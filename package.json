@@ -1,0 +1,28 @@
+{
+    "name": "stationary-monorepo",
+    "private": true,
+    "workspaces": [
+        "apps/*"
+    ],
+    "scripts": {
+        "dev": "bun --filter \"*\" dev",
+        "dev:server": "bun --cwd apps/server dev",
+        "dev:web": "bun --cwd apps/web dev",
+        "build": "bun --filter \"*\" build",
+        "build:server": "bun --cwd apps/server build",
+        "build:web": "bun --cwd apps/web build",
+        "db:migrate": "bun --cwd apps/server db:migrate",
+        "typecheck": "bun --filter \"*\" typecheck"
+    },
+    "pnpm": {
+        "onlyBuiltDependencies": [
+            "@hebilicious/vue-query-nuxt",
+            "@parcel/watcher",
+            "core-js",
+            "esbuild",
+            "sharp",
+            "vue-demi",
+            "workerd"
+        ]
+    }
+}

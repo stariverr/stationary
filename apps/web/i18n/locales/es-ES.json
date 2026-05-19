@@ -1,0 +1,39 @@
+{
+    "common": {
+        "all_posts": "Todas las publicaciones",
+        "to_review": "Para revisar",
+        "tags": "Etiquetas",
+        "trash": "Papelera",
+        "browser": "Navegador",
+        "folders": "Carpetas",
+        "post_info": "Info. del post",
+        "description": "Descripción",
+        "author": "Autor",
+        "created": "Creado",
+        "dimensions": "Dimensiones",
+        "add_tag": "Añadir etiqueta",
+        "post_not_found": "Publicación no encontrada",
+        "platform": "Plataforma",
+        "eid": "EID",
+        "original": "Original",
+        "default_expand_view": "Vista expandida por defecto",
+        "auto_expand_tooltip": "Expandir automáticamente los detalles de la publicación a pantalla completa",
+        "expand": "Expandir",
+        "copy_link": "Copiar enlace",
+        "settings": "Configuración"
+    },
+    "grid": {
+        "showing_items": "Mostrando {count} elementos",
+        "page_info": "Página {current} de {total}"
+    },
+    "platforms": {
+        "XHS": "Rednote",
+        "X": "X",
+        "DOUYIN": "Douyin",
+        "YOUTUBE": "YouTube",
+        "TIKTOK": "TikTok",
+        "INSTAGRAM": "Instagram",
+        "INTERNAL": "Stationary",
+        "BILIBILI": "Bilibili"
+    }
+}

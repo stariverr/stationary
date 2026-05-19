@@ -1,0 +1,39 @@
+{
+    "common": {
+        "all_posts": "所有貼文",
+        "to_review": "待審核",
+        "tags": "標籤",
+        "trash": "垃圾桶",
+        "browser": "瀏覽器",
+        "folders": "資料夾",
+        "post_info": "貼文資訊",
+        "description": "描述",
+        "author": "作者",
+        "created": "建立時間",
+        "dimensions": "尺寸",
+        "add_tag": "新增標籤",
+        "post_not_found": "找不到貼文",
+        "platform": "平台",
+        "eid": "外部ID",
+        "original": "原文連結",
+        "default_expand_view": "默認展開",
+        "auto_expand_tooltip": "自動展開貼文詳情到全螢幕",
+        "expand": "展開",
+        "copy_link": "複製連結",
+        "settings": "設定"
+    },
+    "grid": {
+        "showing_items": "顯示 {count} 項",
+        "page_info": "第 {current} 頁，共 {total} 頁"
+    },
+    "platforms": {
+        "XHS": "小紅書",
+        "X": "X",
+        "DOUYIN": "抖音",
+        "YOUTUBE": "YouTube",
+        "TIKTOK": "TikTok",
+        "INSTAGRAM": "Instagram",
+        "INTERNAL": "本站",
+        "BILIBILI": "嗶哩嗶哩"
+    }
+}

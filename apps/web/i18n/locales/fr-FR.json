@@ -1,0 +1,39 @@
+{
+    "common": {
+        "all_posts": "Tous les messages",
+        "to_review": "À revoir",
+        "tags": "Tags",
+        "trash": "Corbeille",
+        "browser": "Navigateur",
+        "folders": "Dossiers",
+        "post_info": "Info post",
+        "description": "Description",
+        "author": "Auteur",
+        "created": "Créé",
+        "dimensions": "Dimensions",
+        "add_tag": "Ajouter un tag",
+        "post_not_found": "Message non trouvé",
+        "platform": "Plateforme",
+        "eid": "EID",
+        "original": "Original",
+        "default_expand_view": "Vue déployée par défaut",
+        "auto_expand_tooltip": "Déployer automatiquement les détails du post en plein écran",
+        "expand": "Déployer",
+        "copy_link": "Copier le lien",
+        "settings": "Paramètres"
+    },
+    "grid": {
+        "showing_items": "Affichage de {count} éléments",
+        "page_info": "Page {current} sur {total}"
+    },
+    "platforms": {
+        "XHS": "Rednote",
+        "X": "X",
+        "DOUYIN": "Douyin",
+        "YOUTUBE": "YouTube",
+        "TIKTOK": "TikTok",
+        "INSTAGRAM": "Instagram",
+        "INTERNAL": "Stationary",
+        "BILIBILI": "Bilibili"
+    }
+}

@@ -1,0 +1,39 @@
+{
+    "common": {
+        "all_posts": "모든 게시물",
+        "to_review": "검토 대기",
+        "tags": "태그",
+        "trash": "휴지통",
+        "browser": "브라우저",
+        "folders": "폴더",
+        "post_info": "게시물 정보",
+        "description": "설명",
+        "author": "작성자",
+        "created": "작성일",
+        "dimensions": "규격",
+        "add_tag": "태그 추가",
+        "post_not_found": "게시물을 찾을 수 없습니다",
+        "platform": "플랫폼",
+        "eid": "EID",
+        "original": "원본",
+        "default_expand_view": "기본 확장 보기",
+        "auto_expand_tooltip": "게시물 상세 내용을 자동으로 전체 화면으로 확장합니다",
+        "expand": "확장",
+        "copy_link": "링크 복사",
+        "settings": "설정"
+    },
+    "grid": {
+        "showing_items": "{count}개 항목 표시",
+        "page_info": "{current} / {total} 페이지"
+    },
+    "platforms": {
+        "XHS": "샤오홍슈",
+        "X": "X",
+        "DOUYIN": "도우인",
+        "YOUTUBE": "유튜브",
+        "TIKTOK": "틱톡",
+        "INSTAGRAM": "인스타그램",
+        "INTERNAL": "Stationary",
+        "BILIBILI": "빌리빌리"
+    }
+}

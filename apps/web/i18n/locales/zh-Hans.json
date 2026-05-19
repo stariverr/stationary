@@ -1,0 +1,43 @@
+{
+    "common": {
+        "all_posts": "所有帖子",
+        "to_review": "待审核",
+        "tags": "标签",
+        "trash": "回收站",
+        "browser": "浏览器",
+        "folders": "文件夹",
+        "post_info": "帖子信息",
+        "description": "描述",
+        "author": "作者",
+        "created": "创建时间",
+        "dimensions": "尺寸",
+        "add_tag": "添加标签",
+        "post_not_found": "未找到帖子",
+        "platform": "平台",
+        "eid": "外部ID",
+        "original": "原文链接",
+        "default_expand_view": "默认展开",
+        "auto_expand_tooltip": "自动展开帖子详情到全屏",
+        "expand": "展开",
+        "copy_link": "复制链接",
+        "collapse": "收起",
+        "no_description": "暂无描述",
+        "search": "搜索帖子...",
+        "settings": "设置"
+    },
+    "grid": {
+        "showing_items": "显示 {count} 项",
+        "page_info": "第 {current} 页，共 {total} 页"
+    },
+    "platforms": {
+        "XHS": "小红书",
+        "X": "X",
+        "DOUYIN": "抖音",
+        "YOUTUBE": "YouTube",
+        "TIKTOK": "TikTok",
+        "INSTAGRAM": "Instagram",
+        "INTERNAL": "本站",
+        "BILIBILI": "哔哩哔哩",
+        "UNKNOWN": "未知"
+    }
+}

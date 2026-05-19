@@ -1,0 +1,39 @@
+{
+    "common": {
+        "all_posts": "Alle Berichten",
+        "to_review": "Te Beoordelen",
+        "tags": "Tags",
+        "trash": "Prullenbak",
+        "browser": "Browser",
+        "folders": "Mappen",
+        "post_info": "Postinfo",
+        "description": "Beschrijving",
+        "author": "Auteur",
+        "created": "Gemaakt",
+        "dimensions": "Afmetingen",
+        "add_tag": "Tag Toevoegen",
+        "post_not_found": "Bericht niet gevonden",
+        "platform": "Platform",
+        "eid": "EID",
+        "original": "Origineel",
+        "default_expand_view": "Standaard uitgeklapte weergave",
+        "auto_expand_tooltip": "Berichtdetails automatisch uitklappen naar volledig scherm",
+        "expand": "Uitklappen",
+        "copy_link": "Link kopiëren",
+        "settings": "Instellingen"
+    },
+    "grid": {
+        "showing_items": "{count} items weergeven",
+        "page_info": "Pagina {current} van {total}"
+    },
+    "platforms": {
+        "XHS": "Rednote",
+        "X": "X",
+        "DOUYIN": "Douyin",
+        "YOUTUBE": "YouTube",
+        "TIKTOK": "TikTok",
+        "INSTAGRAM": "Instagram",
+        "INTERNAL": "Stationary",
+        "BILIBILI": "Bilibili"
+    }
+}

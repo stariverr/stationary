@@ -1,0 +1,39 @@
+{
+    "common": {
+        "all_posts": "Alle Beiträge",
+        "to_review": "Zu überprüfen",
+        "tags": "Tags",
+        "trash": "Papierkorb",
+        "browser": "Browser",
+        "folders": "Ordner",
+        "post_info": "Beitragdetail",
+        "description": "Beschreibung",
+        "author": "Autor",
+        "created": "Erstellt",
+        "dimensions": "Abmessungen",
+        "add_tag": "Tag hinzufügen",
+        "post_not_found": "Beitrag nicht gefunden",
+        "platform": "Plattform",
+        "eid": "EID",
+        "original": "Original",
+        "default_expand_view": "Standardansicht (erweitert)",
+        "auto_expand_tooltip": "Beitrag automatisch im Vollbildmodus öffnen",
+        "expand": "Erweitern",
+        "copy_link": "Link kopieren",
+        "settings": "Einstellungen"
+    },
+    "grid": {
+        "showing_items": "Zeige {count} Elemente",
+        "page_info": "Seite {current} von {total}"
+    },
+    "platforms": {
+        "XHS": "Rednote",
+        "X": "X",
+        "DOUYIN": "Douyin",
+        "YOUTUBE": "YouTube",
+        "TIKTOK": "TikTok",
+        "INSTAGRAM": "Instagram",
+        "INTERNAL": "Stationary",
+        "BILIBILI": "Bilibili"
+    }
+}

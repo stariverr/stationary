@@ -1,0 +1,15 @@
+{
+    // https://nuxt.com/docs/guide/concepts/typescript
+    "files": [],
+    "compilerOptions": {
+        "module": "esnext",
+        "jsx": "preserve",
+        "jsxImportSource": "vue",
+        "paths": {
+            "@/*": [
+                "./app/*"
+            ]
+        }
+    },
+    "extends": "./.nuxt/tsconfig.json"
+}

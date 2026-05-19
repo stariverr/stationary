@@ -1,0 +1,39 @@
+{
+    "common": {
+        "all_posts": "すべての投稿",
+        "to_review": "レビュー待ち",
+        "tags": "タグ",
+        "trash": "ゴミ箱",
+        "browser": "ブラウザ",
+        "folders": "フォルダー",
+        "post_info": "投稿情報",
+        "description": "説明",
+        "author": "作成者",
+        "created": "作成日",
+        "dimensions": "寸法",
+        "add_tag": "タグを追加",
+        "post_not_found": "投稿が見つかりません",
+        "platform": "プラットフォーム",
+        "eid": "EID",
+        "original": "オリジナル",
+        "default_expand_view": "デフォルト展開ビュー",
+        "auto_expand_tooltip": "投稿の詳細を自動的に全画面表示にする",
+        "expand": "展開",
+        "copy_link": "リンクをコピー",
+        "settings": "設定"
+    },
+    "grid": {
+        "showing_items": "{count} 件を表示中",
+        "page_info": "{total} ページ中 {current} ページ目"
+    },
+    "platforms": {
+        "XHS": "小紅書 (RED)",
+        "X": "X",
+        "DOUYIN": "抖音 (Douyin)",
+        "YOUTUBE": "YouTube",
+        "TIKTOK": "TikTok",
+        "INSTAGRAM": "Instagram",
+        "INTERNAL": "Stationary",
+        "BILIBILI": "Bilibili"
+    }
+}

@@ -1,0 +1,28 @@
+# Dependency directories
+node_modules/
+.pnpm-store
+
+# Build and dev outputs
+dist/
+.output/
+.nuxt/
+.nitro/
+.cache/
+.wrangler/
+tsconfig.tsbuildinfo
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# OS and IDE files
+.DS_Store
+.idea/
+.vscode/
+
+# Local databases/temp
+temp/
+
+# Server
+apps/server/drizzle
