@@ -60,7 +60,6 @@ const PostItemSchema = z.object({
     tags: z.array(z.string()).default([]),
     author: AuthorSchema,
     platform: z.enum(["UNKNOWN", "X", "XHS", "BILIBILI", "DOUYIN", "TIKTOK", "INSTAGRAM"]),
-    library_id: z.uuid().optional(),
     media: z.array(MediaItemSchema),
     published_time: TimestampSchema.optional(),
     /** @deprecated Use published_time. Kept for legacy import payloads. */
@@ -71,6 +70,7 @@ const PostItemSchema = z.object({
 }));
 
 export const CreateTaskSchema = z.object({
+    library_id: z.uuid(),
     posts: z.array(PostItemSchema),
 });
 
@@ -114,7 +114,7 @@ taskApp.post("/create", zValidator("json", CreateTaskSchema), async (c) => {
 
     // Step 1: Save Metadata of Post to DB (Synchronization & Deduplication) synchronously
     for (const postData of payload.posts) {
-        const stepOneResult = await TaskService.saveMetadata(postData, customWorkflowRunId);
+        const stepOneResult = await TaskService.saveMetadata(postData, payload.library_id, customWorkflowRunId);
 
         // The result of Step 1 can determine whether the following steps should be executed.
         if (!stepOneResult.skipUpdate) {

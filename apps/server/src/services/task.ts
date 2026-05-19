@@ -11,26 +11,11 @@ const toTimestamp = (instant: { toString: () => string } | undefined) => {
     return instant?.toString().replace("T", " ").replace("Z", "") ?? null;
 };
 
-const getLibraryId = async (libraryId: string | undefined) => {
-    if (libraryId) return libraryId;
-
-    const existing = await db.select().from(Library).where(eq(Library.name, "Default Library")).limit(1);
-    if (existing[0]) return existing[0].id;
-
-    const created = await db.insert(Library).values({
-        name: "Default Library",
-        description: "Default import library",
-        is_public: true,
-    }).returning({ id: Library.id });
-    return created[0].id;
-};
-
 export const TaskService = {
     /**
      * Step 1: Save metadata to DB (Synchronization & Deduplication)
      */
-    async saveMetadata(postData: PostItemData, workflowRunId: string) {
-        const libraryId = await getLibraryId(postData.library_id);
+    async saveMetadata(postData: PostItemData, targetLibraryId: string, workflowRunId: string) {
         // 1. Author logic
         let authorId: string | null = null;
         if (postData.author.external_id && postData.platform) {
@@ -85,7 +70,7 @@ export const TaskService = {
                 author_name: postData.author.name,
                 author_id: authorId,
                 media_count: postData.media.length,
-                library_id: libraryId,
+                library_id: targetLibraryId,
             };
             const publishedTime = toTimestamp(postData.published_time);
             if (publishedTime) postUpdateData.published_time = publishedTime;
@@ -107,7 +92,7 @@ export const TaskService = {
                 author_id: authorId,
                 published_time: toTimestamp(postData.published_time),
                 media_count: postData.media.length,
-                library_id: libraryId,
+                library_id: targetLibraryId,
                 url: postData.url,
                 sync_status: "PENDING",
                 last_error: null,
@@ -121,7 +106,7 @@ export const TaskService = {
 
         // 3. Media sync
         const mediaEids: string[] = postData.media.map(m => m.external_id).filter((eid): eid is string => !!eid);
-        
+
         let mediaToDelete: any[] = [];
         if (postData.media.length === 0) {
             mediaToDelete = await db.select().from(Media).where(eq(Media.post_id, postId));
@@ -190,7 +175,7 @@ export const TaskService = {
                 const mediaInsertData: typeof Media.$inferInsert = {
                     eid: mediaData.external_id || "",
                     post_id: postId,
-                    library_id: libraryId,
+                    library_id: targetLibraryId,
                     source: postData.platform,
                     title: mediaData.title || "",
                     description: mediaData.description || "",

@@ -67,6 +67,7 @@ For streaming media, the synchronization flow adapts as follows:
 
 ```json
 {
+  "library_id": "uuid-of-target-library",
   "posts": [
     {
       "title": "Post Title",
@@ -75,7 +76,6 @@ For streaming media, the synchronization flow adapts as follows:
       "external_id": "platform_post_unique_id",
       "tags": ["tag1", "tag2"],
       "platform": "XHS",
-      "library_id": "uuid-of-target-library-optional",
       "published_time": "2026-05-19T10:00:00Z",
       "author": {
         "name": "Author Nickname",
@@ -106,6 +106,7 @@ For streaming media, the synchronization flow adapts as follows:
 
 | Field Path | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
+| `library_id` | String | Yes | UUID of the target library where the post batch is imported. |
 | `posts[].platform` | String | Yes | Enum: `UNKNOWN`, `X`, `XHS`, `BILIBILI`, `DOUYIN`, `TIKTOK`, `INSTAGRAM` |
 | `posts[].published_time` | String | No | ISO-8601 string or a 10/13-digit UNIX timestamp (parsed automatically by the backend) |
 | `posts[].media[].type` | String | Yes | Enum: `IMAGE`, `VIDEO`, `LIVE_PHOTO` |

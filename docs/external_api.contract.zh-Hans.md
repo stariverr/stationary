@@ -67,6 +67,7 @@
 
 ```json
 {
+  "library_id": "uuid-of-target-library",
   "posts": [
     {
       "title": "帖子标题",
@@ -75,7 +76,6 @@
       "external_id": "platform_post_unique_id",
       "tags": ["标签1", "标签2"],
       "platform": "XHS",
-      "library_id": "uuid-of-target-library-optional",
       "published_time": "2026-05-19T10:00:00Z",
       "author": {
         "name": "作者昵称",
@@ -106,6 +106,7 @@
 
 | 字段路径 | 类型 | 是否必填 | 约束说明 |
 | :--- | :--- | :--- | :--- |
+| `library_id` | String | 是 | 此次导入任务的目标媒体库 UUID。 |
 | `posts[].platform` | String | 是 | 枚举值：`UNKNOWN`, `X`, `XHS`, `BILIBILI`, `DOUYIN`, `TIKTOK`, `INSTAGRAM` |
 | `posts[].published_time` | String | 否 | 支持 ISO-8601 格式或 10/13 位 UNIX 时间戳（由 Zod 转换器自动解析） |
 | `posts[].media[].type` | String | 是 | 枚举值：`IMAGE`, `VIDEO`, `LIVE_PHOTO` |
