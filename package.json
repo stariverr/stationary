@@ -1,10 +1,7 @@
 {
     "name": "stationary-monorepo",
-    "private": true,
     "packageManager": "bun@1.3.14",
-    "workspaces": [
-        "apps/*"
-    ],
+    "private": true,
     "scripts": {
         "dev": "bun --filter \"*\" dev",
         "dev:server": "bun --cwd apps/server dev",
@@ -18,5 +15,8 @@
     "trustedDependencies": [
         "@parcel/watcher",
         "core-js"
+    ],
+    "workspaces": [
+        "apps/*"
     ]
 }

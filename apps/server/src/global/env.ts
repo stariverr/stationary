@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const envSchema = z.object({
     /** PostgreSQL URL */
-    DB_URL: z.string().optional(),
+    DB_URL: z.string(),
 
     /** Redis URL */
     REDIS_URL: z.string().default("redis://localhost:6379"),
