@@ -11,8 +11,9 @@ const sourceFiles = {
         });
         const output = await new Response(proc.stdout).text();
         await proc.exited;
-        const files = output.trim().split("\n").filter(Boolean).sort();
-        return Bun.file(files.at(-1) ?? "").text();
+        const files = output.trim().split("\n").filter(Boolean);
+        const file = files.find(f => f.includes("add_published_time")) ?? files.sort().at(-1);
+        return Bun.file(file ?? "").text();
     },
 };
 

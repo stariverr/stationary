@@ -34,6 +34,74 @@
         "TIKTOK": "TikTok",
         "INSTAGRAM": "Instagram",
         "INTERNAL": "本站",
-        "BILIBILI": "嗶哩嗶哩"
+        "BILIBILI": "嗶哩嗶哩",
+        "UNKNOWN": "未知"
+    },
+    "settings": {
+        "title": "設定",
+        "description": "管理您的帳戶設定、偏好和 API 整合。",
+        "tabs": {
+            "general": "常規",
+            "appearance": "外觀",
+            "account": "帳戶",
+            "api_keys": "API 密鑰"
+        },
+        "general": {
+            "title": "常規設定",
+            "desc": "基本應用偏好和顯示設定。",
+            "expand_detail": "預設展開詳情",
+            "expand_detail_desc": "在資訊流中自動展開貼文詳情。",
+            "language": "介面語言",
+            "language_desc": "選擇您的首選語言。",
+            "other_title": "其他偏好",
+            "other_desc": "更多設定即將推出。",
+            "other_empty": "當前沒有其他設定可用。"
+        },
+        "appearance": {
+            "title": "外觀",
+            "desc": "自定義應用程式的外觀和感覺。",
+            "coming_soon": "即將推出。"
+        },
+        "account": {
+            "title": "帳戶資料",
+            "desc": "管理您的個人帳戶資訊和個人資料。",
+            "verified": "已認證帳戶",
+            "not_signed_in": "請登入以查看您的帳戶詳情。",
+            "user_id": "用戶 ID",
+            "sign_out": "登出"
+        },
+        "api_keys": {
+            "title": "生成 API 密鑰",
+            "desc": "創建訪問密鑰，以便將外部同步程序（如 Python 或 Node 腳本）與您的媒體庫整合。",
+            "key_name": "密鑰名稱",
+            "key_name_placeholder": "例如：我的同步工具",
+            "scope": "作用域媒體庫",
+            "scope_all": "所有媒體庫 (全局)",
+            "scope_single": "媒體庫: {name}",
+            "unknown_library": "未知媒體庫",
+            "expiration": "有效期",
+            "exp_never": "永久有效",
+            "exp_7d": "7 天",
+            "exp_30d": "30 天",
+            "exp_90d": "90 天",
+            "generate_btn": "生成 API 密鑰",
+            "generating": "正在生成...",
+            "active_title": "活躍 API 密鑰",
+            "active_desc": "當前有權訪問您帳戶的 API 密鑰列表。",
+            "loading": "正在載入密鑰...",
+            "empty": "未找到活躍的 API 密鑰。",
+            "copy_title": "複製您的 API 密鑰",
+            "copy_desc": "出於安全原因，此密鑰僅顯示一次。請立即複製並將其保存在安全的密碼管理器中。",
+            "copy_done": "我已複製，完成",
+            "copied_toast": "已複製 Token 到剪貼簿！",
+            "confirm_revoke": "您確定要吊銷此 API 密鑰嗎？使用此密鑰的任何整合將立即停止工作。",
+            "revoked_toast": "API 密鑰已吊銷",
+            "err_load": "載入 API 密鑰失敗",
+            "err_generate": "生成 API 密鑰失敗",
+            "err_revoke": "吊銷 API 密鑰失敗",
+            "expires_label": "有效期: {date}",
+            "last_used_label": "最後使用: {date}",
+            "never_used": "從未使用"
+        }
     }
 }

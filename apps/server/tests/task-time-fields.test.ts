@@ -17,6 +17,7 @@ describe("task time fields", () => {
         const taskApi = await import("../src/api/task");
 
         const parsed = taskApi.CreateTaskSchema.parse({
+            library_id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3",
             posts: [{
                 title: "Original timestamp",
                 description: "",
@@ -24,7 +25,6 @@ describe("task time fields", () => {
                 tags: [],
                 author: { name: "Author", external_id: "author-1" },
                 platform: "XHS",
-                library_id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3",
                 published_time: "2024-01-02T03:04:05Z",
                 media: [{
                     external_id: "media-1",
@@ -38,7 +38,7 @@ describe("task time fields", () => {
         });
 
         expect(parsed.posts[0].published_time?.toString()).toBe("2024-01-02T03:04:05Z");
-        expect(parsed.posts[0].library_id).toBe("018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3");
+        expect(parsed.library_id).toBe("018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3");
         expect(parsed.posts[0].media[0].published_time?.toString()).toBe("2024-01-02T03:05:06Z");
     });
 
@@ -46,6 +46,7 @@ describe("task time fields", () => {
         const taskApi = await import("../src/api/task");
 
         const parsed = taskApi.CreateTaskSchema.parse({
+            library_id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3",
             posts: [{
                 title: "Legacy timestamp",
                 description: "",

@@ -53,16 +53,16 @@ const getCreateLibraryErrorDescription = (e: any) => {
     }
 
     if (e?.statusCode === 400 || e?.status === 400) {
-        return "Please check the workspace name and description, then try again.";
+        return "Please check the library name and description, then try again.";
     }
 
-    return "Something went wrong while creating the workspace.";
+    return "Something went wrong while creating the library.";
 };
 
 const handleSubmit = async () => {
     if (!name.value.trim()) {
-        toast.warning("Workspace name is required", {
-            description: "Please enter a name before creating a workspace.",
+        toast.warning("Library name is required", {
+            description: "Please enter a name before creating a library.",
         });
         return;
     }
@@ -76,11 +76,11 @@ const handleSubmit = async () => {
             description.value.trim(),
         );
         emit("update:open", false);
-        toast.success("Workspace created", {
-            description: `${name.value.trim()} is now your active workspace.`,
+        toast.success("Library created", {
+            description: `${name.value.trim()} is now your active library.`,
         });
     } catch (e: any) {
-        toast.error("Failed to create workspace", {
+        toast.error("Failed to create library", {
             description: getCreateLibraryErrorDescription(e),
         });
     } finally {
@@ -99,9 +99,9 @@ const handleOpenChange = (val: boolean) => {
     <Dialog :open="open" @update:open="handleOpenChange">
         <DialogContent class="sm:max-w-md">
             <DialogHeader>
-                <DialogTitle>Create Workspace</DialogTitle>
+                <DialogTitle>Create Library</DialogTitle>
                 <DialogDescription>
-                    Create a new workspace to organize your collections
+                    Create a new library to organize your collections
                     separately.
                 </DialogDescription>
             </DialogHeader>
@@ -112,7 +112,7 @@ const handleOpenChange = (val: boolean) => {
                     <Input
                         id="library-name"
                         v-model="name"
-                        placeholder="My Workspace"
+                        placeholder="My Library"
                         :disabled="isCreating"
                         autofocus
                     />
@@ -128,7 +128,7 @@ const handleOpenChange = (val: boolean) => {
                     <Textarea
                         id="library-description"
                         v-model="description"
-                        placeholder="A brief description of this workspace..."
+                        placeholder="A brief description of this library..."
                         :disabled="isCreating"
                         class="resize-none"
                         rows="3"

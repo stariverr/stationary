@@ -82,8 +82,8 @@ const handleMove = async () => {
     if (itemCount.value === 0 || isMoving.value) return
 
     if (!targetLibraryId.value) {
-        toast.warning("Choose a target workspace", {
-            description: "Create or choose another workspace before moving items.",
+        toast.warning("Choose a target library", {
+            description: "Create or choose another library before moving items.",
         })
         return
     }
@@ -96,7 +96,7 @@ const handleMove = async () => {
             targetLibraryId: targetLibraryId.value,
         })
         toast.success("Items moved", {
-            description: `${itemSummary.value} moved to the selected workspace.`,
+            description: `${itemSummary.value} moved to the selected library.`,
         })
         emit("moved")
     } catch (e: any) {
@@ -139,7 +139,7 @@ const handleMove = async () => {
                 </Button>
                 <Select :model-value="targetLibraryId" @update:model-value="handleTargetChange">
                     <SelectTrigger class="h-9 w-[220px]">
-                        <SelectValue :placeholder="hasTargetLibrary ? 'Choose workspace' : 'No target workspace'" />
+                        <SelectValue :placeholder="hasTargetLibrary ? 'Choose library' : 'No target library'" />
                     </SelectTrigger>
                     <SelectContent>
                         <SelectGroup>

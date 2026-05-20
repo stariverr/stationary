@@ -8,8 +8,12 @@ import { Temporal } from "@js-temporal/polyfill";
 import { TaskService } from "@/services/task";
 import { Code } from "@/lib/code";
 import { error, success } from "@/lib/response";
+import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
+import { db } from "@/global/db";
+import { Library } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
-const taskApp = new Hono();
+const taskApp = new Hono<AuthEnv>();
 
 const AuthorSchema = z.object({
     name: z.string().default(""),
@@ -89,8 +93,40 @@ export type CreateTaskPayload = z.infer<typeof CreateTaskSchema>;
 export type WorkflowPayload = z.infer<typeof WorkflowPayloadSchema>;
 
 // Endpoint to create a task
-taskApp.post("/create", zValidator("json", CreateTaskSchema), async (c) => {
+taskApp.post("/create", requireAuth, zValidator("json", CreateTaskSchema), async (c) => {
+    const user = c.get("user");
+    const apiToken = c.get("apiToken");
+
+    if (!user) {
+        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+    }
+
     const payload = c.req.valid("json");
+
+    // 1. Verify library exists
+    const libs = await db.select().from(Library).where(eq(Library.id, payload.library_id)).limit(1);
+    const library = libs[0];
+    if (!library) {
+        return c.json(error(Code.NOT_FOUND, "Target library not found"), 404);
+    }
+
+    // 2. Perform library scoping and ownership validation
+    if (apiToken) {
+        // If API token is scoped to a specific library, check that target matches scope
+        if (apiToken.library_id && apiToken.library_id !== payload.library_id) {
+            return c.json(error(Code.UNAUTHORIZED, "API token is not scoped for this library"), 403);
+        }
+        
+        // Ensure library belongs to the token owner
+        if (library.owner_id !== user.id) {
+            return c.json(error(Code.UNAUTHORIZED, "You do not have access to this library"), 403);
+        }
+    } else {
+        // Logged-in session user, check ownership
+        if (library.owner_id !== user.id) {
+            return c.json(error(Code.UNAUTHORIZED, "You do not have access to this library"), 403);
+        }
+    }
 
     if (!env.QSTASH_TOKEN) {
         return c.json(error(Code.SERVICE_UNAVAILABLE, "QSTASH_TOKEN is not configured"), 500);

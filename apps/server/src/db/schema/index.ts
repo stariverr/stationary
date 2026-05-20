@@ -256,3 +256,20 @@ export const File = pgTable("file", {
     duration: integer("duration"), // For videos
     create_time: timestamp("create_time").defaultNow().notNull(),
 });
+
+// External API Token (M2M)
+export const ExternalApiToken = pgTable("external_api_token", {
+    id: uuid("id").primaryKey().notNull().$defaultFn(() => uuidv7.generate()),
+    name: text("name").notNull(),
+    token_hash: text("token_hash").notNull().unique(),
+    prefix: text("prefix").notNull().default("st"),
+    first_four: text("first_four").notNull().default(""),
+    last_four: text("last_four").notNull().default(""),
+    owner_id: uuid("owner_id").notNull(), // User.id (UUID)
+    library_id: uuid("library_id"), // Optional scope limit to a single Library (UUID)
+    last_used_at: timestamp("last_used_at"),
+    expires_at: timestamp("expires_at"),
+    revoked_at: timestamp("revoked_at"),
+    create_time: timestamp("create_time").defaultNow().notNull(),
+});
+

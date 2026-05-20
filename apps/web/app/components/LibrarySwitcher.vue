@@ -83,7 +83,7 @@ const showCreateDialog = ref(false);
             <DropdownMenuSeparator />
 
             <DropdownMenuLabel class="text-xs text-muted-foreground font-normal"
-                >Workspaces</DropdownMenuLabel
+                >Libraries</DropdownMenuLabel
             >
 
             <div class="max-h-48 overflow-y-auto custom-scrollbar">
@@ -117,7 +117,7 @@ const showCreateDialog = ref(false);
                 @click="showCreateDialog = true"
             >
                 <Plus class="mr-2 h-4 w-4" />
-                <span>Create Workspace</span>
+                <span>Create Library</span>
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />

@@ -39,5 +39,72 @@
         "INTERNAL": "本站",
         "BILIBILI": "哔哩哔哩",
         "UNKNOWN": "未知"
+    },
+    "settings": {
+        "title": "设置",
+        "description": "管理您的账户设置、偏好和 API 集成。",
+        "tabs": {
+            "general": "常规",
+            "appearance": "外观",
+            "account": "账户",
+            "api_keys": "API 密钥"
+        },
+        "general": {
+            "title": "常规设置",
+            "desc": "基本应用偏好和显示设置。",
+            "expand_detail": "默认展开详情",
+            "expand_detail_desc": "在信息流中自动展开帖子详情。",
+            "language": "界面语言",
+            "language_desc": "选择您的首选语言。",
+            "other_title": "其他偏好",
+            "other_desc": "更多设置即将推出。",
+            "other_empty": "当前没有其他设置可用。"
+        },
+        "appearance": {
+            "title": "外观",
+            "desc": "自定义应用程序的外观和感觉。",
+            "coming_soon": "即将推出。"
+        },
+        "account": {
+            "title": "账户资料",
+            "desc": "管理您的个人账户信息和个人资料。",
+            "verified": "已认证账户",
+            "not_signed_in": "请登录以查看您的账户详情。",
+            "user_id": "用户 ID",
+            "sign_out": "退出登录"
+        },
+        "api_keys": {
+            "title": "生成 API 密钥",
+            "desc": "创建访问密钥，以便将外部同步程序（如 Python 或 Node 脚本）与您的媒体库集成。",
+            "key_name": "密钥名称",
+            "key_name_placeholder": "例如：我的同步工具",
+            "scope": "作用域媒体库",
+            "scope_all": "所有媒体库 (全局)",
+            "scope_single": "媒体库: {name}",
+            "unknown_library": "未知媒体库",
+            "expiration": "有效期",
+            "exp_never": "永久有效",
+            "exp_7d": "7 天",
+            "exp_30d": "30 天",
+            "exp_90d": "90 天",
+            "generate_btn": "生成 API 密钥",
+            "generating": "正在生成...",
+            "active_title": "活跃 API 密钥",
+            "active_desc": "当前有权访问您账户的 API 密钥列表。",
+            "loading": "正在加载密钥...",
+            "empty": "未找到活跃的 API 密钥。",
+            "copy_title": "复制您的 API 密钥",
+            "copy_desc": "出于安全原因，此密钥仅显示一次。请立即复制并将其保存在安全的密码管理器中。",
+            "copy_done": "我已复制，完成",
+            "copied_toast": "已复制 Token 到剪贴板！",
+            "confirm_revoke": "您确定要吊销此 API 密钥吗？使用此密钥的任何集成将立即停止工作。",
+            "revoked_toast": "API 密钥已吊销",
+            "err_load": "加载 API 密钥失败",
+            "err_generate": "生成 API 密钥失败",
+            "err_revoke": "吊销 API 密钥失败",
+            "expires_label": "有效期: {date}",
+            "last_used_label": "最后使用: {date}",
+            "never_used": "从未使用"
+        }
     }
 }

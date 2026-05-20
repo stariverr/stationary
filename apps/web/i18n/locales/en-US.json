@@ -39,5 +39,72 @@
         "INTERNAL": "Stationary",
         "BILIBILI": "Bilibili",
         "UNKNOWN": "Unknown"
+    },
+    "settings": {
+        "title": "Settings",
+        "description": "Manage your account settings, preferences, and API integrations.",
+        "tabs": {
+            "general": "General",
+            "appearance": "Appearance",
+            "account": "Account",
+            "api_keys": "API Keys"
+        },
+        "general": {
+            "title": "General Settings",
+            "desc": "Basic application preferences and display settings.",
+            "expand_detail": "Expand Detail by Default",
+            "expand_detail_desc": "Automatically expand post details in the feed.",
+            "language": "Interface Language",
+            "language_desc": "Select your preferred language.",
+            "other_title": "Other Preferences",
+            "other_desc": "Additional settings will appear here soon.",
+            "other_empty": "No other settings currently available."
+        },
+        "appearance": {
+            "title": "Appearance",
+            "desc": "Customize the look and feel of the application.",
+            "coming_soon": "Coming soon."
+        },
+        "account": {
+            "title": "Account Profile",
+            "desc": "Manage your personal account information and profile.",
+            "verified": "Verified Account",
+            "not_signed_in": "Please sign in to view your account details.",
+            "user_id": "User ID",
+            "sign_out": "Sign Out"
+        },
+        "api_keys": {
+            "title": "Generate API Key",
+            "desc": "Create access keys to integrate external sync programs (like Python or Node scripts) with your libraries.",
+            "key_name": "Key Name",
+            "key_name_placeholder": "e.g. My Sync Tool",
+            "scope": "Scope Library",
+            "scope_all": "All Libraries (Global)",
+            "scope_single": "Library: {name}",
+            "unknown_library": "Unknown Library",
+            "expiration": "Expiration",
+            "exp_never": "Never Expires",
+            "exp_7d": "7 Days",
+            "exp_30d": "30 Days",
+            "exp_90d": "90 Days",
+            "generate_btn": "Generate API Key",
+            "generating": "Generating...",
+            "active_title": "Active API Keys",
+            "active_desc": "A list of API keys that currently have access to your account.",
+            "loading": "Loading keys...",
+            "empty": "No active API keys found.",
+            "copy_title": "Copy your API Key",
+            "copy_desc": "For security reasons, this key will only be displayed once. Copy it now and save it in a secure password manager.",
+            "copy_done": "I have copied it, done",
+            "copied_toast": "Token copied to clipboard!",
+            "confirm_revoke": "Are you sure you want to revoke this API Key? Any integrations using this key will immediately stop working.",
+            "revoked_toast": "API Key revoked",
+            "err_load": "Failed to load API keys",
+            "err_generate": "Failed to generate API key",
+            "err_revoke": "Failed to revoke API key",
+            "expires_label": "Expires: {date}",
+            "last_used_label": "Last used: {date}",
+            "never_used": "Never used"
+        }
     }
 }
