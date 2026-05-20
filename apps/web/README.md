@@ -11,14 +11,14 @@ The frontend client is built on **Nuxt 4**, **Vue 3**, **Pinia**, **TanStack Vue
 ### 1. Run Development Server
 ```bash
 # In the apps/web directory
-pnpm dev
+bun run dev
 ```
 The server runs by default at `http://localhost:3000`.
 
 ### 2. Production Build & Preview
-- **Build Bundle**: `pnpm build`
-- **Preview Production Bundle Locally**: `pnpm preview`
-- **Deploy to Cloudflare**: `pnpm deploy` (uses Wrangler under the hood)
+- **Build Bundle**: `bun run build`
+- **Preview Production Bundle Locally**: `bun run preview`
+- **Deploy to Cloudflare**: `bun run deploy` (uses Wrangler under the hood)
 
 ---
 

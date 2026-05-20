@@ -19,7 +19,7 @@ Stationary 是一个专为创意工作者与内容管理者打造的 **多平台
 
 ## 📂 项目结构
 
-本项目采用 **PNPM Monorepo** 架构：
+本项目采用 **Bun Workspace Monorepo** 架构：
 
 ```text
 / (根目录)
@@ -60,7 +60,7 @@ Stationary 是一个专为创意工作者与内容管理者打造的 **多平台
 在项目根目录下执行：
 
 ```bash
-pnpm install
+bun install
 ```
 
 ### 2. 环境变量配置
@@ -76,7 +76,7 @@ pnpm install
 
 ```bash
 cd apps/server
-pnpm db:migrate
+bun run db:migrate
 ```
 
 ### 4. 启动开发服务器
@@ -85,8 +85,8 @@ pnpm db:migrate
 
 ```bash
 # 同时启动 Hono 后端 (localhost:8080) 和 Nuxt 前端 (localhost:3000)
-pnpm --filter @stationary/backend dev
-pnpm --filter @stationary/frontend dev
+bun run dev:server
+bun run dev:web
 ```
 
 ---

@@ -1,0 +1,16 @@
+**
+
+!package.json
+!bun.lock
+!bunfig.toml
+!.npmrc
+
+!apps/
+apps/*
+!apps/server/
+!apps/server/package.json
+!apps/server/tsconfig.json
+!apps/server/src/
+!apps/server/src/**
+!apps/web/
+!apps/web/package.json

@@ -7,13 +7,13 @@
         "deploy": "wrangler deploy",
         "worker:dev": "wrangler dev",
         "db:migrate": "bunx drizzle-kit generate && bunx drizzle-kit push",
-        "docker:build": "docker build --platform linux/amd64 -t stationary:latest ."
+        "docker:build": "docker build --platform linux/amd64 -f Dockerfile -t stationary:latest ../.."
     },
     "dependencies": {
         "@aws-sdk/client-s3": "^3.1048.0",
         "@aws-sdk/lib-storage": "^3.1048.0",
         "@hono/zod-validator": "^0.7.6",
-        "@std/uuid": "npm:@jsr/std__uuid",
+        "@js-temporal/polyfill": "^0.5.1",
         "@upstash/workflow": "^1.3.0",
         "better-auth": "^1.6.11",
         "drizzle-orm": "^1.0.0-rc.2-e38a2ba",
@@ -23,7 +23,7 @@
         "redis": "^5.12.1",
         "resend": "^6.12.3",
         "temporal-polyfill": "^1.0.0",
-        "@js-temporal/polyfill": "^0.5.1",
+        "uuid": "^14.0.0",
         "zod": "^4.4.3"
     },
     "devDependencies": {

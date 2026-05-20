@@ -11,7 +11,7 @@ The backend is built on the **Bun** runtime, the **Hono** framework, and **Drizz
 ### 1. Install Dependencies
 Ensure dependencies are installed at the monorepo root:
 ```bash
-pnpm install
+bun install
 ```
 
 ### 2. Run Development Server
@@ -34,7 +34,7 @@ The project uses PostgreSQL. Database schemas are defined in `src/db/schema/inde
 #### 1. Schema Syncing
 After making changes to schemas, sync them to the database by running:
 ```bash
-pnpm db:migrate
+bun run db:migrate
 ```
 This triggers `drizzle-kit generate` and `drizzle-kit push` under the hood to automatically sync changes.
 

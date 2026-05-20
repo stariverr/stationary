@@ -11,14 +11,14 @@
 ### 1. 运行开发服务器
 ```bash
 # 在 apps/web 目录下
-pnpm dev
+bun run dev
 ```
 开发服务器将默认运行在 `http://localhost:3000`。
 
 ### 2. 生产环境构建与预览
-- **打包编译**：`pnpm build`
-- **本地预览打包文件**：`pnpm preview`
-- **部署到 Cloudflare**：`pnpm deploy`（基于 Wrangler 驱动进行发布）
+- **打包编译**：`bun run build`
+- **本地预览打包文件**：`bun run preview`
+- **部署到 Cloudflare**：`bun run deploy`（基于 Wrangler 驱动进行发布）
 
 ---
 

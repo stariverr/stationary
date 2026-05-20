@@ -11,7 +11,9 @@ import {
     uniqueIndex,
     index,
 } from "drizzle-orm/pg-core";
-import { v7 as uuidv7 } from "@std/uuid";
+import { v7 as createUuidV7 } from "uuid";
+
+const uuidv7 = { generate: createUuidV7 };
 
 // Enums
 export const MediaTypeEnum = pgEnum("media_type", [

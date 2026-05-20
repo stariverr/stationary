@@ -1,7 +1,9 @@
 import ky from "ky";
 import { Readable } from "node:stream";
 import { s3 } from "@/global/s3";
-import { v7 as uuidv7 } from "@std/uuid";
+import { v7 as createUuidV7 } from "uuid";
+
+const uuidv7 = { generate: createUuidV7 };
 
 /**
  * Downloads media and returns the Response for streaming.

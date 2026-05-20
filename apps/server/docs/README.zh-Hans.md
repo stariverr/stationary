@@ -9,9 +9,9 @@
 ## 🛠️ 本地开发
 
 ### 1. 安装依赖
-请确保在根目录使用 pnpm 安装依赖：
+请确保在根目录使用 Bun 安装依赖：
 ```bash
-pnpm install
+bun install
 ```
 
 ### 2. 启动开发服务器
@@ -34,7 +34,7 @@ bun run dev
 #### 1. 结构变更与同步
 当修改了 `schema/index.ts` 文件后，通过以下命令生成迁移 SQL 并同步推送至数据库：
 ```bash
-pnpm db:migrate
+bun run db:migrate
 ```
 该命令在底层执行 `drizzle-kit generate` 与 `drizzle-kit push`，实现 Schema 的自动更新。
 

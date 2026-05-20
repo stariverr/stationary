@@ -19,7 +19,7 @@ Stationary is a multi-platform media asset management and integration platform (
 
 ## 📂 Project Structure
 
-This project uses a **PNPM Monorepo** architecture:
+This project uses a **Bun Workspace Monorepo** architecture:
 
 ```text
 / (Root)
@@ -60,7 +60,7 @@ This project uses a **PNPM Monorepo** architecture:
 From the root directory, run:
 
 ```bash
-pnpm install
+bun install
 ```
 
 ### 2. Configure Environment Variables
@@ -76,7 +76,7 @@ In the `apps/server` directory, run migration scripts to push schemas:
 
 ```bash
 cd apps/server
-pnpm db:migrate
+bun run db:migrate
 ```
 
 ### 4. Run Development Servers

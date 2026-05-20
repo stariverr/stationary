@@ -1,6 +1,7 @@
 {
     "name": "stationary-monorepo",
     "private": true,
+    "packageManager": "bun@1.3.14",
     "workspaces": [
         "apps/*"
     ],
@@ -14,15 +15,8 @@
         "db:migrate": "bun --cwd apps/server db:migrate",
         "typecheck": "bun --filter \"*\" typecheck"
     },
-    "pnpm": {
-        "onlyBuiltDependencies": [
-            "@hebilicious/vue-query-nuxt",
-            "@parcel/watcher",
-            "core-js",
-            "esbuild",
-            "sharp",
-            "vue-demi",
-            "workerd"
-        ]
-    }
+    "trustedDependencies": [
+        "@parcel/watcher",
+        "core-js"
+    ]
 }
