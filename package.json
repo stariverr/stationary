@@ -2,6 +2,7 @@
     "name": "stationary-monorepo",
     "packageManager": "bun@1.3.14",
     "private": true,
+    "type": "module",
     "scripts": {
         "dev": "bun --filter \"*\" dev",
         "dev:server": "bun --cwd apps/server dev",
@@ -16,6 +17,9 @@
         "@parcel/watcher",
         "core-js"
     ],
+    "devDependencies": {
+        "@typescript/native-preview": "^7.0.0-dev.20260519.1"
+    },
     "workspaces": [
         "apps/*"
     ]

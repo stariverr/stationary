@@ -1,8 +1,9 @@
 {
-    "name": "@stationary/backend",
+    "name": "@stationary/server",
+    "type": "module",
     "scripts": {
         "dev": "bun run --hot src/index.ts",
-        "typecheck": "tsgo --noEmit",
+        "typecheck": "bun run tsgo --noEmit",
         "build": "bun build src/index.ts --outdir ./dist --target bun",
         "deploy": "wrangler deploy",
         "worker:dev": "wrangler dev",
@@ -30,7 +31,6 @@
         "@cloudflare/workers-types": "^4.20260518.1",
         "@types/bun": "latest",
         "@types/pg": "latest",
-        "@typescript/native-preview": "^7.0.0-dev.20260518.1",
         "drizzle-kit": "^1.0.0-rc.3",
         "wrangler": "^4.92.0"
     }
