@@ -9,6 +9,7 @@ import { useLibraryStore } from '@/stores/library';
 const { posts, selectedPostId, selectPost, fetchPosts, isLoading, keyword, source, total, page } = usePosts();
 const { toggleSidebar } = useLayout();
 const libraryStore = useLibraryStore();
+const { isMultiSelectClick } = useMultiSelectModifier();
 
 const PAGE_SIZE = 20;
 const totalPages = computed(() => Math.ceil((total.value || 0) / PAGE_SIZE));
@@ -147,8 +148,9 @@ const handleMoved = async () => {
     await fetchPosts({ page: page.value, count: PAGE_SIZE });
 }
 
-const handlePostClick = (post: Post) => {
-    if (isSelectionMode.value || isPostChecked(post.id)) {
+const handlePostClick = (post: Post, event: MouseEvent) => {
+    if (isMultiSelectClick(event) || isSelectionMode.value || isPostChecked(post.id)) {
+        event.preventDefault();
         setPostChecked(post.id, !isPostChecked(post.id));
         return;
     }
@@ -234,10 +236,9 @@ onUnmounted(() => {
         <div class="h-14 border-b border-gray-100 flex items-center justify-between px-6 shrink-0">
             <div class="flex items-center gap-3">
                 <button @click="toggleSidebar"
-                    class="md:hidden p-1.5 -ml-2 hover:bg-gray-100 rounded-md text-gray-500 transition-colors">
+                    class="p-1.5 -ml-2 hover:bg-gray-100 rounded-md text-gray-500 transition-colors">
                     <Menu class="w-5 h-5" />
                 </button>
-                <h1 class="text-xl font-semibold text-gray-900 hidden sm:block">{{ $t('common.all_posts') }}</h1>
             </div>
 
             <div class="flex-1 max-w-2xl px-4 flex items-center gap-3">
@@ -298,7 +299,7 @@ onUnmounted(() => {
                     :show-checkbox="isSelectionMode || isPostChecked(post.id)"
                     :data-index="index"
                     @toggle-checked="setPostChecked(post.id, $event)"
-                    @click="handlePostClick(post)" />
+                    @click="handlePostClick(post, $event)" />
             </div>
         </div>
 

@@ -12,6 +12,7 @@ const { medias, isLoadingMedia, keyword, source, displayMode, total, page, count
 const { refetchMedia, selectMedia } = store;
 const { toggleSidebar } = useLayout();
 const libraryStore = useLibraryStore();
+const { isMultiSelectClick } = useMultiSelectModifier();
 
 const PAGE_SIZE = 20;
 const totalPages = computed(() => Math.ceil((total.value || 0) / PAGE_SIZE));
@@ -157,8 +158,9 @@ const handleMoved = async () => {
     await refetchMedia();
 }
 
-const handleMediaClick = (media: any) => {
-    if ((isSelectionMode.value || isMediaChecked(media.id)) && isMediaMovable(media)) {
+const handleMediaClick = (media: any, event: MouseEvent) => {
+    if (isMediaMovable(media) && (isMultiSelectClick(event) || isSelectionMode.value || isMediaChecked(media.id))) {
+        event.preventDefault();
         setMediaChecked(media, !isMediaChecked(media.id));
         return;
     }
@@ -177,10 +179,9 @@ onMounted(() => {
         <div class="h-14 border-b border-gray-100 flex items-center justify-between px-6 shrink-0">
             <div class="flex items-center gap-3">
                 <button @click="toggleSidebar"
-                    class="md:hidden p-1.5 -ml-2 hover:bg-gray-100 rounded-md text-gray-500 transition-colors">
+                    class="p-1.5 -ml-2 hover:bg-gray-100 rounded-md text-gray-500 transition-colors">
                     <Menu class="w-5 h-5" />
                 </button>
-                <h1 class="text-xl font-semibold text-gray-900 hidden sm:block">Media Assets</h1>
             </div>
 
             <div class="flex-1 max-w-2xl px-4 flex items-center gap-3">
@@ -243,7 +244,7 @@ onMounted(() => {
                     :can-move="isMediaMovable(media)"
                     :show-checkbox="isSelectionMode || isMediaChecked(media.id)"
                     @toggle-checked="setMediaChecked(media, $event)"
-                    @click="handleMediaClick(media)" />
+                    @click="handleMediaClick(media, $event)" />
             </div>
         </div>
 
