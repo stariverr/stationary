@@ -7,6 +7,9 @@
 	"name": "stationary-frontend",
 	"main": "./.output/server/index.mjs",
 	"compatibility_date": "2025-08-07",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
 	"assets": {
 		"binding": "ASSETS",
 		"directory": "./.output/public/"

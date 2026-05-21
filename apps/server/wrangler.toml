@@ -1,18 +1,4 @@
 name = "stationary-api"
 main = "src/index.ts"
 compatibility_date = "2024-11-01"
-
-[vars]
-# DATABASE_MODE = "pg"
-# S3_REGION = "auto"
-# CDN_BASE_URL = "https://cdn.example.com"
-# ... other vars will be added here or via gitignore .dev.vars
-
-# [kv_namespaces]
-# binding = "KV"
-# id = "..."
-
-# [d1_databases]
-# binding = "DB"
-# database_name = "stationary"
-# database_id = "..."
+keep_vars = true

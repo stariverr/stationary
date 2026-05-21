@@ -61,20 +61,8 @@ export default defineNuxtConfig({
             appUrl: process.env.NUXT_PUBLIC_APP_URL || 'http://localhost:3000',
         }
     },
-    // nitro: {
-    //     devProxy: {
-    //         "/api/auth": {
-    //             target: "http://localhost:8080",
-    //             followRedirects: false,
-    //             changeOrigin: true,
-    //             // prependPath: true,
-    //         },
-    //     }
-    // },
-    vue: {
-        compilerOptions: {
-            isCustomElement: (tag) => tag.startsWith('media-'),
-        },
+    nitro: {
+        preset: 'cloudflare-module'
     },
     shadcn: {
         prefix: '',
