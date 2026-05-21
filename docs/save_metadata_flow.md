@@ -35,8 +35,18 @@ graph TD
 
 ### 2. Post Sync & Deduplication
 - **Matching**: Queries the `Post` table using `eid` and `source`.
+- **Deduplication Frequency**: 
+  - To prevent redundant API calls, if a sync is requested for a post with the same platform and `eid` within a configurable threshold (default: 1 day), the update is skipped.
+  - If requested after the threshold has passed, the backend proceeds with change detection and updates the record.
+- **Deduplication Exceptions**: If a post has no `eid` (external ID), it is always treated as a new, unique post, and a new database record is created.
 - **Exists (Update Path)**:
-  - Updates the post's title, body description, tags array, author reference, and total media counts.
+  - Detects changes and updates the post's title, body description, tags array, author reference, and total media counts.
+  - Detects and handles:
+    1. Title/description changes.
+    2. Author profile updates (name/avatar).
+    3. Media item order changes (e.g., first media moved to the end).
+    4. Deletion of existing media.
+    5. Media URL or type updates.
   - Links to the specified `library_id` (or falls back to the default library if omitted).
 - **Does Not Exist (Insert Path)**:
   - Inserts a new `Post` record with `sync_status` set to `PENDING`.

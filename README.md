@@ -93,7 +93,7 @@ bun run dev
 ## 📖 Deep-Dive Documentation
 
 Detailed modules and design flows can be found in the `docs/` folder:
-- **[System Architecture & Database Specifications](file:///Users/kazuha/dev/stationary/docs/architecture.md)**
+- **[System Design & Database Specifications](file:///Users/kazuha/dev/stationary/docs/system_design.md)**
 - **[Metadata Sync Workflows & API Contracts](file:///Users/kazuha/dev/stationary/docs/external_api.contract.md)**
 - **[Metadata Save & S3 Cleanup Flow Details](file:///Users/kazuha/dev/stationary/docs/save_metadata_flow.md)**
 - **[TypeScript Coding Rules & Best Practices](file:///Users/kazuha/dev/stationary/docs/code.rule.md)**

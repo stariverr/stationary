@@ -94,7 +94,7 @@ bun run dev:web
 ## 📖 深度设计文档
 
 详细的模块与业务流转设计可前往 `docs/` 查阅：
-- **[系统架构与数据库设计说明](file:///Users/kazuha/dev/stationary/docs/architecture.md)**
-- **[媒体元数据同步工作流 & API 契约](file:///Users/kazuha/dev/stationary/docs/external_api.contract.md)**
-- **[Metadata 物理保存与清理流程详细说明](file:///Users/kazuha/dev/stationary/docs/save_metadata_flow.md)**
-- **[TypeScript 编写规范与避坑指南](file:///Users/kazuha/dev/stationary/docs/code.rule.md)**
+- **[系统设计与数据库规范说明](file:///Users/kazuha/dev/stationary/docs/system_design.zh-Hans.md)**
+- **[媒体元数据同步工作流 & API 契约](file:///Users/kazuha/dev/stationary/docs/external_api.contract.zh-Hans.md)**
+- **[Metadata 物理保存与清理流程详细说明](file:///Users/kazuha/dev/stationary/docs/save_metadata_flow.zh-Hans.md)**
+- **[TypeScript 编写规范与避坑指南](file:///Users/kazuha/dev/stationary/docs/code.rule.zh-Hans.md)**

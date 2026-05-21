@@ -1,6 +1,6 @@
-# System Architecture & Database Specifications
+# System Design & Database Specifications
 
-> [简体中文](./architecture.zh-Hans.md)
+> [简体中文](./system_design.zh-Hans.md)
 
 This document details the business domain relationships, database design guidelines, dual-view UI rendering mechanisms, and multitenant permission layouts used in Stationary.
 
@@ -50,18 +50,36 @@ erDiagram
   - `ALTERNATIVE`: Backup or fallback files.
   - `LIVE_PHOTO_VIDEO`: The short video track associated with a Live Photo.
   - `COVER`: The cover frame of a video.
+- [Future] **Reference Counting & Sharing Rule**: When multiple entities reference the same physical `File`, do not use a simple counter column (`ref_count`) on the `File` table. Instead, use a dedicated reference table (e.g., `file_usage`) to track active references dynamically. (Since there are no multi-reference relationships yet, the implementation of the `file_usage` table can be deferred.)
 
 ---
 
-## 3. Dual-View UI Mechanism
+## 3. Lifecycle & Deletion Policies
+
+When database foreign keys are disabled, the application layer must enforce referential integrity and handle deletes explicitly.
+
+### 3.1 Recycle Bin Semantics (Soft vs. Hard Delete)
+To prevent accidental data loss, the deletion flow is split into two phases:
+- **Move to Recycle Bin (Soft Delete)**: The initial delete of a `Post` or `Media` marks the record as deleted (setting `deleted_at` to the current time, or `is_deleted` to `true`). Mapping records in `post_tag`, `media_tag`, and `media_file` are preserved, and S3 physical files are kept in place. The item in the Recycle Bin still counts as an active file reference.
+- **Purge Recycle Bin (Hard Delete / Purge)**: Occurs when the user purges the Recycle Bin or executes a permanent delete. This physically deletes the join table records (`post_tag`, `media_tag`, `media_file`) and the database entity rows (`Post` or `Media`).
+  - *Reference Counting Cleanup*: We gather candidate `file_id`s from deleted `media_file` records, check the `file_usage` table to verify if any other active entity references them (Since there are no multi-reference relationships yet, reference counting check is not required for now). **Only if the physical file has no remaining active references** does the backend trigger physical S3 object deletion and remove the file record from the `File` table.
+
+### 3.2 Library Deletion Policy
+To prevent accidental deletion, non-empty libraries (`Library`) do not support direct deletes.
+- **Pre-deletion Check**: Before deleting a `Library` record, the system verifies that there are no active or soft-deleted `Post` or `Media` items belonging to it.
+- **Validation**: The deletion is rejected if any content remains under the library. The library can only be deleted when completely empty.
+
+---
+
+## 4. Dual-View UI Mechanism
 
 The user interface supports two primary data viewing flows:
 
-### 3.1 Board View (Post List)
+### 4.1 Board View (Post List)
 - Focuses on the `Post` unit. Every card renders a Post item, using the media item with `sort_order = 0` as the card's thumbnail cover.
 - Displays author info, post titles, tags, and local publishing times.
 
-### 3.2 All Pins View (Media List)
+### 4.2 All Pins View (Media List)
 - Focuses on the individual `Media` file. Users can browse images and videos directly. Two display modes are supported:
 
 | Display Mode | SQL Filter Logic | Rendering Output |
@@ -71,14 +89,14 @@ The user interface supports two primary data viewing flows:
 
 ---
 
-## 4. Multitenancy & Sharing (User Group & Library)
+## 5. Multitenancy & Sharing (User Group & Library)
 
 The system supports group collaboration using fine-grained permissions:
 
-### 4.1 Resource Entity
+### 5.1 Resource Entity
 - **Library**: The physical isolation boundary for assets. All posts and media files must specify their parent `library_id` on creation.
 
-### 4.2 Group Sharing & Access Control
+### 5.2 Group Sharing & Access Control
 - Users can create their own `Library` instances and build `UserGroup` teams.
 - Library shares can be configured via two tables:
   1. **User-level sharing (`LibraryUserAccess`)**: Grants specific view or edit access to a single `User`.
