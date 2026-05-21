@@ -9,7 +9,7 @@ COPY package.json bun.lock bunfig.toml .npmrc ./
 COPY apps/server/package.json apps/server/package.json
 COPY apps/web/package.json apps/web/package.json
 RUN --mount=type=cache,id=stationary-server-bun,target=/root/.bun/install/cache \
-    bun install --frozen-lockfile --filter @stationary/backend
+    bun install --frozen-lockfile --filter @stationary/server
 
 COPY apps/server/tsconfig.json apps/server/tsconfig.json
 COPY apps/server/src apps/server/src
