@@ -233,7 +233,7 @@ onUnmounted(() => {
 <template>
     <div class="flex-1 min-h-0 flex flex-col bg-white overflow-hidden relative">
         <!-- Header -->
-        <div class="h-14 border-b border-gray-100 flex items-center justify-between px-6 shrink-0">
+        <div class="h-14 border-b border-gray-100 flex items-center justify-between px-3 sm:px-6 shrink-0">
             <div class="flex items-center gap-3">
                 <button @click="toggleSidebar"
                     class="p-1.5 -ml-2 hover:bg-gray-100 rounded-md text-gray-500 transition-colors">
@@ -241,34 +241,34 @@ onUnmounted(() => {
                 </button>
             </div>
 
-            <div class="flex-1 max-w-2xl px-4 flex items-center gap-3">
+            <div class="flex-1 max-w-2xl px-1 sm:px-4 flex items-center gap-1.5 sm:gap-3">
                 <!-- Platform Select -->
-                <div class="relative min-w-[120px]">
+                <div class="relative min-w-[80px] sm:min-w-[120px]">
                     <select v-model="source"
-                        class="w-full bg-gray-50 border border-gray-100 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2 appearance-none pr-8 cursor-pointer hover:bg-gray-100 transition-colors">
+                        class="w-full bg-gray-50 border border-gray-100 text-gray-900 text-xs sm:text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-1.5 sm:p-2 appearance-none pr-6 sm:pr-8 cursor-pointer hover:bg-gray-100 transition-colors">
                         <option v-for="p in platforms" :key="String(p.value)" :value="p.value">
                             {{ p.label }}
                         </option>
                     </select>
-                    <div class="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none text-gray-400">
-                        <ChevronRight class="w-4 h-4 rotate-90" />
+                    <div class="absolute inset-y-0 right-0 flex items-center px-1.5 sm:px-2 pointer-events-none text-gray-400">
+                        <ChevronRight class="w-3.5 h-3.5 sm:w-4 sm:h-4 rotate-90" />
                     </div>
                 </div>
 
                 <!-- Search Input -->
                 <div class="relative flex-1 group">
                     <Search
-                        class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
+                        class="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
                     <input v-model="keyword" type="text" :placeholder="$t('common.search', 'Search posts...')"
-                        class="w-full bg-gray-50 border border-gray-100 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block pl-10 pr-10 py-2 hover:bg-gray-100 focus:bg-white transition-all outline-none" />
+                        class="w-full bg-gray-50 border border-gray-100 text-gray-900 text-xs sm:text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block pl-8 sm:pl-10 pr-8 sm:pr-10 py-1.5 sm:py-2 hover:bg-gray-100 focus:bg-white transition-all outline-none" />
                     <button v-if="keyword" @click="clearSearch"
-                        class="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 hover:bg-gray-200 rounded-full transition-colors text-gray-400">
-                        <X class="w-3.5 h-3.5" />
+                        class="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 p-0.5 hover:bg-gray-200 rounded-full transition-colors text-gray-400">
+                        <X class="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                     </button>
                 </div>
             </div>
 
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-1 sm:gap-2">
                 <Button
                     variant="ghost"
                     size="icon-sm"
@@ -277,13 +277,14 @@ onUnmounted(() => {
                     aria-label="Select items"
                     title="Select items"
                     @click="toggleSelectionMode"
+                    class="h-8 w-8 p-0"
                 >
-                    <CheckSquare />
+                    <CheckSquare class="w-4 h-4 sm:w-5 h-5" />
                 </Button>
-                <button class="p-1.5 hover:bg-gray-100 rounded-md text-gray-500 transition-colors">
+                <button class="hidden sm:block p-1.5 hover:bg-gray-100 rounded-md text-gray-500 transition-colors">
                     <LayoutGrid class="w-5 h-5" />
                 </button>
-                <button class="p-1.5 hover:bg-gray-100 rounded-md text-gray-500 transition-colors">
+                <button class="hidden sm:block p-1.5 hover:bg-gray-100 rounded-md text-gray-500 transition-colors">
                     <List class="w-5 h-5" />
                 </button>
             </div>
@@ -304,17 +305,17 @@ onUnmounted(() => {
         </div>
 
         <!-- Footer / Pagination -->
-        <div class="h-14 border-t border-gray-100 flex items-center justify-between px-6 shrink-0 text-sm text-gray-500 bg-white">
+        <div class="h-14 border-t border-gray-100 flex items-center justify-between px-3 sm:px-6 shrink-0 text-sm text-gray-500 bg-white">
             <div class="hidden sm:block tabular-nums">
                 {{ Array.isArray(posts) ? $t('grid.showing_items', { count: posts.length }) : '' }}
             </div>
 
-            <div class="flex items-center gap-4">
+            <div class="flex items-center gap-2 sm:gap-4">
                 <PaginationRoot :total="total || 0" :sibling-count="1" :items-per-page="PAGE_SIZE" :page="page"
                     @update:page="changePage" class="flex items-center">
                     <PaginationList v-slot="{ items }" class="flex items-center gap-1">
                         <PaginationPrev as-child>
-                            <Button variant="outline" class="w-9 h-9 p-0" :disabled="isPrevDisabled">
+                            <Button variant="outline" class="w-8 h-8 sm:w-9 sm:h-9 p-0" :disabled="isPrevDisabled">
                                 <ChevronLeft class="w-4 h-4" />
                             </Button>
                         </PaginationPrev>
@@ -322,25 +323,25 @@ onUnmounted(() => {
                         <template v-for="(p, index) in items" :key="index">
                             <PaginationListItem v-if="p.type === 'page'" :value="p.value" as-child>
                                 <Button :variant="p.value === page ? 'default' : 'outline'"
-                                    class="w-9 h-9 p-0 tabular-nums">
+                                    class="w-8 h-8 sm:w-9 sm:h-9 p-0 tabular-nums">
                                     {{ p.value }}
                                 </Button>
                             </PaginationListItem>
                             <PaginationEllipsis v-else-if="p.type === 'ellipsis'"
-                                class="w-9 h-9 flex items-center justify-center">
+                                class="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center">
                                 <MoreHorizontal class="w-4 h-4 text-gray-400" />
                             </PaginationEllipsis>
                         </template>
 
                         <PaginationNext as-child>
-                            <Button variant="outline" class="w-9 h-9 p-0" :disabled="isNextDisabled">
+                            <Button variant="outline" class="w-8 h-8 sm:w-9 sm:h-9 p-0" :disabled="isNextDisabled">
                                 <ChevronRight class="w-4 h-4" />
                             </Button>
                         </PaginationNext>
                     </PaginationList>
                 </PaginationRoot>
 
-                <div class="flex items-center gap-3 border-l border-gray-200 pl-4 tabular-nums">
+                <div class="flex items-center gap-3 border-l border-gray-200 pl-2 sm:pl-4 tabular-nums">
                     <i18n-t keypath="grid.page_info" scope="global" class="flex items-center gap-1.5 text-gray-500 text-sm hidden sm:flex">
                         <template #current>
                             <input v-model="jumpPage" type="text"

@@ -24,7 +24,7 @@ const loginWithGoogle = async () => {
 </script>
 
 <template>
-    <div class="min-h-screen flex items-center justify-center bg-[#f9fafb] p-4 font-sans">
+    <div class="min-h-dvh flex items-center justify-center bg-[#f9fafb] p-4 font-sans">
         <div
             class="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden flex flex-col">
             <div class="p-8 flex flex-col items-center text-center">

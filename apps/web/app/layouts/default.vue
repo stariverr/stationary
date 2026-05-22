@@ -9,7 +9,7 @@ watch(() => route.fullPath, () => {
 </script>
 
 <template>
-    <div class="w-full h-screen bg-white flex overflow-hidden font-sans text-gray-900">
+    <div class="w-full h-dvh bg-white flex overflow-hidden font-sans text-gray-900">
         <!-- Left Sidebar (Desktop) -->
         <LeftSidebar class="hidden md:flex w-64 shrink-0" />
 
