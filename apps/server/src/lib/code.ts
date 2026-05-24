@@ -1,6 +1,8 @@
 
 /** API Response Code */
 export const enum Code {
+    // General Code
+
     /** Success */
     SUCCESS = 0,
     /** Unknown Error */
@@ -26,4 +28,7 @@ export const enum Code {
     /** Not Implemented */
     NOT_IMPLEMENTED = 1010,
     
+    // Business Logic Error
+    /** Library Not Empty: cannot be deleted */
+    LIBRARY_NOT_EMPTY = 2001,
 }

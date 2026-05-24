@@ -60,13 +60,13 @@ When database foreign keys are disabled, the application layer must enforce refe
 
 ### 3.1 Recycle Bin Semantics (Soft vs. Hard Delete)
 To prevent accidental data loss, the deletion flow is split into two phases:
-- **Move to Recycle Bin (Soft Delete)**: The initial delete of a `Post` or `Media` marks the record as deleted (setting `deleted_at` to the current time, or `is_deleted` to `true`). Mapping records in `post_tag`, `media_tag`, and `media_file` are preserved, and S3 physical files are kept in place. The item in the Recycle Bin still counts as an active file reference.
+- **Move to Recycle Bin (Soft Delete)**: The initial delete of a `Post` or `Media` marks the record as deleted by setting `delete_time`. Mapping records in `post_tag`, `media_tag`, and `media_file` are preserved, and S3 physical files are kept in place. The item in the Recycle Bin still counts as an active file reference.
 - **Purge Recycle Bin (Hard Delete / Purge)**: Occurs when the user purges the Recycle Bin or executes a permanent delete. This physically deletes the join table records (`post_tag`, `media_tag`, `media_file`) and the database entity rows (`Post` or `Media`).
   - *Reference Counting Cleanup*: We gather candidate `file_id`s from deleted `media_file` records, check the `file_usage` table to verify if any other active entity references them (Since there are no multi-reference relationships yet, reference counting check is not required for now). **Only if the physical file has no remaining active references** does the backend trigger physical S3 object deletion and remove the file record from the `File` table.
 
 ### 3.2 Library Deletion Policy
 To prevent accidental deletion, non-empty libraries (`Library`) do not support direct deletes.
-- **Pre-deletion Check**: Before deleting a `Library` record, the system verifies that there are no active or soft-deleted `Post` or `Media` items belonging to it.
+- **Pre-deletion Check**: Before deleting a `Library` record, the system verifies that there are no `Post` or `Media` items belonging to it, including recycled ones.
 - **Validation**: The deletion is rejected if any content remains under the library. The library can only be deleted when completely empty.
 
 ---

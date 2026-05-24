@@ -10,8 +10,10 @@ import { Code } from "@/lib/code";
 import { error, success } from "@/lib/response";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { db } from "@/global/db";
-import { Library } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { Library, File as DbFile } from "@/db/schema";
+import { eq, and, lt } from "drizzle-orm";
+import { DeleteService } from "@/services/delete";
+import { s3 } from "@/global/s3";
 
 const taskApp = new Hono<AuthEnv>();
 
@@ -37,41 +39,45 @@ const TimestampSchema = z.string().transform((val) => {
     return Temporal.Instant.from(val);
 });
 
-const MediaItemSchema = z.object({
-    external_id: z.string().optional(),
-    title: z.string().nullable().default(""),
-    description: z.string().nullable().default(""),
-    type: z.enum(["IMAGE", "VIDEO", "LIVE_PHOTO"]),
-    primary_file_url: z.string(),
-    alternative_file_url: z.string().nullable().optional(),
-    live_photo_video_url: z.string().nullable().optional(),
-    cover_file_url: z.string().nullable().optional(),
-    /** Media Duration (in seconds) */
-    duration: z.number().nullable().optional(),
-    published_time: TimestampSchema.optional(),
-    /** @deprecated Use published_time. Kept for legacy import payloads. */
-    create_time: TimestampSchema.optional(),
-}).transform(({ create_time, published_time, ...media }) => ({
-    ...media,
-    published_time: published_time ?? create_time,
-}));
+const MediaItemSchema = z
+    .object({
+        external_id: z.string().optional(),
+        title: z.string().nullable().default(""),
+        description: z.string().nullable().default(""),
+        type: z.enum(["IMAGE", "VIDEO", "LIVE_PHOTO"]),
+        primary_file_url: z.string(),
+        alternative_file_url: z.string().nullable().optional(),
+        live_photo_video_url: z.string().nullable().optional(),
+        cover_file_url: z.string().nullable().optional(),
+        /** Media Duration (in seconds) */
+        duration: z.number().nullable().optional(),
+        published_time: TimestampSchema.optional(),
+        /** @deprecated Use published_time. Kept for legacy import payloads. */
+        create_time: TimestampSchema.optional(),
+    })
+    .transform(({ create_time, published_time, ...media }) => ({
+        ...media,
+        published_time: published_time ?? create_time,
+    }));
 
-const PostItemSchema = z.object({
-    title: z.string(),
-    url: z.string().optional(),
-    description: z.string().default(""),
-    external_id: z.string().optional().default(""),
-    tags: z.array(z.string()).default([]),
-    author: AuthorSchema,
-    platform: z.enum(["UNKNOWN", "X", "XHS", "BILIBILI", "DOUYIN", "TIKTOK", "INSTAGRAM"]),
-    media: z.array(MediaItemSchema),
-    published_time: TimestampSchema.optional(),
-    /** @deprecated Use published_time. Kept for legacy import payloads. */
-    create_time: TimestampSchema.optional(),
-}).transform(({ create_time, published_time, ...post }) => ({
-    ...post,
-    published_time: published_time ?? create_time,
-}));
+const PostItemSchema = z
+    .object({
+        title: z.string(),
+        url: z.string().optional(),
+        description: z.string().default(""),
+        external_id: z.string().optional().default(""),
+        tags: z.array(z.string()).default([]),
+        author: AuthorSchema,
+        platform: z.enum(["UNKNOWN", "X", "XHS", "BILIBILI", "DOUYIN", "TIKTOK", "INSTAGRAM"]),
+        media: z.array(MediaItemSchema),
+        published_time: TimestampSchema.optional(),
+        /** @deprecated Use published_time. Kept for legacy import payloads. */
+        create_time: TimestampSchema.optional(),
+    })
+    .transform(({ create_time, published_time, ...post }) => ({
+        ...post,
+        published_time: published_time ?? create_time,
+    }));
 
 export const CreateTaskSchema = z.object({
     library_id: z.uuid(),
@@ -79,11 +85,13 @@ export const CreateTaskSchema = z.object({
 });
 
 const WorkflowPayloadSchema = z.object({
-    posts: z.array(z.object({
-        data: PostItemSchema,
-        id: z.string(),
-        authorId: z.string().nullable(),
-    }))
+    posts: z.array(
+        z.object({
+            data: PostItemSchema,
+            id: z.string(),
+            authorId: z.string().nullable(),
+        }),
+    ),
 });
 
 export type AuthorData = z.infer<typeof AuthorSchema>;
@@ -114,9 +122,12 @@ taskApp.post("/create", requireAuth, zValidator("json", CreateTaskSchema), async
     if (apiToken) {
         // If API token is scoped to a specific library, check that target matches scope
         if (apiToken.library_id && apiToken.library_id !== payload.library_id) {
-            return c.json(error(Code.UNAUTHORIZED, "API token is not scoped for this library"), 403);
+            return c.json(
+                error(Code.UNAUTHORIZED, "API token is not scoped for this library"),
+                403,
+            );
         }
-        
+
         // Ensure library belongs to the token owner
         if (library.owner_id !== user.id) {
             return c.json(error(Code.UNAUTHORIZED, "You do not have access to this library"), 403);
@@ -136,9 +147,11 @@ taskApp.post("/create", requireAuth, zValidator("json", CreateTaskSchema), async
 
     // Get the base URL form the request
     const url = new URL(c.req.url);
-    const origin = env.UPSTASH_WORKFLOW_URL || (c.req.header("x-forwarded-proto")
-        ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
-        : url.origin);
+    const origin =
+        env.UPSTASH_WORKFLOW_URL ||
+        (c.req.header("x-forwarded-proto")
+            ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
+            : url.origin);
     const workflowUrl = `${origin.replace(/\/$/, "")}/api/task/workflow`;
 
     const customWorkflowRunId = crypto.randomUUID();
@@ -150,7 +163,11 @@ taskApp.post("/create", requireAuth, zValidator("json", CreateTaskSchema), async
 
     // Step 1: Save Metadata of Post to DB (Synchronization & Deduplication) synchronously
     for (const postData of payload.posts) {
-        const stepOneResult = await TaskService.saveMetadata(postData, payload.library_id, customWorkflowRunId);
+        const stepOneResult = await TaskService.saveMetadata(
+            postData,
+            payload.library_id,
+            customWorkflowRunId,
+        );
 
         // The result of Step 1 can determine whether the following steps should be executed.
         if (!stepOneResult.skipUpdate) {
@@ -173,53 +190,109 @@ taskApp.post("/create", requireAuth, zValidator("json", CreateTaskSchema), async
         });
     }
 
-    return c.json(success(Code.SUCCESS, {
-        message: "Tasks received and metadata processed",
-        count: payload.posts.length,
-        processedCount: postsToProcess.length,
-        workflowUrl: postsToProcess.length > 0 ? workflowUrl : undefined
-    }));
+    return c.json(
+        success(Code.SUCCESS, {
+            message: "Tasks received and metadata processed",
+            count: payload.posts.length,
+            processedCount: postsToProcess.length,
+            workflowUrl: postsToProcess.length > 0 ? workflowUrl : undefined,
+        }),
+    );
 });
 
 // Upstash Workflow handler
-export const workflowHandler = serve(async (context) => {
-    const { posts } = WorkflowPayloadSchema.parse(context.requestPayload);
+export const workflowHandler = serve(
+    async (context) => {
+        const { posts } = WorkflowPayloadSchema.parse(context.requestPayload);
 
-    for (const post of posts) {
+        for (const post of posts) {
+            // Step 2: Process And Upload Media
+            for (const [index, mediaData] of post.data.media.entries()) {
+                await context.run(`process-media-${post.id}-${index}`, async () => {
+                    await TaskService.processMedia(post.id, index, mediaData);
+                });
+            }
 
-        // Step 2: Process And Upload Media
-        for (const [index, mediaData] of post.data.media.entries()) {
-            await context.run(`process-media-${post.id}-${index}`, async () => {
-                await TaskService.processMedia(post.id, index, mediaData);
+            // Step 3: Process And Upload Avatar
+            if (post.data.author.avatar_file_url && post.authorId) {
+                await context.run(`process-avatar-${post.authorId}`, async () => {
+                    await TaskService.processAvatar(
+                        post.authorId!,
+                        post.data.author.avatar_file_url!,
+                    );
+                });
+            }
+
+            // Step 4: Update Post Status to COMPLETED
+            await context.run(`finalize-post-${post.id}`, async () => {
+                await TaskService.finalizePost(post.id);
             });
         }
+    },
+    {
+        failureFunction: async ({ context, failResponse }) => {
+            // Mark posts associated with this workflow as FAILED
+            await TaskService.markPostAsFailed(
+                context.workflowRunId,
+                failResponse || "Workflow retries exhausted.",
+            );
+        },
+    },
+);
 
-        // Step 3: Process And Upload Avatar
-        if (post.data.author.avatar_file_url && post.authorId) {
-            await context.run(`process-avatar-${post.authorId}`, async () => {
-                await TaskService.processAvatar(post.authorId!, post.data.author.avatar_file_url!);
-            });
+// Cron endpoint to purge expired soft-deleted files
+taskApp.post("/purge-expired-files", async (c) => {
+    const thirtyDaysAgo = Temporal.Now.instant().subtract({ hours: 30 * 24 });
+
+    const expiredFiles = await db
+        .select()
+        .from(DbFile)
+        .where(and(eq(DbFile.delete_status, "DELETED"), lt(DbFile.delete_time, thirtyDaysAgo)));
+
+    let purgedCount = 0;
+    let failedCount = 0;
+    const errors: Array<{ fileId: string; error: string }> = [];
+
+    for (const file of expiredFiles) {
+        try {
+            const canPurge = await DeleteService.canPurgeFile(file.id);
+            if (canPurge) {
+                try {
+                    await s3.delete(file.path, { bucket: file.bucket });
+                } catch (s3Err: any) {
+                    if (s3Err.name !== "NotFound") {
+                        throw s3Err;
+                    }
+                }
+
+                await db.delete(DbFile).where(eq(DbFile.id, file.id));
+                purgedCount++;
+            }
+        } catch (e: any) {
+            failedCount++;
+            errors.push({ fileId: file.id, error: e.message || String(e) });
         }
-
-        // Step 4: Update Post Status to COMPLETED
-        await context.run(`finalize-post-${post.id}`, async () => {
-            await TaskService.finalizePost(post.id);
-        });
     }
 
-}, {
-    failureFunction: async ({ context, failResponse }) => {
-        // Mark posts associated with this workflow as FAILED
-        await TaskService.markPostAsFailed(context.workflowRunId, failResponse || "Workflow retries exhausted.");
-    }
+    return c.json(
+        success(Code.SUCCESS, {
+            purgedCount,
+            failedCount,
+            errors,
+        }),
+    );
 });
 
-taskApp.all("/workflow", async (c, next) => {
-    console.log(`[DEBUG] Incoming request to /api/task/workflow`);
-    // console.log(`[DEBUG] Method: ${c.req.method}`);
-    // console.log(`[DEBUG] Content-Type: ${c.req.header("content-type")}`);
-    // console.log(`[DEBUG] Content-Length: ${c.req.header("content-length")}`);
-    return next();
-}, workflowHandler);
+taskApp.all(
+    "/workflow",
+    async (c, next) => {
+        console.log(`[DEBUG] Incoming request to /api/task/workflow`);
+        // console.log(`[DEBUG] Method: ${c.req.method}`);
+        // console.log(`[DEBUG] Content-Type: ${c.req.header("content-type")}`);
+        // console.log(`[DEBUG] Content-Length: ${c.req.header("content-length")}`);
+        return next();
+    },
+    workflowHandler,
+);
 
 export default taskApp;

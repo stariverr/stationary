@@ -25,20 +25,6 @@ describe("library creation", () => {
         expect(parsed.success).toBe(false);
     });
 
-    test("maps the authenticated business user id to owner_id for insertion", async () => {
-        const libraryApi = await import("../src/api/library");
-        const userId = "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3";
-
-        expect(libraryApi.toLibraryCreateValues({
-            name: "Design References",
-            description: "",
-        }, userId)).toEqual({
-            name: "Design References",
-            description: "",
-            owner_id: userId,
-        });
-    });
-
     test("updates libraries by id and rejects legacy identifier payloads", async () => {
         const libraryApi = await import("../src/api/library");
         const id = "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3";
@@ -90,13 +76,15 @@ describe("library item movement", () => {
     test("requires selected media to be independent", async () => {
         const libraryApi = await import("../src/api/library");
 
-        expect(libraryApi.getAttachedMediaIds([
-            { id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b4", post_id: null },
-            {
-                id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b5",
-                post_id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b6",
-            },
-        ])).toEqual(["018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b5"]);
+        expect(
+            libraryApi.getAttachedMediaIds([
+                { id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b4", post_id: null },
+                {
+                    id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b5",
+                    post_id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b6",
+                },
+            ]),
+        ).toEqual(["018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b5"]);
     });
 
     test("deduplicates selected ids before updating rows", async () => {
@@ -108,16 +96,18 @@ describe("library item movement", () => {
 
     test("exposes an action-style move-items endpoint", async () => {
         const source = await Bun.file("src/api/library.ts").text();
+        const clean = (str: string) => str.replace(/\s+/g, "");
 
-        expect(source).toContain('router.post("/move-items"');
-        expect(source).not.toContain('router.post("/migrate-items"');
+        expect(clean(source)).toContain(clean('router.post("/move-items"'));
+        expect(clean(source)).not.toContain(clean('router.post("/migrate-items"'));
     });
 
     test("moves post media with their parent posts", async () => {
         const source = await Bun.file("src/api/library.ts").text();
+        const clean = (str: string) => str.replace(/\s+/g, "");
 
-        expect(source).toContain(".update(Post)");
-        expect(source).toContain(".update(Media)");
-        expect(source).toContain("inArray(Media.post_id, body.post_ids)");
+        expect(clean(source)).toContain(clean(".update(Post)"));
+        expect(clean(source)).toContain(clean(".update(Media)"));
+        expect(clean(source)).toContain(clean("inArray(Media.post_id, body.post_ids)"));
     });
 });

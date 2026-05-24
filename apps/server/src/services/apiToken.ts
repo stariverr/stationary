@@ -2,6 +2,7 @@ import { db } from "@/global/db";
 import { ExternalApiToken } from "@/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { randomBytes, createHash } from "crypto";
+import { Temporal } from "@js-temporal/polyfill";
 
 export const ApiTokenService = {
     /**
@@ -22,7 +23,7 @@ export const ApiTokenService = {
         // Compute SHA-256 hash of the entire token for database lookup
         const tokenHash = createHash("sha256").update(rawToken).digest("hex");
 
-        const expiresAt = expiresInSeconds ? new Date(Date.now() + expiresInSeconds * 1000) : null;
+        const expiresAt = expiresInSeconds ? Temporal.Now.instant().add({ seconds: expiresInSeconds }) : null;
 
         const results = await db
             .insert(ExternalApiToken)
@@ -34,7 +35,7 @@ export const ApiTokenService = {
                 last_four: rawToken.slice(-4),
                 owner_id: ownerId,
                 library_id: libraryId || null,
-                expires_at: expiresAt,
+                expire_time: expiresAt,
             })
             .returning();
 
@@ -72,7 +73,7 @@ export const ApiTokenService = {
             .where(
                 and(
                     eq(ExternalApiToken.token_hash, tokenHash),
-                    isNull(ExternalApiToken.revoked_at)
+                    isNull(ExternalApiToken.revoke_time)
                 )
             )
             .limit(1);
@@ -81,16 +82,16 @@ export const ApiTokenService = {
         if (!token) return null;
 
         // 4. Expiration check
-        if (token.expires_at && token.expires_at < new Date()) {
+        if (token.expire_time && Temporal.Instant.compare(token.expire_time, Temporal.Now.instant()) < 0) {
             return null;
         }
 
-        // 5. Asynchronously update last_used_at
+        // 5. Asynchronously update last_use_time
         db.update(ExternalApiToken)
-            .set({ last_used_at: new Date() })
+            .set({ last_use_time: Temporal.Now.instant() })
             .where(eq(ExternalApiToken.id, token.id))
             .execute()
-            .catch((err) => console.error("[ApiTokenService] Failed to update last_used_at:", err));
+            .catch((err) => console.error("[ApiTokenService] Failed to update last_use_time:", err));
 
         return token;
     },
@@ -107,15 +108,15 @@ export const ApiTokenService = {
                 first_four: ExternalApiToken.first_four,
                 last_four: ExternalApiToken.last_four,
                 library_id: ExternalApiToken.library_id,
-                last_used_at: ExternalApiToken.last_used_at,
-                expires_at: ExternalApiToken.expires_at,
+                last_use_time: ExternalApiToken.last_use_time,
+                expires_at: ExternalApiToken.expire_time,
                 create_time: ExternalApiToken.create_time,
             })
             .from(ExternalApiToken)
             .where(
                 and(
                     eq(ExternalApiToken.owner_id, ownerId),
-                    isNull(ExternalApiToken.revoked_at)
+                    isNull(ExternalApiToken.revoke_time)
                 )
             );
     },
@@ -126,7 +127,7 @@ export const ApiTokenService = {
     async revokeToken(tokenId: string, ownerId: string) {
         const results = await db
             .update(ExternalApiToken)
-            .set({ revoked_at: new Date() })
+            .set({ revoke_time: Temporal.Now.instant() })
             .where(
                 and(
                     eq(ExternalApiToken.id, tokenId),

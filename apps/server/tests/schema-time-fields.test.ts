@@ -21,8 +21,8 @@ describe("post and media time fields", () => {
     test("schema keeps create_time as record creation time and adds published_time", async () => {
         const schema = await sourceFiles.schema();
 
-        expect(schema).toContain('create_time: timestamp("create_time", { mode: "string" }).defaultNow().notNull()');
-        expect(schema).toContain('published_time: timestamp("published_time", { mode: "string" })');
+        expect(schema).toContain('create_time: temporal("create_time").default(Temporal.Now.instant()).notNull()');
+        expect(schema).toContain('published_time: temporal("published_time")');
     });
 
     test("task service writes source timestamps to published_time instead of create_time", async () => {

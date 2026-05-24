@@ -1,15 +1,17 @@
 import { db } from "@/global/db";
 import { Post, Media, MediaFile, Author, File, Library } from "@/db/schema";
-import { eq, and, notInArray, inArray, gte } from "drizzle-orm";
-import { downloadStream, downloadMedia, getExtensionFromContentType, uploadToS3, moveToTrash } from "@/lib/utils/media";
+import { eq, and, notInArray, inArray, gte, isNull, isNotNull } from "drizzle-orm";
+import {
+    downloadStream,
+    downloadMedia,
+    getExtensionFromContentType,
+    uploadToS3,
+} from "@/lib/utils/media";
 import { withLock } from "@/lib/utils/lock";
 import { env } from "@/global/env";
 import { kv } from "@/global/kv";
 import type { PostItemData, MediaItemData } from "@/api/task";
-
-const toTimestamp = (instant: { toString: () => string } | undefined) => {
-    return instant?.toString().replace("T", " ").replace("Z", "") ?? null;
-};
+import { nowDbTimestamp } from "@/lib/utils/time";
 
 export const TaskService = {
     /**
@@ -24,19 +26,25 @@ export const TaskService = {
                     where: {
                         eid: postData.author.external_id,
                         platform: postData.platform,
-                    }
+                    },
                 });
 
                 if (!author) {
-                    const results = await db.insert(Author).values({
-                        eid: postData.author.external_id,
-                        nickname: postData.author.name,
-                        platform: postData.platform,
-                    }).returning();
+                    const results = await db
+                        .insert(Author)
+                        .values({
+                            eid: postData.author.external_id,
+                            nickname: postData.author.name,
+                            platform: postData.platform,
+                        })
+                        .returning();
                     author = results[0];
                 } else {
                     if (author.nickname !== postData.author.name) {
-                        await db.update(Author).set({ nickname: postData.author.name }).where(eq(Author.id, author.id));
+                        await db
+                            .update(Author)
+                            .set({ nickname: postData.author.name })
+                            .where(eq(Author.id, author.id));
                     }
                 }
                 authorId = author.id;
@@ -53,9 +61,20 @@ export const TaskService = {
             existingPost = await db.query.Post.findFirst({
                 where: {
                     eid: postData.external_id,
-                    source: postData.platform
-                }
+                    source: postData.platform,
+                },
             });
+        }
+
+        if (
+            existingPost &&
+            (existingPost.delete_status === "DELETED" || existingPost.recycle_time !== null)
+        ) {
+            return {
+                postId: existingPost.id,
+                authorId,
+                skipUpdate: true,
+            };
         }
 
         let hasPendingTasks = false;
@@ -72,12 +91,10 @@ export const TaskService = {
                 media_count: postData.media.length,
                 library_id: targetLibraryId,
             };
-            const publishedTime = toTimestamp(postData.published_time);
-            if (publishedTime) postUpdateData.published_time = publishedTime;
+            if (postData.published_time) postUpdateData.published_time = postData.published_time;
 
             // Always update post metadata to reflect the latest scraped text/tags
             await db.update(Post).set(postUpdateData).where(eq(Post.id, postId));
-
         } else {
             // Post not exists, create new one
             const eid = postData.external_id || crypto.randomUUID();
@@ -90,7 +107,7 @@ export const TaskService = {
                 author_name: postData.author.name,
                 author_external_id: postData.author.external_id || "",
                 author_id: authorId,
-                published_time: toTimestamp(postData.published_time),
+                published_time: postData.published_time ?? null,
                 media_count: postData.media.length,
                 library_id: targetLibraryId,
                 url: postData.url,
@@ -98,74 +115,138 @@ export const TaskService = {
                 last_error: null,
                 workflow_run_id: workflowRunId,
             };
-            const results = await db.insert(Post).values(postInsertData).returning({ id: Post.id, eid: Post.eid });
+            const results = await db
+                .insert(Post)
+                .values(postInsertData)
+                .returning({ id: Post.id, eid: Post.eid });
             postId = results[0].id;
             if (!postData.external_id) postData.external_id = results[0].eid;
             hasPendingTasks = true;
         }
 
         // 3. Media sync
-        const mediaEids: string[] = postData.media.map(m => m.external_id).filter((eid): eid is string => !!eid);
+        const mediaEids: string[] = postData.media
+            .map((m) => m.external_id)
+            .filter((eid): eid is string => !!eid);
 
         let mediaToDelete: any[] = [];
         if (postData.media.length === 0) {
-            mediaToDelete = await db.select().from(Media).where(eq(Media.post_id, postId));
+            mediaToDelete = await db
+                .select()
+                .from(Media)
+                .where(and(eq(Media.post_id, postId), eq(Media.delete_status, "ACTIVE")));
         } else if (mediaEids.length > 0) {
-            mediaToDelete = await db.select().from(Media).where(
-                and(
-                    eq(Media.post_id, postId),
-                    notInArray(Media.eid, mediaEids)
-                )
-            );
+            mediaToDelete = await db
+                .select()
+                .from(Media)
+                .where(
+                    and(
+                        eq(Media.post_id, postId),
+                        eq(Media.delete_status, "ACTIVE"),
+                        notInArray(Media.eid, mediaEids),
+                    ),
+                );
         } else {
-            mediaToDelete = await db.select().from(Media).where(
-                and(
-                    eq(Media.post_id, postId),
-                    gte(Media.sort_order, postData.media.length)
-                )
-            );
+            mediaToDelete = await db
+                .select()
+                .from(Media)
+                .where(
+                    and(
+                        eq(Media.post_id, postId),
+                        eq(Media.delete_status, "ACTIVE"),
+                        gte(Media.sort_order, postData.media.length),
+                    ),
+                );
         }
 
         if (mediaToDelete.length > 0) {
-            for (const m of mediaToDelete) {
-                const mediaFiles = await db.select().from(MediaFile).where(eq(MediaFile.media_id, m.id));
-                for (const mf of mediaFiles) {
-                    if (mf.file_id) {
-                        const file = await db.select().from(File).where(eq(File.id, mf.file_id));
-                        if (file[0]) await moveToTrash(file[0].s3_key, postData.platform, postId, env.S3_BUCKET);
-                    }
-                }
-            }
+            const deletedMediaIds = mediaToDelete.map((m) => m.id);
+            const deleteTime = nowDbTimestamp();
+            await db.transaction(async (tx) => {
+                await tx
+                    .update(Media)
+                    .set({
+                        delete_status: "DELETED",
+                        delete_time: deleteTime,
+                    })
+                    .where(
+                        and(inArray(Media.id, deletedMediaIds), eq(Media.delete_status, "ACTIVE")),
+                    );
 
-            if (postData.media.length === 0) {
-                await db.delete(Media).where(eq(Media.post_id, postId));
-            } else if (mediaEids.length > 0) {
-                await db.delete(Media).where(
-                    and(
-                        eq(Media.post_id, postId),
-                        notInArray(Media.eid, mediaEids)
-                    )
-                );
-            } else {
-                await db.delete(Media).where(
-                    and(
-                        eq(Media.post_id, postId),
-                        gte(Media.sort_order, postData.media.length)
-                    )
-                );
-            }
+                const mediaFiles = await tx
+                    .select({ file_id: MediaFile.file_id })
+                    .from(MediaFile)
+                    .where(
+                        and(
+                            inArray(MediaFile.media_id, deletedMediaIds),
+                            eq(MediaFile.delete_status, "ACTIVE"),
+                        ),
+                    );
+                const fileIds = mediaFiles
+                    .map((mf) => mf.file_id)
+                    .filter((fid): fid is string => !!fid);
+
+                await tx
+                    .update(MediaFile)
+                    .set({
+                        delete_status: "DELETED",
+                        delete_time: deleteTime,
+                    })
+                    .where(
+                        and(
+                            inArray(MediaFile.media_id, deletedMediaIds),
+                            eq(MediaFile.delete_status, "ACTIVE"),
+                        ),
+                    );
+
+                if (fileIds.length > 0) {
+                    await tx
+                        .update(File)
+                        .set({
+                            delete_status: "DELETED",
+                            delete_time: deleteTime,
+                        })
+                        .where(and(inArray(File.id, fileIds), eq(File.delete_status, "ACTIVE")));
+                }
+            });
             hasPendingTasks = true;
         }
 
         for (const [index, mediaData] of postData.media.entries()) {
-            const incomingPublishedTime = toTimestamp(mediaData.published_time);
-            const fallbackPublishedTime = incomingPublishedTime ?? toTimestamp(postData.published_time);
-            const oldMediaList = await db.select().from(Media).where(
-                and(
-                    eq(Media.post_id, postId),
-                    mediaData.external_id ? eq(Media.eid, mediaData.external_id) : eq(Media.sort_order, index)
-                )
-            );
+            const incomingPublishedTime = mediaData.published_time;
+            const fallbackPublishedTime = incomingPublishedTime ?? postData.published_time;
+            const oldMediaList = await db
+                .select()
+                .from(Media)
+                .where(
+                    and(
+                        eq(Media.post_id, postId),
+                        eq(Media.delete_status, "ACTIVE"),
+                        mediaData.external_id
+                            ? eq(Media.eid, mediaData.external_id)
+                            : eq(Media.sort_order, index),
+                    ),
+                );
+
+            const deletedMediaList =
+                oldMediaList.length === 0
+                    ? await db
+                          .select()
+                          .from(Media)
+                          .where(
+                              and(
+                                  eq(Media.post_id, postId),
+                                  eq(Media.delete_status, "DELETED"),
+                                  mediaData.external_id
+                                      ? eq(Media.eid, mediaData.external_id)
+                                      : eq(Media.sort_order, index),
+                              ),
+                          )
+                    : [];
+
+            if (deletedMediaList.length > 0) {
+                continue;
+            }
 
             let mediaId: string;
             let m = oldMediaList[0];
@@ -188,7 +269,10 @@ export const TaskService = {
                     published_time: fallbackPublishedTime,
                     sync_status: "PENDING",
                 };
-                const insertedMedia = await db.insert(Media).values(mediaInsertData).returning({ id: Media.id });
+                const insertedMedia = await db
+                    .insert(Media)
+                    .values(mediaInsertData)
+                    .returning({ id: Media.id });
                 mediaId = insertedMedia[0].id;
                 hasPendingTasks = true;
             } else {
@@ -223,7 +307,11 @@ export const TaskService = {
                     mediaNeedsProcessing = true;
                 }
 
-                if (m.sync_status === "FAILED" || m.sync_status === "PENDING" || mediaNeedsProcessing) {
+                if (
+                    m.sync_status === "FAILED" ||
+                    m.sync_status === "PENDING" ||
+                    mediaNeedsProcessing
+                ) {
                     updateData.sync_status = "PENDING";
                     updateData.last_error = null;
                     hasPendingTasks = true;
@@ -235,10 +323,16 @@ export const TaskService = {
             }
 
             // Sync MediaFile records
-            const existingMediaFiles = await db.select().from(MediaFile).where(eq(MediaFile.media_id, mediaId));
+            const existingMediaFiles = await db
+                .select()
+                .from(MediaFile)
+                .where(eq(MediaFile.media_id, mediaId));
 
-            const processAffiliatedFile = async (role: "PRIMARY" | "ALTERNATIVE" | "LIVE_PHOTO_VIDEO" | "COVER", newUrl: string | null | undefined) => {
-                const existing = existingMediaFiles.find(mf => mf.role === role);
+            const processAffiliatedFile = async (
+                role: "PRIMARY" | "ALTERNATIVE" | "LIVE_PHOTO_VIDEO" | "COVER",
+                newUrl: string | null | undefined,
+            ) => {
+                const existing = existingMediaFiles.find((mf) => mf.role === role);
                 if (newUrl) {
                     if (!existing) {
                         await db.insert(MediaFile).values({
@@ -248,28 +342,42 @@ export const TaskService = {
                             sync_status: "PENDING",
                         });
                         hasPendingTasks = true;
-                    } else if (existing.source_url !== newUrl || existing.sync_status === "FAILED") {
+                    } else if (
+                        existing.source_url !== newUrl ||
+                        existing.sync_status === "FAILED"
+                    ) {
                         if (existing.file_id) {
-                            const file = await db.select().from(File).where(eq(File.id, existing.file_id));
-                            if (file[0]) await moveToTrash(file[0].s3_key, postData.platform, postId, env.S3_BUCKET);
+                            await db
+                                .update(File)
+                                .set({
+                                    delete_status: "DELETED",
+                                    delete_time: nowDbTimestamp(),
+                                })
+                                .where(eq(File.id, existing.file_id));
                         }
-                        await db.update(MediaFile).set({
-                            source_url: newUrl,
-                            sync_status: "PENDING",
-                            file_id: null,
-                            last_error: null,
-                        }).where(eq(MediaFile.id, existing.id));
+                        await db
+                            .update(MediaFile)
+                            .set({
+                                source_url: newUrl,
+                                sync_status: "PENDING",
+                                file_id: null,
+                                last_error: null,
+                            })
+                            .where(eq(MediaFile.id, existing.id));
                         hasPendingTasks = true;
                     } else if (existing.sync_status === "PENDING") {
                         hasPendingTasks = true;
                     }
                 } else if (existing) {
-                    // Url was removed, delete the MediaFile and its artifact
-                    if (existing.file_id) {
-                        const file = await db.query.File.findFirst({ where: { id: existing.file_id } });
-                        if (file) await moveToTrash(file.s3_key, postData.platform, postId, env.S3_BUCKET);
-                    }
-                    await db.delete(MediaFile).where(eq(MediaFile.id, existing.id));
+                    await db
+                        .update(MediaFile)
+                        .set({
+                            source_url: null,
+                            file_id: null,
+                            sync_status: "COMPLETED",
+                            last_error: null,
+                        })
+                        .where(eq(MediaFile.id, existing.id));
                 }
             };
 
@@ -282,7 +390,7 @@ export const TaskService = {
         // 4. Check if Avatar needs processing
         if (authorId && postData.author.avatar_file_url) {
             const author = await db.query.Author.findFirst({
-                where: { id: authorId }
+                where: { id: authorId },
             });
             if (author && !author.avatar_file_id) {
                 hasPendingTasks = true;
@@ -291,11 +399,14 @@ export const TaskService = {
 
         // 5. Trigger Workflow if needed
         if (hasPendingTasks && existingPost) {
-            await db.update(Post).set({
-                sync_status: "IN_PROGRESS",
-                workflow_run_id: workflowRunId,
-                last_error: null,
-            }).where(eq(Post.id, postId));
+            await db
+                .update(Post)
+                .set({
+                    sync_status: "IN_PROGRESS",
+                    workflow_run_id: workflowRunId,
+                    last_error: null,
+                })
+                .where(eq(Post.id, postId));
         }
 
         return { postId, authorId, skipUpdate: !hasPendingTasks };
@@ -305,93 +416,135 @@ export const TaskService = {
      * Step 2: Process individual media
      */
     async processMedia(postId: string, index: number, mediaData: MediaItemData) {
-        const mediaRecords = await db.select().from(Media).where(
-            and(
-                eq(Media.post_id, postId),
-                mediaData.external_id ? eq(Media.eid, mediaData.external_id) : eq(Media.sort_order, index)
-            )
-        );
+        const mediaRecords = await db
+            .select()
+            .from(Media)
+            .where(
+                and(
+                    eq(Media.post_id, postId),
+                    eq(Media.delete_status, "ACTIVE"),
+                    mediaData.external_id
+                        ? eq(Media.eid, mediaData.external_id)
+                        : eq(Media.sort_order, index),
+                ),
+            );
         const m = mediaRecords[0];
         if (!m) return;
 
         const lockKey = `lock:media:${postId}:${index}`;
 
-        await withLock(lockKey, async () => {
-            try {
-                await db.update(Media).set({ sync_status: "IN_PROGRESS" }).where(eq(Media.id, m.id));
+        await withLock(
+            lockKey,
+            async () => {
+                try {
+                    await db
+                        .update(Media)
+                        .set({ sync_status: "IN_PROGRESS" })
+                        .where(eq(Media.id, m.id));
 
-                // Fetch again to ensure we get latest
-                const mediaFiles = await db.select().from(MediaFile).where(eq(MediaFile.media_id, m.id));
+                    // Fetch again to ensure we get latest
+                    const mediaFiles = await db
+                        .select()
+                        .from(MediaFile)
+                        .where(eq(MediaFile.media_id, m.id));
 
-                let allCompleted = true;
+                    let allCompleted = true;
 
-                for (const mf of mediaFiles) {
-                    // Already completed or no source url, skipping
-                    if (mf.sync_status === "COMPLETED" || !mf.source_url) continue;
+                    for (const mf of mediaFiles) {
+                        // Already completed or no source url, skipping
+                        if (mf.sync_status === "COMPLETED" || !mf.source_url) continue;
 
-                    // Mark as IN_PROGRESS
-                    await db.update(MediaFile).set({ sync_status: "IN_PROGRESS" }).where(eq(MediaFile.id, mf.id));
+                        // Mark as IN_PROGRESS
+                        await db
+                            .update(MediaFile)
+                            .set({ sync_status: "IN_PROGRESS" })
+                            .where(eq(MediaFile.id, mf.id));
 
-                    try {
-                        const response = await downloadStream(mf.source_url);
-                        if (response && response.body) {
-                            const contentType = response.headers.get("Content-Type");
-                            const contentLength = response.headers.get("Content-Length");
-                            const ext = getExtensionFromContentType(contentType);
+                        try {
+                            const response = await downloadStream(mf.source_url);
+                            if (response && response.body) {
+                                const contentType = response.headers.get("Content-Type");
+                                const contentLength = response.headers.get("Content-Length");
+                                const ext = getExtensionFromContentType(contentType);
 
-                            let prefix = "";
-                            if (mf.role === "PRIMARY") prefix = "file";
-                            else if (mf.role === "ALTERNATIVE") prefix = "alt";
-                            else if (mf.role === "LIVE_PHOTO_VIDEO") prefix = "live";
-                            else if (mf.role === "COVER") prefix = "cover";
+                                let prefix = "";
+                                if (mf.role === "PRIMARY") prefix = "file";
+                                else if (mf.role === "ALTERNATIVE") prefix = "alt";
+                                else if (mf.role === "LIVE_PHOTO_VIDEO") prefix = "live";
+                                else if (mf.role === "COVER") prefix = "cover";
 
-                            const s3Key = `v2/p/${postId.slice(-2)}/${postId}/${index}_${prefix}.${ext}`;
+                                const s3Key = `v2/p/${postId.slice(-2)}/${postId}/${index}_${prefix}.${ext}`;
 
-                            await uploadToS3(
-                                s3Key,
-                                response.body,
-                                contentType || "application/octet-stream",
-                                env.S3_BUCKET,
-                                contentLength ? parseInt(contentLength) : undefined
-                            );
+                                await uploadToS3(
+                                    s3Key,
+                                    response.body,
+                                    contentType || "application/octet-stream",
+                                    env.S3_BUCKET,
+                                    contentLength ? parseInt(contentLength) : undefined,
+                                );
 
-                            const fileResults = await db.insert(File).values({
-                                s3_key: s3Key,
-                                mime_type: contentType || "application/octet-stream",
-                                extension: ext,
-                            }).onConflictDoUpdate({
-                                target: File.s3_key,
-                                set: {
-                                    mime_type: contentType || "application/octet-stream",
-                                    extension: ext,
-                                }
-                            }).returning({ id: File.id });
+                                const fileResults = await db
+                                    .insert(File)
+                                    .values({
+                                        path: s3Key,
+                                        mime_type: contentType || "application/octet-stream",
+                                        extension: ext,
+                                        bucket: env.S3_BUCKET,
+                                    })
+                                    .onConflictDoUpdate({
+                                        target: File.path,
+                                        set: {
+                                            mime_type: contentType || "application/octet-stream",
+                                            extension: ext,
+                                        },
+                                    })
+                                    .returning({ id: File.id });
 
-                            await db.update(MediaFile).set({
-                                file_id: fileResults[0].id,
-                                sync_status: "COMPLETED",
-                                last_error: null
-                            }).where(eq(MediaFile.id, mf.id));
+                                await db
+                                    .update(MediaFile)
+                                    .set({
+                                        file_id: fileResults[0].id,
+                                        sync_status: "COMPLETED",
+                                        last_error: null,
+                                    })
+                                    .where(eq(MediaFile.id, mf.id));
+                            }
+                        } catch (e) {
+                            const errorMsg = e instanceof Error ? e.message : String(e);
+                            await db
+                                .update(MediaFile)
+                                .set({ sync_status: "FAILED", last_error: errorMsg })
+                                .where(eq(MediaFile.id, mf.id));
+                            allCompleted = false;
+                            throw e;
                         }
-                    } catch (e) {
-                        const errorMsg = e instanceof Error ? e.message : String(e);
-                        await db.update(MediaFile).set({ sync_status: "FAILED", last_error: errorMsg }).where(eq(MediaFile.id, mf.id));
-                        allCompleted = false;
-                        throw e;
                     }
-                }
 
-                if (allCompleted) {
-                    await db.update(Media).set({ sync_status: "COMPLETED", last_error: null }).where(eq(Media.id, m.id));
-                } else {
-                    await db.update(Media).set({ sync_status: "FAILED", last_error: "Some files failed to process" }).where(eq(Media.id, m.id));
+                    if (allCompleted) {
+                        await db
+                            .update(Media)
+                            .set({ sync_status: "COMPLETED", last_error: null })
+                            .where(eq(Media.id, m.id));
+                    } else {
+                        await db
+                            .update(Media)
+                            .set({
+                                sync_status: "FAILED",
+                                last_error: "Some files failed to process",
+                            })
+                            .where(eq(Media.id, m.id));
+                    }
+                } catch (e) {
+                    const errorMsg = e instanceof Error ? e.message : String(e);
+                    await db
+                        .update(Media)
+                        .set({ sync_status: "FAILED", last_error: errorMsg })
+                        .where(eq(Media.id, m.id));
+                    throw e; // Re-throw to trigger upstream retry
                 }
-            } catch (e) {
-                const errorMsg = e instanceof Error ? e.message : String(e);
-                await db.update(Media).set({ sync_status: "FAILED", last_error: errorMsg }).where(eq(Media.id, m.id));
-                throw e; // Re-throw to trigger upstream retry
-            }
-        }, { ttl: 300 }); // 5 minutes TTL, auto-renews every 2.5 minutes!
+            },
+            { ttl: 300 },
+        ); // 5 minutes TTL, auto-renews every 2.5 minutes!
     },
 
     /**
@@ -400,61 +553,79 @@ export const TaskService = {
     async processAvatar(authorId: string, avatarUrl: string) {
         const lockKey = `lock:avatar:${authorId}`;
 
-        await withLock(lockKey, async () => {
-            const authorData = await db.select().from(Author).where(eq(Author.id, authorId));
-            const currentAuthor = authorData[0];
+        await withLock(
+            lockKey,
+            async () => {
+                const authorData = await db.select().from(Author).where(eq(Author.id, authorId));
+                const currentAuthor = authorData[0];
 
-            if (currentAuthor && !currentAuthor.avatar_file_id) {
-                const avatarResponse = await downloadStream(avatarUrl);
-                if (avatarResponse && avatarResponse.body) {
-                    const avatarContentType = avatarResponse.headers.get("Content-Type");
-                    const avatarContentLength = avatarResponse.headers.get("Content-Length");
-                    const ext = getExtensionFromContentType(avatarContentType);
-                    const s3Key = `v2/a/${authorId.slice(-2)}/${authorId}/original.${ext}`;
+                if (currentAuthor && !currentAuthor.avatar_file_id) {
+                    const avatarResponse = await downloadStream(avatarUrl);
+                    if (avatarResponse && avatarResponse.body) {
+                        const avatarContentType = avatarResponse.headers.get("Content-Type");
+                        const avatarContentLength = avatarResponse.headers.get("Content-Length");
+                        const ext = getExtensionFromContentType(avatarContentType);
+                        const s3Key = `v2/a/${authorId.slice(-2)}/${authorId}/original.${ext}`;
 
-                    await uploadToS3(
-                        s3Key,
-                        avatarResponse.body,
-                        avatarContentType || "application/octet-stream",
-                        env.S3_BUCKET,
-                        avatarContentLength ? parseInt(avatarContentLength) : undefined
-                    );
+                        await uploadToS3(
+                            s3Key,
+                            avatarResponse.body,
+                            avatarContentType || "application/octet-stream",
+                            env.S3_BUCKET,
+                            avatarContentLength ? parseInt(avatarContentLength) : undefined,
+                        );
 
-                    const fileResults = await db.insert(File).values({
-                        s3_key: s3Key,
-                        mime_type: avatarContentType || "application/octet-stream",
-                        extension: ext,
-                    }).onConflictDoUpdate({
-                        target: File.s3_key,
-                        set: {
-                            mime_type: avatarContentType || "application/octet-stream",
-                            extension: ext,
-                        }
-                    }).returning({ id: File.id });
+                        const fileResults = await db
+                            .insert(File)
+                            .values({
+                                path: s3Key,
+                                mime_type: avatarContentType || "application/octet-stream",
+                                extension: ext,
+                                bucket: env.S3_BUCKET,
+                            })
+                            .onConflictDoUpdate({
+                                target: File.path,
+                                set: {
+                                    mime_type: avatarContentType || "application/octet-stream",
+                                    extension: ext,
+                                },
+                            })
+                            .returning({ id: File.id });
 
-                    await db.update(Author).set({ avatar_file_id: fileResults[0].id }).where(eq(Author.id, authorId));
+                        await db
+                            .update(Author)
+                            .set({ avatar_file_id: fileResults[0].id })
+                            .where(eq(Author.id, authorId));
+                    }
                 }
-            }
-        }, { ttl: 120 }); // 2 minutes TTL, auto-renews every 1 minute
+            },
+            { ttl: 120 },
+        ); // 2 minutes TTL, auto-renews every 1 minute
     },
 
     /**
      * Final Step: Update post status to COMPLETED
      */
     async finalizePost(postId: string) {
-        await db.update(Post).set({
-            sync_status: "COMPLETED",
-            last_error: null
-        }).where(eq(Post.id, postId));
+        await db
+            .update(Post)
+            .set({
+                sync_status: "COMPLETED",
+                last_error: null,
+            })
+            .where(and(eq(Post.id, postId), eq(Post.delete_status, "ACTIVE")));
     },
 
     /**
      * Mark all posts associated with a workflow run as failed
      */
     async markPostAsFailed(workflowRunId: string, errorMsg: string) {
-        await db.update(Post).set({
-            sync_status: "FAILED",
-            last_error: errorMsg
-        }).where(eq(Post.workflow_run_id, workflowRunId));
-    }
+        await db
+            .update(Post)
+            .set({
+                sync_status: "FAILED",
+                last_error: errorMsg,
+            })
+            .where(and(eq(Post.workflow_run_id, workflowRunId), eq(Post.delete_status, "ACTIVE")));
+    },
 };
