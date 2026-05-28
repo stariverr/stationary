@@ -7,6 +7,7 @@ import { Swiper, SwiperSlide } from 'swiper/vue';
 import 'swiper/css';
 import { Temporal } from '@js-temporal/polyfill';
 import { useApi } from '@/composables/useApi';
+import { getOptimizedImageUrl } from '@/utils/image';
 
 const store = useMediaStore();
 const { selectedMediaId, selectedMedia, medias, displayMode } = storeToRefs(store);
@@ -203,7 +204,7 @@ const formatDate = (dateStr: string) => {
                               @click="swiperInstance?.slideTo(index)"
                               class="w-12 h-12 shrink-0 rounded-md overflow-hidden border-2 cursor-pointer transition-all hover:opacity-100"
                               :class="index === currentIndex ? 'border-white opacity-100' : 'border-transparent opacity-50'">
-                              <img v-if="media.type?.toLowerCase() !== 'video'" :src="media.url || media.media_url" class="w-full h-full object-cover" />
+                              <img v-if="media.type?.toLowerCase() !== 'video'" :src="getOptimizedImageUrl(media.url || media.media_url, { width: 320, height: 240, fit: 'cover', gravity: 'auto' })" class="w-full h-full object-cover" />
                               <div v-else class="w-full h-full bg-gray-800 flex items-center justify-center text-white text-xs">VID</div>
                          </div>
                     </div>

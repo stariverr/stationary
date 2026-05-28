@@ -3,6 +3,7 @@ import { ref, watch } from 'vue';
 import type { MediaListItem } from '@/stores/media';
 import { Play, Layers } from '@lucide/vue';
 import { Checkbox } from '@/components/ui/checkbox';
+import { getOptimizedImageUrl, getOptimizedSrcset } from '@/utils/image';
 
 const { media, isSelected, isChecked, canMove, showCheckbox } = defineProps<{
     media: any; // Using any for now to handle both UI mapped and raw, ideally MediaListItem mapped
@@ -52,7 +53,11 @@ watch(isHovered, (hovering) => {
             </div>
 
             <!-- Image Card -->
-            <img v-if="media.type?.toLowerCase() === 'image' || !media.type" :src="media.url" :alt="media.title || 'Image'"
+            <img v-if="media.type?.toLowerCase() === 'image' || !media.type" 
+                :src="getOptimizedImageUrl(media.url, { width: 480, height: 360, fit: 'cover', gravity: 'auto' })" 
+                :srcset="getOptimizedSrcset(media.url, 'list')"
+                sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                :alt="media.title || 'Image'"
                 class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                 loading="lazy" />
 

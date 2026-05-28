@@ -6,6 +6,7 @@ import {
 } from '@lucide/vue';
 import { Swiper, SwiperSlide } from 'swiper/vue';
 import 'swiper/css';
+import { getOptimizedImageUrl, getOptimizedSrcset } from '@/utils/image';
 
 const { selectedPost, selectedPostId, selectedPostDetail } = usePosts();
 const { expandDetailByDefault } = useUserSettings();
@@ -108,7 +109,8 @@ const copyLink = () => {
         </div>
 
         <!-- Media Section (Immersive Lightbox) -->
-        <div v-if="showLightbox" class="fixed inset-0 z-[200] bg-black flex items-center justify-center group/carousel pointer-events-auto">
+        <div v-if="showLightbox"
+            class="fixed inset-0 z-[200] bg-black flex items-center justify-center group/carousel pointer-events-auto">
 
             <!-- Close Button Overlay (Top-Left) -->
             <button @click="closeLightbox"
@@ -152,7 +154,8 @@ const copyLink = () => {
         </div>
 
         <!-- Info Section -->
-        <div v-if="!showLightbox" class="bg-white flex flex-col shrink-0 relative z-110 flex-1 min-h-0 pointer-events-auto">
+        <div v-if="!showLightbox"
+            class="bg-white flex flex-col shrink-0 relative z-110 flex-1 min-h-0 pointer-events-auto">
 
             <div class="flex-1 overflow-y-auto p-6 space-y-6">
                 <!-- Content -->
@@ -164,7 +167,8 @@ const copyLink = () => {
                     </div>
 
                     <!-- Media Carousel (Embedded in Content for Standard/Mobile View) -->
-                    <div v-if="selectedPost.type !== 'text'" class="w-[calc(100%+3rem)] -mx-6 md:w-full md:mx-0 md:rounded-lg aspect-square md:aspect-4/3 bg-black overflow-hidden my-4 cursor-pointer relative group/carousel"
+                    <div v-if="selectedPost.type !== 'text'"
+                        class="w-[calc(100%+3rem)] -mx-6 md:w-full md:mx-0 md:rounded-lg aspect-square md:aspect-4/3 bg-black overflow-hidden my-4 cursor-pointer relative group/carousel"
                         @click="showLightbox = true">
 
                         <!-- Media Counter (Embedded) -->
@@ -180,7 +184,10 @@ const copyLink = () => {
                                 <div class="w-full h-full flex items-center justify-center relative">
                                     <VideoPlayer v-if="media.type === 'VIDEO'" :src="media.url"
                                         :poster="media.thumbnail || media.poster" class="w-full h-full" />
-                                    <img v-else :src="media.url" class="w-full h-full object-cover" />
+                                    <img v-else
+                                        :src="getOptimizedImageUrl(media.url, { width: 960, fit: 'scale-down' })"
+                                        :srcset="getOptimizedSrcset(media.url, 'detail')"
+                                        sizes="(max-width: 768px) 100vw, 480px" class="w-full h-full object-cover" />
                                 </div>
                             </swiper-slide>
                         </swiper>
@@ -243,7 +250,7 @@ const copyLink = () => {
                         <div class="flex items-center gap-2">
                             <FileImage class="w-3 h-3 text-gray-400" />
                             <span class="text-sm text-gray-900">{{ selectedPost.width }} x {{ selectedPost.height
-                            }}</span>
+                                }}</span>
                         </div>
                     </div>
                 </div>

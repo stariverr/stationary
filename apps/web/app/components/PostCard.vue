@@ -3,6 +3,7 @@ import { ref, watch } from 'vue';
 import type { Post } from '@/types/post';
 import { Play } from '@lucide/vue';
 import { Checkbox } from '@/components/ui/checkbox';
+import { getOptimizedImageUrl, getOptimizedSrcset } from '@/utils/image';
 
 const { post, isSelected, isChecked, showCheckbox } = defineProps<{
     post: Post;
@@ -36,22 +37,25 @@ watch(isHovered, (hovering) => {
         :class="isSelected ? 'bg-blue-50 ring-2 ring-blue-500' : 'hover:bg-gray-100'" @mouseenter="isHovered = true"
         @mouseleave="isHovered = false">
         <div v-if="showCheckbox || isHovered" class="absolute top-4 left-4 z-20" @click.stop>
-            <Checkbox
-                :model-value="isChecked"
+            <Checkbox :model-value="isChecked"
                 class="size-5 border-white/80 bg-white/90 shadow-sm data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
                 :aria-label="`Select ${post.title || 'post'}`"
-                @update:model-value="emit('toggleChecked', $event === true)"
-            />
+                @update:model-value="emit('toggleChecked', $event === true)" />
         </div>
 
         <div class="relative aspect-4/3 rounded-lg overflow-hidden border border-gray-100 bg-gray-50">
             <!-- Text Card -->
-            <div v-if="post.type === 'text'" class="w-full h-full p-4 flex flex-col justify-center items-center bg-gray-50 text-gray-400">
-                <span class="text-xs text-center line-clamp-4">{{ post.description || post.title || 'Pure Text' }}</span>
+            <div v-if="post.type === 'text'"
+                class="w-full h-full p-4 flex flex-col justify-center items-center bg-gray-50 text-gray-400">
+                <span class="text-xs text-center line-clamp-4">{{ post.description || post.title || 'Pure Text'
+                    }}</span>
             </div>
 
             <!-- Image Card -->
-            <img v-else-if="post.type === 'image'" :src="post.url" :alt="post.title"
+            <img v-else-if="post.type === 'image'"
+                :src="getOptimizedImageUrl(post.url, { width: 480, height: 360, fit: 'cover', gravity: 'auto' })"
+                :srcset="getOptimizedSrcset(post.url, 'list')"
+                sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw" :alt="post.title"
                 class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                 loading="lazy" />
 
