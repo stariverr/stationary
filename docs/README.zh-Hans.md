@@ -84,7 +84,7 @@ bun run db:migrate
 在项目根目录下，直接启动前后端并行开发环境：
 
 ```bash
-# 同时启动 Hono 后端 (localhost:8080) 和 Nuxt 前端 (localhost:3000)
+# 同时启动 Hono 后端 (localhost:8080) 和 Nuxt 前端 (localhost:4000)
 bun run dev:server
 bun run dev:web
 ```

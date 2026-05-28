@@ -13,7 +13,7 @@ The frontend client is built on **Nuxt 4**, **Vue 3**, **Pinia**, **TanStack Vue
 # In the apps/web directory
 bun run dev
 ```
-The server runs by default at `http://localhost:3000`.
+The server runs by default at `http://localhost:4000`.
 
 ### 2. Production Build & Preview
 - **Build Bundle**: `bun run build`
@@ -42,7 +42,7 @@ apps/web/app/
 
 ## 🔗 Nitro Proxy & OAuth Session Persistence
 
-Since the frontend runs at `localhost:3000` and the backend at `localhost:8080`, we use **Nitro Server Proxy** to forward endpoints and handle session cookies.
+Since the frontend runs at `localhost:4000` and the backend at `localhost:8080`, we use **Nitro Server Proxy** to forward endpoints and handle session cookies.
 
 ### 1. Catch-All Proxy Router (`server/api/[...].ts`)
 All outgoing calls prefixed with `/api/**` are intercepted by the local Nitro server and forwarded to `NUXT_PUBLIC_API_BASE_URL` defined in the `.env` file.

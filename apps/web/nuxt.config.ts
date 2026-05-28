@@ -5,6 +5,9 @@ export default defineNuxtConfig({
     compatibilityDate: '2026-05-18',
     ssr: true,
     devtools: { enabled: false },
+    devServer: {
+        port: 4000
+    },
     modules: [
         "@pinia/nuxt",
         "shadcn-nuxt",
@@ -58,7 +61,7 @@ export default defineNuxtConfig({
         public: {
             apiBaseUrl: process.env.NUXT_PUBLIC_API_BASE_URL || 'http://localhost:8080',
             cdnBaseUrl: process.env.NUXT_PUBLIC_CDN_BASE_URL || 'http://localhost:8080',
-            appUrl: process.env.NUXT_PUBLIC_APP_URL || 'http://localhost:3000',
+            appUrl: process.env.NUXT_PUBLIC_APP_URL || 'http://localhost:4000',
         }
     },
     nitro: {

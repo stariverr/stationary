@@ -84,7 +84,7 @@ bun run db:migrate
 From the root directory, run:
 
 ```bash
-# Launch Hono backend (localhost:8080) and Nuxt frontend (localhost:3000) concurrently
+# Launch Hono backend (localhost:8080) and Nuxt frontend (localhost:4000) concurrently
 bun run dev
 ```
 

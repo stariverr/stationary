@@ -13,7 +13,7 @@
 # 在 apps/web 目录下
 bun run dev
 ```
-开发服务器将默认运行在 `http://localhost:3000`。
+开发服务器将默认运行在 `http://localhost:4000`。
 
 ### 2. 生产环境构建与预览
 - **打包编译**：`bun run build`
@@ -43,7 +43,7 @@ apps/web/app/
 
 ## 🔗 Nitro 代理网关与 OAuth 状态穿透
 
-由于前端在 `localhost:3000`，后端在 `localhost:8080`，为规避跨域问题并保证认证 Session 的传递，项目在 Nuxt 底层引入了 **Nitro Server Proxy**。
+由于前端在 `localhost:4000`，后端在 `localhost:8080`，为规避跨域问题并保证认证 Session 的传递，项目在 Nuxt 底层引入了 **Nitro Server Proxy**。
 
 ### 1. 代理逻辑 (`server/api/[...].ts`)
 所有发往 `/api/**` 的请求都会被 Nitro 服务拦截，自动转发至 `.env` 中 `NUXT_PUBLIC_API_BASE_URL` 配置的后端地址。
