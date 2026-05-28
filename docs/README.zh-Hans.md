@@ -68,7 +68,7 @@ bun install
 请分别在后端和前端的子目录中创建 `.env` 配置文件：
 
 - **后端**：参考 `apps/server/.env.example` 创建 `apps/server/.env`，重点配置数据库连接、S3、QStash 凭证。
-- **前端**：参考 `apps/web/.env` 配置 `NUXT_PUBLIC_API_BASE_URL` 指向后端地址（开发环境一般为 `http://localhost:8080`）。
+- **前端**：参考 `apps/web/.env` 配置 `NUXT_PUBLIC_API_BASE_URL` 指向后端地址（开发环境一般为 `http://localhost:9400`）。
 
 ### 3. 初始化数据库
 
@@ -84,7 +84,7 @@ bun run db:migrate
 在项目根目录下，直接启动前后端并行开发环境：
 
 ```bash
-# 同时启动 Hono 后端 (localhost:8080) 和 Nuxt 前端 (localhost:4000)
+# 同时启动 Hono 后端 (localhost:9400) 和 Nuxt 前端 (localhost:4000)
 bun run dev:server
 bun run dev:web
 ```

@@ -19,7 +19,7 @@ bun install
 # In the apps/server directory
 bun run dev
 ```
-The development server will run with hot-reloading at `http://localhost:8080`.
+The development server will run with hot-reloading at `http://localhost:9400`.
 
 ### 3. Type Checking & Building
 - **Type Check**: `bun run typecheck`
@@ -52,10 +52,10 @@ Because downloading media assets (such as high-definition videos and images) is 
 - **Workflow Executor**: `/api/task/workflow` - called by the Upstash scheduler to execute state machine steps.
 
 ### 2. Local Tunneling (Important)
-Because Upstash needs to invoke your local `/api/task/workflow` callback endpoint, you must expose your local port `8080` to the internet during development:
+Because Upstash needs to invoke your local `/api/task/workflow` callback endpoint, you must expose your local port `9400` to the internet during development:
 1. Start a tunnel (e.g. `ngrok` or `cloudflared`):
    ```bash
-   ngrok http 8080
+   ngrok http 9400
    ```
 2. Copy the public URL generated (e.g., `https://xxxxxx.ngrok-free.app`) and configure it as `UPSTASH_WORKFLOW_URL` in your `.env` file.
 

@@ -21,5 +21,5 @@ ENV NODE_ENV=production
 COPY --from=build /app/apps/server/dist/index.js index.js
 
 USER bun
-EXPOSE 8080/tcp
+EXPOSE 9400
 ENTRYPOINT [ "bun", "run", "--bun", "index.js" ]

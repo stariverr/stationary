@@ -68,7 +68,7 @@ bun install
 Create `.env` configuration files in the subdirectories:
 
 - **Backend**: Refer to `apps/server/.env.example` to create `apps/server/.env`. Make sure to configure the database connection, S3 details, and QStash credentials.
-- **Frontend**: Refer to `apps/web/.env` and set `NUXT_PUBLIC_API_BASE_URL` pointing to the backend (defaults to `http://localhost:8080` in development).
+- **Frontend**: Refer to `apps/web/.env` and set `NUXT_PUBLIC_API_BASE_URL` pointing to the backend (defaults to `http://localhost:9400` in development).
 
 ### 3. Initialize the Database
 
@@ -84,7 +84,7 @@ bun run db:migrate
 From the root directory, run:
 
 ```bash
-# Launch Hono backend (localhost:8080) and Nuxt frontend (localhost:4000) concurrently
+# Launch Hono backend (localhost:9400) and Nuxt frontend (localhost:4000) concurrently
 bun run dev
 ```
 

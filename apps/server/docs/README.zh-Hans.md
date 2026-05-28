@@ -19,7 +19,7 @@ bun install
 # 在 apps/server 目录下
 bun run dev
 ```
-开发服务器会以热重载模式运行在 `http://localhost:8080` 上。
+开发服务器会以热重载模式运行在 `http://localhost:9400` 上。
 
 ### 3. 类型检查与构建
 - **类型检查**：`bun run typecheck`
@@ -52,10 +52,10 @@ bun run db:migrate
 - **任务执行回调**：`/api/task/workflow`。由 Upstash 服务根据状态节点逐步回调执行。
 
 ### 2. 本地开发内网穿透 (重要)
-因为 Upstash 平台需要反向调用后端的 `/api/task/workflow` 端点以驱动步骤执行，在**本地开发**时必须将本地的 `localhost:8080` 暴露给外网：
+因为 Upstash 平台需要反向调用后端的 `/api/task/workflow` 端点以驱动步骤执行，在**本地开发**时必须将本地的 `localhost:9400` 暴露给外网：
 1. 使用穿透工具（如 `ngrok` 或 `cloudflared`）：
    ```bash
-   ngrok http 8080
+   ngrok http 9400
    ```
 2. 将穿透后生成的公网 URL（例如 `https://xxxxxx.ngrok-free.app`）配置到 `.env` 中的 `UPSTASH_WORKFLOW_URL`。
 
