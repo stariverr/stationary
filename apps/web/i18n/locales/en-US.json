@@ -55,9 +55,15 @@
             "expand_detail_desc": "Automatically expand post details in the feed.",
             "language": "Interface Language",
             "language_desc": "Select your preferred language.",
-            "other_title": "Other Preferences",
-            "other_desc": "Additional settings will appear here soon.",
-            "other_empty": "No other settings currently available."
+            "other_title": "System Tools",
+            "other_desc": "System maintenance and recovery utilities.",
+            "other_empty": "No other settings currently available.",
+            "video_cover_recovery": "Video Cover Recovery",
+            "video_cover_recovery_desc": "Scan the database for active video items that are missing completed cover images and automatically queue them for background generation.",
+            "video_cover_recovery_btn": "Scan & Generate Covers",
+            "video_cover_recovery_loading": "Scanning and queueing...",
+            "video_cover_recovery_success": "Successfully scanned and queued {count} missing video covers!",
+            "video_cover_recovery_error": "Failed to scan and queue video covers."
         },
         "appearance": {
             "title": "Appearance",
@@ -104,6 +110,21 @@
             "expires_label": "Expires: {date}",
             "last_used_label": "Last used: {date}",
             "never_used": "Never used"
+        }
+    },
+    "media": {
+        "actions": {
+            "regenerate_cover": "Regenerate cover",
+            "regenerate_covers": "Regenerate video covers"
+        },
+        "cover": {
+            "queued": "Video cover regeneration has been queued.",
+            "batch_queued": "Queued {queued} cover regeneration tasks. Skipped {skipped}.",
+            "already_pending": "A cover generation task is already pending.",
+            "external_exists": "This video already has an external cover and it was not overwritten.",
+            "select_video_required": "Please select at least one video.",
+            "failed": "Failed to queue cover regeneration.",
+            "loading": "Requesting..."
         }
     }
 }

@@ -13,6 +13,7 @@ trigger: always_on
 - [TS/Bun] Date -> Temporal: Do not use the native JavaScript `Date` constructor. All date, time, and timezone operations must utilize the `Temporal` API.
 - [TS/Bun] node:stream -> Web API stream: Use standard Web API streams instead of Node.js stream modules.
 - [TS/Bun] node:fs -> bun:File: Use the native `bun:File` APIs (such as `Bun.file()`) and Bun's built-in file system utilities.
+- [TS] Code Formatting: Always use oxc to format code.
 
 
 # Important Rules

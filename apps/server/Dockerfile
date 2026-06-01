@@ -18,8 +18,13 @@ RUN bun run build
 
 FROM base AS release
 ENV NODE_ENV=production
+
+# Install FFmpeg for video cover frame extraction
+USER root
+RUN apk add --no-cache ffmpeg
+USER bun
+
 COPY --from=build /app/apps/server/dist/index.js index.js
 
-USER bun
 EXPOSE 9400
 ENTRYPOINT [ "bun", "run", "--bun", "index.js" ]

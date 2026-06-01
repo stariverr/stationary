@@ -283,32 +283,42 @@ export const Media = pgTable(
 );
 
 // MediaFile Model
-export const MediaFile = pgTable("media_file", {
-    id: uuid("id")
-        .primaryKey()
-        .notNull()
-        .$defaultFn(() => uuidv7.generate()),
-    media_id: uuid("media_id").notNull(),
-    /** File ID
-     * - Can be null because the file does not exist at first.
-     */
-    file_id: uuid("file_id"),
-    role: MediaFileRoleEnum("role").notNull(),
-    /** Sort Order of Media Variant (Not media.sort_order, which is sort order of media in the post) */
-    sort_order: integer("sort_order").default(0).notNull(),
-    source_url: text("source_url").default(""),
-    sync_status: SyncStatusEnum("sync_status").default("PENDING").notNull(),
-    last_error: text("last_error"),
-    metadata: jsonb("metadata").default({}).notNull(),
-    create_time: temporal("create_time")
-        .default(sql`now()`)
-        .notNull(),
-    update_time: temporal("update_time")
-        .default(sql`now()`)
-        .notNull(),
-    delete_time: temporal("delete_time"),
-    delete_status: DeleteStatusEnum("delete_status").default("ACTIVE").notNull(),
-});
+export const MediaFile = pgTable(
+    "media_file",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        media_id: uuid("media_id").notNull(),
+        /** File ID
+         * - Can be null because the file does not exist at first.
+         */
+        file_id: uuid("file_id"),
+        role: MediaFileRoleEnum("role").notNull(),
+        /** Sort Order of Media Variant (Not media.sort_order, which is sort order of media in the post) */
+        sort_order: integer("sort_order").default(0).notNull(),
+        source_url: text("source_url").default(""),
+        sync_status: SyncStatusEnum("sync_status").default("PENDING").notNull(),
+        last_error: text("last_error"),
+        metadata: jsonb("metadata").default({}).notNull(),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        update_time: temporal("update_time")
+            .default(sql`now()`)
+            .notNull(),
+        delete_time: temporal("delete_time"),
+        delete_status: DeleteStatusEnum("delete_status").default("ACTIVE").notNull(),
+    },
+    (table) => [
+        uniqueIndex("media_file_media_role_sort_unique").on(
+            table.media_id,
+            table.role,
+            table.sort_order,
+        ),
+    ],
+);
 
 // External API Token
 export const ExternalApiToken = pgTable("external_api_token", {
@@ -363,8 +373,8 @@ export const File = pgTable("file", {
     mime_type: text("mime_type").notNull(),
     // TODO: determine nullability
     extension: text("extension"),
-    path: text("s3_key").notNull().unique(), // Path in bucket
-    bucket: text("s3_bucket").notNull(),
+    path: text("path").notNull().unique(), // Path in bucket
+    bucket: text("bucket").notNull(),
     // TODO: determine nullability
     width: integer("width"), // Metadata for quick rendering
     // TODO: determine nullability

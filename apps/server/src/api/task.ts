@@ -6,6 +6,7 @@ import { Client } from "@upstash/workflow";
 import { env } from "@/global/env";
 import { Temporal } from "@js-temporal/polyfill";
 import { TaskService } from "@/services/task";
+import { VideoCoverService } from "@/services/video_cover";
 import { Code } from "@/lib/code";
 import { error, success } from "@/lib/response";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
@@ -283,16 +284,130 @@ taskApp.post("/purge-expired-files", async (c) => {
     );
 });
 
+const CoverWorkflowPayloadSchema = z.object({
+    mediaId: z.uuid(),
+    force: z.boolean().optional(),
+    replaceExternalCover: z.boolean().optional(),
+});
+
+export const coverWorkflowHandler = serve(
+    async (context) => {
+        const { mediaId, force, replaceExternalCover } = CoverWorkflowPayloadSchema.parse(
+            context.requestPayload,
+        );
+
+        await context.run(`generate-cover-${mediaId}`, async () => {
+            await VideoCoverService.generateForMedia(mediaId, { force, replaceExternalCover });
+        });
+    },
+    {
+        failureFunction: async ({ context, failResponse }) => {
+            console.error(
+                `[VIDEO COVER WORKFLOW FAILED] Workflow Run: ${context.workflowRunId}. Reason: ${failResponse}`,
+            );
+            const { mediaId } = CoverWorkflowPayloadSchema.parse(context.requestPayload);
+            try {
+                const { MediaFile } = await import("@/db/schema");
+                await db
+                    .insert(MediaFile)
+                    .values({
+                        media_id: mediaId,
+                        role: "COVER",
+                        sync_status: "FAILED",
+                        last_error: failResponse || "Workflow retries exhausted.",
+                    })
+                    .onConflictDoUpdate({
+                        target: [MediaFile.media_id, MediaFile.role, MediaFile.sort_order],
+                        set: {
+                            sync_status: "FAILED",
+                            last_error: failResponse || "Workflow retries exhausted.",
+                        },
+                    });
+            } catch (dbErr) {
+                console.error(
+                    `[VIDEO COVER WORKFLOW] Failed to write failure status to DB:`,
+                    dbErr,
+                );
+            }
+        },
+    },
+);
+
+taskApp.post("/scan-missing-covers", async (c) => {
+    // Auth Check:
+    // If CRON_SECRET is configured, validate authorization
+    const cronSecret = env.CRON_SECRET;
+    if (cronSecret) {
+        const authHeader = c.req.header("Authorization");
+        const internalHeader = c.req.header("X-Internal-Token");
+
+        let token = "";
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+            token = authHeader.substring(7);
+        } else if (internalHeader) {
+            token = internalHeader;
+        }
+
+        if (token !== cronSecret) {
+            return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+        }
+    } else {
+        // If CRON_SECRET is missing in production, reject for security
+        if (process.env.NODE_ENV === "production") {
+            return c.json(
+                error(Code.SERVICE_UNAVAILABLE, "CRON_SECRET is not configured in production"),
+                500,
+            );
+        }
+    }
+
+    let body: { library_id?: string; limit?: number; stale_minutes?: number } = {};
+    try {
+        body = await c.req.json();
+    } catch {
+        // Safe fallback for empty body
+    }
+
+    // Get the base URL from request
+    const url = new URL(c.req.url);
+    const origin =
+        env.UPSTASH_WORKFLOW_URL ||
+        (c.req.header("x-forwarded-proto")
+            ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
+            : url.origin);
+
+    try {
+        const result = await VideoCoverService.scanAndQueueMissingCovers({
+            libraryId: body.library_id,
+            limit: body.limit,
+            staleMinutes: body.stale_minutes,
+            originUrl: origin,
+        });
+
+        return c.json(success(Code.SUCCESS, result));
+    } catch (e: any) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        console.error(`[task] Failed to run scanAndQueueMissingCovers: ${errorMsg}`);
+        return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
+    }
+});
+
 taskApp.all(
     "/workflow",
     async (c, next) => {
         console.log(`[DEBUG] Incoming request to /api/task/workflow`);
-        // console.log(`[DEBUG] Method: ${c.req.method}`);
-        // console.log(`[DEBUG] Content-Type: ${c.req.header("content-type")}`);
-        // console.log(`[DEBUG] Content-Length: ${c.req.header("content-length")}`);
         return next();
     },
     workflowHandler,
+);
+
+taskApp.all(
+    "/workflow-cover",
+    async (c, next) => {
+        console.log(`[DEBUG] Incoming request to /api/task/workflow-cover`);
+        return next();
+    },
+    coverWorkflowHandler,
 );
 
 export default taskApp;

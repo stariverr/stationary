@@ -5,11 +5,16 @@ import { validator } from "hono/validator";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
 import { Media, MediaFile, Post, File as DbFile } from "@/db/schema";
-import { and, eq, ilike, SQL, count, desc, or, isNull, isNotNull, sql } from "drizzle-orm";
+import { and, eq, ilike, SQL, count, desc, or, isNull, isNotNull, sql, inArray } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { Temporal } from "@js-temporal/polyfill";
 import { RecycleService } from "@/services/recycle";
 import { DeleteService } from "@/services/delete";
+import { Library } from "@/db/schema";
+import { env } from "@/global/env";
+import { VideoCoverService } from "@/services/video_cover";
+import { buildCdnUrl } from "@/lib/utils/cdn";
 
 const router = new Hono<AuthEnv>();
 
@@ -93,6 +98,11 @@ router.get(
 
         const visibleMediaFilter = and(...where);
 
+        const primaryMediaFile = alias(MediaFile, "primary_media_file");
+        const coverMediaFile = alias(MediaFile, "cover_media_file");
+        const primaryDbFile = alias(DbFile, "primary_db_file");
+        const coverDbFile = alias(DbFile, "cover_db_file");
+
         const rawMedia = await db
             .select({
                 id: Media.id,
@@ -103,30 +113,44 @@ router.get(
                 type: Media.type,
                 create_time: Media.create_time,
                 published_time: Media.published_time,
-                s3_key: DbFile.path,
-                s3_bucket: DbFile.bucket,
+                primary_file_path: primaryDbFile.path,
+                primary_file_bucket: primaryDbFile.bucket,
+                cover_file_path: coverDbFile.path,
+                cover_file_bucket: coverDbFile.bucket,
                 post_media_count: Post.media_count,
             })
             .from(Media)
             .leftJoin(Post, eq(Media.post_id, Post.id))
             .leftJoin(
-                MediaFile,
-                and(eq(Media.id, MediaFile.media_id), eq(MediaFile.role, "PRIMARY")),
+                primaryMediaFile,
+                and(eq(Media.id, primaryMediaFile.media_id), eq(primaryMediaFile.role, "PRIMARY")),
             )
-            .leftJoin(DbFile, eq(MediaFile.file_id, DbFile.id))
+            .leftJoin(primaryDbFile, eq(primaryMediaFile.file_id, primaryDbFile.id))
+            .leftJoin(
+                coverMediaFile,
+                and(eq(Media.id, coverMediaFile.media_id), eq(coverMediaFile.role, "COVER")),
+            )
+            .leftJoin(coverDbFile, eq(coverMediaFile.file_id, coverDbFile.id))
             .where(visibleMediaFilter)
-            .orderBy(desc(sql`coalesce(${Media.published_time}, ${Media.create_time})`))
+            .orderBy(desc(Media.create_time))
             .limit(pageSize)
             .offset(offset);
 
         const medias = rawMedia.map((m) => {
+            const filePath = m.cover_file_path || m.primary_file_path;
+            const fileBucket = m.cover_file_bucket || m.primary_file_bucket;
+
             return {
-                ...m,
+                id: m.id,
+                eid: m.eid,
+                post_id: m.post_id,
+                source: m.source,
+                title: m.title,
+                type: m.type,
                 create_time: toIsoTimestamp(m.create_time),
                 published_time: toIsoTimestamp(m.published_time),
                 media_count: m.post_media_count || 1,
-                // 抹平字段结构，方便前端直接使用 url
-                media_url: m.s3_key ? `/${m.s3_bucket}/${m.s3_key}` : null, // Assuming local format, frontend handles CDN prefix usually, but let's just return s3_key and let frontend parse. Wait, post api returns raw fields.
+                media_url: buildCdnUrl(fileBucket, filePath),
             };
         });
 
@@ -185,6 +209,205 @@ router.post("/delete/:id", requireAuth, async (c) => {
     }
 
     return c.json(success(Code.SUCCESS, result));
+});
+
+router.post("/:id/regenerate-cover", requireAuth, async (c) => {
+    const id = c.req.param("id");
+    if (!id) {
+        return c.json(error(Code.INVALID_PARAMETER, "media id is required"), 400);
+    }
+    const mediaId = id as string;
+
+    const user = c.get("user");
+    if (!user) {
+        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+    }
+
+    let body: { replace_external_cover?: boolean } = {};
+    try {
+        body = await c.req.json();
+    } catch {
+        // Safe fallback for empty body
+    }
+
+    const mediaResults = await db
+        .select()
+        .from(Media)
+        .where(
+            and(
+                eq(Media.id, mediaId),
+                eq(Media.delete_status, "ACTIVE"),
+                isNull(Media.recycle_time),
+            ),
+        );
+    const media = mediaResults[0];
+    if (!media) {
+        return c.json(error(Code.NOT_FOUND, "Media not found"), 404);
+    }
+
+    if (media.type !== "VIDEO") {
+        return c.json(error(Code.INVALID_PARAMETER, "Media is not a video"), 400);
+    }
+
+    // Verify user owns the library
+    const libResults = await db
+        .select()
+        .from(Library)
+        .where(eq(Library.id, media.library_id))
+        .limit(1);
+    const library = libResults[0];
+    if (!library || library.owner_id !== user.id) {
+        return c.json(error(Code.UNAUTHORIZED, "You do not have access to this library"), 403);
+    }
+
+    const url = new URL(c.req.url);
+    const origin =
+        env.UPSTASH_WORKFLOW_URL ||
+        (c.req.header("x-forwarded-proto")
+            ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
+            : url.origin);
+
+    const res = await VideoCoverService.requestForMedia(mediaId, {
+        originUrl: origin,
+        force: true,
+        replaceExternalCover: body.replace_external_cover ?? false,
+    });
+
+    return c.json(success(Code.SUCCESS, res));
+});
+
+router.post("/regenerate-covers", requireAuth, async (c) => {
+    const user = c.get("user");
+    if (!user) {
+        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+    }
+
+    let body: { media_ids?: string[]; replace_external_cover?: boolean } = {};
+    try {
+        body = await c.req.json();
+    } catch {
+        return c.json(error(Code.INVALID_PARAMETER, "Invalid request body"), 400);
+    }
+
+    const mediaIds = Array.from(new Set(body.media_ids || []));
+    if (mediaIds.length === 0) {
+        return c.json(
+            error(Code.INVALID_PARAMETER, "media_ids is required and cannot be empty"),
+            400,
+        );
+    }
+
+    if (mediaIds.length > 100) {
+        return c.json(
+            error(Code.INVALID_PARAMETER, "Cannot process more than 100 media items at once"),
+            400,
+        );
+    }
+
+    const mediaList = await db
+        .select()
+        .from(Media)
+        .where(
+            and(
+                inArray(Media.id, mediaIds),
+                eq(Media.delete_status, "ACTIVE"),
+                isNull(Media.recycle_time),
+            ),
+        );
+
+    if (mediaList.length === 0) {
+        return c.json(error(Code.NOT_FOUND, "No matching media items found"), 404);
+    }
+
+    // Verify user owns libraries of all found media
+    const uniqueLibraryIds = Array.from(new Set(mediaList.map((m) => m.library_id))).filter(
+        (libId): libId is string => !!libId,
+    );
+    const libraries = await db
+        .select()
+        .from(Library)
+        .where(and(inArray(Library.id, uniqueLibraryIds), eq(Library.delete_status, "ACTIVE")));
+
+    const isAuthorized =
+        libraries.every((lib) => lib.owner_id === user.id) &&
+        libraries.length === uniqueLibraryIds.length;
+    if (!isAuthorized) {
+        return c.json(
+            error(Code.UNAUTHORIZED, "You do not have access to some of the selected libraries"),
+            403,
+        );
+    }
+
+    const url = new URL(c.req.url);
+    const origin =
+        env.UPSTASH_WORKFLOW_URL ||
+        (c.req.header("x-forwarded-proto")
+            ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
+            : url.origin);
+
+    let queued = 0;
+    let skipped = 0;
+    let alreadyPending = 0;
+    let failed = 0;
+
+    const results: Array<{
+        mediaId: string;
+        status: "queued" | "skipped" | "already_pending" | "failed";
+        reason?: string;
+        error?: string;
+    }> = [];
+
+    for (const media of mediaList) {
+        if (media.type !== "VIDEO") {
+            skipped++;
+            results.push({
+                mediaId: media.id,
+                status: "skipped",
+                reason: "media_not_video",
+            });
+            continue;
+        }
+
+        try {
+            const res = await VideoCoverService.requestForMedia(media.id, {
+                originUrl: origin,
+                force: true,
+                replaceExternalCover: body.replace_external_cover ?? false,
+            });
+
+            if (res.status === "queued") {
+                queued++;
+            } else if (res.status === "skipped") {
+                skipped++;
+            } else if (res.status === "already_pending") {
+                alreadyPending++;
+            }
+
+            results.push({
+                mediaId: media.id,
+                status: res.status,
+                reason: res.status === "skipped" ? (res as any).reason : undefined,
+            });
+        } catch (err: any) {
+            failed++;
+            results.push({
+                mediaId: media.id,
+                status: "failed",
+                error: err.message || String(err),
+            });
+        }
+    }
+
+    return c.json(
+        success(Code.SUCCESS, {
+            requested: mediaIds.length,
+            queued,
+            skipped,
+            alreadyPending,
+            failed,
+            results,
+        }),
+    );
 });
 
 export default router;

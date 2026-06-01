@@ -1,3 +1,36 @@
+const trimTrailingSlash = (value: string) =>
+    value.endsWith("/") ? value.slice(0, -1) : value;
+
+const trimLeadingSlash = (value: string) =>
+    value.startsWith("/") ? value.slice(1) : value;
+
+const stripCloudflareImagePrefix = (pathname: string) => {
+    const prefix = "/cdn-cgi/image/";
+    if (!pathname.startsWith(prefix)) return pathname;
+
+    const pathAfterPrefix = pathname.slice(prefix.length);
+    const imagePathStart = pathAfterPrefix.indexOf("/");
+    if (imagePathStart === -1) return pathname;
+
+    return pathAfterPrefix.slice(imagePathStart);
+};
+
+const resolveAssetUrlParts = (url: string, fallbackOrigin: string) => {
+    try {
+        const parsed = new URL(url);
+        const pathname = stripCloudflareImagePrefix(parsed.pathname);
+        return {
+            origin: parsed.origin,
+            path: trimLeadingSlash(`${pathname}${parsed.search}`),
+        };
+    } catch {
+        return {
+            origin: fallbackOrigin,
+            path: trimLeadingSlash(url),
+        };
+    }
+};
+
 export interface ImageOptimizerOptions {
     width?: number;
     height?: number;
@@ -16,8 +49,8 @@ export function getOptimizedImageUrl(
 ): string {
     if (!url) return "";
 
-    // Skip video formats
-    if (url.match(/\.(mp4|webm|mov|ogg|avi)($|\?)/i)) {
+    // Skip video formats and AVIF source files (Cloudflare Resizing does not support AVIF as a source image)
+    if (url.match(/\.(mp4|webm|mov|ogg|avi|avif)($|\?)/i)) {
         return url;
     }
 
@@ -28,28 +61,17 @@ export function getOptimizedImageUrl(
 
     const config = useRuntimeConfig();
     const provider = config.public.imageProvider || "cloudflare";
-    const cdnBase = config.public.cdnBaseUrl || "";
-
-    let origin = cdnBase.replace(/\/$/, "");
-    let path = url;
-
-    if (url.startsWith("http")) {
-        try {
-            const parsed = new URL(url);
-            origin = parsed.origin;
-            path = parsed.pathname + parsed.search;
-        } catch {
-            // Fallback
-        }
-    }
-
-    path = path.replace(/^\//, "");
+    const configuredCdnBase =
+        typeof config.public.cdnBaseUrl === "string" ? config.public.cdnBaseUrl : "";
+    const fallbackOrigin = trimTrailingSlash(configuredCdnBase);
+    const assetUrl = resolveAssetUrlParts(url, fallbackOrigin);
 
     if (provider === "none") {
-        return `${origin}/${path}`;
+        if (!assetUrl.origin) return url;
+        return `${assetUrl.origin}/${assetUrl.path}`;
     }
 
-    // Cloudflare format
+    // Cloudflare Image Resizing inserts the transformation segment between the origin and asset path.
     const { width, height, fit, quality = 75, format = "avif", gravity } = options;
 
     const params: string[] = [];
@@ -61,7 +83,8 @@ export function getOptimizedImageUrl(
     if (gravity) params.push(`gravity=${gravity}`);
 
     const optionsStr = params.join(",");
-    return `${origin}/cdn-cgi/image/${optionsStr}/${path}`;
+    if (!assetUrl.origin) return url;
+    return `${assetUrl.origin}/cdn-cgi/image/${optionsStr}/${assetUrl.path}`;
 }
 
 /**
@@ -72,6 +95,11 @@ export function getOptimizedSrcset(
     type: "list" | "detail",
 ): string {
     if (!url) return "";
+
+    // Skip generating srcset for AVIF source files to avoid duplicate entries of same unoptimized URL
+    if (url.match(/\.avif($|\?)/i)) {
+        return "";
+    }
 
     if (type === "list") {
         // 320x240, 480x360, 640x480

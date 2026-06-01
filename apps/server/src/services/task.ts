@@ -7,6 +7,7 @@ import {
     getExtensionFromContentType,
     uploadToS3,
 } from "@/lib/utils/media";
+import { VideoCoverService } from "@/services/video_cover";
 import { withLock } from "@/lib/utils/lock";
 import { env } from "@/global/env";
 import { kv } from "@/global/kv";
@@ -369,6 +370,10 @@ export const TaskService = {
                         hasPendingTasks = true;
                     }
                 } else if (existing) {
+                    // Do not erase existing cover files if newUrl is null/undefined
+                    if (role === "COVER") {
+                        return;
+                    }
                     await db
                         .update(MediaFile)
                         .set({
@@ -473,10 +478,10 @@ export const TaskService = {
                                 else if (mf.role === "LIVE_PHOTO_VIDEO") prefix = "live";
                                 else if (mf.role === "COVER") prefix = "cover";
 
-                                const s3Key = `v2/p/${postId.slice(-2)}/${postId}/${index}_${prefix}.${ext}`;
+                                const path = `v2/p/${postId.slice(-2)}/${postId}/${index}_${prefix}.${ext}`;
 
                                 await uploadToS3(
-                                    s3Key,
+                                    path,
                                     response.body,
                                     contentType || "application/octet-stream",
                                     env.S3_BUCKET,
@@ -486,7 +491,7 @@ export const TaskService = {
                                 const fileResults = await db
                                     .insert(File)
                                     .values({
-                                        path: s3Key,
+                                        path: path,
                                         mime_type: contentType || "application/octet-stream",
                                         extension: ext,
                                         bucket: env.S3_BUCKET,
@@ -525,6 +530,18 @@ export const TaskService = {
                             .update(Media)
                             .set({ sync_status: "COMPLETED", last_error: null })
                             .where(eq(Media.id, m.id));
+
+                        // Trigger video cover generation asynchronously after main video completed
+                        if (m.type === "VIDEO") {
+                            try {
+                                await VideoCoverService.requestForMedia(m.id);
+                            } catch (coverErr) {
+                                console.error(
+                                    `[VIDEO COVER] Failed to schedule cover extraction for media ${m.id}:`,
+                                    coverErr,
+                                );
+                            }
+                        }
                     } else {
                         await db
                             .update(Media)
@@ -565,10 +582,10 @@ export const TaskService = {
                         const avatarContentType = avatarResponse.headers.get("Content-Type");
                         const avatarContentLength = avatarResponse.headers.get("Content-Length");
                         const ext = getExtensionFromContentType(avatarContentType);
-                        const s3Key = `v2/a/${authorId.slice(-2)}/${authorId}/original.${ext}`;
+                        const path = `v2/a/${authorId.slice(-2)}/${authorId}/original.${ext}`;
 
                         await uploadToS3(
-                            s3Key,
+                            path,
                             avatarResponse.body,
                             avatarContentType || "application/octet-stream",
                             env.S3_BUCKET,
@@ -578,7 +595,7 @@ export const TaskService = {
                         const fileResults = await db
                             .insert(File)
                             .values({
-                                path: s3Key,
+                                path: path,
                                 mime_type: avatarContentType || "application/octet-stream",
                                 extension: ext,
                                 bucket: env.S3_BUCKET,

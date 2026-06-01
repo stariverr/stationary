@@ -52,9 +52,15 @@
             "expand_detail_desc": "在資訊流中自動展開貼文詳情。",
             "language": "介面語言",
             "language_desc": "選擇您的首選語言。",
-            "other_title": "其他偏好",
-            "other_desc": "更多設定即將推出。",
-            "other_empty": "當前沒有其他設定可用。"
+            "other_title": "系統工具",
+            "other_desc": "維護和恢復系統狀態的輔助工具。",
+            "other_empty": "當前沒有其他設定可用。",
+            "video_cover_recovery": "影片封面恢復",
+            "video_cover_recovery_desc": "一鍵檢索資料庫中缺失封面的影片，並自動加入到後台封面生成處理隊列。",
+            "video_cover_recovery_btn": "一鍵檢索並生成",
+            "video_cover_recovery_loading": "正在檢索並加入隊列...",
+            "video_cover_recovery_success": "成功檢索並將 {count} 個影片封面加入處理隊列！",
+            "video_cover_recovery_error": "檢索或添加隊列失敗。"
         },
         "appearance": {
             "title": "外觀",
@@ -101,6 +107,21 @@
             "expires_label": "有效期: {date}",
             "last_used_label": "最後使用: {date}",
             "never_used": "從未使用"
+        }
+    },
+    "media": {
+        "actions": {
+            "regenerate_cover": "重新生成封面",
+            "regenerate_covers": "批量重新生成影片封面"
+        },
+        "cover": {
+            "queued": "影片封面重新生成任務已加入隊列。",
+            "batch_queued": "已將 {queued} 個封面重新生成任務加入隊列，跳過 {skipped} 個。",
+            "already_pending": "該影片封面已在生成隊列中。",
+            "external_exists": "該影片已有外部封面，未覆蓋。",
+            "select_video_required": "請至少選擇一個影片。",
+            "failed": "封面重新生成任務加入隊列失敗。",
+            "loading": "正在請求..."
         }
     }
 }

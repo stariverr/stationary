@@ -132,9 +132,9 @@ const copyLink = () => {
                     <swiper-slide v-for="(media, index) in selectedPost.media" :key="index"
                         class="flex items-center justify-center bg-transparent">
                         <div class="w-full h-full flex items-center justify-center relative">
-                            <VideoPlayer v-if="media.type === 'VIDEO'" :src="media.url"
-                                :poster="media.thumbnail || media.poster" class="max-h-full max-w-full h-full w-auto" />
-                            <img v-else :src="media.url" class="max-h-full max-w-full object-contain" />
+                            <VideoPlayer v-if="media.type === 'VIDEO'" :src="media.url || ''"
+                                :poster="media.thumbnail || media.poster || ''" class="max-h-full max-w-full h-full w-auto" />
+                            <img v-else :src="media.url || ''" class="max-h-full max-w-full object-contain" />
                         </div>
                     </swiper-slide>
                 </swiper>
@@ -167,7 +167,7 @@ const copyLink = () => {
                     </div>
 
                     <!-- Media Carousel (Embedded in Content for Standard/Mobile View) -->
-                    <div v-if="selectedPost.type !== 'text'"
+                    <div v-if="selectedPost.type !== 'TEXT'"
                         class="w-[calc(100%+3rem)] -mx-6 md:w-full md:mx-0 md:rounded-lg aspect-square md:aspect-4/3 bg-black overflow-hidden my-4 cursor-pointer relative group/carousel"
                         @click="showLightbox = true">
 
@@ -182,11 +182,11 @@ const copyLink = () => {
                             <swiper-slide v-for="(media, index) in selectedPost.media" :key="index"
                                 class="bg-transparent flex items-center justify-center">
                                 <div class="w-full h-full flex items-center justify-center relative">
-                                    <VideoPlayer v-if="media.type === 'VIDEO'" :src="media.url"
-                                        :poster="media.thumbnail || media.poster" class="w-full h-full" />
+                                    <VideoPlayer v-if="media.type === 'VIDEO'" :src="media.url || ''"
+                                        :poster="media.thumbnail || media.poster || ''" class="w-full h-full" />
                                     <img v-else
-                                        :src="getOptimizedImageUrl(media.url, { width: 960, fit: 'scale-down' })"
-                                        :srcset="getOptimizedSrcset(media.url, 'detail')"
+                                        :src="getOptimizedImageUrl(media.url || '', { width: 960, fit: 'scale-down' })"
+                                        :srcset="getOptimizedSrcset(media.url || '', 'detail')"
                                         sizes="(max-width: 768px) 100vw, 480px" class="w-full h-full object-cover" />
                                 </div>
                             </swiper-slide>
@@ -244,12 +244,12 @@ const copyLink = () => {
                         </div>
                     </div>
 
-                    <div v-if="selectedPost.type !== 'text'" class="space-y-1">
+                    <div v-if="selectedPost.type !== 'TEXT'" class="space-y-1">
                         <div class="text-[10px] uppercase text-gray-400 font-semibold tracking-wider">{{
                             $t('common.dimensions') }}</div>
                         <div class="flex items-center gap-2">
                             <FileImage class="w-3 h-3 text-gray-400" />
-                            <span class="text-sm text-gray-900">{{ selectedPost.width }} x {{ selectedPost.height
+                            <span class="text-sm text-gray-900">{{ selectedPost.media?.[0]?.width || selectedPost.width }} x {{ selectedPost.media?.[0]?.height || selectedPost.height
                                 }}</span>
                         </div>
                     </div>

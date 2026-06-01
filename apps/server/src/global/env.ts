@@ -15,12 +15,13 @@ const envSchema = z.object({
     RESEND_API_KEY: z.string(),
     AUTH_SECRET: z.string(),
 
-
     BETTER_AUTH_URL: z.string().optional(),
     BETTER_AUTH_SECRET: z.string().optional(),
 
-    TRUSTED_ORIGINS: z.string().default("").transform(v => v ? v.split(",") : []),
-
+    TRUSTED_ORIGINS: z
+        .string()
+        .default("")
+        .transform((v) => (v ? v.split(",") : [])),
 
     /** TikHub API Base URL */
     TIKHUB_API_BASE_URL: z.string().optional(),
@@ -36,11 +37,15 @@ const envSchema = z.object({
     CDN_BASE_URL: z.string(),
 
     QSTASH_URL: z.string().optional(),
-    QSTASH_TOKEN: z.string().optional(),
+    QSTASH_TOKEN: z.string().nonempty("QSTASH_TOKEN is required"),
     QSTASH_CURRENT_SIGNING_KEY: z.string().optional(),
     QSTASH_NEXT_SIGNING_KEY: z.string().optional(),
     UPSTASH_WORKFLOW_URL: z.string().optional(),
-    POST_UPDATE_THRESHOLD_HOURS: z.string().default("24").transform(v => parseInt(v)),
+    POST_UPDATE_THRESHOLD_HOURS: z
+        .string()
+        .default("24")
+        .transform((v) => parseInt(v)),
+    CRON_SECRET: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

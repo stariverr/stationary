@@ -55,9 +55,15 @@
             "expand_detail_desc": "在信息流中自动展开帖子详情。",
             "language": "界面语言",
             "language_desc": "选择您的首选语言。",
-            "other_title": "其他偏好",
-            "other_desc": "更多设置即将推出。",
-            "other_empty": "当前没有其他设置可用。"
+            "other_title": "系统工具",
+            "other_desc": "维护和恢复系统状态的辅助工具。",
+            "other_empty": "当前没有其他设置可用。",
+            "video_cover_recovery": "视频封面恢复",
+            "video_cover_recovery_desc": "一键检索数据库中缺失封面的视频，并自动加入到后台封面生成处理队列。",
+            "video_cover_recovery_btn": "一键检索并生成",
+            "video_cover_recovery_loading": "正在检索并加入队列...",
+            "video_cover_recovery_success": "成功检索并将 {count} 个视频封面加入处理队列！",
+            "video_cover_recovery_error": "检索或添加队列失败。"
         },
         "appearance": {
             "title": "外观",
@@ -104,6 +110,21 @@
             "expires_label": "有效期: {date}",
             "last_used_label": "最后使用: {date}",
             "never_used": "从未使用"
+        }
+    },
+    "media": {
+        "actions": {
+            "regenerate_cover": "重新生成封面",
+            "regenerate_covers": "批量重新生成视频封面"
+        },
+        "cover": {
+            "queued": "视频封面重新生成任务已加入队列。",
+            "batch_queued": "已将 {queued} 个封面重新生成任务加入队列，跳过 {skipped} 个。",
+            "already_pending": "该视频封面已在生成队列中。",
+            "external_exists": "该视频已有外部封面，未覆盖。",
+            "select_video_required": "请至少选择一个视频。",
+            "failed": "封面重新生成任务加入队列失败。",
+            "loading": "正在请求..."
         }
     }
 }

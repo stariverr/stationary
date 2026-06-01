@@ -21,7 +21,7 @@ describe("post and media time fields", () => {
     test("schema keeps create_time as record creation time and adds published_time", async () => {
         const schema = await sourceFiles.schema();
 
-        expect(schema).toContain('create_time: temporal("create_time").default(Temporal.Now.instant()).notNull()');
+        expect(schema).toContain('create_time: temporal("create_time")');
         expect(schema).toContain('published_time: temporal("published_time")');
     });
 

@@ -23,7 +23,8 @@ graph TD
     Step2 --> Step3[3. Media Change Detection & Sync]
     Step3 --> Step3_1[3.1 Cleanup Orphaned Assets]
     Step3_1 --> Step3_2[3.2 Media File URL Diff Checks & Reset PENDING]
-    Step3_2 --> Step4[4. Author Avatar Check]
+    Step3_2 --> Step3_3[3.3 Automated Video Cover Extraction]
+    Step3_3 --> Step4[4. Author Avatar Check]
     Step4 --> Step5[5. Schedule Background Workflow]
     Step5 --> End([Return postId, authorId, skipUpdate])
 ```
@@ -74,6 +75,12 @@ Iterates over the incoming media array, matching items by `external_id` (or fall
     1. Calls `moveToTrash` to queue deletion of the obsolete S3 file.
     2. Clears the `file_id` on the `MediaFile` record and resets its status to `PENDING` (clearing out any `last_error`).
     3. Sets `hasPendingTasks = true` to signal that downloads are required.
+
+#### 3.3 Automated Video Cover Extraction (FFmpeg & AVIF)
+During background processing, if a video completes downloading but has no valid `COVER` record, it delegates asynchronously to `VideoCoverService`:
+1. **Extraction**: The system utilizes `Bun.spawn` to natively invoke `ffmpeg` with SVT-AV1 (`libsvtav1`).
+2. **Network & Temp Storage**: FFmpeg streams from a secure, temporary **S3 Presigned GET URL** for the video and writes the AVIF to a seekable temporary file (required by the AVIF muxer to compile ISOBMFF metadata boxes).
+3. **Storage Integration**: The AVIF bytes are read into memory (achieving **65% smaller file sizes** compared to JPEG), uploaded to S3 as `.avif`, and the temporary file is guaranteed to be deleted.
 
 ### 4. Author Avatar Check
 - Checks if the author has an active avatar. If the payload supplies `avatar_file_url` but `avatar_file_id` is empty, marks the avatar task for download and sets `hasPendingTasks = true`.

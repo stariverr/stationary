@@ -6,10 +6,12 @@ import { error, success } from "@/lib/response";
 import { Code } from "@/lib/code";
 import { requireAuth } from "@/lib/auth/middleware";
 import { Media, MediaFile, Post, File as DbFile } from "@/db/schema";
-import { and, eq, ilike, SQL, count, asc, sql, isNull } from "drizzle-orm";
+import { and, eq, ilike, SQL, count, asc, sql, isNull, inArray, lte } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Temporal } from "@js-temporal/polyfill";
 import { RecycleService } from "@/services/recycle";
 import { DeleteService } from "@/services/delete";
+import { buildCdnUrl } from "@/lib/utils/cdn";
 
 const router = new Hono();
 const activePostFilter = and(eq(Post.delete_status, "ACTIVE"), isNull(Post.recycle_time));
@@ -54,7 +56,7 @@ router.get(
     validator("query", (value, c) => {
         const parsed = PostListRequestBodySchema.safeParse(value);
         if (!parsed.success) {
-            return c.text("Invalid!", 401);
+            return c.json(error(Code.INVALID_PARAMETER, "Invalid request parameters"), 400);
         }
         return parsed.data;
     }),
@@ -87,43 +89,119 @@ router.get(
                 title: Post.title,
                 source: Post.source,
                 tags: Post.tags,
+                author_name: Post.author_name,
                 create_time: Post.create_time,
                 published_time: Post.published_time,
-                media_id: Media.id,
-                media_type: Media.type,
-                media_url: Media.primary_url,
-                media_index: Media.sort_order,
-                media_published_time: Media.published_time,
-                s3_key: DbFile.path,
-                s3_bucket: DbFile.bucket,
+                url: Post.url,
             })
             .from(Post)
-            .leftJoin(
-                Media,
-                and(eq(Post.id, Media.post_id), eq(Media.sort_order, 0), activeMediaFilter),
-            )
-            .leftJoin(
-                MediaFile,
-                and(eq(Media.id, MediaFile.media_id), eq(MediaFile.role, "PRIMARY")),
-            )
-            .leftJoin(DbFile, eq(MediaFile.file_id, DbFile.id))
             .where(and(activePostFilter, ...where))
             .orderBy(asc(sql`coalesce(${Post.published_time}, ${Post.create_time})`))
             .limit(pageSize)
             .offset(offset);
 
+        interface PostListMediaItem {
+            id: string;
+            eid: string;
+            source: typeof Media.$inferSelect.source;
+            title: string;
+            description: string;
+            type: typeof Media.$inferSelect.type;
+            sort_order: number;
+            primary_file_url: string | null;
+            cover_file_url: string | null;
+            create_time: string | null;
+            published_time: string | null;
+        }
+
+        const postIds = rawPosts.map((p) => p.id);
+        const mediaByPostId = new Map<string, PostListMediaItem[]>();
+
+        if (postIds.length > 0) {
+            const primaryMediaFile = alias(MediaFile, "primary_media_file");
+            const coverMediaFile = alias(MediaFile, "cover_media_file");
+            const primaryDbFile = alias(DbFile, "primary_db_file");
+            const coverDbFile = alias(DbFile, "cover_db_file");
+
+            const mediaRows = await db
+                .select({
+                    id: Media.id,
+                    eid: Media.eid,
+                    post_id: Media.post_id,
+                    source: Media.source,
+                    title: Media.title,
+                    description: Media.description,
+                    type: Media.type,
+                    sort_order: Media.sort_order,
+                    create_time: Media.create_time,
+                    published_time: Media.published_time,
+                    primary_file_path: primaryDbFile.path,
+                    primary_file_bucket: primaryDbFile.bucket,
+                    cover_file_path: coverDbFile.path,
+                    cover_file_bucket: coverDbFile.bucket,
+                })
+                .from(Media)
+                .leftJoin(
+                    primaryMediaFile,
+                    and(
+                        eq(Media.id, primaryMediaFile.media_id),
+                        eq(primaryMediaFile.role, "PRIMARY"),
+                    ),
+                )
+                .leftJoin(primaryDbFile, eq(primaryMediaFile.file_id, primaryDbFile.id))
+                .leftJoin(
+                    coverMediaFile,
+                    and(eq(Media.id, coverMediaFile.media_id), eq(coverMediaFile.role, "COVER")),
+                )
+                .leftJoin(coverDbFile, eq(coverMediaFile.file_id, coverDbFile.id))
+                .where(
+                    and(
+                        inArray(Media.post_id, postIds),
+                        lte(Media.sort_order, 3), // up to 4 media items per post
+                        activeMediaFilter,
+                    ),
+                )
+                .orderBy(asc(Media.sort_order));
+
+            for (const row of mediaRows) {
+                if (!row.post_id) continue;
+                if (!mediaByPostId.has(row.post_id)) {
+                    mediaByPostId.set(row.post_id, []);
+                }
+                mediaByPostId.get(row.post_id)!.push({
+                    id: row.id,
+                    eid: row.eid,
+                    source: row.source,
+                    title: row.title,
+                    description: row.description,
+                    type: row.type,
+                    sort_order: row.sort_order,
+                    primary_file_url: buildCdnUrl(row.primary_file_bucket, row.primary_file_path),
+                    cover_file_url: buildCdnUrl(row.cover_file_bucket, row.cover_file_path),
+                    create_time: toIsoTimestamp(row.create_time),
+                    published_time: toIsoTimestamp(row.published_time),
+                });
+            }
+        }
+
         const posts = rawPosts.map((post) => {
-            const hasMedia = !!post.media_id;
-            let computedType = "text";
-            if (hasMedia) {
-                computedType = post.media_type === "VIDEO" ? "video" : "image";
+            const postMedia = mediaByPostId.get(post.id) || [];
+            let type: "MULTI_MEDIA" | "TEXT" = "TEXT";
+            if (postMedia.length > 0) {
+                type = "MULTI_MEDIA";
             }
             return {
-                ...post,
+                id: post.id,
+                eid: post.eid,
+                type: type,
+                title: post.title,
+                source: post.source,
+                tags: post.tags,
+                author_name: post.author_name,
                 create_time: toIsoTimestamp(post.create_time),
                 published_time: toIsoTimestamp(post.published_time),
-                media_published_time: toIsoTimestamp(post.media_published_time),
-                type: computedType,
+                url: post.url,
+                media: postMedia,
             };
         });
 
@@ -160,7 +238,7 @@ export const PostDetailResponseBodySchema = z.object({
     create_time: z.string().optional(),
     published_time: z.string().nullable().optional(),
     media_count: z.number().optional(),
-    type: z.string().optional(),
+    type: z.enum(["TEXT", "MULTI_MEDIA"]).optional(),
     url: z.string().nullable().optional(),
     media: z
         .array(
@@ -172,10 +250,10 @@ export const PostDetailResponseBodySchema = z.object({
                 description: z.string().nullable().optional(),
                 type: z.string().optional(),
                 sort_order: z.number().optional(),
-                primary_file_path: z.string().nullable(),
-                alternative_file_path: z.string().nullable(),
-                live_photo_video_path: z.string().nullable(),
-                cover_file_path: z.string().nullable(),
+                primary_file_url: z.string().nullable().optional(),
+                alternative_file_url: z.string().nullable().optional(),
+                live_photo_video_url: z.string().nullable().optional(),
+                cover_file_url: z.string().nullable().optional(),
                 create_time: z.string().optional(),
                 published_time: z.string().nullable().optional(),
             }),
@@ -189,7 +267,7 @@ router.get(
     validator("param", (value, c) => {
         const parsed = PostDetailRequestPathParamSchema.safeParse(value);
         if (!parsed.success) {
-            return c.text("Invalid!", 401);
+            return c.json(error(Code.INVALID_PARAMETER, "Invalid post ID"), 400);
         }
         return parsed.data.id;
     }),
@@ -220,7 +298,8 @@ router.get(
                 create_time: Media.create_time,
                 published_time: Media.published_time,
                 file_role: MediaFile.role,
-                file_s3_key: DbFile.path,
+                file_path: DbFile.path,
+                file_bucket: DbFile.bucket,
             })
             .from(Media)
             .leftJoin(MediaFile, eq(Media.id, MediaFile.media_id))
@@ -240,7 +319,12 @@ router.get(
                 sort_order: number;
                 create_time: Temporal.Instant;
                 published_time: Temporal.Instant | null;
-                files: Partial<Record<typeof MediaFile.$inferSelect.role, string | null>>;
+                files: Partial<
+                    Record<
+                        typeof MediaFile.$inferSelect.role,
+                        { path: string | null; bucket: string | null }
+                    >
+                >;
             }
         >();
 
@@ -260,7 +344,10 @@ router.get(
             };
 
             if (row.file_role) {
-                media.files[row.file_role] = row.file_s3_key ?? null;
+                media.files[row.file_role] = {
+                    path: row.file_path ?? null,
+                    bucket: row.file_bucket ?? null,
+                };
             }
 
             if (!existing) {
@@ -282,12 +369,7 @@ router.get(
             create_time: toIsoTimestamp(postData.create_time) ?? undefined,
             published_time: toIsoTimestamp(postData.published_time),
             media_count: postData.media_count,
-            type:
-                media.length > 0
-                    ? media[0]?.type?.toLowerCase() === "video"
-                        ? "video"
-                        : "image"
-                    : "text",
+            type: media.length > 0 ? "MULTI_MEDIA" : "TEXT",
             url: postData.url,
             media: media.map((m) => {
                 return {
@@ -299,10 +381,16 @@ router.get(
                     description: m.description,
                     type: m.type,
                     sort_order: m.sort_order,
-                    primary_file_path: m.files.PRIMARY ?? null,
-                    alternative_file_path: m.files.ALTERNATIVE ?? null,
-                    live_photo_video_path: m.files.LIVE_PHOTO_VIDEO ?? null,
-                    cover_file_path: m.files.COVER ?? null,
+                    primary_file_url: buildCdnUrl(m.files.PRIMARY?.bucket, m.files.PRIMARY?.path),
+                    alternative_file_url: buildCdnUrl(
+                        m.files.ALTERNATIVE?.bucket,
+                        m.files.ALTERNATIVE?.path,
+                    ),
+                    live_photo_video_url: buildCdnUrl(
+                        m.files.LIVE_PHOTO_VIDEO?.bucket,
+                        m.files.LIVE_PHOTO_VIDEO?.path,
+                    ),
+                    cover_file_url: buildCdnUrl(m.files.COVER?.bucket, m.files.COVER?.path),
                     create_time: toIsoTimestamp(m.create_time) ?? undefined,
                     published_time: toIsoTimestamp(m.published_time),
                 };
