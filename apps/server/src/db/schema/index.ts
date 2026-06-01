@@ -276,7 +276,7 @@ export const Media = pgTable(
     },
     (table) => [
         uniqueIndex("media_post_sort_unique").on(table.post_id, table.sort_order),
-        uniqueIndex("media_source_eid_unique").on(table.source, table.eid),
+        index("media_source_eid_idx").on(table.source, table.eid),
         index("media_library_delete_time_idx").on(table.library_id, table.delete_time),
         index("media_post_delete_time_idx").on(table.post_id, table.delete_time),
     ],
