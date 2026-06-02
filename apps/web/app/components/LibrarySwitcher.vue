@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -12,6 +12,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ChevronsUpDown, LogOut, Settings, Plus, Check } from "@lucide/vue";
 import { authClient, useSession } from "@/lib/auth-client";
 import { useLibraryStore } from "@/stores/library";
+import { useUserStore } from "@/stores/user";
 import { storeToRefs } from "pinia";
 import CreateLibraryDialog from "@/components/CreateLibraryDialog.vue";
 
@@ -20,6 +21,13 @@ const emit = defineEmits(["open-settings"]);
 
 const libraryStore = useLibraryStore();
 const { libraries, activeLibrary } = storeToRefs(libraryStore);
+
+const userStore = useUserStore();
+const { userProfile } = storeToRefs(userStore);
+
+const displayName = computed(() => userProfile.value?.name || "User");
+const displayImage = computed(() => userProfile.value?.image || "");
+const userEmail = computed(() => userProfile.value?.email || "");
 
 const showCreateDialog = ref(false);
 </script>
@@ -32,13 +40,13 @@ const showCreateDialog = ref(false);
             <div class="flex items-center gap-2.5 flex-1 overflow-hidden">
                 <Avatar class="h-8 w-8">
                     <AvatarImage
-                        v-if="session.data?.user?.image"
-                        :src="session.data?.user?.image"
+                        v-if="displayImage"
+                        :src="displayImage"
                     />
                     <AvatarFallback
                         class="text-xs font-medium bg-blue-50 text-blue-600"
                     >
-                        {{ session.data?.user?.name?.charAt(0) || "U" }}
+                        {{ displayName.charAt(0) || "U" }}
                     </AvatarFallback>
                 </Avatar>
                 <div class="flex flex-col items-start overflow-hidden min-w-0">
@@ -50,7 +58,7 @@ const showCreateDialog = ref(false);
                     <span
                         class="text-xs text-gray-500 truncate w-full text-left leading-tight mt-0.5"
                     >
-                        {{ session.data?.user?.name || "User" }}
+                        {{ displayName }}
                     </span>
                 </div>
             </div>
@@ -62,20 +70,20 @@ const showCreateDialog = ref(false);
             <div v-if="session.data?.user" class="flex items-center gap-2 p-2">
                 <Avatar class="h-8 w-8">
                     <AvatarImage
-                        v-if="session.data.user?.image"
-                        :src="session.data.user?.image"
+                        v-if="displayImage"
+                        :src="displayImage"
                     />
                     <AvatarFallback>{{
-                        session.data.user?.name?.charAt(0) || "U"
+                        displayName.charAt(0) || "U"
                     }}</AvatarFallback>
                 </Avatar>
                 <div class="flex flex-col space-y-1 overflow-hidden">
                     <span class="text-sm font-medium leading-none truncate">{{
-                        session.data.user?.name || "User"
+                        displayName
                     }}</span>
                     <span
                         class="text-xs text-muted-foreground leading-none truncate"
-                        >{{ session.data.user?.email || "" }}</span
+                        >{{ userEmail }}</span
                     >
                 </div>
             </div>

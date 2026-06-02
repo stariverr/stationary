@@ -12,7 +12,13 @@ router.use("*", requireAuth);
 
 router.get("/", (c) => {
     const user = c.get("user");
-    return c.json(success(Code.SUCCESS, user));
+    const authUser = c.get("authUser");
+    return c.json(
+        success(Code.SUCCESS, {
+            ...user,
+            email: authUser?.email || null,
+        }),
+    );
 });
 
 export const TokenCreateBodySchema = z

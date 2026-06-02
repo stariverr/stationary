@@ -28,6 +28,8 @@ import { computed, ref, watch } from "vue";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/sonner";
 import { useLibraryStore } from "@/stores/library";
+import { useUserStore } from "@/stores/user";
+import { storeToRefs } from "pinia";
 import {
     Key,
     Copy,
@@ -54,6 +56,13 @@ const isOpen = computed({
 const { expandDetailByDefault } = useUserSettings();
 const { locale, setLocale, locales, t } = useI18n();
 const session = useSession();
+
+const userStore = useUserStore();
+const { userProfile } = storeToRefs(userStore);
+
+const displayName = computed(() => userProfile.value?.name || "User");
+const displayImage = computed(() => userProfile.value?.image || "");
+const userEmail = computed(() => userProfile.value?.email || "");
 
 const localeOptions = computed(() => {
     return locales.value.map((l) => ({
@@ -380,25 +389,25 @@ const formatDate = (dateStr: string | null | undefined) => {
                                 >
                                     <Avatar class="w-16 h-16 border-2 border-white shadow-sm">
                                         <AvatarImage
-                                            v-if="session.data.user?.image"
-                                            :src="session.data.user?.image"
-                                            :alt="session.data.user?.name || 'User'"
+                                            v-if="displayImage"
+                                            :src="displayImage"
+                                            :alt="displayName"
                                         />
                                         <AvatarFallback
                                             class="bg-blue-100 text-blue-700 text-xl font-bold"
                                         >
                                             {{
-                                                session.data.user?.name?.charAt(0)?.toUpperCase() ||
+                                                displayName.charAt(0)?.toUpperCase() ||
                                                 "U"
                                             }}
                                         </AvatarFallback>
                                     </Avatar>
                                     <div class="space-y-1">
                                         <h4 class="text-lg font-bold leading-none">
-                                            {{ session.data.user?.name || "User" }}
+                                            {{ displayName }}
                                         </h4>
                                         <p class="text-sm text-muted-foreground">
-                                            {{ session.data.user?.email || "" }}
+                                            {{ userEmail }}
                                         </p>
                                         <div
                                             class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700 uppercase tracking-wider"

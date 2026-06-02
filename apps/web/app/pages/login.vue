@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { authClient } from "@/lib/auth-client";
-import { GalleryHorizontal, Mail } from "@lucide/vue";
+import { GalleryHorizontal, Mail, Astroid } from "@lucide/vue";
 
 definePageMeta({
     layout: false,
@@ -40,7 +40,7 @@ const loginWithGoogle = async () => {
                 <div class="w-full space-y-3">
                     <button @click="loginWithGithub"
                         class="w-full flex items-center justify-center gap-3 px-4 py-3 bg-black text-white rounded-xl font-medium hover:bg-gray-800 transition-all duration-200 active:scale-[0.98]">
-                        <Github class="w-5 h-5" />
+                        <Astroid class="w-5 h-5" />
                         Continue with GitHub
                     </button>
 

@@ -1,18 +1,18 @@
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue';
-import type { Post } from '@/types/post';
-import { Play, Loader2, FileImage, Link as LinkIcon, Trash } from '@lucide/vue';
-import { Checkbox } from '@/components/ui/checkbox';
-import { getOptimizedImageUrl, getOptimizedSrcset } from '@/utils/image';
+import { ref, watch, nextTick } from "vue";
+import type { Post } from "@/types/post";
+import { Play, Loader2, FileImage, Link as LinkIcon, Trash } from "@lucide/vue";
+import { Checkbox } from "@/components/ui/checkbox";
+import { getOptimizedImageUrl, getOptimizedSrcset } from "@/utils/image";
 import {
     ContextMenu,
     ContextMenuContent,
     ContextMenuItem,
     ContextMenuTrigger,
-} from '@/components/ui/context-menu';
-import { toast } from '@/components/ui/sonner';
-import { useApi } from '@/composables/useApi';
-import { usePostStore } from '@/stores/posts';
+} from "@/components/ui/context-menu";
+import { toast } from "@/components/ui/sonner";
+import { useApi } from "@/composables/useApi";
+import { usePostStore } from "@/stores/posts";
 
 const { post, isSelected, isChecked, showCheckbox } = defineProps<{
     post: Post;
@@ -33,7 +33,7 @@ const postStore = usePostStore();
 
 watch(isHovered, async (hovering) => {
     const firstMedia = post.media?.[0];
-    if (post.type === 'MULTI_MEDIA' && firstMedia?.type === 'VIDEO') {
+    if (post.type === "MULTI_MEDIA" && firstMedia?.type === "VIDEO") {
         if (hovering) {
             // Wait for DOM to update and mount the video element
             await nextTick();
@@ -72,14 +72,14 @@ const handleRegenerateCover = async () => {
 };
 
 const handleCopyLink = () => {
-    const url = window.location.origin + '/posts/' + post.id;
+    const url = window.location.origin + "/posts/" + post.id;
     navigator.clipboard.writeText(url);
     toast.success("Post link copied to clipboard.");
 };
 
 const handleDelete = async () => {
     try {
-        const response = await useApi<any>(`/post/trash/${post.id}`, { method: 'POST' });
+        const response = await useApi<any>(`/post/trash/${post.id}`, { method: "POST" });
         if (response && response.success) {
             toast.success("Post moved to trash.");
             postStore.refetchPosts();
@@ -90,6 +90,15 @@ const handleDelete = async () => {
         toast.error("Failed to move post to trash.");
     }
 };
+const handleMouseEnter = () => {
+    if (typeof window !== "undefined" && window.matchMedia("(hover: hover)").matches) {
+        isHovered.value = true;
+    }
+};
+
+const handleMouseLeave = () => {
+    isHovered.value = false;
+};
 </script>
 
 <template>
@@ -97,8 +106,7 @@ const handleDelete = async () => {
         <ContextMenuTrigger as-child>
             <div class="group relative flex flex-col gap-2 p-2 rounded-xl transition-all duration-200 cursor-pointer"
                 :class="isSelected ? 'bg-blue-50 ring-2 ring-blue-500' : 'hover:bg-gray-100'"
-                @mouseenter="isHovered = true" @mouseleave="isHovered = false"
-                @click="emit('click', $event)">
+                @mouseenter="handleMouseEnter" @mouseleave="handleMouseLeave" @click="emit('click', $event)">
                 <div v-if="showCheckbox || isHovered" class="absolute top-4 left-4 z-20" @click.stop>
                     <Checkbox :model-value="isChecked"
                         class="size-5 border-white/80 bg-white/90 shadow-sm data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
@@ -110,14 +118,19 @@ const handleDelete = async () => {
                     <!-- Text Card -->
                     <div v-if="post.type === 'TEXT'"
                         class="w-full h-full p-4 flex flex-col justify-center items-center bg-gray-50 text-gray-400">
-                        <span class="text-xs text-center line-clamp-4">{{ post.description || post.title || 'Pure Text'
+                        <span class="text-xs text-center line-clamp-4">{{
+                            post.description || post.title || "Pure Text"
                             }}</span>
                     </div>
 
                     <!-- Image Card -->
-                    <img v-else-if="post.type === 'MULTI_MEDIA' && post.media?.[0]?.type !== 'VIDEO'"
-                        :src="getOptimizedImageUrl(post.media?.[0]?.url, { width: 480, height: 360, fit: 'cover', gravity: 'auto' })"
-                        :srcset="getOptimizedSrcset(post.media?.[0]?.url, 'list')"
+                    <img v-else-if="post.type === 'MULTI_MEDIA' && post.media?.[0]?.type !== 'VIDEO'" :src="getOptimizedImageUrl(post.media?.[0]?.url, {
+                        width: 480,
+                        height: 360,
+                        fit: 'cover',
+                        gravity: 'auto',
+                    })
+                        " :srcset="getOptimizedSrcset(post.media?.[0]?.url, 'list')"
                         sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw" :alt="post.title"
                         class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                         loading="lazy" />
@@ -130,9 +143,13 @@ const handleDelete = async () => {
                             class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                             muted playsinline loop preload="metadata"></video>
 
-                        <img v-if="post.media?.[0]?.poster && !isHovered"
-                            :src="getOptimizedImageUrl(post.media?.[0]?.poster, { width: 480, height: 360, fit: 'cover', gravity: 'auto' })"
-                            :srcset="getOptimizedSrcset(post.media?.[0]?.poster, 'list')"
+                        <img v-if="post.media?.[0]?.poster && !isHovered" :src="getOptimizedImageUrl(post.media?.[0]?.poster, {
+                            width: 480,
+                            height: 360,
+                            fit: 'cover',
+                            gravity: 'auto',
+                        })
+                            " :srcset="getOptimizedSrcset(post.media?.[0]?.poster, 'list')"
                             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw" :alt="post.title"
                             class="absolute inset-0 w-full h-full object-cover transition-all duration-300 group-hover:scale-105 pointer-events-none"
                             loading="lazy" />
@@ -156,11 +173,12 @@ const handleDelete = async () => {
                 <div class="flex flex-col px-1">
                     <h3
                         class="text-sm font-medium text-gray-900 line-clamp-1 group-hover:text-blue-600 transition-colors">
-                        {{
-                            post.title }}</h3>
+                        {{ post.title }}
+                    </h3>
                     <div class="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
                         <span v-if="post.type !== 'TEXT'">{{ post.media?.[0]?.width || post.width }}x{{
-                            post.media?.[0]?.height || post.height }}</span>
+                            post.media?.[0]?.height || post.height
+                        }}</span>
                         <span v-if="post.type !== 'TEXT'">{{ post.size }}</span>
                     </div>
                     <div class="flex flex-wrap gap-1 mt-2">
@@ -177,16 +195,16 @@ const handleDelete = async () => {
                 :disabled="isRegenerating" class="flex items-center gap-2" @click.stop="handleRegenerateCover">
                 <Loader2 v-if="isRegenerating" class="w-4 h-4 animate-spin" />
                 <FileImage v-else class="w-4 h-4" />
-                <span>{{ $t('media.actions.regenerate_cover', 'Regenerate Cover') }}</span>
+                <span>{{ $t("media.actions.regenerate_cover", "Regenerate Cover") }}</span>
             </ContextMenuItem>
             <ContextMenuItem class="flex items-center gap-2" @click.stop="handleCopyLink">
                 <LinkIcon class="w-4 h-4" />
-                <span>{{ $t('common.copy_link', 'Copy Link') }}</span>
+                <span>{{ $t("common.copy_link", "Copy Link") }}</span>
             </ContextMenuItem>
             <ContextMenuItem class="flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50"
                 @click.stop="handleDelete">
                 <Trash class="w-4 h-4" />
-                <span>{{ $t('common.delete', 'Delete') }}</span>
+                <span>{{ $t("common.delete", "Delete") }}</span>
             </ContextMenuItem>
         </ContextMenuContent>
     </ContextMenu>
