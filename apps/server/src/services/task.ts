@@ -1,5 +1,15 @@
 import { db } from "@/global/db";
-import { Post, Media, MediaFile, Author, File, Library } from "@/db/schema";
+import {
+    Post,
+    Media,
+    MediaFile,
+    Author,
+    File,
+    Library,
+    DeleteStatus,
+    SyncStatus,
+    MediaFileRole,
+} from "@/db/schema";
 import { eq, and, notInArray, inArray, gte, isNull, isNotNull } from "drizzle-orm";
 import {
     downloadStream,
@@ -112,7 +122,7 @@ export const TaskService = {
                 media_count: postData.media.length,
                 library_id: targetLibraryId,
                 url: postData.url,
-                sync_status: "PENDING",
+                sync_status: SyncStatus.PENDING,
                 last_error: null,
                 workflow_run_id: workflowRunId,
             };
@@ -135,7 +145,9 @@ export const TaskService = {
             mediaToDelete = await db
                 .select()
                 .from(Media)
-                .where(and(eq(Media.post_id, postId), eq(Media.delete_status, "ACTIVE")));
+                .where(
+                    and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE)),
+                );
         } else if (mediaEids.length > 0) {
             mediaToDelete = await db
                 .select()
@@ -143,7 +155,7 @@ export const TaskService = {
                 .where(
                     and(
                         eq(Media.post_id, postId),
-                        eq(Media.delete_status, "ACTIVE"),
+                        eq(Media.delete_status, DeleteStatus.ACTIVE),
                         notInArray(Media.eid, mediaEids),
                     ),
                 );
@@ -154,7 +166,7 @@ export const TaskService = {
                 .where(
                     and(
                         eq(Media.post_id, postId),
-                        eq(Media.delete_status, "ACTIVE"),
+                        eq(Media.delete_status, DeleteStatus.ACTIVE),
                         gte(Media.sort_order, postData.media.length),
                     ),
                 );
@@ -167,11 +179,14 @@ export const TaskService = {
                 await tx
                     .update(Media)
                     .set({
-                        delete_status: "DELETED",
+                        delete_status: DeleteStatus.DELETED,
                         delete_time: deleteTime,
                     })
                     .where(
-                        and(inArray(Media.id, deletedMediaIds), eq(Media.delete_status, "ACTIVE")),
+                        and(
+                            inArray(Media.id, deletedMediaIds),
+                            eq(Media.delete_status, DeleteStatus.ACTIVE),
+                        ),
                     );
 
                 const mediaFiles = await tx
@@ -180,7 +195,7 @@ export const TaskService = {
                     .where(
                         and(
                             inArray(MediaFile.media_id, deletedMediaIds),
-                            eq(MediaFile.delete_status, "ACTIVE"),
+                            eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
                         ),
                     );
                 const fileIds = mediaFiles
@@ -190,13 +205,13 @@ export const TaskService = {
                 await tx
                     .update(MediaFile)
                     .set({
-                        delete_status: "DELETED",
+                        delete_status: DeleteStatus.DELETED,
                         delete_time: deleteTime,
                     })
                     .where(
                         and(
                             inArray(MediaFile.media_id, deletedMediaIds),
-                            eq(MediaFile.delete_status, "ACTIVE"),
+                            eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
                         ),
                     );
 
@@ -204,10 +219,15 @@ export const TaskService = {
                     await tx
                         .update(File)
                         .set({
-                            delete_status: "DELETED",
+                            delete_status: DeleteStatus.DELETED,
                             delete_time: deleteTime,
                         })
-                        .where(and(inArray(File.id, fileIds), eq(File.delete_status, "ACTIVE")));
+                        .where(
+                            and(
+                                inArray(File.id, fileIds),
+                                eq(File.delete_status, DeleteStatus.ACTIVE),
+                            ),
+                        );
                 }
             });
             hasPendingTasks = true;
@@ -222,7 +242,7 @@ export const TaskService = {
                 .where(
                     and(
                         eq(Media.post_id, postId),
-                        eq(Media.delete_status, "ACTIVE"),
+                        eq(Media.delete_status, DeleteStatus.ACTIVE),
                         mediaData.external_id
                             ? eq(Media.eid, mediaData.external_id)
                             : eq(Media.sort_order, index),
@@ -237,7 +257,7 @@ export const TaskService = {
                           .where(
                               and(
                                   eq(Media.post_id, postId),
-                                  eq(Media.delete_status, "DELETED"),
+                                  eq(Media.delete_status, DeleteStatus.DELETED),
                                   mediaData.external_id
                                       ? eq(Media.eid, mediaData.external_id)
                                       : eq(Media.sort_order, index),
@@ -268,7 +288,7 @@ export const TaskService = {
                     live_photo_url: mediaData.live_photo_video_url || null,
                     cover_url: mediaData.cover_file_url || null,
                     published_time: fallbackPublishedTime,
-                    sync_status: "PENDING",
+                    sync_status: SyncStatus.PENDING,
                 };
                 const insertedMedia = await db
                     .insert(Media)
@@ -309,11 +329,11 @@ export const TaskService = {
                 }
 
                 if (
-                    m.sync_status === "FAILED" ||
-                    m.sync_status === "PENDING" ||
+                    m.sync_status === SyncStatus.FAILED ||
+                    m.sync_status === SyncStatus.PENDING ||
                     mediaNeedsProcessing
                 ) {
-                    updateData.sync_status = "PENDING";
+                    updateData.sync_status = SyncStatus.PENDING;
                     updateData.last_error = null;
                     hasPendingTasks = true;
                 }
@@ -330,7 +350,7 @@ export const TaskService = {
                 .where(eq(MediaFile.media_id, mediaId));
 
             const processAffiliatedFile = async (
-                role: "PRIMARY" | "ALTERNATIVE" | "LIVE_PHOTO_VIDEO" | "COVER",
+                role: MediaFileRole,
                 newUrl: string | null | undefined,
             ) => {
                 const existing = existingMediaFiles.find((mf) => mf.role === role);
@@ -340,18 +360,18 @@ export const TaskService = {
                             media_id: mediaId,
                             role: role,
                             source_url: newUrl,
-                            sync_status: "PENDING",
+                            sync_status: SyncStatus.PENDING,
                         });
                         hasPendingTasks = true;
                     } else if (
                         existing.source_url !== newUrl ||
-                        existing.sync_status === "FAILED"
+                        existing.sync_status === SyncStatus.FAILED
                     ) {
                         if (existing.file_id) {
                             await db
                                 .update(File)
                                 .set({
-                                    delete_status: "DELETED",
+                                    delete_status: DeleteStatus.DELETED,
                                     delete_time: nowDbTimestamp(),
                                 })
                                 .where(eq(File.id, existing.file_id));
@@ -360,7 +380,7 @@ export const TaskService = {
                             .update(MediaFile)
                             .set({
                                 source_url: newUrl,
-                                sync_status: "PENDING",
+                                sync_status: SyncStatus.PENDING,
                                 file_id: null,
                                 last_error: null,
                             })
@@ -379,17 +399,20 @@ export const TaskService = {
                         .set({
                             source_url: null,
                             file_id: null,
-                            sync_status: "COMPLETED",
+                            sync_status: SyncStatus.COMPLETED,
                             last_error: null,
                         })
                         .where(eq(MediaFile.id, existing.id));
                 }
             };
 
-            await processAffiliatedFile("PRIMARY", mediaData.primary_file_url);
-            await processAffiliatedFile("ALTERNATIVE", mediaData.alternative_file_url);
-            await processAffiliatedFile("LIVE_PHOTO_VIDEO", mediaData.live_photo_video_url);
-            await processAffiliatedFile("COVER", mediaData.cover_file_url);
+            await processAffiliatedFile(MediaFileRole.PRIMARY, mediaData.primary_file_url);
+            await processAffiliatedFile(MediaFileRole.ALTERNATIVE, mediaData.alternative_file_url);
+            await processAffiliatedFile(
+                MediaFileRole.LIVE_PHOTO_VIDEO,
+                mediaData.live_photo_video_url,
+            );
+            await processAffiliatedFile(MediaFileRole.COVER, mediaData.cover_file_url);
         }
 
         // 4. Check if Avatar needs processing
@@ -407,7 +430,7 @@ export const TaskService = {
             await db
                 .update(Post)
                 .set({
-                    sync_status: "IN_PROGRESS",
+                    sync_status: SyncStatus.IN_PROGRESS,
                     workflow_run_id: workflowRunId,
                     last_error: null,
                 })
@@ -427,7 +450,7 @@ export const TaskService = {
             .where(
                 and(
                     eq(Media.post_id, postId),
-                    eq(Media.delete_status, "ACTIVE"),
+                    eq(Media.delete_status, DeleteStatus.ACTIVE),
                     mediaData.external_id
                         ? eq(Media.eid, mediaData.external_id)
                         : eq(Media.sort_order, index),
@@ -444,7 +467,7 @@ export const TaskService = {
                 try {
                     await db
                         .update(Media)
-                        .set({ sync_status: "IN_PROGRESS" })
+                        .set({ sync_status: SyncStatus.IN_PROGRESS })
                         .where(eq(Media.id, m.id));
 
                     // Fetch again to ensure we get latest
@@ -457,12 +480,12 @@ export const TaskService = {
 
                     for (const mf of mediaFiles) {
                         // Already completed or no source url, skipping
-                        if (mf.sync_status === "COMPLETED" || !mf.source_url) continue;
+                        if (mf.sync_status === SyncStatus.COMPLETED || !mf.source_url) continue;
 
                         // Mark as IN_PROGRESS
                         await db
                             .update(MediaFile)
-                            .set({ sync_status: "IN_PROGRESS" })
+                            .set({ sync_status: SyncStatus.IN_PROGRESS })
                             .where(eq(MediaFile.id, mf.id));
 
                         try {
@@ -509,7 +532,7 @@ export const TaskService = {
                                     .update(MediaFile)
                                     .set({
                                         file_id: fileResults[0].id,
-                                        sync_status: "COMPLETED",
+                                        sync_status: SyncStatus.COMPLETED,
                                         last_error: null,
                                     })
                                     .where(eq(MediaFile.id, mf.id));
@@ -518,7 +541,7 @@ export const TaskService = {
                             const errorMsg = e instanceof Error ? e.message : String(e);
                             await db
                                 .update(MediaFile)
-                                .set({ sync_status: "FAILED", last_error: errorMsg })
+                                .set({ sync_status: SyncStatus.FAILED, last_error: errorMsg })
                                 .where(eq(MediaFile.id, mf.id));
                             allCompleted = false;
                             throw e;
@@ -528,7 +551,7 @@ export const TaskService = {
                     if (allCompleted) {
                         await db
                             .update(Media)
-                            .set({ sync_status: "COMPLETED", last_error: null })
+                            .set({ sync_status: SyncStatus.COMPLETED, last_error: null })
                             .where(eq(Media.id, m.id));
 
                         // Trigger video cover generation asynchronously after main video completed
@@ -546,7 +569,7 @@ export const TaskService = {
                         await db
                             .update(Media)
                             .set({
-                                sync_status: "FAILED",
+                                sync_status: SyncStatus.FAILED,
                                 last_error: "Some files failed to process",
                             })
                             .where(eq(Media.id, m.id));
@@ -555,7 +578,7 @@ export const TaskService = {
                     const errorMsg = e instanceof Error ? e.message : String(e);
                     await db
                         .update(Media)
-                        .set({ sync_status: "FAILED", last_error: errorMsg })
+                        .set({ sync_status: SyncStatus.FAILED, last_error: errorMsg })
                         .where(eq(Media.id, m.id));
                     throw e; // Re-throw to trigger upstream retry
                 }
@@ -627,10 +650,10 @@ export const TaskService = {
         await db
             .update(Post)
             .set({
-                sync_status: "COMPLETED",
+                sync_status: SyncStatus.COMPLETED,
                 last_error: null,
             })
-            .where(and(eq(Post.id, postId), eq(Post.delete_status, "ACTIVE")));
+            .where(and(eq(Post.id, postId), eq(Post.delete_status, DeleteStatus.ACTIVE)));
     },
 
     /**
@@ -640,9 +663,14 @@ export const TaskService = {
         await db
             .update(Post)
             .set({
-                sync_status: "FAILED",
+                sync_status: SyncStatus.FAILED,
                 last_error: errorMsg,
             })
-            .where(and(eq(Post.workflow_run_id, workflowRunId), eq(Post.delete_status, "ACTIVE")));
+            .where(
+                and(
+                    eq(Post.workflow_run_id, workflowRunId),
+                    eq(Post.delete_status, DeleteStatus.ACTIVE),
+                ),
+            );
     },
 };

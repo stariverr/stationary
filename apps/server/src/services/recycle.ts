@@ -1,6 +1,6 @@
 import { and, count, eq, isNull, isNotNull } from "drizzle-orm";
 import { db } from "@/global/db";
-import { Media, Post } from "@/db/schema";
+import { DeleteStatus, Media, Post } from "@/db/schema";
 import { nowDbTimestamp } from "@/lib/utils/time";
 
 export const RecycleService = {
@@ -19,7 +19,7 @@ export const RecycleService = {
                 .limit(1);
 
             const post = postRows[0];
-            if (!post || post.delete_status !== "ACTIVE" || post.recycle_time) {
+            if (!post || post.delete_status !== DeleteStatus.ACTIVE || post.recycle_time) {
                 return { postUpdated: 0, mediaUpdated: 0 };
             }
 
@@ -29,7 +29,7 @@ export const RecycleService = {
                 .where(
                     and(
                         eq(Post.id, postId),
-                        eq(Post.delete_status, "ACTIVE"),
+                        eq(Post.delete_status, DeleteStatus.ACTIVE),
                         isNull(Post.recycle_time),
                     ),
                 )
@@ -45,7 +45,7 @@ export const RecycleService = {
                 .where(
                     and(
                         eq(Media.post_id, postId),
-                        eq(Media.delete_status, "ACTIVE"),
+                        eq(Media.delete_status, DeleteStatus.ACTIVE),
                         isNull(Media.recycle_time),
                     ),
                 )
@@ -71,7 +71,7 @@ export const RecycleService = {
                 .limit(1);
 
             const post = postRows[0];
-            if (!post || post.delete_status !== "ACTIVE" || !post.recycle_time) {
+            if (!post || post.delete_status !== DeleteStatus.ACTIVE || !post.recycle_time) {
                 return { postUpdated: 0, mediaUpdated: 0 };
             }
 
@@ -81,7 +81,7 @@ export const RecycleService = {
                 .where(
                     and(
                         eq(Post.id, postId),
-                        eq(Post.delete_status, "ACTIVE"),
+                        eq(Post.delete_status, DeleteStatus.ACTIVE),
                         isNotNull(Post.recycle_time),
                     ),
                 )
@@ -97,7 +97,7 @@ export const RecycleService = {
                 .where(
                     and(
                         eq(Media.post_id, postId),
-                        eq(Media.delete_status, "ACTIVE"),
+                        eq(Media.delete_status, DeleteStatus.ACTIVE),
                         eq(Media.recycle_time, post.recycle_time),
                     ),
                 )
@@ -119,7 +119,7 @@ export const RecycleService = {
             .where(
                 and(
                     eq(Media.id, mediaId),
-                    eq(Media.delete_status, "ACTIVE"),
+                    eq(Media.delete_status, DeleteStatus.ACTIVE),
                     isNull(Media.recycle_time),
                 ),
             )
@@ -135,7 +135,7 @@ export const RecycleService = {
             .where(
                 and(
                     eq(Media.id, mediaId),
-                    eq(Media.delete_status, "ACTIVE"),
+                    eq(Media.delete_status, DeleteStatus.ACTIVE),
                     isNotNull(Media.recycle_time),
                 ),
             )
@@ -153,12 +153,22 @@ export const RecycleService = {
             db
                 .select({ total: count() })
                 .from(Post)
-                .where(and(eq(Post.library_id, libraryId), eq(Post.delete_status, "ACTIVE")))
+                .where(
+                    and(
+                        eq(Post.library_id, libraryId),
+                        eq(Post.delete_status, DeleteStatus.ACTIVE),
+                    ),
+                )
                 .limit(1),
             db
                 .select({ total: count() })
                 .from(Media)
-                .where(and(eq(Media.library_id, libraryId), eq(Media.delete_status, "ACTIVE")))
+                .where(
+                    and(
+                        eq(Media.library_id, libraryId),
+                        eq(Media.delete_status, DeleteStatus.ACTIVE),
+                    ),
+                )
                 .limit(1),
         ]);
 

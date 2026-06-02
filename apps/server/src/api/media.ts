@@ -4,7 +4,15 @@ import { z } from "zod";
 import { validator } from "hono/validator";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
-import { Media, MediaFile, Post, File as DbFile } from "@/db/schema";
+import {
+    Media,
+    MediaFile,
+    Post,
+    File as DbFile,
+    PostSource,
+    DeleteStatus,
+    MediaFileRole,
+} from "@/db/schema";
 import { and, eq, ilike, SQL, count, desc, or, isNull, isNotNull, sql, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
@@ -45,9 +53,9 @@ export const MediaListRequestBodySchema = z.object({
             .optional(),
     ),
     keyword: z.string().optional(),
-    source: z.enum(["UNKNOWN", "X", "XHS", "BILIBILI", "DOUYIN", "TIKTOK", "INSTAGRAM"]).optional(),
+    source: z.enum(PostSource).optional(),
     display_mode: z.enum(["flat", "stacked"]).default("flat"),
-    library_id: z.string().uuid().optional(),
+    library_id: z.uuid().optional(),
 });
 
 router.get(
@@ -83,7 +91,7 @@ router.get(
         }
 
         // Filter undeleted media
-        where.push(eq(Media.delete_status, "ACTIVE"));
+        where.push(eq(Media.delete_status, DeleteStatus.ACTIVE));
         where.push(isNull(Media.recycle_time));
 
         // 双轨制：堆叠模式 vs 平铺模式
@@ -123,12 +131,18 @@ router.get(
             .leftJoin(Post, eq(Media.post_id, Post.id))
             .leftJoin(
                 primaryMediaFile,
-                and(eq(Media.id, primaryMediaFile.media_id), eq(primaryMediaFile.role, "PRIMARY")),
+                and(
+                    eq(Media.id, primaryMediaFile.media_id),
+                    eq(primaryMediaFile.role, MediaFileRole.PRIMARY),
+                ),
             )
             .leftJoin(primaryDbFile, eq(primaryMediaFile.file_id, primaryDbFile.id))
             .leftJoin(
                 coverMediaFile,
-                and(eq(Media.id, coverMediaFile.media_id), eq(coverMediaFile.role, "COVER")),
+                and(
+                    eq(Media.id, coverMediaFile.media_id),
+                    eq(coverMediaFile.role, MediaFileRole.COVER),
+                ),
             )
             .leftJoin(coverDbFile, eq(coverMediaFile.file_id, coverDbFile.id))
             .where(visibleMediaFilter)
@@ -236,7 +250,7 @@ router.post("/:id/regenerate-cover", requireAuth, async (c) => {
         .where(
             and(
                 eq(Media.id, mediaId),
-                eq(Media.delete_status, "ACTIVE"),
+                eq(Media.delete_status, DeleteStatus.ACTIVE),
                 isNull(Media.recycle_time),
             ),
         );
@@ -310,7 +324,7 @@ router.post("/regenerate-covers", requireAuth, async (c) => {
         .where(
             and(
                 inArray(Media.id, mediaIds),
-                eq(Media.delete_status, "ACTIVE"),
+                eq(Media.delete_status, DeleteStatus.ACTIVE),
                 isNull(Media.recycle_time),
             ),
         );
@@ -326,7 +340,12 @@ router.post("/regenerate-covers", requireAuth, async (c) => {
     const libraries = await db
         .select()
         .from(Library)
-        .where(and(inArray(Library.id, uniqueLibraryIds), eq(Library.delete_status, "ACTIVE")));
+        .where(
+            and(
+                inArray(Library.id, uniqueLibraryIds),
+                eq(Library.delete_status, DeleteStatus.ACTIVE),
+            ),
+        );
 
     const isAuthorized =
         libraries.every((lib) => lib.owner_id === user.id) &&

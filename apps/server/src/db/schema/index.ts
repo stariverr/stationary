@@ -37,42 +37,95 @@ export const temporal = customType<{
 });
 
 // Enums
-export const MediaTypeEnum = pgEnum("media_type", ["IMAGE", "VIDEO", "LIVE_PHOTO"]);
-export const PostSourceEnum = pgEnum("post_source", [
-    "UNKNOWN",
-    "X",
-    "XHS",
-    "BILIBILI",
-    "DOUYIN",
-    "TIKTOK",
-    "INSTAGRAM",
+
+/** Media Type
+ *
+ */
+export enum MediaType {
+    IMAGE = "IMAGE",
+    VIDEO = "VIDEO",
+    LIVE_PHOTO = "LIVE_PHOTO",
+}
+const MediaTypeEnum = pgEnum("media_type", [
+    MediaType.IMAGE,
+    MediaType.VIDEO,
+    MediaType.LIVE_PHOTO,
 ]);
 
-export const SyncStatusEnum = pgEnum("sync_status", [
-    "PENDING",
-    "IN_PROGRESS",
-    "COMPLETED",
-    "FAILED",
+export enum PostSource {
+    UNKNOWN = "UNKNOWN",
+    X = "X",
+    XHS = "XHS",
+    BILIBILI = "BILIBILI",
+    DOUYIN = "DOUYIN",
+    TIKTOK = "TIKTOK",
+    INSTAGRAM = "INSTAGRAM",
+}
+const PostSourceEnum = pgEnum("post_source", [
+    PostSource.UNKNOWN,
+    PostSource.X,
+    PostSource.XHS,
+    PostSource.BILIBILI,
+    PostSource.DOUYIN,
+    PostSource.TIKTOK,
+    PostSource.INSTAGRAM,
 ]);
 
-export const MediaFileRoleEnum = pgEnum("media_file_role", [
-    "PRIMARY",
-    "ALTERNATIVE",
-    "COVER",
-    "LIVE_PHOTO_VIDEO",
+export enum SyncStatus {
+    PENDING = "PENDING",
+    IN_PROGRESS = "IN_PROGRESS",
+    COMPLETED = "COMPLETED",
+    FAILED = "FAILED",
+}
+const SyncStatusEnum = pgEnum("sync_status", [
+    SyncStatus.PENDING,
+    SyncStatus.IN_PROGRESS,
+    SyncStatus.COMPLETED,
+    SyncStatus.FAILED,
+]);
+
+export enum MediaFileRole {
+    PRIMARY = "PRIMARY",
+    ALTERNATIVE = "ALTERNATIVE",
+    COVER = "COVER",
+    LIVE_PHOTO_VIDEO = "LIVE_PHOTO_VIDEO",
+}
+const MediaFileRoleEnum = pgEnum("media_file_role", [
+    MediaFileRole.PRIMARY,
+    MediaFileRole.ALTERNATIVE,
+    MediaFileRole.COVER,
+    MediaFileRole.LIVE_PHOTO_VIDEO,
     // "THUMBNAIL",
     // "TRANSCODED",
     // "PREVIEW",
 ]);
 
-export const AccessRoleEnum = pgEnum("access_role", ["VIEWER", "EDITOR", "ADMIN"]);
+export enum AccessRole {
+    VIEWER = "VIEWER",
+    EDITOR = "EDITOR",
+    ADMIN = "ADMIN",
+}
+const AccessRoleEnum = pgEnum("access_role", [
+    AccessRole.VIEWER,
+    AccessRole.EDITOR,
+    AccessRole.ADMIN,
+]);
 
 /** Soft delete status enum
- * - ACTIVE: Not deleted
- * - DELETED: Soft deleted, but affiliated records may still exist
- * - PURGED: Soft deleted, and all affiliated records and objects are deleted
+ * - `ACTIVE`: Not deleted
+ * - `DELETED`: Soft deleted, but affiliated records may still exist
+ * - `PURGED`: Soft deleted, and all affiliated records and objects are deleted
  */
-export const DeleteStatusEnum = pgEnum("delete_status", ["ACTIVE", "DELETED", "PURGED"]);
+export enum DeleteStatus {
+    ACTIVE = "ACTIVE",
+    DELETED = "DELETED",
+    PURGED = "PURGED",
+}
+const DeleteStatusEnum = pgEnum("delete_status", [
+    DeleteStatus.ACTIVE,
+    DeleteStatus.DELETED,
+    DeleteStatus.PURGED,
+]);
 
 export const Author = pgTable("author", {
     id: uuid("id")
@@ -92,7 +145,7 @@ export const Author = pgTable("author", {
         .notNull(),
     update_time: temporal("update_time"),
     delete_time: temporal("delete_time"),
-    delete_status: DeleteStatusEnum("delete_status").default("ACTIVE").notNull(),
+    delete_status: DeleteStatusEnum("delete_status").default(DeleteStatus.ACTIVE).notNull(),
 });
 
 export const Library = pgTable("library", {
@@ -112,7 +165,7 @@ export const Library = pgTable("library", {
         .notNull(),
     update_time: temporal("update_time"),
     delete_time: temporal("delete_time"),
-    delete_status: DeleteStatusEnum("delete_status").default("ACTIVE").notNull(),
+    delete_status: DeleteStatusEnum("delete_status").default(DeleteStatus.ACTIVE).notNull(),
 });
 
 /** User Group
@@ -142,7 +195,7 @@ export const UserGroupMember = pgTable("user_group_member", {
         .$defaultFn(() => uuidv7.generate()),
     group_id: uuid("group_id").notNull(),
     user_id: uuid("user_id").notNull(),
-    role: AccessRoleEnum("role").notNull().default("VIEWER"),
+    role: AccessRoleEnum("role").notNull().default(AccessRole.VIEWER),
     create_time: temporal("create_time")
         .default(sql`now()`)
         .notNull(),
@@ -159,7 +212,7 @@ export const LibraryUserAccess = pgTable("library_user_access", {
         .$defaultFn(() => uuidv7.generate()),
     library_id: uuid("library_id").notNull(),
     user_id: uuid("user_id").notNull(),
-    role: AccessRoleEnum("role").notNull().default("VIEWER"),
+    role: AccessRoleEnum("role").notNull().default(AccessRole.VIEWER),
     create_time: temporal("create_time")
         .default(sql`now()`)
         .notNull(),
@@ -176,7 +229,7 @@ export const LibraryGroupAccess = pgTable("library_group_access", {
         .$defaultFn(() => uuidv7.generate()),
     library_id: uuid("library_id").notNull(),
     group_id: uuid("group_id").notNull(),
-    role: AccessRoleEnum("role").notNull().default("VIEWER"),
+    role: AccessRoleEnum("role").notNull().default(AccessRole.VIEWER),
     create_time: temporal("create_time")
         .default(sql`now()`)
         .notNull(),
@@ -193,7 +246,7 @@ export const Post = pgTable(
             .primaryKey()
             .notNull()
             .$defaultFn(() => uuidv7.generate()),
-        source: PostSourceEnum("source").notNull().default("UNKNOWN"),
+        source: PostSourceEnum("source").notNull().default(PostSource.UNKNOWN),
         eid: text("eid").notNull(),
         title: text("title").notNull(),
         description: text("description").notNull(),
@@ -207,7 +260,7 @@ export const Post = pgTable(
         media_count: integer("media_count").notNull(),
         /** Source Platform URL */
         url: text("url").default(""),
-        sync_status: SyncStatusEnum("sync_status").default("PENDING").notNull(),
+        sync_status: SyncStatusEnum("sync_status").default(SyncStatus.PENDING).notNull(),
         last_error: text("last_error"),
         workflow_run_id: text("workflow_run_id"),
         library_id: uuid("library_id").notNull(),
@@ -215,7 +268,7 @@ export const Post = pgTable(
             .default(sql`now()`)
             .notNull(),
         update_time: temporal("update_time"),
-        delete_status: DeleteStatusEnum("delete_status").default("ACTIVE").notNull(),
+        delete_status: DeleteStatusEnum("delete_status").default(DeleteStatus.ACTIVE).notNull(),
         delete_time: temporal("delete_time"),
         recycle_time: temporal("recycle_time"),
     },
@@ -240,7 +293,7 @@ export const Media = pgTable(
          */
         post_id: uuid("post_id"),
         library_id: uuid("library_id").notNull(),
-        source: PostSourceEnum("source").notNull().default("UNKNOWN"),
+        source: PostSourceEnum("source").notNull().default(PostSource.UNKNOWN),
         title: text("title").notNull(),
         description: text("description").notNull(),
         type: MediaTypeEnum("type").notNull(),
@@ -263,14 +316,14 @@ export const Media = pgTable(
         /** Original published time on the source platform */
         // TODO: Change it to not null
         published_time: temporal("published_time"),
-        sync_status: SyncStatusEnum("sync_status").default("PENDING").notNull(),
+        sync_status: SyncStatusEnum("sync_status").default(SyncStatus.PENDING).notNull(),
         last_error: text("last_error"),
         workflow_run_id: text("workflow_run_id"),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),
         update_time: temporal("update_time"),
-        delete_status: DeleteStatusEnum("delete_status").default("ACTIVE").notNull(),
+        delete_status: DeleteStatusEnum("delete_status").default(DeleteStatus.ACTIVE).notNull(),
         delete_time: temporal("delete_time"),
         recycle_time: temporal("recycle_time"),
     },
@@ -299,7 +352,7 @@ export const MediaFile = pgTable(
         /** Sort Order of Media Variant (Not media.sort_order, which is sort order of media in the post) */
         sort_order: integer("sort_order").default(0).notNull(),
         source_url: text("source_url").default(""),
-        sync_status: SyncStatusEnum("sync_status").default("PENDING").notNull(),
+        sync_status: SyncStatusEnum("sync_status").default(SyncStatus.PENDING).notNull(),
         last_error: text("last_error"),
         metadata: jsonb("metadata").default({}).notNull(),
         create_time: temporal("create_time")
@@ -309,7 +362,7 @@ export const MediaFile = pgTable(
             .default(sql`now()`)
             .notNull(),
         delete_time: temporal("delete_time"),
-        delete_status: DeleteStatusEnum("delete_status").default("ACTIVE").notNull(),
+        delete_status: DeleteStatusEnum("delete_status").default(DeleteStatus.ACTIVE).notNull(),
     },
     (table) => [
         uniqueIndex("media_file_media_role_sort_unique").on(
@@ -384,7 +437,7 @@ export const File = pgTable("file", {
     create_time: temporal("create_time")
         .default(sql`now()`)
         .notNull(),
-    delete_status: DeleteStatusEnum("delete_status").default("ACTIVE").notNull(),
+    delete_status: DeleteStatusEnum("delete_status").default(DeleteStatus.ACTIVE).notNull(),
     delete_time: temporal("delete_time"),
 });
 

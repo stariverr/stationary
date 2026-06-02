@@ -4,7 +4,7 @@ import { z } from "zod";
 import { validator } from "hono/validator";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
-import { Library, Media, Post } from "@/db/schema";
+import { DeleteStatus, Library, Media, Post } from "@/db/schema";
 import { and, eq, ilike, SQL, count, inArray, isNull } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { RecycleService } from "@/services/recycle";
@@ -71,7 +71,7 @@ router.get(
         const offset = (page - 1) * pageSize;
         const { keyword } = c.req.valid("query");
 
-        const where: SQL[] = [eq(Library.delete_status, "ACTIVE")];
+        const where: SQL[] = [eq(Library.delete_status, DeleteStatus.ACTIVE)];
         if (keyword) {
             where.push(ilike(Library.name, `%${keyword}%`));
         }
@@ -197,7 +197,12 @@ router.post(
         const targetLibraries = await db
             .select({ id: Library.id })
             .from(Library)
-            .where(and(eq(Library.id, body.target_library_id), eq(Library.delete_status, "ACTIVE")))
+            .where(
+                and(
+                    eq(Library.id, body.target_library_id),
+                    eq(Library.delete_status, DeleteStatus.ACTIVE),
+                ),
+            )
             .limit(1);
 
         if (targetLibraries.length === 0) {
@@ -209,7 +214,12 @@ router.post(
                 ? await db
                       .select({ id: Post.id })
                       .from(Post)
-                      .where(and(inArray(Post.id, body.post_ids), eq(Post.delete_status, "ACTIVE")))
+                      .where(
+                          and(
+                              inArray(Post.id, body.post_ids),
+                              eq(Post.delete_status, DeleteStatus.ACTIVE),
+                          ),
+                      )
                 : [];
 
         if (selectedPosts.length !== body.post_ids.length) {
@@ -222,7 +232,10 @@ router.post(
                       .select({ id: Media.id, post_id: Media.post_id })
                       .from(Media)
                       .where(
-                          and(inArray(Media.id, body.media_ids), eq(Media.delete_status, "ACTIVE")),
+                          and(
+                              inArray(Media.id, body.media_ids),
+                              eq(Media.delete_status, DeleteStatus.ACTIVE),
+                          ),
                       )
                 : [];
 

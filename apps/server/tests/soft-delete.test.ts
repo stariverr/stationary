@@ -15,7 +15,8 @@ const sourceFiles = {
         await proc.exited;
         const files = output.trim().split("\n").filter(Boolean);
         // Find the friendly_franklin_richards or latest migration
-        const file = files.find(f => f.includes("friendly_franklin_richards")) ?? files.sort().at(-1);
+        const file =
+            files.find((f) => f.includes("friendly_franklin_richards")) ?? files.sort().at(-1);
         return Bun.file(file ?? "").text();
     },
 };
@@ -26,31 +27,38 @@ describe("soft deletion lifecycle", () => {
         const migration = await sourceFiles.latestMigration();
 
         expect(schema).toContain('delete_time: temporal("delete_time")');
-        expect(schema).toContain('index("post_library_delete_time_idx").on(table.library_id, table.delete_time)');
-        expect(schema).toContain('index("media_library_delete_time_idx").on(table.library_id, table.delete_time)');
-        expect(schema).toContain('index("media_post_delete_time_idx").on(table.post_id, table.delete_time)');
-        
-        const hasAddOrRename = migration.includes('ADD COLUMN "delete_time"') || 
-                               migration.includes('RENAME COLUMN "deleted_time" TO "delete_time"') ||
-                               migration.includes('ADD COLUMN "delete_status"');
+        expect(schema).toContain(
+            'index("post_library_delete_time_idx").on(table.library_id, table.delete_time)',
+        );
+        expect(schema).toContain(
+            'index("media_library_delete_time_idx").on(table.library_id, table.delete_time)',
+        );
+        expect(schema).toContain(
+            'index("media_post_delete_time_idx").on(table.post_id, table.delete_time)',
+        );
+
+        const hasAddOrRename =
+            migration.includes('ADD COLUMN "delete_time"') ||
+            migration.includes('RENAME COLUMN "deleted_time" TO "delete_time"') ||
+            migration.includes('ADD COLUMN "delete_status"');
         expect(hasAddOrRename).toBe(true);
     });
 
     test("normal post and media APIs hide recycled/deleted records and expose trash actions", async () => {
         const postApi = await sourceFiles.postApi();
         const mediaApi = await sourceFiles.mediaApi();
-        const clean = (str: string) => str.replace(/\s+/g, '');
+        const clean = (str: string) => str.replace(/\s+/g, "");
 
-        expect(clean(postApi)).toContain(clean('eq(Post.delete_status, "ACTIVE")'));
-        expect(clean(postApi)).toContain(clean('isNull(Post.recycle_time)'));
-        expect(clean(postApi)).toContain(clean('eq(Media.delete_status, "ACTIVE")'));
-        expect(clean(postApi)).toContain(clean('isNull(Media.recycle_time)'));
+        expect(clean(postApi)).toContain(clean("eq(Post.delete_status, DeleteStatus.ACTIVE)"));
+        expect(clean(postApi)).toContain(clean("isNull(Post.recycle_time)"));
+        expect(clean(postApi)).toContain(clean("eq(Media.delete_status, DeleteStatus.ACTIVE)"));
+        expect(clean(postApi)).toContain(clean("isNull(Media.recycle_time)"));
         expect(clean(postApi)).toContain(clean('router.post("/trash/:id"'));
         expect(clean(postApi)).toContain(clean('router.post("/restore/:id"'));
         expect(clean(postApi)).toContain(clean('router.post("/delete/:id"'));
 
-        expect(clean(mediaApi)).toContain(clean('eq(Media.delete_status, "ACTIVE")'));
-        expect(clean(mediaApi)).toContain(clean('isNull(Media.recycle_time)'));
+        expect(clean(mediaApi)).toContain(clean("eq(Media.delete_status, DeleteStatus.ACTIVE)"));
+        expect(clean(mediaApi)).toContain(clean("isNull(Media.recycle_time)"));
         expect(clean(mediaApi)).toContain(clean('router.post("/trash/:id"'));
         expect(clean(mediaApi)).toContain(clean('router.post("/restore/:id"'));
         expect(clean(mediaApi)).toContain(clean('router.post("/delete/:id"'));
@@ -59,12 +67,22 @@ describe("soft deletion lifecycle", () => {
     test("library deletion is blocked while any active post or media remains", async () => {
         const libraryApi = await sourceFiles.libraryApi();
         const recycleService = await sourceFiles.recycleService();
-        const clean = (str: string) => str.replace(/\s+/g, '');
+        const clean = (str: string) => str.replace(/\s+/g, "");
 
         expect(clean(libraryApi)).toContain(clean("DeleteService.deleteLibrary(id)"));
-        expect(clean(libraryApi)).toContain(clean("Please empty posts and media in this library before deleting it."));
-        expect(clean(recycleService)).toContain(clean('db.select({ total: count() }).from(Post).where(and(eq(Post.library_id, libraryId), eq(Post.delete_status, "ACTIVE")))'));
-        expect(clean(recycleService)).toContain(clean('db.select({ total: count() }).from(Media).where(and(eq(Media.library_id, libraryId), eq(Media.delete_status, "ACTIVE")))'));
+        expect(clean(libraryApi)).toContain(
+            clean("Please empty posts and media in this library before deleting it."),
+        );
+        expect(clean(recycleService)).toContain(
+            clean(
+                "db.select({ total: count() }).from(Post).where(and(eq(Post.library_id, libraryId), eq(Post.delete_status, DeleteStatus.ACTIVE)))",
+            ),
+        );
+        expect(clean(recycleService)).toContain(
+            clean(
+                "db.select({ total: count() }).from(Media).where(and(eq(Media.library_id, libraryId), eq(Media.delete_status, DeleteStatus.ACTIVE)))",
+            ),
+        );
     });
 
     test("scraper sync soft-deletes missing media instead of hard-deleting files", async () => {

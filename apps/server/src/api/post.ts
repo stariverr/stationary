@@ -5,7 +5,15 @@ import { validator } from "hono/validator";
 import { error, success } from "@/lib/response";
 import { Code } from "@/lib/code";
 import { requireAuth } from "@/lib/auth/middleware";
-import { Media, MediaFile, Post, File as DbFile } from "@/db/schema";
+import {
+    Media,
+    MediaFile,
+    Post,
+    File as DbFile,
+    DeleteStatus,
+    PostSource,
+    MediaFileRole,
+} from "@/db/schema";
 import { and, eq, ilike, SQL, count, asc, sql, isNull, inArray, lte } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Temporal } from "@js-temporal/polyfill";
@@ -14,8 +22,14 @@ import { DeleteService } from "@/services/delete";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 
 const router = new Hono();
-const activePostFilter = and(eq(Post.delete_status, "ACTIVE"), isNull(Post.recycle_time));
-const activeMediaFilter = and(eq(Media.delete_status, "ACTIVE"), isNull(Media.recycle_time));
+const activePostFilter = and(
+    eq(Post.delete_status, DeleteStatus.ACTIVE),
+    isNull(Post.recycle_time),
+);
+const activeMediaFilter = and(
+    eq(Media.delete_status, DeleteStatus.ACTIVE),
+    isNull(Media.recycle_time),
+);
 
 const toIsoTimestamp = (value: Temporal.Instant | string | null | undefined) => {
     if (!value) return null;
@@ -46,7 +60,7 @@ export const PostListRequestBodySchema = z.object({
             .optional(),
     ),
     keyword: z.string().optional(),
-    source: z.enum(["UNKNOWN", "X", "XHS", "BILIBILI", "DOUYIN", "TIKTOK", "INSTAGRAM"]).optional(),
+    source: z.enum(PostSource).optional(),
 });
 
 // Post List
@@ -145,13 +159,16 @@ router.get(
                     primaryMediaFile,
                     and(
                         eq(Media.id, primaryMediaFile.media_id),
-                        eq(primaryMediaFile.role, "PRIMARY"),
+                        eq(primaryMediaFile.role, MediaFileRole.PRIMARY),
                     ),
                 )
                 .leftJoin(primaryDbFile, eq(primaryMediaFile.file_id, primaryDbFile.id))
                 .leftJoin(
                     coverMediaFile,
-                    and(eq(Media.id, coverMediaFile.media_id), eq(coverMediaFile.role, "COVER")),
+                    and(
+                        eq(Media.id, coverMediaFile.media_id),
+                        eq(coverMediaFile.role, MediaFileRole.COVER),
+                    ),
                 )
                 .leftJoin(coverDbFile, eq(coverMediaFile.file_id, coverDbFile.id))
                 .where(

@@ -11,7 +11,15 @@ import { Code } from "@/lib/code";
 import { error, success } from "@/lib/response";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { db } from "@/global/db";
-import { Library, File as DbFile } from "@/db/schema";
+import {
+    Library,
+    File as DbFile,
+    DeleteStatus,
+    SyncStatus,
+    MediaFileRole,
+    PostSource,
+    MediaType,
+} from "@/db/schema";
 import { eq, and, lt } from "drizzle-orm";
 import { DeleteService } from "@/services/delete";
 import { s3 } from "@/global/s3";
@@ -45,7 +53,7 @@ const MediaItemSchema = z
         external_id: z.string().optional(),
         title: z.string().nullable().default(""),
         description: z.string().nullable().default(""),
-        type: z.enum(["IMAGE", "VIDEO", "LIVE_PHOTO"]),
+        type: z.enum(MediaType),
         primary_file_url: z.string(),
         alternative_file_url: z.string().nullable().optional(),
         live_photo_video_url: z.string().nullable().optional(),
@@ -69,7 +77,7 @@ const PostItemSchema = z
         external_id: z.string().optional().default(""),
         tags: z.array(z.string()).default([]),
         author: AuthorSchema,
-        platform: z.enum(["UNKNOWN", "X", "XHS", "BILIBILI", "DOUYIN", "TIKTOK", "INSTAGRAM"]),
+        platform: z.enum(PostSource),
         media: z.array(MediaItemSchema),
         published_time: TimestampSchema.optional(),
         /** @deprecated Use published_time. Kept for legacy import payloads. */
@@ -248,7 +256,12 @@ taskApp.post("/purge-expired-files", async (c) => {
     const expiredFiles = await db
         .select()
         .from(DbFile)
-        .where(and(eq(DbFile.delete_status, "DELETED"), lt(DbFile.delete_time, thirtyDaysAgo)));
+        .where(
+            and(
+                eq(DbFile.delete_status, DeleteStatus.DELETED),
+                lt(DbFile.delete_time, thirtyDaysAgo),
+            ),
+        );
 
     let purgedCount = 0;
     let failedCount = 0;
@@ -312,14 +325,14 @@ export const coverWorkflowHandler = serve(
                     .insert(MediaFile)
                     .values({
                         media_id: mediaId,
-                        role: "COVER",
-                        sync_status: "FAILED",
+                        role: MediaFileRole.COVER,
+                        sync_status: SyncStatus.FAILED,
                         last_error: failResponse || "Workflow retries exhausted.",
                     })
                     .onConflictDoUpdate({
                         target: [MediaFile.media_id, MediaFile.role, MediaFile.sort_order],
                         set: {
-                            sync_status: "FAILED",
+                            sync_status: SyncStatus.FAILED,
                             last_error: failResponse || "Workflow retries exhausted.",
                         },
                     });
