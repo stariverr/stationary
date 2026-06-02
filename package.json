@@ -18,9 +18,9 @@
         "core-js"
     ],
     "devDependencies": {
-        "@typescript/native-preview": "^7.0.0-dev.20260527.2",
-        "oxfmt": "^0.51.0",
-        "oxlint": "^1.67.0"
+        "@typescript/native-preview": "^7.0.0-dev.20260601.1",
+        "oxfmt": "^0.53.0",
+        "oxlint": "^1.68.0"
     },
     "workspaces": [
         "apps/*"
