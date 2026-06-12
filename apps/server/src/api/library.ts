@@ -5,7 +5,7 @@ import { validator } from "hono/validator";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
 import { DeleteStatus, Library, Media, Post } from "@/db/schema";
-import { and, eq, ilike, SQL, count, inArray, isNull } from "drizzle-orm";
+import { and, eq, ilike, SQL, count, inArray, isNull, sql } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { RecycleService } from "@/services/recycle";
 import { DeleteService } from "@/services/delete";
@@ -284,6 +284,118 @@ router.post(
         });
 
         return c.json(success(Code.SUCCESS, moved));
+    },
+);
+
+function maskKey(key: string | null | undefined): string | null {
+    if (!key) return null;
+    if (key.length <= 8) return "********";
+    return `${key.slice(0, 4)}...${key.slice(-4)}`;
+}
+
+// GET Library AI Config
+router.get("/:id/ai-config", requireAuth, async (c) => {
+    const id = c.req.param("id");
+    if (!id) {
+        return c.json(error(Code.INVALID_PARAMETER, "Library ID is required"), 400);
+    }
+
+    const libraryRows = await db.select().from(Library).where(eq(Library.id, id)).limit(1);
+    const library = libraryRows[0];
+
+    if (!library) {
+        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
+    }
+
+    return c.json(
+        success(Code.SUCCESS, {
+            ai_provider: library.ai_provider,
+            openai_api_key: maskKey(library.openai_api_key),
+            openai_base_url: library.openai_base_url,
+            openai_model_embedding_text: library.openai_model_embedding_text,
+            openai_model_embedding_text_map_to: library.openai_model_embedding_text_map_to,
+            openai_model_embedding_image: library.openai_model_embedding_image,
+            openai_model_embedding_image_map_to: library.openai_model_embedding_image_map_to,
+            openai_model_describe_image: library.openai_model_describe_image,
+            openai_model_describe_image_map_to: library.openai_model_describe_image_map_to,
+            gemini_api_key: maskKey(library.gemini_api_key),
+            gemini_base_url: library.gemini_base_url,
+        }),
+    );
+});
+
+export const LibraryAiConfigSchema = z.object({
+    ai_provider: z.enum(["gemini", "openai"]).nullable().optional(),
+    openai_api_key: z.string().nullable().optional(),
+    openai_base_url: z.string().nullable().optional(),
+    openai_model_embedding_text: z.string().nullable().optional(),
+    openai_model_embedding_text_map_to: z.string().nullable().optional(),
+    openai_model_embedding_image: z.string().nullable().optional(),
+    openai_model_embedding_image_map_to: z.string().nullable().optional(),
+    openai_model_describe_image: z.string().nullable().optional(),
+    openai_model_describe_image_map_to: z.string().nullable().optional(),
+    gemini_api_key: z.string().nullable().optional(),
+    gemini_base_url: z.string().nullable().optional(),
+});
+
+// POST Library AI Config
+router.post(
+    "/:id/ai-config",
+    requireAuth,
+    validator("json", (value, c) => {
+        const parsed = LibraryAiConfigSchema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(
+                error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid payload"),
+                400,
+            );
+        }
+        return parsed.data;
+    }),
+    async (c) => {
+        const id = c.req.param("id");
+        if (!id) {
+            return c.json(error(Code.INVALID_PARAMETER, "Library ID is required"), 400);
+        }
+
+        const body = c.req.valid("json");
+
+        const libraryRows = await db.select().from(Library).where(eq(Library.id, id)).limit(1);
+        const library = libraryRows[0];
+
+        if (!library) {
+            return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
+        }
+
+        let geminiApiKey = body.gemini_api_key;
+        if (geminiApiKey && geminiApiKey.includes("...")) {
+            geminiApiKey = library.gemini_api_key;
+        }
+
+        let openaiApiKey = body.openai_api_key;
+        if (openaiApiKey && openaiApiKey.includes("...")) {
+            openaiApiKey = library.openai_api_key;
+        }
+
+        await db
+            .update(Library)
+            .set({
+                ai_provider: body.ai_provider,
+                openai_api_key: openaiApiKey,
+                openai_base_url: body.openai_base_url,
+                openai_model_embedding_text: body.openai_model_embedding_text,
+                openai_model_embedding_text_map_to: body.openai_model_embedding_text_map_to,
+                openai_model_embedding_image: body.openai_model_embedding_image,
+                openai_model_embedding_image_map_to: body.openai_model_embedding_image_map_to,
+                openai_model_describe_image: body.openai_model_describe_image,
+                openai_model_describe_image_map_to: body.openai_model_describe_image_map_to,
+                gemini_api_key: geminiApiKey,
+                gemini_base_url: body.gemini_base_url,
+                update_time: sql`now()`,
+            })
+            .where(eq(Library.id, id));
+
+        return c.json(success(Code.SUCCESS, null, "Library AI configuration updated successfully"));
     },
 );
 

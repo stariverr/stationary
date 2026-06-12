@@ -21,7 +21,11 @@
         "copy_link": "复制链接",
         "collapse": "收起",
         "no_description": "暂无描述",
-        "search": "搜索帖子...",
+        "search": "搜索...",
+        "ai_search": "AI 搜索",
+        "classic_search": "传统搜索",
+        "ai_search_tooltip": "开启 AI 智能/语义搜索",
+        "classic_search_tooltip": "仅使用常规关键字搜索",
         "settings": "设置"
     },
     "grid": {
@@ -46,7 +50,8 @@
             "general": "常规",
             "appearance": "外观",
             "account": "账户",
-            "api_keys": "API 密钥"
+            "api_keys": "API 密钥",
+            "ai_config": "AI 配置"
         },
         "general": {
             "title": "常规设置",
@@ -110,6 +115,37 @@
             "expires_label": "有效期: {date}",
             "last_used_label": "最后使用: {date}",
             "never_used": "从未使用"
+        },
+        "ai_config": {
+            "title": "AI 处理与检索配置",
+            "desc": "为各个媒体库单独配置 AI 服务，以启用图像智能描述、文本/图像向量化与混合语义检索。",
+            "library_select": "选择目标媒体库",
+            "provider": "AI 提供商",
+            "provider_disabled": "禁用 AI 功能 (不使用)",
+            "provider_gemini": "Google Gemini",
+            "provider_openai": "OpenAI (兼容 API)",
+            "api_key": "API 密钥",
+            "api_key_placeholder": "请输入 API 密钥",
+            "base_url": "API 代理基址 (Base URL)",
+            "base_url_placeholder": "可选，例如 https://api.openai.com/v1",
+            "text_embedding_model": "文本向量化模型",
+            "text_embedding_model_placeholder": "默认：text-embedding-3-small",
+            "text_embedding_dim": "文本模型映射空间 ID (Map To)",
+            "text_embedding_dim_placeholder": "默认：text-embedding-3-small",
+            "image_embedding_model": "图像向量化模型",
+            "image_embedding_model_placeholder": "默认：clip-vit-base-patch32",
+            "image_embedding_dim": "图像模型映射空间 ID (Map To)",
+            "image_embedding_dim_placeholder": "默认：clip-vit-base-patch32",
+            "describe_image_model": "多模态描述模型",
+            "describe_image_model_placeholder": "默认：gpt-4o-mini",
+            "describe_image_dim": "描述模型映射空间 ID (Map To)",
+            "describe_image_dim_placeholder": "默认：gpt-4o-mini",
+            "save_btn": "保存配置",
+            "saving": "正在保存...",
+            "save_success": "AI 配置保存成功！",
+            "err_load": "加载 AI 配置失败",
+            "err_save": "保存 AI 配置失败",
+            "loading": "正在加载配置..."
         }
     },
     "media": {
@@ -126,5 +162,15 @@
             "failed": "封面重新生成任务加入队列失败。",
             "loading": "正在请求..."
         }
+    },
+    "search": {
+        "matched_reason": "匹配原因",
+        "matched_via": "匹配渠道",
+        "keyword_search": "Keyword Search (FTS/Fuzzy Search)",
+        "keyword_search_tooltip": "匹配标题、描述等文本关键字",
+        "image_embedding": "Image Embedding Search",
+        "text_embedding": "Text Embedding Search",
+        "scene": "场景描述",
+        "styles": "风格标签"
     }
 }

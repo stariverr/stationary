@@ -29,13 +29,36 @@ export const useMediaStore = defineStore("media", () => {
 
     // State
     const keyword = ref((route.query.keyword as string) || "");
+    const searchKeyword = ref(keyword.value);
     const source = ref<string | undefined>((route.query.source as string) || undefined);
     const displayMode = ref<"flat" | "stacked">(
         (route.query.display_mode as "flat" | "stacked") || "flat",
     );
     const page = ref(parseInt(route.query.page as string) || 1);
     const count = ref(20);
+    const useAiSearch = ref(true);
+
     const selectedMediaId = ref<string | null>(null);
+
+    // Debounce keyword search to prevent spamming backend requests
+    let debounceTimeout: any = null;
+    watch(keyword, (newVal) => {
+        if (debounceTimeout) clearTimeout(debounceTimeout);
+        if (!newVal) {
+            searchKeyword.value = "";
+            page.value = 1;
+            return;
+        }
+        debounceTimeout = setTimeout(() => {
+            searchKeyword.value = newVal;
+            page.value = 1;
+        }, 500);
+    });
+
+    // Reset page to 1 when search filters change
+    watch([source, displayMode, useAiSearch], () => {
+        page.value = 1;
+    });
 
     // Reset page to 1 when library changes
     watch(
@@ -60,26 +83,50 @@ export const useMediaStore = defineStore("media", () => {
             display_mode: newDisplayMode,
         }) => {
             const query = { ...route.query };
+            let changed = false;
 
-            if (newKeyword) query.keyword = newKeyword;
-            else delete query.keyword;
+            if ("is_ai" in query) {
+                delete query.is_ai;
+                changed = true;
+            }
 
-            if (newSource) query.source = newSource;
-            else delete query.source;
+            const updateParam = (key: string, value: string | undefined) => {
+                if (value !== undefined) {
+                    if (query[key] !== value) {
+                        query[key] = value;
+                        changed = true;
+                    }
+                } else {
+                    if (query[key] !== undefined) {
+                        delete query[key];
+                        changed = true;
+                    }
+                }
+            };
 
-            if (newPage && newPage > 1) query.page = newPage.toString();
-            else delete query.page;
+            updateParam("keyword", newKeyword || undefined);
+            updateParam("source", newSource);
+            updateParam("page", newPage && newPage > 1 ? newPage.toString() : undefined);
+            updateParam(
+                "display_mode",
+                newDisplayMode && newDisplayMode !== "flat" ? newDisplayMode : undefined,
+            );
 
-            if (newDisplayMode && newDisplayMode !== "flat") query.display_mode = newDisplayMode;
-            else delete query.display_mode;
-
-            router.push({ query });
+            if (changed) {
+                router.push({ query });
+            }
         },
     );
 
     watch(
         () => route.query,
         (newQuery) => {
+            if ("is_ai" in newQuery) {
+                const query = { ...newQuery };
+                delete query.is_ai;
+                router.replace({ query });
+                return;
+            }
             if (newQuery.keyword !== undefined && newQuery.keyword !== keyword.value) {
                 keyword.value = (newQuery.keyword as string) || "";
             }
@@ -130,32 +177,100 @@ export const useMediaStore = defineStore("media", () => {
             {
                 page: page.value,
                 count: count.value,
-                keyword: keyword.value,
+                keyword: searchKeyword.value,
                 source: source.value,
                 display_mode: displayMode.value,
                 library_id: libraryStore.activeLibraryId,
+                ai: useAiSearch.value,
             },
         ]),
         placeholderData: keepPreviousData,
         queryFn: async () => {
-            const response = await useApi<{
-                success: boolean;
-                data: { list: MediaListItem[]; total?: number };
-            }>("/media/list", {
-                query: {
-                    page: page.value,
-                    count: count.value,
-                    keyword: keyword.value,
-                    source: source.value,
-                    display_mode: displayMode.value,
-                    library_id: libraryStore.activeLibraryId,
-                },
-            });
-            if (response && response.success && response.data) {
-                return {
-                    list: response.data.list.map(mapApiMediaToUiMedia),
-                    total: response.data.total || 0,
-                };
+            const hasKeyword = !!searchKeyword.value?.trim();
+            const isAi = useAiSearch.value;
+            console.log(
+                "[DEBUG STORE] queryFn called. hasKeyword:",
+                hasKeyword,
+                "isAi:",
+                isAi,
+                "useAiSearch:",
+                useAiSearch.value,
+            );
+            if (hasKeyword && isAi) {
+                console.log("[DEBUG STORE] Fetching from /search");
+                const response = await useApi<{
+                    success: boolean;
+                    data: { list: any[]; total: number; hasMore: boolean };
+                }>("/search", {
+                    query: {
+                        page: page.value,
+                        count: count.value,
+                        keyword: searchKeyword.value,
+                        source: source.value,
+                        library_id: libraryStore.activeLibraryId || undefined,
+                    },
+                });
+
+                if (response && response.success && response.data) {
+                    const mappedList = response.data.list.map((item) => {
+                        const displayTime = item.published_time ?? item.create_time;
+                        return {
+                            id: item.id,
+                            eid: "",
+                            post_id: null,
+                            source: source.value || "UNKNOWN",
+                            title: item.title,
+                            type: item.type || "IMAGE",
+                            create_time: item.create_time || "",
+                            published_time: item.published_time,
+                            post_media_count: 1,
+                            media_count: 1,
+                            media_url: item.media_url,
+                            url: item.media_url,
+                            matched_reason: item.matched_reason,
+                            matched_details: item.matched_details,
+                            score: item.score,
+                            date: displayTime
+                                ? Temporal.Instant.from(displayTime)
+                                      .toZonedDateTimeISO(Temporal.Now.timeZoneId())
+                                      .toLocaleString(undefined, {
+                                          year: "numeric",
+                                          month: "2-digit",
+                                          day: "2-digit",
+                                          hour: "2-digit",
+                                          minute: "2-digit",
+                                          second: "2-digit",
+                                      })
+                                : "Unknown",
+                        };
+                    });
+
+                    return {
+                        list: mappedList,
+                        total: response.data.total || 0,
+                    };
+                }
+            } else {
+                console.log("[DEBUG STORE] Fetching from /media/list");
+                const response = await useApi<{
+                    success: boolean;
+                    data: { list: MediaListItem[]; total?: number };
+                }>("/media/list", {
+                    query: {
+                        page: page.value,
+                        count: count.value,
+                        keyword: searchKeyword.value,
+                        source: source.value,
+                        display_mode: displayMode.value,
+                        library_id: libraryStore.activeLibraryId,
+                    },
+                });
+                if (response && response.success && response.data) {
+                    return {
+                        list: response.data.list.map(mapApiMediaToUiMedia),
+                        total: response.data.total || 0,
+                    };
+                }
             }
             return { list: [], total: 0 };
         },
@@ -164,6 +279,10 @@ export const useMediaStore = defineStore("media", () => {
     const medias = computed(() => mediaData.value?.list || []);
     const total = computed(() => mediaData.value?.total || 0);
     const isLoadingMedia = computed(() => isLoadingMediaQuery.value);
+
+    watch(useAiSearch, () => {
+        refetchMedia();
+    });
 
     const selectedMedia = computed(() => {
         if (!selectedMediaId.value) return null;
@@ -180,6 +299,7 @@ export const useMediaStore = defineStore("media", () => {
         displayMode,
         page,
         count,
+        useAiSearch,
         medias,
         total,
         isLoadingMedia,

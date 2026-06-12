@@ -9,6 +9,7 @@ import {
     Link as LinkIcon,
     FileImage,
     Loader2,
+    Sparkles,
 } from "@lucide/vue";
 import { useMediaStore } from "@/stores/media";
 import { toast } from "@/components/ui/sonner";
@@ -379,6 +380,132 @@ const formatDate = (dateStr: string) => {
                                 >
                                 <div class="text-sm text-gray-700">
                                     {{ formatDate(currentPublishedTime) }}
+                                </div>
+                            </div>
+                        </div>
+
+                        <hr class="border-gray-100" />
+
+                        <!-- Match Details -->
+                        <div
+                            v-if="currentMediaItem?.matched_details"
+                            class="space-y-4 bg-gray-50/50 dark:bg-gray-900/10 p-4 rounded-xl border border-gray-100/80 dark:border-gray-800/40"
+                        >
+                            <h4
+                                class="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2 flex items-center gap-1.5"
+                            >
+                                <Sparkles class="w-3.5 h-3.5 text-amber-500 fill-amber-500/20" />
+                                {{ $t("search.matched_reason") }}
+                            </h4>
+
+                            <!-- Keyword Dimension -->
+                            <div v-if="currentMediaItem.matched_details.keyword" class="space-y-1">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                                    <span
+                                        class="text-xs font-semibold text-gray-950 dark:text-gray-50"
+                                        >{{ $t("search.keyword_search") }}</span
+                                    >
+                                </div>
+                                <p
+                                    class="text-[11px] text-gray-500 dark:text-gray-400 pl-3 leading-relaxed"
+                                >
+                                    {{ $t("search.keyword_search_tooltip") }}
+                                </p>
+                            </div>
+
+                            <!-- Text Embedding Dimension -->
+                            <div
+                                v-if="currentMediaItem.matched_details.text_semantic"
+                                class="space-y-1"
+                            >
+                                <div class="flex items-center justify-between gap-1.5">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+                                        <span
+                                            class="text-xs font-semibold text-gray-950 dark:text-gray-50"
+                                            >{{ $t("search.text_embedding") }}</span
+                                        >
+                                    </div>
+                                    <span
+                                        class="text-[10px] font-mono bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 px-1.5 py-0.5 rounded border border-purple-100/30"
+                                    >
+                                        d={{
+                                            currentMediaItem.matched_details.text_semantic.distance?.toFixed(
+                                                4,
+                                            )
+                                        }}
+                                    </span>
+                                </div>
+                                <p
+                                    v-if="currentMediaItem.matched_details.text_semantic.caption"
+                                    class="text-[11px] text-gray-600 dark:text-gray-400 pl-3 italic border-l-2 border-purple-100 dark:border-purple-900/30 my-1 py-0.5 leading-relaxed"
+                                >
+                                    "{{ currentMediaItem.matched_details.text_semantic.caption }}"
+                                </p>
+                            </div>
+
+                            <!-- Image Embedding Dimension -->
+                            <div
+                                v-if="currentMediaItem.matched_details.visual_semantic"
+                                class="space-y-1"
+                            >
+                                <div class="flex items-center justify-between gap-1.5">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                                        <span
+                                            class="text-xs font-semibold text-gray-950 dark:text-gray-50"
+                                            >{{ $t("search.image_embedding") }}</span
+                                        >
+                                    </div>
+                                    <span
+                                        class="text-[10px] font-mono bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded border border-amber-100/30"
+                                    >
+                                        d={{
+                                            currentMediaItem.matched_details.visual_semantic.distance?.toFixed(
+                                                4,
+                                            )
+                                        }}
+                                    </span>
+                                </div>
+                                <div
+                                    v-if="
+                                        currentMediaItem.matched_details.visual_semantic.scene ||
+                                        currentMediaItem.matched_details.visual_semantic.styles
+                                            ?.length
+                                    "
+                                    class="text-[11px] text-gray-600 dark:text-gray-400 pl-3 space-y-1 leading-relaxed"
+                                >
+                                    <div
+                                        v-if="
+                                            currentMediaItem.matched_details.visual_semantic.scene
+                                        "
+                                    >
+                                        <span class="text-gray-400 dark:text-gray-500"
+                                            >{{ $t("search.scene") }}:</span
+                                        >
+                                        {{ currentMediaItem.matched_details.visual_semantic.scene }}
+                                    </div>
+                                    <div
+                                        v-if="
+                                            currentMediaItem.matched_details.visual_semantic.styles
+                                                ?.length
+                                        "
+                                    >
+                                        <span class="text-gray-400 dark:text-gray-500"
+                                            >{{ $t("search.styles") }}:</span
+                                        >
+                                        <div class="flex flex-wrap gap-1 mt-0.5">
+                                            <span
+                                                v-for="style in currentMediaItem.matched_details
+                                                    .visual_semantic.styles"
+                                                :key="style"
+                                                class="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-1.5 py-0.5 rounded text-[10px]"
+                                            >
+                                                {{ style }}
+                                            </span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

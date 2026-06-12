@@ -35,6 +35,10 @@ const envSchema = z.object({
     S3_BUCKET: z.string().nonempty("S3_BUCKET is required"),
 
     CDN_BASE_URL: z.string(),
+    STORAGE_IS_PUBLIC: z
+        .string()
+        .default("false")
+        .transform((v) => v === "true"),
 
     QSTASH_URL: z.string().optional(),
     QSTASH_TOKEN: z.string().nonempty("QSTASH_TOKEN is required"),

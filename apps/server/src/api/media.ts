@@ -23,19 +23,9 @@ import { Library } from "@/db/schema";
 import { env } from "@/global/env";
 import { VideoCoverService } from "@/services/video_cover";
 import { buildCdnUrl } from "@/lib/utils/cdn";
+import { toIsoTimestamp } from "@/lib/utils/time";
 
 const router = new Hono<AuthEnv>();
-
-const toIsoTimestamp = (value: Temporal.Instant | string | null | undefined) => {
-    if (!value) return null;
-    if (value instanceof Temporal.Instant) {
-        return value.toString();
-    }
-
-    const normalized = value.includes("T") ? value : value.replace(" ", "T");
-    const withTimeZone = /(?:Z|[+-]\d{2}:\d{2})$/.test(normalized) ? normalized : `${normalized}Z`;
-    return Temporal.Instant.from(withTimeZone).toString();
-};
 
 export const MediaListRequestBodySchema = z.object({
     page: z.preprocess(
@@ -81,7 +71,9 @@ router.get(
         const where: SQL[] = [];
 
         if (keyword) {
-            where.push(ilike(Media.title, `%${keyword}%`));
+            where.push(
+                or(ilike(Media.title, `%${keyword}%`), ilike(Media.description, `%${keyword}%`))!,
+            );
         }
         if (source) {
             where.push(eq(Media.source, source));
@@ -405,7 +397,7 @@ router.post("/regenerate-covers", requireAuth, async (c) => {
             results.push({
                 mediaId: media.id,
                 status: res.status,
-                reason: res.status === "skipped" ? (res as any).reason : undefined,
+                reason: res.status === "skipped" ? res.reason : undefined,
             });
         } catch (err: any) {
             failed++;

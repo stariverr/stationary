@@ -22,9 +22,30 @@ export const usePostStore = defineStore("posts", () => {
     // Pinia State for UI - Initialized from URL
     const selectedPostId = ref<string | number | null>(null);
     const keyword = ref((route.query.keyword as string) || "");
+    const searchKeyword = ref(keyword.value);
     const source = ref<string | undefined>((route.query.source as string) || undefined);
     const page = ref(parseInt(route.query.page as string) || 1);
     const count = ref(20);
+
+    // Debounce keyword search to prevent spamming backend requests
+    let debounceTimeout: any = null;
+    watch(keyword, (newVal) => {
+        if (debounceTimeout) clearTimeout(debounceTimeout);
+        if (!newVal) {
+            searchKeyword.value = "";
+            page.value = 1;
+            return;
+        }
+        debounceTimeout = setTimeout(() => {
+            searchKeyword.value = newVal;
+            page.value = 1;
+        }, 500);
+    });
+
+    // Reset page to 1 when search filters change
+    watch(source, () => {
+        page.value = 1;
+    });
 
     // Reset page to 1 when library changes
     watch(
@@ -35,21 +56,39 @@ export const usePostStore = defineStore("posts", () => {
     );
 
     // Synchronize URL query parameters with internal state
+    // Synchronize URL query parameters with internal state
     watch(
         () => ({ keyword: keyword.value, source: source.value, page: page.value }),
         ({ keyword: newKeyword, source: newSource, page: newPage }) => {
             const query = { ...route.query };
+            let changed = false;
 
-            if (newKeyword) query.keyword = newKeyword;
-            else delete query.keyword;
+            if ("is_ai" in query) {
+                delete query.is_ai;
+                changed = true;
+            }
 
-            if (newSource) query.source = newSource;
-            else delete query.source;
+            const updateParam = (key: string, value: string | undefined) => {
+                if (value !== undefined) {
+                    if (query[key] !== value) {
+                        query[key] = value;
+                        changed = true;
+                    }
+                } else {
+                    if (query[key] !== undefined) {
+                        delete query[key];
+                        changed = true;
+                    }
+                }
+            };
 
-            if (newPage && newPage > 1) query.page = newPage.toString();
-            else delete query.page;
+            updateParam("keyword", newKeyword || undefined);
+            updateParam("source", newSource);
+            updateParam("page", newPage && newPage > 1 ? newPage.toString() : undefined);
 
-            router.push({ query });
+            if (changed) {
+                router.push({ query });
+            }
         },
     );
 
@@ -57,6 +96,12 @@ export const usePostStore = defineStore("posts", () => {
     watch(
         () => route.query,
         (newQuery) => {
+            if ("is_ai" in newQuery) {
+                const query = { ...newQuery };
+                delete query.is_ai;
+                router.replace({ query });
+                return;
+            }
             if (newQuery.keyword !== undefined && newQuery.keyword !== keyword.value) {
                 keyword.value = (newQuery.keyword as string) || "";
             }
@@ -112,6 +157,8 @@ export const usePostStore = defineStore("posts", () => {
         };
     };
 
+    const isListEnabled = computed(() => route.path.startsWith("/posts"));
+
     // TanStack Query for Posts List
     const {
         data: postsData,
@@ -123,11 +170,12 @@ export const usePostStore = defineStore("posts", () => {
             {
                 page: page.value,
                 count: count.value,
-                keyword: keyword.value,
+                keyword: searchKeyword.value,
                 source: source.value,
                 library_id: libraryStore.activeLibraryId,
             },
         ]),
+        enabled: isListEnabled,
         placeholderData: keepPreviousData,
         queryFn: async () => {
             const response = await useApi<{
@@ -137,7 +185,7 @@ export const usePostStore = defineStore("posts", () => {
                 query: {
                     page: page.value,
                     count: count.value,
-                    keyword: keyword.value,
+                    keyword: searchKeyword.value,
                     source: source.value,
                     library_id: libraryStore.activeLibraryId,
                 },
@@ -168,15 +216,16 @@ export const usePostStore = defineStore("posts", () => {
                 const detail = response.data;
                 const displayTime = detail.published_time ?? detail.create_time;
 
-                const uiMedia = detail.media?.map((m) => {
-                    return {
-                        ...m,
-                        type: m.type as "VIDEO" | "IMAGE" | "LIVE_PHOTO",
-                        url: m.primary_file_url || null,
-                        thumbnail: m.cover_file_url || null,
-                        live_url: m.live_photo_video_url || null,
-                    };
-                }) || [];
+                const uiMedia =
+                    detail.media?.map((m) => {
+                        return {
+                            ...m,
+                            type: m.type as "VIDEO" | "IMAGE" | "LIVE_PHOTO",
+                            url: m.primary_file_url || null,
+                            thumbnail: m.cover_file_url || null,
+                            live_url: m.live_photo_video_url || null,
+                        };
+                    }) || [];
 
                 return {
                     ...detail,
@@ -202,9 +251,7 @@ export const usePostStore = defineStore("posts", () => {
                     width: 1080,
                     height: 1920,
                     type: detail.type as "TEXT" | "MULTI_MEDIA",
-                    originalUrl:
-                        detail.url ||
-                        (uiMedia.length ? uiMedia[0]?.url || "" : ""),
+                    originalUrl: detail.url || (uiMedia.length ? uiMedia[0]?.url || "" : ""),
                     media: uiMedia,
                 } as Post;
             }

@@ -46,7 +46,7 @@ export enum MediaType {
     VIDEO = "VIDEO",
     LIVE_PHOTO = "LIVE_PHOTO",
 }
-const MediaTypeEnum = pgEnum("media_type", [
+export const MediaTypeEnum = pgEnum("media_type", [
     MediaType.IMAGE,
     MediaType.VIDEO,
     MediaType.LIVE_PHOTO,
@@ -61,7 +61,7 @@ export enum PostSource {
     TIKTOK = "TIKTOK",
     INSTAGRAM = "INSTAGRAM",
 }
-const PostSourceEnum = pgEnum("post_source", [
+export const PostSourceEnum = pgEnum("post_source", [
     PostSource.UNKNOWN,
     PostSource.X,
     PostSource.XHS,
@@ -77,7 +77,7 @@ export enum SyncStatus {
     COMPLETED = "COMPLETED",
     FAILED = "FAILED",
 }
-const SyncStatusEnum = pgEnum("sync_status", [
+export const SyncStatusEnum = pgEnum("sync_status", [
     SyncStatus.PENDING,
     SyncStatus.IN_PROGRESS,
     SyncStatus.COMPLETED,
@@ -90,7 +90,7 @@ export enum MediaFileRole {
     COVER = "COVER",
     LIVE_PHOTO_VIDEO = "LIVE_PHOTO_VIDEO",
 }
-const MediaFileRoleEnum = pgEnum("media_file_role", [
+export const MediaFileRoleEnum = pgEnum("media_file_role", [
     MediaFileRole.PRIMARY,
     MediaFileRole.ALTERNATIVE,
     MediaFileRole.COVER,
@@ -105,7 +105,7 @@ export enum AccessRole {
     EDITOR = "EDITOR",
     ADMIN = "ADMIN",
 }
-const AccessRoleEnum = pgEnum("access_role", [
+export const AccessRoleEnum = pgEnum("access_role", [
     AccessRole.VIEWER,
     AccessRole.EDITOR,
     AccessRole.ADMIN,
@@ -121,7 +121,7 @@ export enum DeleteStatus {
     DELETED = "DELETED",
     PURGED = "PURGED",
 }
-const DeleteStatusEnum = pgEnum("delete_status", [
+export const DeleteStatusEnum = pgEnum("delete_status", [
     DeleteStatus.ACTIVE,
     DeleteStatus.DELETED,
     DeleteStatus.PURGED,
@@ -160,6 +160,17 @@ export const Library = pgTable("library", {
     owner_id: uuid("owner_id").notNull(),
     /** 是否公开 */
     is_public: boolean("is_public").default(false).notNull(),
+    ai_provider: text("ai_provider"),
+    openai_api_key: text("openai_api_key"),
+    openai_base_url: text("openai_base_url"),
+    openai_model_embedding_text: text("openai_model_embedding_text"),
+    openai_model_embedding_text_map_to: text("openai_model_embedding_text_map_to"),
+    openai_model_embedding_image: text("openai_model_embedding_image"),
+    openai_model_embedding_image_map_to: text("openai_model_embedding_image_map_to"),
+    openai_model_describe_image: text("openai_model_describe_image"),
+    openai_model_describe_image_map_to: text("openai_model_describe_image_map_to"),
+    gemini_api_key: text("gemini_api_key"),
+    gemini_base_url: text("gemini_base_url"),
     create_time: temporal("create_time")
         .default(sql`now()`)
         .notNull(),
@@ -491,3 +502,241 @@ export const BetterVerification = pgTable("better_verification", {
 });
 
 // ==== Better Auth Tables: END ====
+
+// ==== AI & Search Tables: START ====
+
+// Generic unconstrained vector type for pgvector
+export const genericVector = customType<{ data: number[] }>({
+    dataType() {
+        return "vector";
+    },
+    fromDriver(value: unknown) {
+        if (typeof value === "string") {
+            return value.slice(1, -1).split(",").map(Number);
+        }
+        return value as number[];
+    },
+    toDriver(value: number[]) {
+        return `[${value.join(",")}]`;
+    },
+});
+
+// Enums
+export enum ModalityType {
+    TEXT = "TEXT",
+    IMAGE = "IMAGE",
+    VIDEO_FRAME = "VIDEO_FRAME",
+    AUDIO = "AUDIO",
+}
+export const ModalityEnum = pgEnum("modality_type", [
+    ModalityType.TEXT,
+    ModalityType.IMAGE,
+    ModalityType.VIDEO_FRAME,
+    ModalityType.AUDIO,
+]);
+
+// NOTE: Reserved for future vector space model migration and upgrade management. Currently unused.
+export enum EmbeddingSpaceStatus {
+    ACTIVE = "ACTIVE",
+    DEPRECATED = "DEPRECATED",
+    EXPERIMENTAL = "EXPERIMENTAL",
+}
+export const EmbeddingSpaceStatusEnum = pgEnum("embedding_space_status", [
+    EmbeddingSpaceStatus.ACTIVE,
+    EmbeddingSpaceStatus.DEPRECATED,
+    EmbeddingSpaceStatus.EXPERIMENTAL,
+]);
+
+export enum EntityType {
+    POST = "POST",
+    MEDIA = "MEDIA",
+}
+export const EntityTypeEnum = pgEnum("entity_type", [EntityType.POST, EntityType.MEDIA]);
+
+/** Kind of Embeddings Vector Space
+ * - `TEXT`: Text-only Embeddings
+ * - `MULTI_MODAL`: Embeddings for Multi-modal data
+ */
+export enum VectorSpaceKind {
+    TEXT = "TEXT",
+    MULTI_MODAL = "MULTI_MODAL",
+}
+export const VectorSpaceKindEnum = pgEnum("space_kind", [
+    VectorSpaceKind.TEXT,
+    VectorSpaceKind.MULTI_MODAL,
+]);
+
+export enum MetricType {
+    COSINE = "COSINE",
+    INNER_PRODUCT = "INNER_PRODUCT",
+    L2 = "L2",
+}
+export const MetricTypeEnum = pgEnum("metric_type", [
+    MetricType.COSINE,
+    MetricType.INNER_PRODUCT,
+    MetricType.L2,
+]);
+
+export enum EmbeddingRole {
+    CONTENT_TEXT = "CONTENT_TEXT",
+    AI_CAPTION = "AI_CAPTION",
+    IMAGE_PRIMARY = "IMAGE_PRIMARY",
+    VIDEO_KEYFRAME = "VIDEO_KEYFRAME",
+    OCR_TEXT = "OCR_TEXT",
+}
+export const EmbeddingRoleEnum = pgEnum("embedding_role", [
+    EmbeddingRole.CONTENT_TEXT,
+    EmbeddingRole.AI_CAPTION,
+    EmbeddingRole.IMAGE_PRIMARY,
+    EmbeddingRole.VIDEO_KEYFRAME,
+    EmbeddingRole.OCR_TEXT,
+]);
+
+export enum EmbeddingStatus {
+    READY = "READY",
+    STALE = "STALE",
+    FAILED = "FAILED",
+    DISABLED = "DISABLED",
+}
+export const EmbeddingStatusEnum = pgEnum("embedding_status", [
+    EmbeddingStatus.READY,
+    EmbeddingStatus.STALE,
+    EmbeddingStatus.FAILED,
+    EmbeddingStatus.DISABLED,
+]);
+
+export enum ProcessingStatus {
+    PENDING = "PENDING",
+    IN_PROGRESS = "IN_PROGRESS",
+    COMPLETED = "COMPLETED",
+    FAILED = "FAILED",
+}
+export const ProcessingStatusEnum = pgEnum("processing_status", [
+    ProcessingStatus.PENDING,
+    ProcessingStatus.IN_PROGRESS,
+    ProcessingStatus.COMPLETED,
+    ProcessingStatus.FAILED,
+]);
+
+// TODO: Reserved for future vector space upgrades, model migrations,
+// and background re-indexing status management (e.g., ACTIVE -> DEPRECATED).
+// Currently unused; space IDs and model metadata are derived dynamically in code.
+export const EmbeddingSpace = pgTable("embedding_space", {
+    id: text("id").primaryKey(), // e.g. "gemini:multimodal-embedding-004:1408:cosine:v1"
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    model_version: text("model_version").notNull(),
+    dimension: integer("dimension").notNull(),
+    space_kind: VectorSpaceKindEnum("space_kind").notNull(),
+    metric: MetricTypeEnum("metric").notNull(),
+    status: EmbeddingSpaceStatusEnum("status").default(EmbeddingSpaceStatus.ACTIVE).notNull(),
+    config: jsonb("config").default({}).notNull(),
+    create_time: temporal("create_time")
+        .default(sql`now()`)
+        .notNull(),
+    update_time: temporal("update_time"),
+});
+
+export const AssetSearchDocument = pgTable(
+    "asset_search_document",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        library_id: uuid("library_id").notNull(),
+        entity_type: EntityTypeEnum("entity_type").notNull(),
+        entity_id: uuid("entity_id").notNull(),
+        source: text("source").notNull(),
+        media_type: text("media_type"),
+        title: text("title").notNull().default(""),
+        content: text("content").notNull().default(""),
+        tags: jsonb("tags").$type<string[]>().default([]).notNull(),
+        ai_tags: jsonb("ai_tags").$type<string[]>().default([]).notNull(),
+        author_name: text("author_name").default("").notNull(),
+        published_time: temporal("published_time"),
+        content_hash: text("content_hash").notNull(),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        update_time: temporal("update_time"),
+    },
+    (table) => [uniqueIndex("search_doc_entity_unique").on(table.entity_type, table.entity_id)],
+);
+
+export const AssetAiMetadata = pgTable(
+    "asset_ai_metadata",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        library_id: uuid("library_id").notNull(),
+        entity_type: EntityTypeEnum("entity_type").notNull(),
+        entity_id: uuid("entity_id").notNull(),
+        caption: text("caption").default("").notNull(),
+        summary: text("summary").default("").notNull(),
+        tags: jsonb("tags").$type<string[]>().default([]).notNull(),
+        objects: jsonb("objects").$type<string[]>().default([]).notNull(),
+        colors: jsonb("colors").$type<string[]>().default([]).notNull(),
+        styles: jsonb("styles").$type<string[]>().default([]).notNull(),
+        scene: text("scene").default("").notNull(),
+        ocr_text: text("ocr_text").default("").notNull(),
+        model: text("model").notNull(),
+        metadata_pipeline_id: text("metadata_pipeline_id").notNull(),
+        processing_status: ProcessingStatusEnum("processing_status")
+            .default(ProcessingStatus.PENDING)
+            .notNull(),
+        last_error: text("last_error"),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        update_time: temporal("update_time"),
+    },
+    (table) => [
+        uniqueIndex("ai_metadata_entity_pipeline_unique").on(
+            table.entity_type,
+            table.entity_id,
+            table.metadata_pipeline_id,
+        ),
+    ],
+);
+
+export const AssetEmbedding = pgTable(
+    "asset_embedding",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        library_id: uuid("library_id").notNull(),
+        entity_type: EntityTypeEnum("entity_type").notNull(),
+        entity_id: uuid("entity_id").notNull(),
+        document_id: uuid("document_id"),
+        embedding_space_id: text("embedding_space_id").notNull(),
+        embedding_role: EmbeddingRoleEnum("embedding_role").notNull(),
+        input_modality: ModalityEnum("input_modality").notNull(),
+        dimension: integer("dimension").notNull(),
+        embedding: genericVector("embedding").notNull(),
+        content_hash: text("content_hash").notNull(),
+        source_file_id: uuid("source_file_id"),
+        embedding_status: EmbeddingStatusEnum("embedding_status")
+            .default(EmbeddingStatus.READY)
+            .notNull(),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        update_time: temporal("update_time"),
+    },
+    (table) => [
+        uniqueIndex("asset_emb_unique").on(
+            table.entity_type,
+            table.entity_id,
+            table.embedding_space_id,
+            table.embedding_role,
+            table.content_hash,
+        ),
+    ],
+);
+
+// ==== AI & Search Tables: END ====

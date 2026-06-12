@@ -149,7 +149,7 @@ export const VideoCoverService = {
                 (!!cover.source_url || (!!cover.file_id && cover.sync_status === "COMPLETED"));
 
             let needsRegeneration = false;
-            if (cover && cover.metadata && (cover.metadata as any).generated) {
+            if (cover && (cover.metadata as any)?.generated) {
                 const lastPrimaryId = (cover.metadata as any).primary_file_id;
                 if (lastPrimaryId !== primary.file_id) {
                     needsRegeneration = true;

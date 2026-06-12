@@ -21,7 +21,11 @@
         "collapse": "Collapse",
         "expand": "Expand",
         "no_description": "No description available.",
-        "search": "Search posts...",
+        "search": "Search...",
+        "ai_search": "AI Search",
+        "classic_search": "Classic Search",
+        "ai_search_tooltip": "Enable AI semantic search",
+        "classic_search_tooltip": "Perform traditional keyword search only",
         "settings": "Settings"
     },
     "grid": {
@@ -46,7 +50,8 @@
             "general": "General",
             "appearance": "Appearance",
             "account": "Account",
-            "api_keys": "API Keys"
+            "api_keys": "API Keys",
+            "ai_config": "AI Config"
         },
         "general": {
             "title": "General Settings",
@@ -110,6 +115,37 @@
             "expires_label": "Expires: {date}",
             "last_used_label": "Last used: {date}",
             "never_used": "Never used"
+        },
+        "ai_config": {
+            "title": "AI Processing & Search Config",
+            "desc": "Configure AI services per library to enable smart image description, text/image vector embeddings, and hybrid semantic retrieval.",
+            "library_select": "Select Target Library",
+            "provider": "AI Provider",
+            "provider_disabled": "Disable AI (None)",
+            "provider_gemini": "Google Gemini",
+            "provider_openai": "OpenAI (Compatible API)",
+            "api_key": "API Key",
+            "api_key_placeholder": "Enter API Key",
+            "base_url": "API Base URL (Proxy)",
+            "base_url_placeholder": "Optional, e.g. https://api.openai.com/v1",
+            "text_embedding_model": "Text Embedding Model",
+            "text_embedding_model_placeholder": "Default: text-embedding-3-small",
+            "text_embedding_dim": "Text Model Mapping (Map To)",
+            "text_embedding_dim_placeholder": "Default: text-embedding-3-small",
+            "image_embedding_model": "Image Embedding Model",
+            "image_embedding_model_placeholder": "Default: clip-vit-base-patch32",
+            "image_embedding_dim": "Image Model Mapping (Map To)",
+            "image_embedding_dim_placeholder": "Default: clip-vit-base-patch32",
+            "describe_image_model": "Image Caption Model",
+            "describe_image_model_placeholder": "Default: gpt-4o-mini",
+            "describe_image_dim": "Image Caption Mapping (Map To)",
+            "describe_image_dim_placeholder": "Default: gpt-4o-mini",
+            "save_btn": "Save Config",
+            "saving": "Saving...",
+            "save_success": "AI configuration saved successfully!",
+            "err_load": "Failed to load AI configuration",
+            "err_save": "Failed to save AI configuration",
+            "loading": "Loading configuration..."
         }
     },
     "media": {
@@ -126,5 +162,15 @@
             "failed": "Failed to queue cover regeneration.",
             "loading": "Requesting..."
         }
+    },
+    "search": {
+        "matched_reason": "Match Details",
+        "matched_via": "Matched via",
+        "keyword_search": "Keyword Search (FTS/Fuzzy Search)",
+        "keyword_search_tooltip": "Matches title and description keywords",
+        "image_embedding": "Image Embedding Search",
+        "text_embedding": "Text Embedding Search",
+        "scene": "Scene Description",
+        "styles": "Style Tags"
     }
 }

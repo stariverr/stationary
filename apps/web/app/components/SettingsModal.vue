@@ -40,6 +40,7 @@ import {
     AlertTriangle,
     Calendar,
     Layers,
+    Sparkles,
 } from "@lucide/vue";
 
 const props = defineProps({
@@ -146,6 +147,13 @@ watch(
             newTokenExpiresIn.value = "0";
             generatedToken.value = null;
             justCopied.value = false;
+
+            // Initialize selectedLibraryId for AI configuration
+            if (libraryStore.activeLibraryId) {
+                selectedLibraryId.value = libraryStore.activeLibraryId;
+            } else if (libraryStore.libraries.length > 0) {
+                selectedLibraryId.value = libraryStore.libraries[0]?.id || "";
+            }
         }
     },
 );
@@ -233,6 +241,91 @@ const formatDate = (dateStr: string | null | undefined) => {
         minute: "2-digit",
     });
 };
+
+// --- AI Config State and Management logic ---
+const selectedLibraryId = ref<string>("");
+const isFetchingConfig = ref(false);
+const isSavingConfig = ref(false);
+
+const aiConfig = ref<any>({
+    ai_provider: null,
+    openai_api_key: "",
+    openai_base_url: "",
+    openai_model_embedding_text: "",
+    openai_model_embedding_text_map_to: "",
+    openai_model_embedding_image: "",
+    openai_model_embedding_image_map_to: "",
+    openai_model_describe_image: "",
+    openai_model_describe_image_map_to: "",
+    gemini_api_key: "",
+    gemini_base_url: "",
+});
+
+const fetchAiConfig = async () => {
+    if (!selectedLibraryId.value) return;
+    isFetchingConfig.value = true;
+    try {
+        const res = await useApi<any>(`/library/${selectedLibraryId.value}/ai-config`);
+        if (res && res.success) {
+            aiConfig.value = {
+                ai_provider: res.data.ai_provider || null,
+                openai_api_key: res.data.openai_api_key || "",
+                openai_base_url: res.data.openai_base_url || "",
+                openai_model_embedding_text: res.data.openai_model_embedding_text || "",
+                openai_model_embedding_text_map_to:
+                    res.data.openai_model_embedding_text_map_to || "",
+                openai_model_embedding_image: res.data.openai_model_embedding_image || "",
+                openai_model_embedding_image_map_to:
+                    res.data.openai_model_embedding_image_map_to || "",
+                openai_model_describe_image: res.data.openai_model_describe_image || "",
+                openai_model_describe_image_map_to:
+                    res.data.openai_model_describe_image_map_to || "",
+                gemini_api_key: res.data.gemini_api_key || "",
+                gemini_base_url: res.data.gemini_base_url || "",
+            };
+        }
+    } catch (err: any) {
+        console.error("Failed to fetch AI configuration", err);
+        toast.error(t("settings.ai_config.err_load"));
+    } finally {
+        isFetchingConfig.value = false;
+    }
+};
+
+const saveAiConfig = async () => {
+    if (!selectedLibraryId.value) return;
+    isSavingConfig.value = true;
+    try {
+        const payload = { ...aiConfig.value };
+        for (const key in payload) {
+            if (payload[key] === "") {
+                payload[key] = null;
+            }
+        }
+        const res = await useApi<any>(`/library/${selectedLibraryId.value}/ai-config`, {
+            method: "POST",
+            body: payload,
+        });
+        if (res && res.success) {
+            toast.success(t("settings.ai_config.save_success"));
+            await fetchAiConfig();
+        }
+    } catch (err: any) {
+        console.error("Failed to save AI configuration", err);
+        toast.error(t("settings.ai_config.err_save"));
+    } finally {
+        isSavingConfig.value = false;
+    }
+};
+
+watch(
+    () => selectedLibraryId.value,
+    (newId) => {
+        if (newId) {
+            fetchAiConfig();
+        }
+    },
+);
 </script>
 
 <template>
@@ -247,7 +340,7 @@ const formatDate = (dateStr: string | null | undefined) => {
 
             <div class="p-6 overflow-y-auto max-h-[80vh]">
                 <Tabs default-value="general" class="w-full">
-                    <TabsList class="grid w-full grid-cols-4 mb-6">
+                    <TabsList class="grid w-full grid-cols-5 mb-6">
                         <TabsTrigger value="general">
                             {{ $t("settings.tabs.general") }}
                         </TabsTrigger>
@@ -259,6 +352,9 @@ const formatDate = (dateStr: string | null | undefined) => {
                         </TabsTrigger>
                         <TabsTrigger value="apikeys">
                             {{ $t("settings.tabs.api_keys") }}
+                        </TabsTrigger>
+                        <TabsTrigger value="aiconfig">
+                            {{ $t("settings.tabs.ai_config") }}
                         </TabsTrigger>
                     </TabsList>
 
@@ -396,10 +492,7 @@ const formatDate = (dateStr: string | null | undefined) => {
                                         <AvatarFallback
                                             class="bg-blue-100 text-blue-700 text-xl font-bold"
                                         >
-                                            {{
-                                                displayName.charAt(0)?.toUpperCase() ||
-                                                "U"
-                                            }}
+                                            {{ displayName.charAt(0)?.toUpperCase() || "U" }}
                                         </AvatarFallback>
                                     </Avatar>
                                     <div class="space-y-1">
@@ -701,6 +794,270 @@ const formatDate = (dateStr: string | null | undefined) => {
                                     </CardContent>
                                 </Card>
                             </template>
+                        </div>
+                    </TabsContent>
+
+                    <TabsContent value="aiconfig">
+                        <div class="grid gap-6">
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>{{ $t("settings.ai_config.title") }}</CardTitle>
+                                    <CardDescription>
+                                        {{ $t("settings.ai_config.desc") }}
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent class="grid gap-4">
+                                    <div class="grid gap-2">
+                                        <Label>{{ $t("settings.ai_config.library_select") }}</Label>
+                                        <Select v-model="selectedLibraryId">
+                                            <SelectTrigger>
+                                                <SelectValue placeholder="Select target library" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectGroup>
+                                                    <SelectItem
+                                                        v-for="lib in libraryStore.libraries"
+                                                        :key="lib.id"
+                                                        :value="lib.id"
+                                                    >
+                                                        {{ lib.name }}
+                                                    </SelectItem>
+                                                </SelectGroup>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+
+                                    <div
+                                        v-if="isFetchingConfig"
+                                        class="flex flex-col items-center justify-center py-10 text-muted-foreground"
+                                    >
+                                        <Loader2 class="w-8 h-8 animate-spin mb-2" />
+                                        <p class="text-sm">
+                                            {{ $t("settings.ai_config.loading") }}
+                                        </p>
+                                    </div>
+
+                                    <template v-else-if="selectedLibraryId">
+                                        <div class="grid gap-2">
+                                            <Label>{{ $t("settings.ai_config.provider") }}</Label>
+                                            <Select v-model="aiConfig.ai_provider">
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Select AI provider" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectGroup>
+                                                        <SelectItem :value="null">
+                                                            {{
+                                                                $t(
+                                                                    "settings.ai_config.provider_disabled",
+                                                                )
+                                                            }}
+                                                        </SelectItem>
+                                                        <SelectItem value="gemini">
+                                                            {{
+                                                                $t(
+                                                                    "settings.ai_config.provider_gemini",
+                                                                )
+                                                            }}
+                                                        </SelectItem>
+                                                        <SelectItem value="openai">
+                                                            {{
+                                                                $t(
+                                                                    "settings.ai_config.provider_openai",
+                                                                )
+                                                            }}
+                                                        </SelectItem>
+                                                    </SelectGroup>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div
+                                            v-if="aiConfig.ai_provider === 'gemini'"
+                                            class="grid gap-4 border-t pt-4 mt-2"
+                                        >
+                                            <div class="grid gap-2">
+                                                <Label>{{
+                                                    $t("settings.ai_config.api_key")
+                                                }}</Label>
+                                                <Input
+                                                    type="password"
+                                                    v-model="aiConfig.gemini_api_key"
+                                                    :placeholder="
+                                                        $t('settings.ai_config.api_key_placeholder')
+                                                    "
+                                                />
+                                            </div>
+                                            <div class="grid gap-2">
+                                                <Label>{{
+                                                    $t("settings.ai_config.base_url")
+                                                }}</Label>
+                                                <Input
+                                                    v-model="aiConfig.gemini_base_url"
+                                                    :placeholder="
+                                                        $t(
+                                                            'settings.ai_config.base_url_placeholder',
+                                                        )
+                                                    "
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div
+                                            v-else-if="aiConfig.ai_provider === 'openai'"
+                                            class="grid gap-4 border-t pt-4 mt-2"
+                                        >
+                                            <div class="grid gap-2">
+                                                <Label>{{
+                                                    $t("settings.ai_config.api_key")
+                                                }}</Label>
+                                                <Input
+                                                    type="password"
+                                                    v-model="aiConfig.openai_api_key"
+                                                    :placeholder="
+                                                        $t('settings.ai_config.api_key_placeholder')
+                                                    "
+                                                />
+                                            </div>
+                                            <div class="grid gap-2">
+                                                <Label>{{
+                                                    $t("settings.ai_config.base_url")
+                                                }}</Label>
+                                                <Input
+                                                    v-model="aiConfig.openai_base_url"
+                                                    :placeholder="
+                                                        $t(
+                                                            'settings.ai_config.base_url_placeholder',
+                                                        )
+                                                    "
+                                                />
+                                            </div>
+
+                                            <div class="grid grid-cols-2 gap-4">
+                                                <div class="grid gap-2">
+                                                    <Label>{{
+                                                        $t(
+                                                            "settings.ai_config.text_embedding_model",
+                                                        )
+                                                    }}</Label>
+                                                    <Input
+                                                        v-model="
+                                                            aiConfig.openai_model_embedding_text
+                                                        "
+                                                        :placeholder="
+                                                            $t(
+                                                                'settings.ai_config.text_embedding_model_placeholder',
+                                                            )
+                                                        "
+                                                    />
+                                                </div>
+                                                <div class="grid gap-2">
+                                                    <Label>{{
+                                                        $t("settings.ai_config.text_embedding_dim")
+                                                    }}</Label>
+                                                    <Input
+                                                        v-model="
+                                                            aiConfig.openai_model_embedding_text_map_to
+                                                        "
+                                                        :placeholder="
+                                                            $t(
+                                                                'settings.ai_config.text_embedding_dim_placeholder',
+                                                            )
+                                                        "
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div class="grid grid-cols-2 gap-4">
+                                                <div class="grid gap-2">
+                                                    <Label>{{
+                                                        $t(
+                                                            "settings.ai_config.image_embedding_model",
+                                                        )
+                                                    }}</Label>
+                                                    <Input
+                                                        v-model="
+                                                            aiConfig.openai_model_embedding_image
+                                                        "
+                                                        :placeholder="
+                                                            $t(
+                                                                'settings.ai_config.image_embedding_model_placeholder',
+                                                            )
+                                                        "
+                                                    />
+                                                </div>
+                                                <div class="grid gap-2">
+                                                    <Label>{{
+                                                        $t("settings.ai_config.image_embedding_dim")
+                                                    }}</Label>
+                                                    <Input
+                                                        v-model="
+                                                            aiConfig.openai_model_embedding_image_map_to
+                                                        "
+                                                        :placeholder="
+                                                            $t(
+                                                                'settings.ai_config.image_embedding_dim_placeholder',
+                                                            )
+                                                        "
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div class="grid grid-cols-2 gap-4">
+                                                <div class="grid gap-2">
+                                                    <Label>{{
+                                                        $t(
+                                                            "settings.ai_config.describe_image_model",
+                                                        )
+                                                    }}</Label>
+                                                    <Input
+                                                        v-model="
+                                                            aiConfig.openai_model_describe_image
+                                                        "
+                                                        :placeholder="
+                                                            $t(
+                                                                'settings.ai_config.describe_image_model_placeholder',
+                                                            )
+                                                        "
+                                                    />
+                                                </div>
+                                                <div class="grid gap-2">
+                                                    <Label>{{
+                                                        $t("settings.ai_config.describe_image_dim")
+                                                    }}</Label>
+                                                    <Input
+                                                        v-model="
+                                                            aiConfig.openai_model_describe_image_map_to
+                                                        "
+                                                        :placeholder="
+                                                            $t(
+                                                                'settings.ai_config.describe_image_dim_placeholder',
+                                                            )
+                                                        "
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <Button
+                                            class="w-full mt-4"
+                                            :disabled="isSavingConfig"
+                                            @click="saveAiConfig"
+                                        >
+                                            <Loader2
+                                                v-if="isSavingConfig"
+                                                class="w-4 h-4 mr-2 animate-spin"
+                                            />
+                                            <Sparkles v-else class="w-4 h-4 mr-2" />
+                                            {{
+                                                isSavingConfig
+                                                    ? $t("settings.ai_config.saving")
+                                                    : $t("settings.ai_config.save_btn")
+                                            }}
+                                        </Button>
+                                    </template>
+                                </CardContent>
+                            </Card>
                         </div>
                     </TabsContent>
                 </Tabs>
