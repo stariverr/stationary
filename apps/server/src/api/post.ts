@@ -13,6 +13,8 @@ import {
     DeleteStatus,
     PostSource,
     MediaFileRole,
+    AssetAiMetadata,
+    EntityType,
 } from "@/db/schema";
 import { and, eq, ilike, SQL, count, asc, sql, isNull, inArray, lte } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -97,6 +99,8 @@ router.get(
                 create_time: Post.create_time,
                 published_time: Post.published_time,
                 url: Post.url,
+                sync_status: Post.sync_status,
+                last_error: Post.last_error,
             })
             .from(Post)
             .where(and(activePostFilter, ...where))
@@ -116,6 +120,10 @@ router.get(
             cover_file_url: string | null;
             create_time: string | null;
             published_time: string | null;
+            sync_status: string;
+            last_error: string | null;
+            ai_status: string;
+            ai_error: string | null;
         }
 
         const postIds = rawPosts.map((p) => p.id);
@@ -143,6 +151,10 @@ router.get(
                     primary_file_bucket: primaryDbFile.bucket,
                     cover_file_path: coverDbFile.path,
                     cover_file_bucket: coverDbFile.bucket,
+                    sync_status: Media.sync_status,
+                    last_error: Media.last_error,
+                    ai_status: AssetAiMetadata.processing_status,
+                    ai_error: AssetAiMetadata.last_error,
                 })
                 .from(Media)
                 .leftJoin(
@@ -161,6 +173,13 @@ router.get(
                     ),
                 )
                 .leftJoin(coverDbFile, eq(coverMediaFile.file_id, coverDbFile.id))
+                .leftJoin(
+                    AssetAiMetadata,
+                    and(
+                        eq(Media.id, AssetAiMetadata.entity_id),
+                        eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
+                    ),
+                )
                 .where(
                     and(
                         inArray(Media.post_id, postIds),
@@ -187,6 +206,10 @@ router.get(
                     cover_file_url: buildCdnUrl(row.cover_file_bucket, row.cover_file_path),
                     create_time: toIsoTimestamp(row.create_time),
                     published_time: toIsoTimestamp(row.published_time),
+                    sync_status: row.sync_status,
+                    last_error: row.last_error,
+                    ai_status: row.ai_status ?? "PENDING",
+                    ai_error: row.ai_error,
                 });
             }
         }
@@ -208,6 +231,8 @@ router.get(
                 create_time: toIsoTimestamp(post.create_time),
                 published_time: toIsoTimestamp(post.published_time),
                 url: post.url,
+                sync_status: post.sync_status,
+                last_error: post.last_error,
                 media: postMedia,
             };
         });
@@ -247,6 +272,8 @@ export const PostDetailResponseBodySchema = z.object({
     media_count: z.number().optional(),
     type: z.enum(["TEXT", "MULTI_MEDIA"]).optional(),
     url: z.string().nullable().optional(),
+    sync_status: z.string().optional(),
+    last_error: z.string().nullable().optional(),
     media: z
         .array(
             z.object({
@@ -263,6 +290,10 @@ export const PostDetailResponseBodySchema = z.object({
                 cover_file_url: z.string().nullable().optional(),
                 create_time: z.string().optional(),
                 published_time: z.string().nullable().optional(),
+                sync_status: z.string().optional(),
+                last_error: z.string().nullable().optional(),
+                ai_status: z.string().optional(),
+                ai_error: z.string().nullable().optional(),
             }),
         )
         .optional(),
@@ -307,10 +338,21 @@ router.get(
                 file_role: MediaFile.role,
                 file_path: DbFile.path,
                 file_bucket: DbFile.bucket,
+                sync_status: Media.sync_status,
+                last_error: Media.last_error,
+                ai_status: AssetAiMetadata.processing_status,
+                ai_error: AssetAiMetadata.last_error,
             })
             .from(Media)
             .leftJoin(MediaFile, eq(Media.id, MediaFile.media_id))
             .leftJoin(DbFile, eq(MediaFile.file_id, DbFile.id))
+            .leftJoin(
+                AssetAiMetadata,
+                and(
+                    eq(Media.id, AssetAiMetadata.entity_id),
+                    eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
+                ),
+            )
             .where(and(eq(Media.post_id, id), activeMediaFilter))
             .orderBy(asc(Media.sort_order), asc(MediaFile.sort_order));
 
@@ -326,6 +368,10 @@ router.get(
                 sort_order: number;
                 create_time: Temporal.Instant;
                 published_time: Temporal.Instant | null;
+                sync_status: string;
+                last_error: string | null;
+                ai_status: string;
+                ai_error: string | null;
                 files: Partial<
                     Record<
                         typeof MediaFile.$inferSelect.role,
@@ -347,6 +393,10 @@ router.get(
                 sort_order: row.sort_order,
                 create_time: row.create_time,
                 published_time: row.published_time,
+                sync_status: row.sync_status,
+                last_error: row.last_error,
+                ai_status: row.ai_status ?? "PENDING",
+                ai_error: row.ai_error,
                 files: {},
             };
 
@@ -377,7 +427,8 @@ router.get(
             published_time: toIsoTimestamp(postData.published_time),
             media_count: postData.media_count,
             type: media.length > 0 ? "MULTI_MEDIA" : "TEXT",
-            url: postData.url,
+            sync_status: postData.sync_status,
+            last_error: postData.last_error,
             media: media.map((m) => {
                 return {
                     id: m.id,
@@ -400,6 +451,10 @@ router.get(
                     cover_file_url: buildCdnUrl(m.files.COVER?.bucket, m.files.COVER?.path),
                     create_time: toIsoTimestamp(m.create_time) ?? undefined,
                     published_time: toIsoTimestamp(m.published_time),
+                    sync_status: m.sync_status,
+                    last_error: m.last_error,
+                    ai_status: m.ai_status,
+                    ai_error: m.ai_error,
                 };
             }),
         };

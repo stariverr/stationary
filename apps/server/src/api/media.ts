@@ -12,6 +12,8 @@ import {
     PostSource,
     DeleteStatus,
     MediaFileRole,
+    AssetAiMetadata,
+    EntityType,
 } from "@/db/schema";
 import { and, eq, ilike, SQL, count, desc, or, isNull, isNotNull, sql, inArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -118,6 +120,10 @@ router.get(
                 cover_file_path: coverDbFile.path,
                 cover_file_bucket: coverDbFile.bucket,
                 post_media_count: Post.media_count,
+                sync_status: Media.sync_status,
+                last_error: Media.last_error,
+                ai_status: AssetAiMetadata.processing_status,
+                ai_error: AssetAiMetadata.last_error,
             })
             .from(Media)
             .leftJoin(Post, eq(Media.post_id, Post.id))
@@ -137,15 +143,19 @@ router.get(
                 ),
             )
             .leftJoin(coverDbFile, eq(coverMediaFile.file_id, coverDbFile.id))
+            .leftJoin(
+                AssetAiMetadata,
+                and(
+                    eq(Media.id, AssetAiMetadata.entity_id),
+                    eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
+                ),
+            )
             .where(visibleMediaFilter)
             .orderBy(desc(Media.create_time))
             .limit(pageSize)
             .offset(offset);
 
         const medias = rawMedia.map((m) => {
-            const filePath = m.cover_file_path || m.primary_file_path;
-            const fileBucket = m.cover_file_bucket || m.primary_file_bucket;
-
             return {
                 id: m.id,
                 eid: m.eid,
@@ -156,7 +166,12 @@ router.get(
                 create_time: toIsoTimestamp(m.create_time),
                 published_time: toIsoTimestamp(m.published_time),
                 media_count: m.post_media_count || 1,
-                media_url: buildCdnUrl(fileBucket, filePath),
+                url: buildCdnUrl(m.primary_file_bucket, m.primary_file_path),
+                cover: buildCdnUrl(m.cover_file_bucket, m.cover_file_path),
+                sync_status: m.sync_status,
+                last_error: m.last_error,
+                ai_status: m.ai_status ?? "PENDING",
+                ai_error: m.ai_error,
             };
         });
 

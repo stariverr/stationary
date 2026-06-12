@@ -1,7 +1,17 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref, watch, nextTick } from "vue";
 import type { MediaListItem } from "@/stores/media";
-import { Play, Layers, Loader2, FileImage, Trash } from "@lucide/vue";
+import {
+    Play,
+    Layers,
+    Loader2,
+    FileImage,
+    Trash,
+    Clock,
+    CheckCircle2,
+    AlertCircle,
+    Sparkles,
+} from "@lucide/vue";
 import { Checkbox } from "@/components/ui/checkbox";
 import { getOptimizedImageUrl, getOptimizedSrcset } from "@/utils/image";
 import {
@@ -30,16 +40,31 @@ const emit = defineEmits<{
 const videoRef = ref<HTMLVideoElement | null>(null);
 const isHovered = ref(false);
 
-watch(isHovered, (hovering) => {
-    if (media.type?.toLowerCase() === "video" && videoRef.value) {
+watch(isHovered, async (hovering) => {
+    if (media.type?.toLowerCase() === "video") {
         if (hovering) {
-            videoRef.value.play().catch(() => {});
+            await nextTick();
+            if (videoRef.value) {
+                videoRef.value.play().catch(() => {});
+            }
         } else {
-            videoRef.value.pause();
-            videoRef.value.currentTime = 0;
+            if (videoRef.value) {
+                videoRef.value.pause();
+                videoRef.value.currentTime = 0;
+            }
         }
     }
 });
+
+const handleMouseEnter = () => {
+    if (typeof window !== "undefined" && window.matchMedia("(hover: hover)").matches) {
+        isHovered.value = true;
+    }
+};
+
+const handleMouseLeave = () => {
+    isHovered.value = false;
+};
 
 const mediaStore = useMediaStore();
 const isRegenerating = ref(false);
@@ -85,8 +110,8 @@ const handleDelete = async () => {
             <div
                 class="group relative flex flex-col gap-2 p-2 rounded-xl transition-all duration-200 cursor-pointer"
                 :class="isSelected ? 'bg-blue-50 ring-2 ring-blue-500' : 'hover:bg-gray-100'"
-                @mouseenter="isHovered = true"
-                @mouseleave="isHovered = false"
+                @mouseenter="handleMouseEnter"
+                @mouseleave="handleMouseLeave"
                 @click="emit('click', $event)"
             >
                 <div
@@ -133,16 +158,47 @@ const handleDelete = async () => {
                     />
 
                     <!-- Video Card -->
-                    <div v-else-if="media.type?.toLowerCase() === 'video'" class="w-full h-full">
+                    <div
+                        v-else-if="media.type?.toLowerCase() === 'video'"
+                        class="w-full h-full relative bg-gray-900"
+                    >
                         <video
+                            v-if="isHovered"
                             ref="videoRef"
                             :src="`${media.url}#t=0.01`"
+                            :poster="media.poster || undefined"
                             class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                             muted
                             playsinline
                             loop
                             preload="metadata"
                         ></video>
+
+                        <img
+                            v-if="media.poster && !isHovered"
+                            :src="
+                                getOptimizedImageUrl(media.poster, {
+                                    width: 480,
+                                    height: 360,
+                                    fit: 'cover',
+                                    gravity: 'auto',
+                                })
+                            "
+                            :srcset="getOptimizedSrcset(media.poster, 'list')"
+                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                            :alt="media.title || 'Video Cover'"
+                            class="absolute inset-0 w-full h-full object-cover transition-all duration-300 group-hover:scale-105 pointer-events-none"
+                            loading="lazy"
+                        />
+
+                        <!-- Fallback placeholder if no poster and not hovered -->
+                        <div
+                            v-else-if="!media.poster && !isHovered"
+                            class="absolute inset-0 flex flex-col items-center justify-center bg-gray-800 text-gray-500 pointer-events-none"
+                        >
+                            <Play class="w-8 h-8 opacity-40 mb-1" />
+                            <span class="text-[10px] opacity-40">Hover to play</span>
+                        </div>
 
                         <div
                             class="absolute inset-0 flex items-center justify-center bg-black/10 group-hover:bg-transparent transition-colors pointer-events-none"
@@ -165,6 +221,65 @@ const handleDelete = async () => {
                     </h3>
                     <div class="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
                         <span>{{ media.date }}</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 mt-1">
+                        <!-- Media Sync Status Badge -->
+                        <span
+                            v-if="media.sync_status && media.sync_status !== 'COMPLETED'"
+                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors border"
+                            :class="
+                                media.sync_status === 'IN_PROGRESS'
+                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                    : media.sync_status === 'FAILED'
+                                      ? 'bg-red-50 text-red-700 border-red-200 cursor-help'
+                                      : 'bg-amber-50 text-amber-700 border-amber-200'
+                            "
+                            :title="
+                                media.sync_status === 'FAILED'
+                                    ? media.last_error || 'Unknown Error'
+                                    : undefined
+                            "
+                        >
+                            <Clock v-if="media.sync_status === 'PENDING'" class="size-3" />
+                            <Loader2
+                                v-else-if="media.sync_status === 'IN_PROGRESS'"
+                                class="size-3 animate-spin"
+                            />
+                            <AlertCircle
+                                v-else-if="media.sync_status === 'FAILED'"
+                                class="size-3"
+                            />
+                            {{ media.sync_status }}
+                        </span>
+
+                        <!-- Media AI Status Badge -->
+                        <span
+                            v-if="media.ai_status"
+                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors border"
+                            :class="
+                                media.ai_status === 'COMPLETED'
+                                    ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                    : media.ai_status === 'IN_PROGRESS'
+                                      ? 'bg-indigo-50 text-indigo-700 border-indigo-200 animate-pulse'
+                                      : media.ai_status === 'FAILED'
+                                        ? 'bg-red-50 text-red-700 border-red-200 cursor-help'
+                                        : 'bg-slate-50 text-slate-700 border-slate-200'
+                            "
+                            :title="
+                                media.ai_status === 'FAILED'
+                                    ? media.ai_error || 'Unknown Error'
+                                    : undefined
+                            "
+                        >
+                            <Clock v-if="media.ai_status === 'PENDING'" class="size-3" />
+                            <Loader2
+                                v-else-if="media.ai_status === 'IN_PROGRESS'"
+                                class="size-3 animate-spin"
+                            />
+                            <AlertCircle v-else-if="media.ai_status === 'FAILED'" class="size-3" />
+                            <Sparkles v-else class="size-3" />
+                            AI: {{ media.ai_status === "COMPLETED" ? "Ready" : media.ai_status }}
+                        </span>
                     </div>
                     <div
                         v-if="media.matched_details"

@@ -33,6 +33,7 @@ export interface SearchResultItem {
     type: string;
     title: string;
     media_url: string | null;
+    cover_url?: string | null;
     score: number;
     matched_reason: string;
     matched_details?: {
@@ -187,14 +188,17 @@ export const HybridSearchService = {
             const mediaId = candidate.mediaId;
             const mediaInfo = mediaDetails.find((m) => m.id === mediaId);
 
-            // Find best media url (COVER for video, PRIMARY for image)
+            // Find media url (PRIMARY for video/image) and cover url (COVER for video)
             const filesForMedia = mediaFiles.filter((f) => f.mediaId === mediaId);
-            const coverFile = filesForMedia.find((f) => f.role === MediaFileRole.COVER);
             const primaryFile = filesForMedia.find((f) => f.role === MediaFileRole.PRIMARY);
-            const activeFile = coverFile || primaryFile;
+            const coverFile = filesForMedia.find((f) => f.role === MediaFileRole.COVER);
 
-            const mediaUrl = activeFile
-                ? buildCdnUrl(activeFile.fileBucket, activeFile.filePath)
+            const mediaUrl = primaryFile
+                ? buildCdnUrl(primaryFile.fileBucket, primaryFile.filePath)
+                : null;
+
+            const coverUrl = coverFile
+                ? buildCdnUrl(coverFile.fileBucket, coverFile.filePath)
                 : null;
 
             // Resolve matched reason
@@ -269,6 +273,7 @@ export const HybridSearchService = {
                 type: mediaInfo?.type || "IMAGE",
                 title: candidate.title,
                 media_url: mediaUrl,
+                cover_url: coverUrl,
                 score: parseFloat(candidate.score.toFixed(4)),
                 matched_reason: matchedReason,
                 matched_details: matchedDetails,

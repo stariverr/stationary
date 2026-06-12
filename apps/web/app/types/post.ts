@@ -30,6 +30,10 @@ export const ApiPostMediaSchema = v.object({
     live_photo_video_url: v.optional(v.nullable(v.string())),
     create_time: v.optional(v.string()),
     published_time: v.optional(v.nullable(v.string())),
+    sync_status: v.optional(v.nullable(v.string())),
+    last_error: v.optional(v.nullable(v.string())),
+    ai_status: v.optional(v.nullable(v.string())),
+    ai_error: v.optional(v.nullable(v.string())),
 });
 export type ApiPostMedia = v.InferOutput<typeof ApiPostMediaSchema>;
 
@@ -45,6 +49,8 @@ export const PostListItemSchema = v.object({
     published_time: v.nullish(v.string()),
     media: v.array(ApiPostMediaSchema),
     type: v.picklist(["TEXT", "MULTI_MEDIA"]),
+    sync_status: v.optional(v.nullable(v.string())),
+    last_error: v.optional(v.nullable(v.string())),
 });
 export type ApiPostListItem = v.InferOutput<typeof PostListItemSchema>;
 
@@ -63,6 +69,8 @@ export const PostDetailResponseBodySchema = v.object({
     url: v.optional(v.nullable(v.string())),
     media: v.optional(v.array(ApiPostMediaSchema)),
     type: v.picklist(["TEXT", "MULTI_MEDIA"]),
+    sync_status: v.optional(v.nullable(v.string())),
+    last_error: v.optional(v.nullable(v.string())),
 });
 export type ApiPostDetail = v.InferOutput<typeof PostDetailResponseBodySchema>;
 
@@ -82,6 +90,10 @@ export const PostMediaSchema = v.object({
     live_photo_video_url: v.optional(v.nullable(v.string())),
     create_time: v.optional(v.string()),
     published_time: v.optional(v.nullable(v.string())),
+    sync_status: v.optional(v.nullable(v.string())),
+    last_error: v.optional(v.nullable(v.string())),
+    ai_status: v.optional(v.nullable(v.string())),
+    ai_error: v.optional(v.nullable(v.string())),
 
     // Mapped fields for UI
     url: v.nullable(v.string()),
@@ -108,6 +120,8 @@ export const PostSchema = v.object({
     media_count: v.optional(v.number()),
     url: v.optional(v.nullable(v.string())),
     media: v.optional(v.array(PostMediaSchema)),
+    sync_status: v.optional(v.nullable(v.string())),
+    last_error: v.optional(v.nullable(v.string())),
 
     // Mapped fields for UI / Legacy compatibility
     platform: PlatformSchema,

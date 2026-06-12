@@ -127,6 +127,10 @@ export const usePostStore = defineStore("posts", () => {
                 thumbnail: m.cover_file_url || null,
                 live_url: m.live_photo_video_url || null,
                 poster: m.cover_file_url || null,
+                sync_status: m.sync_status || "PENDING",
+                last_error: m.last_error || null,
+                ai_status: m.ai_status || "PENDING",
+                ai_error: m.ai_error || null,
             };
         });
 
@@ -153,6 +157,8 @@ export const usePostStore = defineStore("posts", () => {
             platform: (apiPost.source || "UNKNOWN") as Platform,
             type: apiPost.type as "TEXT" | "MULTI_MEDIA",
             url: apiPost.url,
+            sync_status: apiPost.sync_status || "PENDING",
+            last_error: apiPost.last_error || null,
             media: uiMedia,
         };
     };
@@ -224,6 +230,11 @@ export const usePostStore = defineStore("posts", () => {
                             url: m.primary_file_url || null,
                             thumbnail: m.cover_file_url || null,
                             live_url: m.live_photo_video_url || null,
+                            poster: m.cover_file_url || null,
+                            sync_status: m.sync_status || "PENDING",
+                            last_error: m.last_error || null,
+                            ai_status: m.ai_status || "PENDING",
+                            ai_error: m.ai_error || null,
                         };
                     }) || [];
 
@@ -252,6 +263,8 @@ export const usePostStore = defineStore("posts", () => {
                     height: 1920,
                     type: detail.type as "TEXT" | "MULTI_MEDIA",
                     originalUrl: detail.url || (uiMedia.length ? uiMedia[0]?.url || "" : ""),
+                    sync_status: detail.sync_status || "PENDING",
+                    last_error: detail.last_error || null,
                     media: uiMedia,
                 } as Post;
             }

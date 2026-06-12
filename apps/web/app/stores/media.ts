@@ -16,7 +16,12 @@ export const MediaListResponseBodySchema = v.object({
     published_time: v.nullable(v.string()),
     post_media_count: v.nullable(v.number()),
     media_count: v.number(),
-    media_url: v.nullable(v.string()),
+    url: v.nullable(v.string()),
+    cover: v.optional(v.nullable(v.string())),
+    sync_status: v.optional(v.nullable(v.string())),
+    last_error: v.optional(v.nullable(v.string())),
+    ai_status: v.optional(v.nullable(v.string())),
+    ai_error: v.optional(v.nullable(v.string())),
 });
 
 export type MediaListItem = v.InferOutput<typeof MediaListResponseBodySchema>;
@@ -151,7 +156,12 @@ export const useMediaStore = defineStore("media", () => {
         const displayTime = apiMedia.published_time ?? apiMedia.create_time;
         return {
             ...apiMedia,
-            url: apiMedia.media_url,
+            url: apiMedia.url,
+            poster: apiMedia.cover || null,
+            sync_status: apiMedia.sync_status || "PENDING",
+            last_error: apiMedia.last_error || null,
+            ai_status: apiMedia.ai_status || "PENDING",
+            ai_error: apiMedia.ai_error || null,
             date: displayTime
                 ? Temporal.Instant.from(displayTime)
                       .toZonedDateTimeISO(Temporal.Now.timeZoneId())
@@ -225,8 +235,13 @@ export const useMediaStore = defineStore("media", () => {
                             published_time: item.published_time,
                             post_media_count: 1,
                             media_count: 1,
-                            media_url: item.media_url,
-                            url: item.media_url,
+                            url: item.media_url || item.url,
+                            cover: item.cover_url || item.cover || null,
+                            poster: item.cover_url || item.cover || null,
+                            sync_status: item.sync_status || "PENDING",
+                            last_error: item.last_error || null,
+                            ai_status: item.ai_status || "PENDING",
+                            ai_error: item.ai_error || null,
                             matched_reason: item.matched_reason,
                             matched_details: item.matched_details,
                             score: item.score,
