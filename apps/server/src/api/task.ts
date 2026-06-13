@@ -24,8 +24,9 @@ import {
     AssetAiMetadata,
     Media,
     Post,
+    MediaFile,
 } from "@/db/schema";
-import { eq, and, lt, inArray, sql } from "drizzle-orm";
+import { eq, and, lt, inArray, sql, or, isNull, isNotNull } from "drizzle-orm";
 import { DeleteService } from "@/services/delete";
 import { s3 } from "@/global/s3";
 
@@ -424,7 +425,10 @@ taskApp.post("/retry-sync", requireAuth, zValidator("json", RetrySyncSchema), as
 
     const payload = c.req.valid("json");
     if (!payload.post_ids?.length && !payload.media_ids?.length) {
-        return c.json(error(Code.INVALID_PARAMETER, "At least one post_id or media_id is required"), 400);
+        return c.json(
+            error(Code.INVALID_PARAMETER, "At least one post_id or media_id is required"),
+            400,
+        );
     }
 
     // Auth verification: ensure all requested posts/medias belong to libraries owned by the user
@@ -447,17 +451,20 @@ taskApp.post("/retry-sync", requireAuth, zValidator("json", RetrySyncSchema), as
             .select({ library_id: Post.library_id })
             .from(Post)
             .where(inArray(Post.id, postIds));
-        
+
         const uniqueLibraryIds = Array.from(new Set(posts.map((p) => p.library_id)));
         if (uniqueLibraryIds.length > 0) {
             const libraries = await db
                 .select({ owner_id: Library.owner_id })
                 .from(Library)
                 .where(inArray(Library.id, uniqueLibraryIds));
-            
+
             const isAuthorized = libraries.every((lib) => lib.owner_id === user.id);
             if (!isAuthorized) {
-                return c.json(error(Code.UNAUTHORIZED, "You do not have access to some of the libraries"), 403);
+                return c.json(
+                    error(Code.UNAUTHORIZED, "You do not have access to some of the libraries"),
+                    403,
+                );
             }
         }
     }
@@ -483,6 +490,53 @@ taskApp.post("/retry-sync", requireAuth, zValidator("json", RetrySyncSchema), as
     }
 });
 
+// Endpoint to sweep tasks stuck in IN_PROGRESS for too long
+taskApp.post("/sweep-stuck-tasks", async (c) => {
+    // Auth Check: Validate cron secret
+    const cronSecret = env.CRON_SECRET;
+    if (cronSecret) {
+        const authHeader = c.req.header("Authorization");
+        const internalHeader = c.req.header("X-Internal-Token");
+
+        let token = "";
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+            token = authHeader.substring(7);
+        } else if (internalHeader) {
+            token = internalHeader;
+        }
+
+        if (token !== cronSecret) {
+            return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+        }
+    } else {
+        if (process.env.NODE_ENV === "production") {
+            return c.json(
+                error(Code.SERVICE_UNAVAILABLE, "CRON_SECRET is not configured in production"),
+                500,
+            );
+        }
+    }
+
+    let thresholdMinutes = 30;
+    try {
+        const body = await c.req.json();
+        if (body && typeof body.threshold_minutes === "number") {
+            thresholdMinutes = body.threshold_minutes;
+        }
+    } catch {
+        // Fallback to default
+    }
+
+    try {
+        const result = await TaskService.sweepStuckTasks(thresholdMinutes);
+        return c.json(success(Code.SUCCESS, result));
+    } catch (e: any) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        console.error(`[task] Failed to sweep stuck tasks: ${errorMsg}`);
+        return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
+    }
+});
+
 // Endpoint to queue items for AI enrichment
 const QueueAiSchema = z.object({
     post_ids: z.array(z.string().uuid()).optional(),
@@ -497,7 +551,10 @@ taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async 
 
     const payload = c.req.valid("json");
     if (!payload.post_ids?.length && !payload.media_ids?.length) {
-        return c.json(error(Code.INVALID_PARAMETER, "At least one post_id or media_id is required"), 400);
+        return c.json(
+            error(Code.INVALID_PARAMETER, "At least one post_id or media_id is required"),
+            400,
+        );
     }
 
     // Resolve media IDs from the database
@@ -511,7 +568,7 @@ taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async 
                 and(
                     inArray(Media.post_id, payload.post_ids),
                     eq(Media.delete_status, DeleteStatus.ACTIVE),
-                )
+                ),
             );
         for (const m of mediaList) {
             targetMediaIds.add(m.id);
@@ -526,7 +583,9 @@ taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async 
 
     const finalMediaIds = Array.from(targetMediaIds);
     if (finalMediaIds.length === 0) {
-        return c.json(success(Code.SUCCESS, { count: 0, message: "No active media items found to enrich" }));
+        return c.json(
+            success(Code.SUCCESS, { count: 0, message: "No active media items found to enrich" }),
+        );
     }
 
     // Authorization verification: verify user owns all associated libraries
@@ -541,10 +600,13 @@ taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async 
             .select({ owner_id: Library.owner_id })
             .from(Library)
             .where(inArray(Library.id, uniqueLibraryIds));
-        
+
         const isAuthorized = libraries.every((lib) => lib.owner_id === user.id);
         if (!isAuthorized) {
-            return c.json(error(Code.UNAUTHORIZED, "You do not have access to some of the libraries"), 403);
+            return c.json(
+                error(Code.UNAUTHORIZED, "You do not have access to some of the libraries"),
+                403,
+            );
         }
     }
 
@@ -602,7 +664,12 @@ taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async 
             workflowRunId: customWorkflowRunId,
         });
 
-        return c.json(success(Code.SUCCESS, { count: finalMediaIds.length, workflowRunId: customWorkflowRunId }));
+        return c.json(
+            success(Code.SUCCESS, {
+                count: finalMediaIds.length,
+                workflowRunId: customWorkflowRunId,
+            }),
+        );
     } catch (e: any) {
         const errorMsg = e instanceof Error ? e.message : String(e);
         // Reset status to FAILED in case of QStash trigger failure
@@ -618,7 +685,7 @@ taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async 
                     and(
                         eq(AssetAiMetadata.entity_id, mediaId),
                         eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
-                    )
+                    ),
                 );
         }
         return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
@@ -649,20 +716,27 @@ export const aiWorkflowHandler = serve(
                     const postList = await db
                         .select()
                         .from(Post)
-                        .where(and(eq(Post.id, media.post_id), eq(Post.delete_status, DeleteStatus.ACTIVE)))
+                        .where(
+                            and(
+                                eq(Post.id, media.post_id),
+                                eq(Post.delete_status, DeleteStatus.ACTIVE),
+                            ),
+                        )
                         .limit(1);
                     post = postList[0] || null;
                 }
-                
+
                 // If no post, construct dummy Post to satisfy enrichMediaItem signature
-                const postObj = post || {
-                    id: "",
-                    source: media.source,
-                    title: media.title,
-                    description: media.description,
-                    tags: [],
-                    author_name: "",
-                } as any;
+                const postObj =
+                    post ||
+                    ({
+                        id: "",
+                        source: media.source,
+                        title: media.title,
+                        description: media.description,
+                        tags: [],
+                        author_name: "",
+                    } as any);
 
                 await AiEnrichmentService.enrichMediaItem(media, postObj);
             });
@@ -670,7 +744,9 @@ export const aiWorkflowHandler = serve(
     },
     {
         failureFunction: async ({ context, failResponse }) => {
-            console.error(`[AI WORKFLOW FAILED] Workflow Run: ${context.workflowRunId}. Reason: ${failResponse}`);
+            console.error(
+                `[AI WORKFLOW FAILED] Workflow Run: ${context.workflowRunId}. Reason: ${failResponse}`,
+            );
             const { mediaIds } = AiWorkflowPayloadSchema.parse(context.requestPayload);
             const errorMsg = failResponse || "Workflow retries exhausted.";
             for (const mediaId of mediaIds) {
@@ -681,12 +757,13 @@ export const aiWorkflowHandler = serve(
                         and(
                             eq(AssetAiMetadata.entity_id, mediaId),
                             eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
-                        )
+                        ),
                     )
                     .limit(1);
                 const aiMetadata = aiMetadataList[0];
                 if (aiMetadata) {
-                    await db.update(AssetAiMetadata)
+                    await db
+                        .update(AssetAiMetadata)
                         .set({
                             processing_status: ProcessingStatus.FAILED,
                             last_error: errorMsg,
@@ -695,8 +772,8 @@ export const aiWorkflowHandler = serve(
                         .where(eq(AssetAiMetadata.id, aiMetadata.id));
                 }
             }
-        }
-    }
+        },
+    },
 );
 
 taskApp.all(

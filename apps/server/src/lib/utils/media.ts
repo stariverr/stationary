@@ -1,66 +1,259 @@
 import ky from "ky";
-import { Readable } from "node:stream";
 import { s3 } from "@/global/s3";
 import { v7 as createUuidV7 } from "uuid";
 
 const uuidv7 = { generate: createUuidV7 };
 
 /**
+ * Resolves appropriate Referer and User-Agent headers to bypass anti-hotlinking.
+ */
+function getRefererHeaders(url: string): Record<string, string> {
+    const headers: Record<string, string> = {
+        "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    };
+    if (url.includes("zjcdn.com") || url.includes("douyin.com")) {
+        headers["Referer"] = "https://www.douyin.com/";
+    } else if (url.includes("tiktok.com")) {
+        headers["Referer"] = "https://www.tiktok.com/";
+    } else if (url.includes("xhslink.com") || url.includes("xiaohongshu.com")) {
+        headers["Referer"] = "https://www.xiaohongshu.com/";
+    }
+    return headers;
+}
+
+/**
+ * Creates a resumable standard Web ReadableStream that automatically resumes
+ * using Range requests if the stream connection drops mid-consumption.
+ */
+function createResumableStream(
+    url: string,
+    initialRes: Response,
+    requestHeaders: Record<string, string>,
+    timeout: number | false,
+): ReadableStream<Uint8Array> {
+    let offset = 0;
+    let reader: any = initialRes.body!.getReader();
+    let attempt = 0;
+    const maxRetries = 3;
+    const readTimeoutMs = 30_000; // 30 seconds idle read timeout
+
+    return new ReadableStream<Uint8Array>({
+        async pull(controller) {
+            while (true) {
+                if (!reader) {
+                    try {
+                        attempt++;
+                        if (attempt > maxRetries) {
+                            throw new Error(`Max retries reached during stream download resume`);
+                        }
+
+                        console.warn(
+                            `[ResumableStream] Connection lost at offset ${offset}. Retrying attempt ${attempt}/${maxRetries} for ${url}...`,
+                        );
+
+                        const retryHeaders = {
+                            ...requestHeaders,
+                            Range: `bytes=${offset}-`,
+                        };
+
+                        let res: Response;
+                        if (timeout !== false) {
+                            const retryController = new AbortController();
+                            const retryTimeoutId = setTimeout(
+                                () => retryController.abort(),
+                                timeout,
+                            );
+
+                            res = await ky(url, {
+                                headers: retryHeaders,
+                                timeout: false,
+                                signal: retryController.signal,
+                                throwHttpErrors: false,
+                            });
+                            clearTimeout(retryTimeoutId);
+                        } else {
+                            res = await ky(url, {
+                                headers: retryHeaders,
+                                timeout: false,
+                                throwHttpErrors: false,
+                            });
+                        }
+
+                        if (res.status !== 206) {
+                            throw new Error(
+                                `Server did not return 206 Partial Content (Status: ${res.status})`,
+                            );
+                        }
+
+                        if (!res.body) {
+                            throw new Error(`Retry response body is empty`);
+                        }
+
+                        reader = res.body.getReader();
+                    } catch (err: any) {
+                        console.error(
+                            `[ResumableStream] Failed to resume stream at attempt ${attempt}:`,
+                            err,
+                        );
+                        controller.error(err);
+                        return;
+                    }
+                }
+
+                try {
+                    const activeReader = reader;
+                    if (!activeReader) {
+                        throw new Error("Reader is null unexpectedly");
+                    }
+
+                    // Race activeReader.read() against a 30s idle timeout
+                    let timeoutId: any;
+                    const timeoutPromise = new Promise<never>((_, reject) => {
+                        timeoutId = setTimeout(() => {
+                            reject(
+                                new Error(
+                                    `Read timeout: No data received for ${readTimeoutMs / 1000}s`,
+                                ),
+                            );
+                        }, readTimeoutMs);
+                    });
+
+                    const readPromise = activeReader.read();
+                    const { done, value } = await Promise.race([readPromise, timeoutPromise]);
+                    clearTimeout(timeoutId);
+
+                    if (done) {
+                        controller.close();
+                        return;
+                    }
+                    offset += value.length;
+                    attempt = 0; // Reset retry counter on successful read
+                    controller.enqueue(value);
+                    return;
+                } catch (err: any) {
+                    console.warn(
+                        `[ResumableStream] Stream read interrupted/timeout at offset ${offset}:`,
+                        err.message || err,
+                    );
+
+                    if (reader) {
+                        try {
+                            reader.cancel().catch(() => {});
+                        } catch {}
+                    }
+                    reader = null;
+                    // Exponential backoff
+                    await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+                }
+            }
+        },
+        cancel() {
+            const activeReader = reader;
+            if (activeReader) {
+                activeReader.cancel().catch(() => {});
+            }
+        },
+    });
+}
+
+/**
  * Downloads media and returns the Response for streaming.
  */
-export async function downloadStream(url: string, options: {
-    timeout?: number | false;
-    headers?: Record<string, string>;
-} = {}): Promise<Response | null> {
-
+export async function downloadStream(
+    url: string,
+    options: {
+        timeout?: number | false;
+        headers?: Record<string, string>;
+    } = {},
+): Promise<Response | null> {
     try {
         const targetUrl = url.startsWith("//") ? `https:${url}` : url;
-        const timeout = options.timeout !== undefined ? options.timeout : false;
-        const response = await ky(targetUrl, {
-            timeout: timeout,
-            throwHttpErrors: false,
-            headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                "Accept-Language": "en,zh-CN;q=0.9,zh;q=0.8",
-                "Accept-Encoding": "zstd, br, gzip",
-                ...options.headers,
-            },
-            retry: {
-        limit: 3,
-        methods: ['get'],
-        statusCodes: [408, 413, 429, 500, 502, 503, 504]
-    }
-        });
+        const refererHeaders = getRefererHeaders(targetUrl);
+        const requestHeaders = {
+            ...refererHeaders,
+            ...options.headers,
+        };
 
-        if (!response.ok || !response.body) {
-            const errorMsg = `Failed to download media from ${url}: ${response.status}`;
+        // Default to 30s handshake timeout if not specified
+        const handshakeTimeout = options.timeout !== undefined ? options.timeout : 30_000;
+
+        let initialRes: Response;
+        if (handshakeTimeout !== false) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), handshakeTimeout);
+
+            initialRes = await ky(targetUrl, {
+                headers: requestHeaders,
+                timeout: false,
+                signal: controller.signal,
+                throwHttpErrors: false,
+                retry: {
+                    limit: 3,
+                    methods: ["get"],
+                    statusCodes: [408, 413, 429, 500, 502, 503, 504],
+                },
+            });
+            clearTimeout(timeoutId);
+        } else {
+            initialRes = await ky(targetUrl, {
+                headers: requestHeaders,
+                timeout: false,
+                throwHttpErrors: false,
+                retry: {
+                    limit: 3,
+                    methods: ["get"],
+                    statusCodes: [408, 413, 429, 500, 502, 503, 504],
+                },
+            });
+        }
+
+        if (!initialRes.ok) {
+            const errorMsg = `Failed to download media from ${url}: ${initialRes.status}`;
             console.error(errorMsg);
             throw new Error(errorMsg);
         }
 
-        return response;
-    } catch (error) {
-        if (error instanceof Error && error.message.includes("Failed to download media")) {
-            throw error;
+        if (!initialRes.body) {
+            throw new Error(`Response body is empty`);
         }
-        console.error(`Error downloading media from ${url}:`, error);
-        throw new Error(`Error downloading media from ${url}: ${error}`);
+
+        // 2. Wrap body in custom resumable stream
+        const resumableStream = createResumableStream(
+            targetUrl,
+            initialRes,
+            requestHeaders,
+            handshakeTimeout,
+        );
+
+        // 3. Return a standard Web Response containing our custom stream
+        return new Response(resumableStream, {
+            status: initialRes.status,
+            statusText: initialRes.statusText,
+            headers: initialRes.headers,
+        });
+    } catch (error) {
+        console.error(`Error downloading media stream from ${url}:`, error);
+        throw error;
     }
 }
 
 /**
  * Downloads media from a URL with retry logic.
  */
-export async function downloadMedia(url: string, options: {
-    timeout?: number;
-    retry?: number;
-    headers?: Record<string, string>;
-} = {}): Promise<{ buffer: Buffer; contentType: string } | null> {
+export async function downloadMedia(
+    url: string,
+    options: {
+        timeout?: number;
+        retry?: number;
+        headers?: Record<string, string>;
+    } = {},
+): Promise<{ buffer: Buffer; contentType: string } | null> {
     const { timeout = 240_000, retry = 3, headers = {} } = options;
 
     try {
         const targetUrl = url.startsWith("//") ? `https:${url}` : url;
+        const refererHeaders = getRefererHeaders(targetUrl);
         const response = await ky(targetUrl, {
             method: "GET",
             retry: {
@@ -70,9 +263,9 @@ export async function downloadMedia(url: string, options: {
             timeout: timeout,
             throwHttpErrors: false,
             headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                ...refererHeaders,
                 ...headers,
-            }
+            },
         });
 
         if (!response.ok) {
@@ -80,11 +273,11 @@ export async function downloadMedia(url: string, options: {
             return null;
         }
 
-        const contentType = response.headers.get("Content-Type") || "application/octet-stream";
-        const buffer = await response.arrayBuffer();
+        const contentType = response.headers.get("content-type") || "application/octet-stream";
+        const arrayBuffer = await response.arrayBuffer();
 
         return {
-            buffer: Buffer.from(buffer),
+            buffer: Buffer.from(arrayBuffer),
             contentType,
         };
     } catch (error) {
@@ -134,10 +327,9 @@ export async function uploadToS3(
     data: ReadableStream | Uint8Array | Blob,
     contentType: string,
     bucket: string,
-    contentLength?: number
+    contentLength?: number,
 ): Promise<boolean> {
     try {
-
         await s3.write(path, data, {
             bucket,
             type: contentType,

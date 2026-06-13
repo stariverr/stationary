@@ -10,7 +10,7 @@ import {
     SyncStatus,
     MediaFileRole,
 } from "@/db/schema";
-import { eq, and, notInArray, inArray, gte, isNull, isNotNull } from "drizzle-orm";
+import { eq, and, notInArray, inArray, gte, isNull, isNotNull, or, lt } from "drizzle-orm";
 import {
     downloadStream,
     downloadMedia,
@@ -24,6 +24,7 @@ import { Client } from "@upstash/workflow";
 import { kv } from "@/global/kv";
 import type { PostItemData, MediaItemData } from "@/api/task";
 import { nowDbTimestamp } from "@/lib/utils/time";
+import { Temporal } from "@js-temporal/polyfill";
 
 export const TaskService = {
     /**
@@ -825,15 +826,103 @@ export const TaskService = {
         const client = new Client({ token: env.QSTASH_TOKEN });
         const workflowUrl = `${options.originUrl.replace(/\/$/, "")}/api/task/workflow`;
 
-        await client.trigger({
-            url: workflowUrl,
-            body: { posts: postsToProcess },
-            headers: {
-                "Content-Type": "application/json",
-            },
-            workflowRunId: customWorkflowRunId,
-        });
+        if (postsToProcess.length > 0) {
+            await client.trigger({
+                url: workflowUrl,
+                body: { posts: postsToProcess },
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                workflowRunId: customWorkflowRunId,
+            });
+        }
 
         return { count: postsToProcess.length };
+    },
+
+    /**
+     * Sweep tasks stuck in IN_PROGRESS for longer than thresholdMinutes.
+     */
+    async sweepStuckTasks(thresholdMinutes: number) {
+        const threshold = Temporal.Now.instant().subtract({ minutes: thresholdMinutes });
+
+        // Find stuck posts
+        const stuckPosts = await db
+            .select()
+            .from(Post)
+            .where(
+                and(
+                    eq(Post.sync_status, SyncStatus.IN_PROGRESS),
+                    or(
+                        and(isNotNull(Post.update_time), lt(Post.update_time, threshold)),
+                        and(isNull(Post.update_time), lt(Post.create_time, threshold)),
+                    ),
+                ),
+            );
+
+        let sweptCount = 0;
+        if (stuckPosts.length > 0) {
+            const stuckPostIds = stuckPosts.map((p) => p.id);
+
+            await db.transaction(async (tx) => {
+                // 1. Update stuck posts
+                await tx
+                    .update(Post)
+                    .set({
+                        sync_status: SyncStatus.FAILED,
+                        last_error: `Sync timed out (stuck in IN_PROGRESS for more than ${thresholdMinutes} minutes)`,
+                        update_time: Temporal.Now.instant(),
+                    })
+                    .where(inArray(Post.id, stuckPostIds));
+
+                // 2. Find and update stuck media under these posts
+                await tx
+                    .update(Media)
+                    .set({
+                        sync_status: SyncStatus.FAILED,
+                        last_error: "Post sync timed out",
+                        update_time: Temporal.Now.instant(),
+                    })
+                    .where(
+                        and(
+                            inArray(Media.post_id, stuckPostIds),
+                            inArray(Media.sync_status, [
+                                SyncStatus.PENDING,
+                                SyncStatus.IN_PROGRESS,
+                            ]),
+                        ),
+                    );
+
+                // 3. Find and update stuck media files under these media items
+                const mediaItems = await tx
+                    .select({ id: Media.id })
+                    .from(Media)
+                    .where(inArray(Media.post_id, stuckPostIds));
+
+                const mediaIds = mediaItems.map((m) => m.id);
+                if (mediaIds.length > 0) {
+                    await tx
+                        .update(MediaFile)
+                        .set({
+                            sync_status: SyncStatus.FAILED,
+                            last_error: "Post sync timed out",
+                            update_time: Temporal.Now.instant(),
+                        })
+                        .where(
+                            and(
+                                inArray(MediaFile.media_id, mediaIds),
+                                inArray(MediaFile.sync_status, [
+                                    SyncStatus.PENDING,
+                                    SyncStatus.IN_PROGRESS,
+                                ]),
+                            ),
+                        );
+                }
+            });
+
+            sweptCount = stuckPostIds.length;
+        }
+
+        return { sweptCount };
     },
 };
