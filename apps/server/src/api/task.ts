@@ -19,8 +19,13 @@ import {
     MediaFileRole,
     PostSource,
     MediaType,
+    EntityType,
+    ProcessingStatus,
+    AssetAiMetadata,
+    Media,
+    Post,
 } from "@/db/schema";
-import { eq, and, lt } from "drizzle-orm";
+import { eq, and, lt, inArray, sql } from "drizzle-orm";
 import { DeleteService } from "@/services/delete";
 import { s3 } from "@/global/s3";
 
@@ -405,6 +410,295 @@ taskApp.post("/scan-missing-covers", async (c) => {
     }
 });
 
+// Endpoint to retry sync for failed items
+const RetrySyncSchema = z.object({
+    post_ids: z.array(z.string().uuid()).optional(),
+    media_ids: z.array(z.string().uuid()).optional(),
+});
+
+taskApp.post("/retry-sync", requireAuth, zValidator("json", RetrySyncSchema), async (c) => {
+    const user = c.get("user");
+    if (!user) {
+        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+    }
+
+    const payload = c.req.valid("json");
+    if (!payload.post_ids?.length && !payload.media_ids?.length) {
+        return c.json(error(Code.INVALID_PARAMETER, "At least one post_id or media_id is required"), 400);
+    }
+
+    // Auth verification: ensure all requested posts/medias belong to libraries owned by the user
+    const resolvedPostIds = new Set<string>(payload.post_ids || []);
+    if (payload.media_ids?.length) {
+        const mediaList = await db
+            .select({ post_id: Media.post_id })
+            .from(Media)
+            .where(inArray(Media.id, payload.media_ids));
+        for (const m of mediaList) {
+            if (m.post_id) {
+                resolvedPostIds.add(m.post_id);
+            }
+        }
+    }
+
+    const postIds = Array.from(resolvedPostIds);
+    if (postIds.length > 0) {
+        const posts = await db
+            .select({ library_id: Post.library_id })
+            .from(Post)
+            .where(inArray(Post.id, postIds));
+        
+        const uniqueLibraryIds = Array.from(new Set(posts.map((p) => p.library_id)));
+        if (uniqueLibraryIds.length > 0) {
+            const libraries = await db
+                .select({ owner_id: Library.owner_id })
+                .from(Library)
+                .where(inArray(Library.id, uniqueLibraryIds));
+            
+            const isAuthorized = libraries.every((lib) => lib.owner_id === user.id);
+            if (!isAuthorized) {
+                return c.json(error(Code.UNAUTHORIZED, "You do not have access to some of the libraries"), 403);
+            }
+        }
+    }
+
+    const url = new URL(c.req.url);
+    const origin =
+        env.UPSTASH_WORKFLOW_URL ||
+        (c.req.header("x-forwarded-proto")
+            ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
+            : url.origin);
+
+    try {
+        const result = await TaskService.retrySync({
+            postIds: payload.post_ids,
+            mediaIds: payload.media_ids,
+            originUrl: origin,
+        });
+
+        return c.json(success(Code.SUCCESS, result));
+    } catch (e: any) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
+    }
+});
+
+// Endpoint to queue items for AI enrichment
+const QueueAiSchema = z.object({
+    post_ids: z.array(z.string().uuid()).optional(),
+    media_ids: z.array(z.string().uuid()).optional(),
+});
+
+taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async (c) => {
+    const user = c.get("user");
+    if (!user) {
+        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+    }
+
+    const payload = c.req.valid("json");
+    if (!payload.post_ids?.length && !payload.media_ids?.length) {
+        return c.json(error(Code.INVALID_PARAMETER, "At least one post_id or media_id is required"), 400);
+    }
+
+    // Resolve media IDs from the database
+    const targetMediaIds = new Set<string>();
+
+    if (payload.post_ids?.length) {
+        const mediaList = await db
+            .select({ id: Media.id })
+            .from(Media)
+            .where(
+                and(
+                    inArray(Media.post_id, payload.post_ids),
+                    eq(Media.delete_status, DeleteStatus.ACTIVE),
+                )
+            );
+        for (const m of mediaList) {
+            targetMediaIds.add(m.id);
+        }
+    }
+
+    if (payload.media_ids?.length) {
+        for (const id of payload.media_ids) {
+            targetMediaIds.add(id);
+        }
+    }
+
+    const finalMediaIds = Array.from(targetMediaIds);
+    if (finalMediaIds.length === 0) {
+        return c.json(success(Code.SUCCESS, { count: 0, message: "No active media items found to enrich" }));
+    }
+
+    // Authorization verification: verify user owns all associated libraries
+    const mediaList = await db
+        .select({ id: Media.id, library_id: Media.library_id })
+        .from(Media)
+        .where(inArray(Media.id, finalMediaIds));
+
+    const uniqueLibraryIds = Array.from(new Set(mediaList.map((m) => m.library_id)));
+    if (uniqueLibraryIds.length > 0) {
+        const libraries = await db
+            .select({ owner_id: Library.owner_id })
+            .from(Library)
+            .where(inArray(Library.id, uniqueLibraryIds));
+        
+        const isAuthorized = libraries.every((lib) => lib.owner_id === user.id);
+        if (!isAuthorized) {
+            return c.json(error(Code.UNAUTHORIZED, "You do not have access to some of the libraries"), 403);
+        }
+    }
+
+    // 1. Initialize AssetAiMetadata status to PENDING
+    const { AiService } = await import("@/services/ai/service");
+    for (const media of mediaList) {
+        const aiService = await AiService.forLibrary(media.library_id);
+        const metadataPipelineId = aiService?.metadataPipelineId || "default";
+        const model = aiService?.chatModelName || "none";
+
+        await db
+            .insert(AssetAiMetadata)
+            .values({
+                library_id: media.library_id,
+                entity_type: EntityType.MEDIA,
+                entity_id: media.id,
+                metadata_pipeline_id: metadataPipelineId,
+                model: model,
+                processing_status: ProcessingStatus.PENDING,
+                last_error: null,
+            })
+            .onConflictDoUpdate({
+                target: [
+                    AssetAiMetadata.entity_type,
+                    AssetAiMetadata.entity_id,
+                    AssetAiMetadata.metadata_pipeline_id,
+                ],
+                set: {
+                    processing_status: ProcessingStatus.PENDING,
+                    last_error: null,
+                    update_time: sql`now()`,
+                },
+            });
+    }
+
+    // 2. Trigger QStash workflow for AI enrichment
+    const url = new URL(c.req.url);
+    const origin =
+        env.UPSTASH_WORKFLOW_URL ||
+        (c.req.header("x-forwarded-proto")
+            ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
+            : url.origin);
+    const workflowUrl = `${origin.replace(/\/$/, "")}/api/task/workflow-ai`;
+
+    const client = new Client({ token: env.QSTASH_TOKEN });
+    const customWorkflowRunId = crypto.randomUUID();
+
+    try {
+        await client.trigger({
+            url: workflowUrl,
+            body: { mediaIds: finalMediaIds },
+            headers: {
+                "Content-Type": "application/json",
+            },
+            workflowRunId: customWorkflowRunId,
+        });
+
+        return c.json(success(Code.SUCCESS, { count: finalMediaIds.length, workflowRunId: customWorkflowRunId }));
+    } catch (e: any) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        // Reset status to FAILED in case of QStash trigger failure
+        for (const mediaId of finalMediaIds) {
+            await db
+                .update(AssetAiMetadata)
+                .set({
+                    processing_status: ProcessingStatus.FAILED,
+                    last_error: errorMsg,
+                    update_time: sql`now()`,
+                })
+                .where(
+                    and(
+                        eq(AssetAiMetadata.entity_id, mediaId),
+                        eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
+                    )
+                );
+        }
+        return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
+    }
+});
+
+const AiWorkflowPayloadSchema = z.object({
+    mediaIds: z.array(z.string()),
+});
+
+export const aiWorkflowHandler = serve(
+    async (context) => {
+        const { mediaIds } = AiWorkflowPayloadSchema.parse(context.requestPayload);
+        const { AiEnrichmentService } = await import("@/services/ai/enrich");
+
+        for (const mediaId of mediaIds) {
+            await context.run(`ai-enrich-${mediaId}`, async () => {
+                const mediaList = await db
+                    .select()
+                    .from(Media)
+                    .where(and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE)))
+                    .limit(1);
+                const media = mediaList[0];
+                if (!media) return;
+
+                let post = null;
+                if (media.post_id) {
+                    const postList = await db
+                        .select()
+                        .from(Post)
+                        .where(and(eq(Post.id, media.post_id), eq(Post.delete_status, DeleteStatus.ACTIVE)))
+                        .limit(1);
+                    post = postList[0] || null;
+                }
+                
+                // If no post, construct dummy Post to satisfy enrichMediaItem signature
+                const postObj = post || {
+                    id: "",
+                    source: media.source,
+                    title: media.title,
+                    description: media.description,
+                    tags: [],
+                    author_name: "",
+                } as any;
+
+                await AiEnrichmentService.enrichMediaItem(media, postObj);
+            });
+        }
+    },
+    {
+        failureFunction: async ({ context, failResponse }) => {
+            console.error(`[AI WORKFLOW FAILED] Workflow Run: ${context.workflowRunId}. Reason: ${failResponse}`);
+            const { mediaIds } = AiWorkflowPayloadSchema.parse(context.requestPayload);
+            const errorMsg = failResponse || "Workflow retries exhausted.";
+            for (const mediaId of mediaIds) {
+                const aiMetadataList = await db
+                    .select()
+                    .from(AssetAiMetadata)
+                    .where(
+                        and(
+                            eq(AssetAiMetadata.entity_id, mediaId),
+                            eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
+                        )
+                    )
+                    .limit(1);
+                const aiMetadata = aiMetadataList[0];
+                if (aiMetadata) {
+                    await db.update(AssetAiMetadata)
+                        .set({
+                            processing_status: ProcessingStatus.FAILED,
+                            last_error: errorMsg,
+                            update_time: sql`now()`,
+                        })
+                        .where(eq(AssetAiMetadata.id, aiMetadata.id));
+                }
+            }
+        }
+    }
+);
+
 taskApp.all(
     "/workflow",
     async (c, next) => {
@@ -421,6 +715,15 @@ taskApp.all(
         return next();
     },
     coverWorkflowHandler,
+);
+
+taskApp.all(
+    "/workflow-ai",
+    async (c, next) => {
+        console.log(`[DEBUG] Incoming request to /api/task/workflow-ai`);
+        return next();
+    },
+    aiWorkflowHandler,
 );
 
 export default taskApp;

@@ -308,6 +308,28 @@ export const useMediaStore = defineStore("media", () => {
         selectedMediaId.value = id;
     };
 
+    const retrySync = async (mediaIds: string[]) => {
+        const response = await useApi<any>("/task/retry-sync", {
+            method: "POST",
+            body: { media_ids: mediaIds },
+        });
+        if (response && response.success) {
+            refetchMedia();
+        }
+        return response;
+    };
+
+    const queueAi = async (mediaIds: string[]) => {
+        const response = await useApi<any>("/task/queue-ai", {
+            method: "POST",
+            body: { media_ids: mediaIds },
+        });
+        if (response && response.success) {
+            refetchMedia();
+        }
+        return response;
+    };
+
     return {
         keyword,
         source,
@@ -322,5 +344,7 @@ export const useMediaStore = defineStore("media", () => {
         selectedMediaId,
         selectedMedia,
         selectMedia,
+        retrySync,
+        queueAi,
     };
 });

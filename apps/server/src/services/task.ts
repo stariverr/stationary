@@ -20,6 +20,7 @@ import {
 import { VideoCoverService } from "@/services/video_cover";
 import { withLock } from "@/lib/utils/lock";
 import { env } from "@/global/env";
+import { Client } from "@upstash/workflow";
 import { kv } from "@/global/kv";
 import type { PostItemData, MediaItemData } from "@/api/task";
 import { nowDbTimestamp } from "@/lib/utils/time";
@@ -573,6 +574,14 @@ export const TaskService = {
                                 last_error: "Some files failed to process",
                             })
                             .where(eq(Media.id, m.id));
+
+                        await db
+                            .update(Post)
+                            .set({
+                                sync_status: SyncStatus.FAILED,
+                                last_error: `Media item ${m.id} failed to process: Some files failed to process`,
+                            })
+                            .where(eq(Post.id, postId));
                     }
                 } catch (e) {
                     const errorMsg = e instanceof Error ? e.message : String(e);
@@ -580,6 +589,15 @@ export const TaskService = {
                         .update(Media)
                         .set({ sync_status: SyncStatus.FAILED, last_error: errorMsg })
                         .where(eq(Media.id, m.id));
+
+                    await db
+                        .update(Post)
+                        .set({
+                            sync_status: SyncStatus.FAILED,
+                            last_error: `Media item ${m.id} failed to process: ${errorMsg}`,
+                        })
+                        .where(eq(Post.id, postId));
+
                     throw e; // Re-throw to trigger upstream retry
                 }
             },
@@ -672,5 +690,150 @@ export const TaskService = {
                     eq(Post.delete_status, DeleteStatus.ACTIVE),
                 ),
             );
+    },
+
+    /**
+     * Retry sync for failed posts/media by resetting states and re-triggering the QStash sync workflow.
+     */
+    async retrySync(options: { postIds?: string[]; mediaIds?: string[]; originUrl: string }) {
+        if (!env.QSTASH_TOKEN) {
+            throw new Error("QSTASH_TOKEN is not configured");
+        }
+
+        const resolvedPostIds = new Set<string>(options.postIds || []);
+
+        // Resolve media ids to post ids
+        if (options.mediaIds && options.mediaIds.length > 0) {
+            const mediaList = await db
+                .select({ post_id: Media.post_id })
+                .from(Media)
+                .where(inArray(Media.id, options.mediaIds));
+            for (const m of mediaList) {
+                if (m.post_id) {
+                    resolvedPostIds.add(m.post_id);
+                }
+            }
+        }
+
+        const postIds = Array.from(resolvedPostIds);
+        if (postIds.length === 0) return { count: 0 };
+
+        // Fetch posts
+        const posts = await db
+            .select()
+            .from(Post)
+            .where(and(inArray(Post.id, postIds), eq(Post.delete_status, DeleteStatus.ACTIVE)));
+
+        if (posts.length === 0) return { count: 0 };
+
+        const customWorkflowRunId = crypto.randomUUID();
+        const postsToProcess: Array<{
+            data: PostItemData;
+            id: string;
+            authorId: string | null;
+        }> = [];
+
+        // For each post, prepare payload and reset status
+        for (const post of posts) {
+            // Reset failed media items and failed media files under this post
+            const postMedia = await db
+                .select()
+                .from(Media)
+                .where(
+                    and(eq(Media.post_id, post.id), eq(Media.delete_status, DeleteStatus.ACTIVE)),
+                );
+
+            const mediaIds = postMedia.map((m) => m.id);
+
+            if (mediaIds.length > 0) {
+                // Reset failed media files to PENDING
+                await db
+                    .update(MediaFile)
+                    .set({
+                        sync_status: SyncStatus.PENDING,
+                        last_error: null,
+                    })
+                    .where(
+                        and(
+                            inArray(MediaFile.media_id, mediaIds),
+                            eq(MediaFile.sync_status, SyncStatus.FAILED),
+                        ),
+                    );
+
+                // Reset failed media items to PENDING
+                await db
+                    .update(Media)
+                    .set({
+                        sync_status: SyncStatus.PENDING,
+                        last_error: null,
+                    })
+                    .where(
+                        and(eq(Media.post_id, post.id), eq(Media.sync_status, SyncStatus.FAILED)),
+                    );
+            }
+
+            // Reset post status
+            await db
+                .update(Post)
+                .set({
+                    sync_status: SyncStatus.IN_PROGRESS,
+                    workflow_run_id: customWorkflowRunId,
+                    last_error: null,
+                })
+                .where(eq(Post.id, post.id));
+
+            // Reconstruct PostItemData
+            const author = post.author_id
+                ? (
+                      await db.select().from(Author).where(eq(Author.id, post.author_id)).limit(1)
+                  )[0] || null
+                : null;
+
+            const mappedMedia = postMedia.map((m) => ({
+                external_id: m.eid,
+                title: m.title,
+                description: m.description,
+                type: m.type,
+                primary_file_url: m.primary_url ?? "",
+                alternative_file_url: m.alternative_url,
+                live_photo_video_url: m.live_photo_url,
+                cover_file_url: m.cover_url,
+                published_time: m.published_time ?? undefined,
+            }));
+
+            postsToProcess.push({
+                id: post.id,
+                authorId: post.author_id,
+                data: {
+                    title: post.title,
+                    url: post.url ?? undefined,
+                    description: post.description,
+                    external_id: post.eid,
+                    tags: post.tags,
+                    author: {
+                        name: post.author_name,
+                        external_id: post.author_external_id ?? undefined,
+                        avatar_file_url: null,
+                    },
+                    platform: post.source,
+                    media: mappedMedia,
+                    published_time: post.published_time ?? undefined,
+                },
+            });
+        }
+
+        const client = new Client({ token: env.QSTASH_TOKEN });
+        const workflowUrl = `${options.originUrl.replace(/\/$/, "")}/api/task/workflow`;
+
+        await client.trigger({
+            url: workflowUrl,
+            body: { posts: postsToProcess },
+            headers: {
+                "Content-Type": "application/json",
+            },
+            workflowRunId: customWorkflowRunId,
+        });
+
+        return { count: postsToProcess.length };
     },
 };

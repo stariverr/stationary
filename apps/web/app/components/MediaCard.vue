@@ -11,6 +11,7 @@ import {
     CheckCircle2,
     AlertCircle,
     Sparkles,
+    RefreshCw,
 } from "@lucide/vue";
 import { Checkbox } from "@/components/ui/checkbox";
 import { getOptimizedImageUrl, getOptimizedSrcset } from "@/utils/image";
@@ -100,6 +101,41 @@ const handleDelete = async () => {
         }
     } catch {
         toast.error("Failed to move media to trash.");
+    }
+};
+
+const isRetryingSync = ref(false);
+const isQueueingAi = ref(false);
+
+const handleRetrySync = async () => {
+    isRetryingSync.value = true;
+    try {
+        const res = await mediaStore.retrySync([media.id]);
+        if (res && res.success) {
+            toast.success("Sync retry queued.");
+        } else {
+            throw new Error();
+        }
+    } catch {
+        toast.error("Failed to queue sync retry.");
+    } finally {
+        isRetryingSync.value = false;
+    }
+};
+
+const handleQueueAi = async () => {
+    isQueueingAi.value = true;
+    try {
+        const res = await mediaStore.queueAi([media.id]);
+        if (res && res.success) {
+            toast.success("AI enrichment queued.");
+        } else {
+            throw new Error();
+        }
+    } catch {
+        toast.error("Failed to queue AI enrichment.");
+    } finally {
+        isQueueingAi.value = false;
     }
 };
 </script>
@@ -320,6 +356,25 @@ const handleDelete = async () => {
                 <Loader2 v-if="isRegenerating" class="w-4 h-4 animate-spin" />
                 <FileImage v-else class="w-4 h-4" />
                 <span>{{ $t("media.actions.regenerate_cover", "Regenerate Cover") }}</span>
+            </ContextMenuItem>
+            <ContextMenuItem
+                v-if="media.sync_status === 'FAILED'"
+                :disabled="isRetryingSync"
+                class="flex items-center gap-2"
+                @click.stop="handleRetrySync"
+            >
+                <Loader2 v-if="isRetryingSync" class="w-4 h-4 animate-spin" />
+                <RefreshCw class="w-4 h-4" />
+                <span>{{ $t("media.actions.retry_sync", "Retry Sync") }}</span>
+            </ContextMenuItem>
+            <ContextMenuItem
+                :disabled="isQueueingAi"
+                class="flex items-center gap-2"
+                @click.stop="handleQueueAi"
+            >
+                <Loader2 v-if="isQueueingAi" class="w-4 h-4 animate-spin" />
+                <Sparkles class="w-4 h-4" />
+                <span>{{ $t("media.actions.queue_ai", "Queue for AI") }}</span>
             </ContextMenuItem>
             <ContextMenuItem
                 class="flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50"

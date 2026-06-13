@@ -284,6 +284,28 @@ export const usePostStore = defineStore("posts", () => {
         selectedPostId.value = id;
     };
 
+    const retrySync = async (postIds: string[]) => {
+        const response = await useApi<any>("/task/retry-sync", {
+            method: "POST",
+            body: { post_ids: postIds },
+        });
+        if (response && response.success) {
+            refetchPosts();
+        }
+        return response;
+    };
+
+    const queueAi = async (postIds: string[]) => {
+        const response = await useApi<any>("/task/queue-ai", {
+            method: "POST",
+            body: { post_ids: postIds },
+        });
+        if (response && response.success) {
+            refetchPosts();
+        }
+        return response;
+    };
+
     return {
         // State
         selectedPostId,
@@ -300,5 +322,7 @@ export const usePostStore = defineStore("posts", () => {
         // Actions
         selectPost,
         refetchPosts,
+        retrySync,
+        queueAi,
     };
 });
