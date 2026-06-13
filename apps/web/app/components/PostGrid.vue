@@ -66,15 +66,15 @@ const platforms = [
     { label: "Youtube", value: "YOUTUBE" },
 ];
 
+const scrollContainer = ref<HTMLElement | null>(null);
+
 const changePage = async (newPage: number) => {
     if (newPage < 1 || newPage > totalPages.value) return;
     page.value = newPage;
+    if (scrollContainer.value) {
+        scrollContainer.value.scrollTop = 0;
+    }
     await fetchPosts({ page: newPage, count: PAGE_SIZE });
-    // Scroll content area back to top
-    nextTick(() => {
-        const contentArea = document.querySelector(".flex-1.overflow-y-auto.p-6");
-        if (contentArea) contentArea.scrollTop = 0;
-    });
 };
 
 const isPrevDisabled = computed(() => page.value <= 1 || isLoading.value);
@@ -323,7 +323,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Content -->
-        <div class="flex-1 overflow-y-auto p-6">
+        <div ref="scrollContainer" class="flex-1 overflow-y-auto p-6">
             <div
                 v-if="Array.isArray(posts)"
                 ref="gridContainer"
