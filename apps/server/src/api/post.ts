@@ -15,6 +15,7 @@ import {
     MediaFileRole,
     AssetAiMetadata,
     EntityType,
+    Author,
 } from "@/db/schema";
 import { and, eq, ilike, SQL, count, asc, sql, isNull, inArray, lte } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -88,6 +89,8 @@ router.get(
             where.push(eq(Post.source, source));
         }
 
+        const authorAvatarFile = alias(DbFile, "author_avatar_file");
+
         const rawPosts = await db
             .select({
                 id: Post.id,
@@ -101,8 +104,12 @@ router.get(
                 url: Post.url,
                 sync_status: Post.sync_status,
                 last_error: Post.last_error,
+                author_avatar_bucket: authorAvatarFile.bucket,
+                author_avatar_path: authorAvatarFile.path,
             })
             .from(Post)
+            .leftJoin(Author, eq(Post.author_id, Author.id))
+            .leftJoin(authorAvatarFile, eq(Author.avatar_file_id, authorAvatarFile.id))
             .where(and(activePostFilter, ...where))
             .orderBy(asc(sql`coalesce(${Post.published_time}, ${Post.create_time})`))
             .limit(pageSize)
@@ -228,6 +235,7 @@ router.get(
                 source: post.source,
                 tags: post.tags,
                 author_name: post.author_name,
+                author_avatar_url: buildCdnUrl(post.author_avatar_bucket, post.author_avatar_path),
                 create_time: toIsoTimestamp(post.create_time),
                 published_time: toIsoTimestamp(post.published_time),
                 url: post.url,
@@ -266,6 +274,7 @@ export const PostDetailResponseBodySchema = z.object({
     description: z.string().nullable().optional(),
     tags: z.array(z.string()).nullable().optional(),
     author_name: z.string().nullable().optional(),
+    author_avatar_url: z.string().nullable().optional(),
     author_external_id: z.string().nullable().optional(),
     create_time: z.string().optional(),
     published_time: z.string().nullable().optional(),
@@ -312,9 +321,30 @@ router.get(
     async (c) => {
         const id = c.req.valid("param");
 
+        const authorAvatarFile = alias(DbFile, "author_avatar_file");
+
         const postRows = await db
-            .select()
+            .select({
+                id: Post.id,
+                source: Post.source,
+                eid: Post.eid,
+                title: Post.title,
+                description: Post.description,
+                tags: Post.tags,
+                author_name: Post.author_name,
+                author_external_id: Post.author_external_id,
+                create_time: Post.create_time,
+                published_time: Post.published_time,
+                media_count: Post.media_count,
+                sync_status: Post.sync_status,
+                last_error: Post.last_error,
+                url: Post.url,
+                author_avatar_bucket: authorAvatarFile.bucket,
+                author_avatar_path: authorAvatarFile.path,
+            })
             .from(Post)
+            .leftJoin(Author, eq(Post.author_id, Author.id))
+            .leftJoin(authorAvatarFile, eq(Author.avatar_file_id, authorAvatarFile.id))
             .where(and(eq(Post.id, id), activePostFilter))
             .limit(1);
 
@@ -422,6 +452,10 @@ router.get(
             description: postData.description,
             tags: postData.tags,
             author_name: postData.author_name,
+            author_avatar_url: buildCdnUrl(
+                postData.author_avatar_bucket,
+                postData.author_avatar_path,
+            ),
             author_external_id: postData.author_external_id,
             create_time: toIsoTimestamp(postData.create_time) ?? undefined,
             published_time: toIsoTimestamp(postData.published_time),

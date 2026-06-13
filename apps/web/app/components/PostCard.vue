@@ -149,6 +149,26 @@ const handleMouseEnter = () => {
 const handleMouseLeave = () => {
     isHovered.value = false;
 };
+
+const getPlatformBadgeClass = (platform: string) => {
+    switch (platform) {
+        case "XHS":
+            return "bg-red-50 text-red-600 border-red-200";
+        case "BILIBILI":
+            return "bg-pink-50 text-pink-600 border-pink-200";
+        case "DOUYIN":
+        case "TIKTOK":
+            return "bg-slate-900 text-slate-100 border-slate-800 dark:bg-slate-800 dark:text-slate-200";
+        case "YOUTUBE":
+            return "bg-rose-50 text-rose-600 border-rose-200";
+        case "INSTAGRAM":
+            return "bg-purple-50 text-purple-600 border-purple-200";
+        case "X":
+            return "bg-gray-900 text-gray-100 border-gray-800 dark:bg-gray-800 dark:text-gray-200";
+        default:
+            return "bg-gray-50 text-gray-600 border-gray-200";
+    }
+};
 </script>
 
 <template>
@@ -261,19 +281,53 @@ const handleMouseLeave = () => {
                     </div>
                 </div>
 
-                <div class="flex flex-col px-1">
+                <div class="flex flex-col px-1 gap-1">
+                    <!-- Author & Platform Info -->
+                    <div class="flex items-center justify-between mt-1 gap-2">
+                        <div class="flex items-center gap-1.5 min-w-0">
+                            <img
+                                v-if="post.author_avatar_url"
+                                :src="post.author_avatar_url"
+                                alt="avatar"
+                                class="w-5 h-5 rounded-full object-cover shrink-0"
+                                loading="lazy"
+                            />
+                            <div
+                                v-else
+                                class="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center text-[10px] font-medium text-gray-500 shrink-0"
+                            >
+                                {{ (post.author || "U").charAt(0).toUpperCase() }}
+                            </div>
+                            <span class="text-xs text-gray-600 font-medium truncate">
+                                {{ post.author }}
+                            </span>
+                        </div>
+                        <span
+                            v-if="post.platform"
+                            class="text-[9px] px-1.5 py-0.5 rounded font-semibold border shrink-0"
+                            :class="getPlatformBadgeClass(post.platform)"
+                        >
+                            {{ $t("platforms." + post.platform) }}
+                        </span>
+                    </div>
+
                     <h3
-                        class="text-sm font-medium text-gray-900 line-clamp-1 group-hover:text-blue-600 transition-colors"
+                        class="text-sm font-medium text-gray-900 line-clamp-1 group-hover:text-blue-600 transition-colors mt-0.5"
                     >
                         {{ post.title }}
                     </h3>
                     <div class="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
-                        <span v-if="post.type !== 'TEXT'"
+                        <span
+                            v-if="
+                                post.type !== 'TEXT' &&
+                                (post.media?.[0]?.width || post.width) &&
+                                (post.media?.[0]?.height || post.height)
+                            "
                             >{{ post.media?.[0]?.width || post.width }}x{{
                                 post.media?.[0]?.height || post.height
                             }}</span
                         >
-                        <span v-if="post.type !== 'TEXT'">{{ post.size }}</span>
+                        <span v-if="post.type !== 'TEXT' && post.size">{{ post.size }}</span>
                     </div>
                     <div class="flex items-center gap-1.5 mt-1">
                         <!-- Post Sync Status Badge -->
