@@ -54,8 +54,17 @@ const isOpen = computed({
     set: (val) => emit("update:open", val),
 });
 
+import { type WritableComputedRef, type ComputedRef } from "vue";
+
+interface NuxtI18nComposer {
+    locale: WritableComputedRef<string>;
+    setLocale: (locale: string) => Promise<void>;
+    locales: ComputedRef<Array<{ code: string; name?: string } | string>>;
+    t: (key: string, values?: Record<string, unknown>) => string;
+}
+
 const { expandDetailByDefault } = useUserSettings();
-const { locale, setLocale, locales, t } = useI18n();
+const { locale, setLocale, locales, t } = useI18n() as unknown as NuxtI18nComposer;
 const session = useSession();
 
 const userStore = useUserStore();
@@ -74,13 +83,46 @@ const localeOptions = computed(() => {
 
 const handleLocaleChange = (value: AcceptableValue) => {
     if (typeof value === "string") {
-        setLocale(value as Parameters<typeof setLocale>[0]);
+        setLocale(value);
     }
 };
 
+interface ApiToken {
+    id: string;
+    name: string;
+    prefix: string;
+    first_four: string | null;
+    last_four: string;
+    library_id: string | null;
+    expires_at: string | null;
+    last_used_at: string | null;
+}
+
+interface ApiResponse<T = unknown> {
+    success: boolean;
+    message?: string;
+    data?: T;
+}
+
+interface FetchErrorLike {
+    data?: {
+        message?: string;
+        error?: string;
+        queued?: number;
+    };
+    response?: {
+        _data?: {
+            message?: string;
+            error?: string;
+            queued?: number;
+        };
+    };
+    message?: string;
+}
+
 // --- API Token State and Management logic ---
 const libraryStore = useLibraryStore();
-const apiTokens = ref<any[]>([]);
+const apiTokens = ref<ApiToken[]>([]);
 const isLoading = ref(false);
 const isGenerating = ref(false);
 const isRevoking = ref<string | null>(null);
@@ -97,21 +139,22 @@ const isRecovering = ref(false);
 const triggerCoverRecovery = async () => {
     try {
         isRecovering.value = true;
-        const res = await useApi<any>("/task/scan-missing-covers", {
+        const res = await useApi<ApiResponse<{ queued: number }>>("/task/scan-missing-covers", {
             method: "POST",
             body: {},
         });
-        if (res && res.success) {
+        if (res && res.success && res.data) {
             toast.success(
                 t("settings.general.video_cover_recovery_success", { count: res.data.queued }),
             );
         } else {
             throw new Error(res?.message || "Server error");
         }
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error("Failed to run video cover recovery", err);
+        const fetchErr = err as FetchErrorLike;
         toast.error(t("settings.general.video_cover_recovery_error"), {
-            description: err?.message || "Unknown error occurred",
+            description: fetchErr?.message || "Unknown error occurred",
         });
     } finally {
         isRecovering.value = false;
@@ -122,14 +165,15 @@ const fetchTokens = async () => {
     if (!props.open) return;
     isLoading.value = true;
     try {
-        const res = await useApi<any>("/user/tokens");
-        if (res && res.success) {
+        const res = await useApi<ApiResponse<ApiToken[]>>("/user/tokens");
+        if (res && res.success && res.data) {
             apiTokens.value = res.data;
         }
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error("Failed to fetch tokens", err);
+        const fetchErr = err as FetchErrorLike;
         toast.error(t("settings.api_keys.err_load"), {
-            description: err?.data?.message || "Unknown error occurred",
+            description: fetchErr?.data?.message || "Unknown error occurred",
         });
     } finally {
         isLoading.value = false;
@@ -168,19 +212,20 @@ const generateToken = async () => {
             expires_in_seconds:
                 newTokenExpiresIn.value === "0" ? null : Number(newTokenExpiresIn.value),
         };
-        const res = await useApi<any>("/user/tokens", {
+        const res = await useApi<ApiResponse<{ token: string }>>("/user/tokens", {
             method: "POST",
             body: payload,
         });
-        if (res && res.success) {
+        if (res && res.success && res.data) {
             generatedToken.value = res.data.token;
             toast.success(t("settings.api_keys.copied_toast"));
             await fetchTokens();
         }
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error("Failed to generate token", err);
+        const fetchErr = err as FetchErrorLike;
         toast.error(t("settings.api_keys.err_generate"), {
-            description: err?.data?.message || "Unknown error occurred",
+            description: fetchErr?.data?.message || "Unknown error occurred",
         });
     } finally {
         isGenerating.value = false;
@@ -191,17 +236,18 @@ const revokeToken = async (tokenId: string) => {
     if (confirm(t("settings.api_keys.confirm_revoke"))) {
         isRevoking.value = tokenId;
         try {
-            const res = await useApi<any>(`/user/tokens/${tokenId}`, {
+            const res = await useApi<ApiResponse>(`/user/tokens/${tokenId}`, {
                 method: "DELETE",
             });
             if (res && res.success) {
                 toast.success(t("settings.api_keys.revoked_toast"));
                 await fetchTokens();
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error("Failed to revoke token", err);
+            const fetchErr = err as FetchErrorLike;
             toast.error(t("settings.api_keys.err_revoke"), {
-                description: err?.data?.message || "Unknown error",
+                description: fetchErr?.data?.message || "Unknown error",
             });
         } finally {
             isRevoking.value = null;
@@ -225,7 +271,7 @@ const copyToClipboard = async (text: string) => {
 
 const getLibraryName = (libId: string | null) => {
     if (!libId) return t("settings.api_keys.scope_all");
-    const lib = libraryStore.libraries.find((l: any) => l.id === libId);
+    const lib = libraryStore.libraries.find((l) => l.id === libId);
     return lib
         ? t("settings.api_keys.scope_single", { name: lib.name })
         : t("settings.api_keys.unknown_library");
@@ -242,12 +288,26 @@ const formatDate = (dateStr: string | null | undefined) => {
     });
 };
 
+interface AiConfig {
+    ai_provider: string | null;
+    openai_api_key: string;
+    openai_base_url: string;
+    openai_model_embedding_text: string;
+    openai_model_embedding_text_map_to: string;
+    openai_model_embedding_image: string;
+    openai_model_embedding_image_map_to: string;
+    openai_model_describe_image: string;
+    openai_model_describe_image_map_to: string;
+    gemini_api_key: string;
+    gemini_base_url: string;
+}
+
 // --- AI Config State and Management logic ---
 const selectedLibraryId = ref<string>("");
 const isFetchingConfig = ref(false);
 const isSavingConfig = ref(false);
 
-const aiConfig = ref<any>({
+const aiConfig = ref<AiConfig>({
     ai_provider: null,
     openai_api_key: "",
     openai_base_url: "",
@@ -265,8 +325,8 @@ const fetchAiConfig = async () => {
     if (!selectedLibraryId.value) return;
     isFetchingConfig.value = true;
     try {
-        const res = await useApi<any>(`/library/${selectedLibraryId.value}/ai-config`);
-        if (res && res.success) {
+        const res = await useApi<ApiResponse<AiConfig>>(`/library/${selectedLibraryId.value}/ai-config`);
+        if (res && res.success && res.data) {
             aiConfig.value = {
                 ai_provider: res.data.ai_provider || null,
                 openai_api_key: res.data.openai_api_key || "",
@@ -284,7 +344,7 @@ const fetchAiConfig = async () => {
                 gemini_base_url: res.data.gemini_base_url || "",
             };
         }
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error("Failed to fetch AI configuration", err);
         toast.error(t("settings.ai_config.err_load"));
     } finally {
@@ -296,13 +356,13 @@ const saveAiConfig = async () => {
     if (!selectedLibraryId.value) return;
     isSavingConfig.value = true;
     try {
-        const payload = { ...aiConfig.value };
+        const payload: Record<string, string | null> = { ...aiConfig.value };
         for (const key in payload) {
             if (payload[key] === "") {
                 payload[key] = null;
             }
         }
-        const res = await useApi<any>(`/library/${selectedLibraryId.value}/ai-config`, {
+        const res = await useApi<ApiResponse<AiConfig>>(`/library/${selectedLibraryId.value}/ai-config`, {
             method: "POST",
             body: payload,
         });
@@ -310,7 +370,7 @@ const saveAiConfig = async () => {
             toast.success(t("settings.ai_config.save_success"));
             await fetchAiConfig();
         }
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error("Failed to save AI configuration", err);
         toast.error(t("settings.ai_config.err_save"));
     } finally {

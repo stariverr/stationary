@@ -61,13 +61,17 @@ watch(isHovered, async (hovering) => {
     }
 });
 
+interface ApiResponse {
+    success: boolean;
+}
+
 const handleRegenerateCover = async () => {
     const videoMedia = post.media?.[0];
     if (!videoMedia || !videoMedia.id) return;
 
     isRegenerating.value = true;
     try {
-        const response = await useApi<any>(`/media/${videoMedia.id}/regenerate-cover`, {
+        const response = await useApi<ApiResponse>(`/media/${videoMedia.id}/regenerate-cover`, {
             method: "POST",
         });
         if (response && response.success) {
@@ -90,7 +94,7 @@ const handleCopyLink = () => {
 
 const handleDelete = async () => {
     try {
-        const response = await useApi<any>(`/post/trash/${post.id}`, { method: "POST" });
+        const response = await useApi<ApiResponse>(`/post/trash/${post.id}`, { method: "POST" });
         if (response && response.success) {
             toast.success("Post moved to trash.");
             postStore.refetchPosts();
@@ -106,7 +110,7 @@ const isRetryingSync = ref(false);
 const isQueueingAi = ref(false);
 
 const hasFailedMedia = computed(() => {
-    return post.media?.some((m: any) => m.sync_status === "FAILED");
+    return post.media?.some((m) => m.sync_status === "FAILED");
 });
 
 const handleRetrySync = async () => {

@@ -1,6 +1,6 @@
-import type { RouterConfig } from "@nuxt/schema";
+import type { RouterOptions } from "vue-router";
 
-export default <RouterConfig>{
+export default <RouterOptions>{
     scrollBehavior(to, from, savedPosition) {
         // If the path didn't change (e.g. only query parameters like page, keyword changed), do not scroll
         if (to.path === from.path) {

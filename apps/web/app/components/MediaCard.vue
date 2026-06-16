@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from "vue";
-import type { MediaListItem } from "@/stores/media";
+import type { MediaListItem, MappedMediaItem } from "@/stores/media";
 import {
     Play,
     Layers,
@@ -26,7 +26,7 @@ import { useApi } from "@/composables/useApi";
 import { useMediaStore } from "@/stores/media";
 
 const { media, isSelected, isChecked, canMove, showCheckbox } = defineProps<{
-    media: any; // Using any for now to handle both UI mapped and raw, ideally MediaListItem mapped
+    media: MappedMediaItem;
     isSelected?: boolean;
     isChecked?: boolean;
     canMove?: boolean;
@@ -70,12 +70,16 @@ const handleMouseLeave = () => {
 const mediaStore = useMediaStore();
 const isRegenerating = ref(false);
 
+interface ApiResponse {
+    success: boolean;
+}
+
 const handleRegenerateCover = async () => {
     if (!media.id) return;
 
     isRegenerating.value = true;
     try {
-        const response = await useApi<any>(`/media/${media.id}/regenerate-cover`, {
+        const response = await useApi<ApiResponse>(`/media/${media.id}/regenerate-cover`, {
             method: "POST",
         });
         if (response && response.success) {
@@ -92,7 +96,7 @@ const handleRegenerateCover = async () => {
 
 const handleDelete = async () => {
     try {
-        const response = await useApi<any>(`/media/trash/${media.id}`, { method: "POST" });
+        const response = await useApi<ApiResponse>(`/media/trash/${media.id}`, { method: "POST" });
         if (response && response.success) {
             toast.success("Media moved to trash.");
             mediaStore.refetchMedia();

@@ -11,14 +11,14 @@ const config = useRuntimeConfig();
 const loginWithGithub = async () => {
     await authClient.signIn.social({
         provider: "github",
-        callbackURL: config.public.appUrl,
+        callbackURL: config.public.appUrl as string | undefined,
     });
 };
 
 const loginWithGoogle = async () => {
     await authClient.signIn.social({
         provider: "google",
-        callbackURL: config.public.appUrl,
+        callbackURL: config.public.appUrl as string | undefined,
     });
 };
 </script>

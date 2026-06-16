@@ -4,7 +4,7 @@ import { PaginationListItem, type PaginationListItemProps } from 'reka-ui'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 
-const props = defineProps<PaginationListItemProps & { class?: HTMLAttributes['class'] }>()
+const props = defineProps<PaginationListItemProps & { class?: HTMLAttributes['class']; page?: number }>()
 
 const delegatedProps = computed(() => {
   const { class: _, ...delegated } = props

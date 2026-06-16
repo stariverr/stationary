@@ -23,7 +23,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { useMediaStore } from "@/stores/media";
+import { useMediaStore, type MappedMediaItem } from "@/stores/media";
 import { useLibraryStore } from "@/stores/library";
 import { storeToRefs } from "pinia";
 
@@ -112,11 +112,11 @@ const handleJump = () => {
     }
 };
 
-const isMediaMovable = (media: any) => !media.post_id;
+const isMediaMovable = (media: MappedMediaItem) => !media.post_id;
 
 const isMediaChecked = (id: string) => selectedMediaIds.value.has(String(id));
 
-const setMediaChecked = (media: any, checked: boolean) => {
+const setMediaChecked = (media: MappedMediaItem, checked: boolean) => {
     if (!isMediaMovable(media)) return;
 
     const next = new Set(selectedMediaIds.value);
@@ -179,7 +179,7 @@ const handleMoved = async () => {
     await refetchMedia();
 };
 
-const handleMediaClick = (media: any, event: MouseEvent) => {
+const handleMediaClick = (media: MappedMediaItem, event: MouseEvent) => {
     if (
         isMediaMovable(media) &&
         (isMultiSelectClick(event) || isSelectionMode.value || isMediaChecked(media.id))

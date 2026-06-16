@@ -25,6 +25,6 @@ export const useSafeEnv = () => {
             throw e;
         }
         // Fallback or handle error gracefully in production
-        return config.public as v.InferOutput<typeof PublicEnvSchema>;
+        return config.public as unknown as v.InferOutput<typeof PublicEnvSchema>;
     }
 };

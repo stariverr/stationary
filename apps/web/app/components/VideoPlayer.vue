@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, computed, nextTick } from "vue";
 import "plyr/dist/plyr.css";
+import type Plyr from "plyr";
+import type { MediaPlayerClass } from "dashjs";
 
 interface Subtitle {
     url: string;
@@ -18,8 +20,8 @@ interface Props {
 }
 
 const videoRef = ref<HTMLVideoElement | null>(null);
-const player = ref<any>(null);
-let dashPlayer: any = null;
+const player = ref<Plyr | null>(null);
+let dashPlayer: MediaPlayerClass | null = null;
 
 const props = withDefaults(defineProps<Props>(), {
     src: "",
@@ -161,10 +163,10 @@ const updateSource = async () => {
 
     if (!player.value) return;
 
-    const plyrTracks = processedSubtitles.value.map((sub) => ({
-        kind: "captions",
+    const plyrTracks: Plyr.Track[] = processedSubtitles.value.map((sub) => ({
+        kind: "captions" as const,
         label: sub.label,
-        srclang: sub.language,
+        srcLang: sub.language,
         src: sub.url,
         default: sub.default,
     }));
@@ -189,7 +191,7 @@ const updateSource = async () => {
                     },
                 },
             });
-            dashPlayer.on("error", (e: any) => {
+            dashPlayer.on("error", (e: unknown) => {
                 console.error("[VideoPlayer] dash.js error event:", e);
             });
 

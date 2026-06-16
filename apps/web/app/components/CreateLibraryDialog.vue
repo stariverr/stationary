@@ -41,18 +41,35 @@ watch(
     },
 );
 
-const getCreateLibraryErrorDescription = (e: any) => {
+interface FetchErrorLike {
+    data?: {
+        message?: string;
+        error?: string;
+    };
+    response?: {
+        _data?: {
+            message?: string;
+            error?: string;
+        };
+    };
+    statusCode?: number;
+    status?: number;
+    message?: string;
+}
+
+const getCreateLibraryErrorDescription = (e: unknown) => {
+    const err = e as FetchErrorLike;
     const backendMessage =
-        e?.data?.message ||
-        e?.data?.error ||
-        e?.response?._data?.message ||
-        e?.response?._data?.error;
+        err?.data?.message ||
+        err?.data?.error ||
+        err?.response?._data?.message ||
+        err?.response?._data?.error;
 
     if (backendMessage) {
         return backendMessage;
     }
 
-    if (e?.statusCode === 400 || e?.status === 400) {
+    if (err?.statusCode === 400 || err?.status === 400) {
         return "Please check the library name and description, then try again.";
     }
 
@@ -79,7 +96,7 @@ const handleSubmit = async () => {
         toast.success("Library created", {
             description: `${name.value.trim()} is now your active library.`,
         });
-    } catch (e: any) {
+    } catch (e: unknown) {
         toast.error("Failed to create library", {
             description: getCreateLibraryErrorDescription(e),
         });

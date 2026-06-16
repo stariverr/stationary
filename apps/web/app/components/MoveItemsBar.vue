@@ -12,8 +12,9 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { useLibraryStore } from "@/stores/library";
 import { CheckSquare, Loader2, MoveRight, X, FileImage, RefreshCw, Sparkles } from "@lucide/vue";
-import { useMediaStore } from "@/stores/media";
+import { useMediaStore, type MappedMediaItem } from "@/stores/media";
 import { usePostStore } from "@/stores/posts";
+import type { Post, PostMedia } from "@/types/post";
 
 const props = withDefaults(
     defineProps<{
@@ -49,13 +50,13 @@ const isQueueingAi = ref(false);
 
 const hasSelectedFailedSync = computed(() => {
     const directFailedMedia = mediaStore.medias.some(
-        (m: any) => props.mediaIds.includes(String(m.id)) && m.sync_status === "FAILED",
+        (m: MappedMediaItem) => props.mediaIds.includes(String(m.id)) && m.sync_status === "FAILED",
     );
     const directFailedPost = postStore.posts.some(
-        (p: any) =>
+        (p: Post) =>
             props.postIds.includes(String(p.id)) &&
             (p.sync_status === "FAILED" ||
-                p.media?.some((m: any) => m.sync_status === "FAILED")),
+                p.media?.some((m) => m.sync_status === "FAILED")),
     );
     return directFailedMedia || directFailedPost;
 });
@@ -106,14 +107,16 @@ const handleBatchQueueAi = async () => {
     }
 };
 
-const selectedVideos = computed(() => {
+type VideoItemLike = MappedMediaItem | PostMedia;
+
+const selectedVideos = computed<VideoItemLike[]>(() => {
     const directVideos = mediaStore.medias.filter(
-        (m: any) => props.mediaIds.includes(String(m.id)) && m.type?.toLowerCase() === "video",
+        (m: MappedMediaItem) => props.mediaIds.includes(String(m.id)) && m.type?.toLowerCase() === "video",
     );
 
-    const postVideos: any[] = [];
+    const postVideos: PostMedia[] = [];
     if (props.postIds && props.postIds.length > 0) {
-        const selectedPosts = postStore.posts.filter((p: any) => props.postIds.includes(String(p.id)));
+        const selectedPosts = postStore.posts.filter((p: Post) => props.postIds.includes(String(p.id)));
         for (const post of selectedPosts) {
             if (post.media) {
                 for (const media of post.media) {
@@ -125,8 +128,8 @@ const selectedVideos = computed(() => {
         }
     }
 
-    const combined = [...directVideos, ...postVideos];
-    const uniqueMap = new Map<string, any>();
+    const combined: VideoItemLike[] = [...directVideos, ...postVideos];
+    const uniqueMap = new Map<string, VideoItemLike>();
     for (const v of combined) {
         uniqueMap.set(String(v.id), v);
     }
@@ -136,7 +139,7 @@ const selectedVideos = computed(() => {
 const hasSelectedVideos = computed(() => selectedVideos.value.length > 0);
 
 const handleBatchRegenerate = async () => {
-    const videoIds = selectedVideos.value.map((v: any) => v.id);
+    const videoIds = selectedVideos.value.map((v: VideoItemLike) => v.id);
     if (videoIds.length === 0) {
         toast.warning(t("media.cover.select_video_required", "Please select at least one video."));
         return;
@@ -144,26 +147,26 @@ const handleBatchRegenerate = async () => {
 
     try {
         isRegenerating.value = true;
-        const response = await useApi<any>("/media/regenerate-covers", {
+        const response = await useApi<{ success: boolean; data: { queued: number; skipped: number }; message?: string }>("/media/regenerate-covers", {
             method: "POST",
             body: {
                 media_ids: videoIds,
             },
         });
-        if (response && response.success) {
+        if (response && response.success && response.data) {
             const { queued, skipped } = response.data;
             toast.success(
-                $t(
-                    "media.cover.batch_queued",
-                    "Queued {queued} cover regeneration tasks. Skipped {skipped}.",
-                    { queued, skipped },
-                ),
+                t("media.cover.batch_queued", {
+                    queued,
+                    skipped,
+                    default: "Queued {queued} cover regeneration tasks. Skipped {skipped}.",
+                }),
             );
             emit("cancel");
         } else {
             throw new Error(response?.message || "Failed to batch request cover generation");
         }
-    } catch (err: any) {
+    } catch (err: unknown) {
         console.error("Failed to batch regenerate covers:", err);
         toast.error(t("media.cover.failed", "Failed to queue cover regeneration."));
     } finally {
@@ -205,13 +208,28 @@ const handleTargetChange = (value: AcceptableValue) => {
     }
 };
 
-const getMoveErrorDescription = (e: any) => {
+interface FetchErrorLike {
+    data?: {
+        message?: string;
+        error?: string;
+    };
+    response?: {
+        _data?: {
+            message?: string;
+            error?: string;
+        };
+    };
+    message?: string;
+}
+
+const getMoveErrorDescription = (e: unknown) => {
+    const err = e as FetchErrorLike;
     return (
-        e?.data?.message ||
-        e?.data?.error ||
-        e?.response?._data?.message ||
-        e?.response?._data?.error ||
-        e?.message ||
+        err?.data?.message ||
+        err?.data?.error ||
+        err?.response?._data?.message ||
+        err?.response?._data?.error ||
+        err?.message ||
         "Something went wrong while moving the selected items."
     );
 };
@@ -237,7 +255,7 @@ const handleMove = async () => {
             description: `${itemSummary.value} moved to the selected library.`,
         });
         emit("moved");
-    } catch (e: any) {
+    } catch (e: unknown) {
         toast.error("Failed to move items", {
             description: getMoveErrorDescription(e),
         });
