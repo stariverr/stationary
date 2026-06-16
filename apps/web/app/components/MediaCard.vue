@@ -1,26 +1,10 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from "vue";
 import type { MediaListItem, MappedMediaItem } from "@/stores/media";
-import {
-    Play,
-    Layers,
-    Loader2,
-    FileImage,
-    Trash,
-    Clock,
-    CheckCircle2,
-    AlertCircle,
-    Sparkles,
-    RefreshCw,
-} from "@lucide/vue";
+import { Play, Layers, Loader2, FileImage, Trash, Clock, CheckCircle2, AlertCircle, Sparkles, RefreshCw } from "@lucide/vue";
 import { Checkbox } from "@/components/ui/checkbox";
 import { getOptimizedImageUrl, getOptimizedSrcset } from "@/utils/image";
-import {
-    ContextMenu,
-    ContextMenuContent,
-    ContextMenuItem,
-    ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { toast } from "@/components/ui/sonner";
 import { useApi } from "@/composables/useApi";
 import { useMediaStore } from "@/stores/media";
@@ -154,11 +138,7 @@ const handleQueueAi = async () => {
                 @mouseleave="handleMouseLeave"
                 @click="emit('click', $event)"
             >
-                <div
-                    v-if="canMove !== false && (showCheckbox || isHovered)"
-                    class="absolute top-4 left-4 z-20"
-                    @click.stop
-                >
+                <div v-if="canMove !== false && (showCheckbox || isHovered)" class="absolute top-4 left-4 z-20" @click.stop>
                     <Checkbox
                         :model-value="isChecked"
                         class="size-5 border-white/80 bg-white/90 shadow-sm data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
@@ -167,9 +147,7 @@ const handleQueueAi = async () => {
                     />
                 </div>
 
-                <div
-                    class="relative aspect-4/3 rounded-lg overflow-hidden border border-gray-100 bg-gray-50"
-                >
+                <div class="relative aspect-4/3 rounded-lg overflow-hidden border border-gray-100 bg-gray-50">
                     <!-- Stack Indicator (1/N) -->
                     <div
                         v-if="media.media_count > 1"
@@ -181,7 +159,7 @@ const handleQueueAi = async () => {
 
                     <!-- Image Card -->
                     <img
-                        v-if="media.type?.toLowerCase() === 'image' || !media.type"
+                        v-if="media.type?.toLowerCase() === 'image' || media.type?.toLowerCase() === 'live_photo' || !media.type"
                         :src="
                             getOptimizedImageUrl(media.url, {
                                 width: 480,
@@ -198,10 +176,7 @@ const handleQueueAi = async () => {
                     />
 
                     <!-- Video Card -->
-                    <div
-                        v-else-if="media.type?.toLowerCase() === 'video'"
-                        class="w-full h-full relative bg-gray-900"
-                    >
+                    <div v-else-if="media.type?.toLowerCase() === 'video'" class="w-full h-full relative bg-gray-900">
                         <video
                             v-if="isHovered"
                             ref="videoRef"
@@ -243,10 +218,7 @@ const handleQueueAi = async () => {
                         <div
                             class="absolute inset-0 flex items-center justify-center bg-black/10 group-hover:bg-transparent transition-colors pointer-events-none"
                         >
-                            <div
-                                v-if="!isHovered"
-                                class="bg-white/90 p-2 rounded-full shadow-sm backdrop-blur-sm"
-                            >
+                            <div v-if="!isHovered" class="bg-white/90 p-2 rounded-full shadow-sm backdrop-blur-sm">
                                 <Play class="w-4 h-4 text-black fill-black ml-0.5" />
                             </div>
                         </div>
@@ -254,9 +226,7 @@ const handleQueueAi = async () => {
                 </div>
 
                 <div class="flex flex-col px-1">
-                    <h3
-                        class="text-sm font-medium text-gray-900 line-clamp-1 group-hover:text-blue-600 transition-colors"
-                    >
+                    <h3 class="text-sm font-medium text-gray-900 line-clamp-1 group-hover:text-blue-600 transition-colors">
                         {{ media.title || "Untitled" }}
                     </h3>
                     <div class="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
@@ -274,21 +244,11 @@ const handleQueueAi = async () => {
                                       ? 'bg-red-50 text-red-700 border-red-200 cursor-help'
                                       : 'bg-amber-50 text-amber-700 border-amber-200'
                             "
-                            :title="
-                                media.sync_status === 'FAILED'
-                                    ? media.last_error || 'Unknown Error'
-                                    : undefined
-                            "
+                            :title="media.sync_status === 'FAILED' ? media.last_error || 'Unknown Error' : undefined"
                         >
                             <Clock v-if="media.sync_status === 'PENDING'" class="size-3" />
-                            <Loader2
-                                v-else-if="media.sync_status === 'IN_PROGRESS'"
-                                class="size-3 animate-spin"
-                            />
-                            <AlertCircle
-                                v-else-if="media.sync_status === 'FAILED'"
-                                class="size-3"
-                            />
+                            <Loader2 v-else-if="media.sync_status === 'IN_PROGRESS'" class="size-3 animate-spin" />
+                            <AlertCircle v-else-if="media.sync_status === 'FAILED'" class="size-3" />
                             {{ media.sync_status }}
                         </span>
 
@@ -305,26 +265,16 @@ const handleQueueAi = async () => {
                                         ? 'bg-red-50 text-red-700 border-red-200 cursor-help'
                                         : 'bg-slate-50 text-slate-700 border-slate-200'
                             "
-                            :title="
-                                media.ai_status === 'FAILED'
-                                    ? media.ai_error || 'Unknown Error'
-                                    : undefined
-                            "
+                            :title="media.ai_status === 'FAILED' ? media.ai_error || 'Unknown Error' : undefined"
                         >
                             <Clock v-if="media.ai_status === 'PENDING'" class="size-3" />
-                            <Loader2
-                                v-else-if="media.ai_status === 'IN_PROGRESS'"
-                                class="size-3 animate-spin"
-                            />
+                            <Loader2 v-else-if="media.ai_status === 'IN_PROGRESS'" class="size-3 animate-spin" />
                             <AlertCircle v-else-if="media.ai_status === 'FAILED'" class="size-3" />
                             <Sparkles v-else class="size-3" />
                             AI: {{ media.ai_status === "COMPLETED" ? "Ready" : media.ai_status }}
                         </span>
                     </div>
-                    <div
-                        v-if="media.matched_details"
-                        class="flex flex-wrap gap-1 mt-1.5 animate-fade-in"
-                    >
+                    <div v-if="media.matched_details" class="flex flex-wrap gap-1 mt-1.5 animate-fade-in">
                         <span
                             v-if="media.matched_details.keyword"
                             class="text-[9px] px-1.5 py-0.5 rounded font-medium bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400 border border-blue-100/50 dark:border-blue-900/30"
@@ -371,19 +321,12 @@ const handleQueueAi = async () => {
                 <RefreshCw class="w-4 h-4" />
                 <span>{{ $t("media.actions.retry_sync", "Retry Sync") }}</span>
             </ContextMenuItem>
-            <ContextMenuItem
-                :disabled="isQueueingAi"
-                class="flex items-center gap-2"
-                @click.stop="handleQueueAi"
-            >
+            <ContextMenuItem :disabled="isQueueingAi" class="flex items-center gap-2" @click.stop="handleQueueAi">
                 <Loader2 v-if="isQueueingAi" class="w-4 h-4 animate-spin" />
                 <Sparkles class="w-4 h-4" />
                 <span>{{ $t("media.actions.queue_ai", "Queue for AI") }}</span>
             </ContextMenuItem>
-            <ContextMenuItem
-                class="flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50"
-                @click.stop="handleDelete"
-            >
+            <ContextMenuItem class="flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50" @click.stop="handleDelete">
                 <Trash class="w-4 h-4" />
                 <span>{{ $t("common.delete", "Delete") }}</span>
             </ContextMenuItem>

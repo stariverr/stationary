@@ -59,10 +59,7 @@ export const HybridSearchService = {
      * Resolve all accessible library IDs for the authorized user
      */
     async resolveAccessibleLibraries(userId: string, targetLibraryId?: string): Promise<string[]> {
-        const whereConditions = [
-            eq(Library.owner_id, userId),
-            eq(Library.delete_status, DeleteStatus.ACTIVE),
-        ];
+        const whereConditions = [eq(Library.owner_id, userId), eq(Library.delete_status, DeleteStatus.ACTIVE)];
 
         if (targetLibraryId) {
             whereConditions.push(eq(Library.id, targetLibraryId));
@@ -85,10 +82,7 @@ export const HybridSearchService = {
         const limit = 100; // Get top 100 candidates from each channel for high recall before rank fusion
 
         // 1. Enforce pre-filtering security bounds on libraries
-        const accessibleLibraryIds = await this.resolveAccessibleLibraries(
-            userId,
-            params.library_id,
-        );
+        const accessibleLibraryIds = await this.resolveAccessibleLibraries(userId, params.library_id);
         if (accessibleLibraryIds.length === 0) {
             return { list: [], hasMore: false, total: 0 };
         }
@@ -104,24 +98,8 @@ export const HybridSearchService = {
         // Execute retrievals in parallel
         const [keywordRes, textSemanticRes, visualSemanticRes] = await Promise.all([
             hasQuery ? this.keywordSearch(queryString, accessibleLibraryIds, limit, params) : [],
-            hasQuery
-                ? this.textSemanticSearch(
-                      queryString,
-                      accessibleLibraryIds,
-                      limit,
-                      params,
-                      aiService,
-                  )
-                : [],
-            hasQuery
-                ? this.visualSemanticSearch(
-                      queryString,
-                      accessibleLibraryIds,
-                      limit,
-                      params,
-                      aiService,
-                  )
-                : [],
+            hasQuery ? this.textSemanticSearch(queryString, accessibleLibraryIds, limit, params, aiService) : [],
+            hasQuery ? this.visualSemanticSearch(queryString, accessibleLibraryIds, limit, params, aiService) : [],
         ]);
 
         // 2. Perform Reciprocal Rank Fusion (RRF)
@@ -162,10 +140,7 @@ export const HybridSearchService = {
                 .where(
                     and(
                         inArray(Track.media_id, candidateMediaIds),
-                        or(
-                            and(eq(Track.purpose, TrackPurpose.CONTENT), eq(Track.priority, 0)),
-                            eq(Track.purpose, TrackPurpose.COVER),
-                        ),
+                        or(and(eq(Track.purpose, TrackPurpose.CONTENT), eq(Track.priority, 0)), eq(Track.purpose, TrackPurpose.COVER)),
                         eq(Track.delete_status, DeleteStatus.ACTIVE),
                         eq(File.delete_status, DeleteStatus.ACTIVE),
                     ),
@@ -173,12 +148,7 @@ export const HybridSearchService = {
             db
                 .select()
                 .from(AssetAiMetadata)
-                .where(
-                    and(
-                        inArray(AssetAiMetadata.entity_id, candidateMediaIds),
-                        eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
-                    ),
-                ),
+                .where(and(inArray(AssetAiMetadata.entity_id, candidateMediaIds), eq(AssetAiMetadata.entity_type, EntityType.MEDIA))),
             db
                 .select({
                     id: Media.id,
@@ -198,17 +168,16 @@ export const HybridSearchService = {
             // Find media url (CONTENT with priority 0) and cover url (COVER)
             const tracksForMedia = tracks.filter((f) => f.mediaId === mediaId);
             const primaryTrack = tracksForMedia.find(
-                (f) => f.purpose === TrackPurpose.CONTENT && f.priority === 0,
+                (f) =>
+                    f.purpose === TrackPurpose.CONTENT &&
+                    f.priority === 0 &&
+                    (mediaInfo?.type === "VIDEO" ? f.type === TrackType.VIDEO : f.type === TrackType.IMAGE),
             );
             const coverTrack = tracksForMedia.find((f) => f.purpose === TrackPurpose.COVER);
 
-            const mediaUrl = primaryTrack
-                ? buildCdnUrl(primaryTrack.fileBucket, primaryTrack.filePath)
-                : null;
+            const mediaUrl = primaryTrack ? buildCdnUrl(primaryTrack.fileBucket, primaryTrack.filePath) : null;
 
-            const coverUrl = coverTrack
-                ? buildCdnUrl(coverTrack.fileBucket, coverTrack.filePath)
-                : null;
+            const coverUrl = coverTrack ? buildCdnUrl(coverTrack.fileBucket, coverTrack.filePath) : null;
 
             // Resolve matched reason
             const channels = candidate.matchedChannels || [];
@@ -222,17 +191,11 @@ export const HybridSearchService = {
                 labels.push("Keyword Search (FTS/Fuzzy Search)");
             }
             if (textMatch) {
-                const distStr =
-                    textMatch.distance !== undefined
-                        ? ` (Distance: ${textMatch.distance.toFixed(4)})`
-                        : "";
+                const distStr = textMatch.distance !== undefined ? ` (Distance: ${textMatch.distance.toFixed(4)})` : "";
                 labels.push(`Text Embedding Search${distStr}`);
             }
             if (visualMatch) {
-                const distStr =
-                    visualMatch.distance !== undefined
-                        ? ` (Distance: ${visualMatch.distance.toFixed(4)})`
-                        : "";
+                const distStr = visualMatch.distance !== undefined ? ` (Distance: ${visualMatch.distance.toFixed(4)})` : "";
                 labels.push(`Image Embedding Search${distStr}`);
             }
 
@@ -308,10 +271,7 @@ export const HybridSearchService = {
             eq(Media.delete_status, DeleteStatus.ACTIVE),
             isNull(Media.recycle_time),
             inArray(Media.library_id, accessibleLibraryIds),
-            or(
-                ilike(AssetSearchDocument.title, `%${query}%`),
-                ilike(AssetSearchDocument.content, `%${query}%`),
-            ),
+            or(ilike(AssetSearchDocument.title, `%${query}%`), ilike(AssetSearchDocument.content, `%${query}%`)),
         ];
 
         if (params.source) {
@@ -327,13 +287,7 @@ export const HybridSearchService = {
                 title: Media.title,
             })
             .from(AssetSearchDocument)
-            .innerJoin(
-                Media,
-                and(
-                    eq(AssetSearchDocument.entity_id, Media.id),
-                    eq(AssetSearchDocument.entity_type, EntityType.MEDIA),
-                ),
-            )
+            .innerJoin(Media, and(eq(AssetSearchDocument.entity_id, Media.id), eq(AssetSearchDocument.entity_type, EntityType.MEDIA)))
             .where(and(...whereClause))
             .limit(limit);
 
@@ -377,19 +331,10 @@ export const HybridSearchService = {
                 .select({
                     id: Media.id,
                     title: Media.title,
-                    distance: cosineDistance(
-                        AssetEmbedding.embedding,
-                        queryEmbedding.embedding,
-                    ) as SQL<number>,
+                    distance: cosineDistance(AssetEmbedding.embedding, queryEmbedding.embedding) as SQL<number>,
                 })
                 .from(AssetEmbedding)
-                .innerJoin(
-                    Media,
-                    and(
-                        eq(AssetEmbedding.entity_id, Media.id),
-                        eq(AssetEmbedding.entity_type, EntityType.MEDIA),
-                    ),
-                )
+                .innerJoin(Media, and(eq(AssetEmbedding.entity_id, Media.id), eq(AssetEmbedding.entity_type, EntityType.MEDIA)))
                 .where(and(...whereClause))
                 .orderBy(cosineDistance(AssetEmbedding.embedding, queryEmbedding.embedding))
                 .limit(limit);
@@ -443,19 +388,10 @@ export const HybridSearchService = {
                 .select({
                     id: Media.id,
                     title: Media.title,
-                    distance: cosineDistance(
-                        AssetEmbedding.embedding,
-                        queryRes.embedding,
-                    ) as SQL<number>,
+                    distance: cosineDistance(AssetEmbedding.embedding, queryRes.embedding) as SQL<number>,
                 })
                 .from(AssetEmbedding)
-                .innerJoin(
-                    Media,
-                    and(
-                        eq(AssetEmbedding.entity_id, Media.id),
-                        eq(AssetEmbedding.entity_type, EntityType.MEDIA),
-                    ),
-                )
+                .innerJoin(Media, and(eq(AssetEmbedding.entity_id, Media.id), eq(AssetEmbedding.entity_type, EntityType.MEDIA)))
                 .where(and(...whereClause))
                 .orderBy(cosineDistance(AssetEmbedding.embedding, queryRes.embedding))
                 .limit(limit);

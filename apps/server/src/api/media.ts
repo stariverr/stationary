@@ -59,13 +59,7 @@ export const MediaListRequestBodySchema = z.object({
     ),
     count: z.preprocess(
         (val) => (val === "" || val === undefined ? undefined : Number(val)),
-        z
-            .number()
-            .int()
-            .positive()
-            .gte(10, "Count must be 10 or greater.")
-            .lte(100, "Count must be 100 or less.")
-            .optional(),
+        z.number().int().positive().gte(10, "Count must be 10 or greater.").lte(100, "Count must be 100 or less.").optional(),
     ),
     keyword: z.string().optional(),
     source: z.enum(PostSource).optional(),
@@ -126,12 +120,14 @@ export function mapMediaToResponse(
 
     const coverFile = sortedFiles.find((f) => f.purpose === TrackPurpose.COVER);
     const coverUrl =
-        coverFile && coverFile.file_path && coverFile.file_bucket
-            ? buildCdnUrl(coverFile.file_bucket, coverFile.file_path)
-            : null;
+        coverFile && coverFile.file_path && coverFile.file_bucket ? buildCdnUrl(coverFile.file_bucket, coverFile.file_path) : null;
 
+    // Live Photo: IMAGE is primary
     const primaryFile = sortedFiles.find(
-        (f) => f.purpose === TrackPurpose.CONTENT && f.priority === 0,
+        (f) =>
+            f.purpose === TrackPurpose.CONTENT &&
+            f.priority === 0 &&
+            (media.type === "VIDEO" ? f.type === TrackType.VIDEO : f.type === TrackType.IMAGE),
     );
     let primaryFileUrl =
         primaryFile && primaryFile.file_path && primaryFile.file_bucket
@@ -189,9 +185,7 @@ router.get(
         const where: SQL[] = [];
 
         if (keyword) {
-            where.push(
-                or(ilike(Media.title, `%${keyword}%`), ilike(Media.description, `%${keyword}%`))!,
-            );
+            where.push(or(ilike(Media.title, `%${keyword}%`), ilike(Media.description, `%${keyword}%`))!);
         }
         if (source) {
             where.push(eq(Media.source, source));
@@ -251,12 +245,7 @@ router.get(
                     last_error: AssetAiMetadata.last_error,
                 })
                 .from(AssetAiMetadata)
-                .where(
-                    and(
-                        inArray(AssetAiMetadata.entity_id, mediaIds),
-                        eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
-                    ),
-                );
+                .where(and(inArray(AssetAiMetadata.entity_id, mediaIds), eq(AssetAiMetadata.entity_type, EntityType.MEDIA)));
 
             for (const meta of aiMetadatas) {
                 const existing = aiMetadataMap.get(meta.entity_id);
@@ -364,13 +353,7 @@ router.get("/detail/:id", requireAuth, async (c) => {
             last_error: Media.last_error,
         })
         .from(Media)
-        .where(
-            and(
-                eq(Media.id, id as string),
-                eq(Media.delete_status, DeleteStatus.ACTIVE),
-                isNull(Media.recycle_time),
-            ),
-        )
+        .where(and(eq(Media.id, id as string), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
         .limit(1);
 
     const media = mediaResults[0];
@@ -378,11 +361,7 @@ router.get("/detail/:id", requireAuth, async (c) => {
         return c.json(error(Code.NOT_FOUND, "Media not found"), 404);
     }
 
-    const libResults = await db
-        .select()
-        .from(Library)
-        .where(eq(Library.id, media.library_id))
-        .limit(1);
+    const libResults = await db.select().from(Library).where(eq(Library.id, media.library_id)).limit(1);
     const library = libResults[0];
     if (!library || library.owner_id !== user.id) {
         return c.json(error(Code.UNAUTHORIZED, "You do not have access to this library"), 403);
@@ -394,20 +373,14 @@ router.get("/detail/:id", requireAuth, async (c) => {
             last_error: AssetAiMetadata.last_error,
         })
         .from(AssetAiMetadata)
-        .where(
-            and(
-                eq(AssetAiMetadata.entity_id, media.id),
-                eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
-            ),
-        );
+        .where(and(eq(AssetAiMetadata.entity_id, media.id), eq(AssetAiMetadata.entity_type, EntityType.MEDIA)));
 
     let aiStatus = "PENDING";
     let aiError: string | null = null;
     for (const meta of aiMetadatas) {
         if (
             aiStatus !== "COMPLETED" &&
-            (meta.processing_status === "COMPLETED" ||
-                (aiStatus !== "FAILED" && meta.processing_status === "FAILED"))
+            (meta.processing_status === "COMPLETED" || (aiStatus !== "FAILED" && meta.processing_status === "FAILED"))
         ) {
             aiStatus = meta.processing_status;
             aiError = meta.last_error;
@@ -434,11 +407,7 @@ router.get("/detail/:id", requireAuth, async (c) => {
         .from(Track)
         .leftJoin(DbFile, eq(Track.file_id, DbFile.id))
         .where(
-            and(
-                eq(Track.media_id, media.id),
-                eq(Track.delete_status, DeleteStatus.ACTIVE),
-                eq(Track.sync_status, SyncStatus.COMPLETED),
-            ),
+            and(eq(Track.media_id, media.id), eq(Track.delete_status, DeleteStatus.ACTIVE), eq(Track.sync_status, SyncStatus.COMPLETED)),
         );
 
     const response = mapMediaToResponse(
@@ -516,13 +485,7 @@ router.post("/:id/regenerate-cover", requireAuth, async (c) => {
     const mediaResults = await db
         .select()
         .from(Media)
-        .where(
-            and(
-                eq(Media.id, mediaId),
-                eq(Media.delete_status, DeleteStatus.ACTIVE),
-                isNull(Media.recycle_time),
-            ),
-        );
+        .where(and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)));
     const media = mediaResults[0];
     if (!media) {
         return c.json(error(Code.NOT_FOUND, "Media not found"), 404);
@@ -533,11 +496,7 @@ router.post("/:id/regenerate-cover", requireAuth, async (c) => {
     }
 
     // Verify user owns the library
-    const libResults = await db
-        .select()
-        .from(Library)
-        .where(eq(Library.id, media.library_id))
-        .limit(1);
+    const libResults = await db.select().from(Library).where(eq(Library.id, media.library_id)).limit(1);
     const library = libResults[0];
     if (!library || library.owner_id !== user.id) {
         return c.json(error(Code.UNAUTHORIZED, "You do not have access to this library"), 403);
@@ -546,9 +505,7 @@ router.post("/:id/regenerate-cover", requireAuth, async (c) => {
     const url = new URL(c.req.url);
     const origin =
         env.UPSTASH_WORKFLOW_URL ||
-        (c.req.header("x-forwarded-proto")
-            ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
-            : url.origin);
+        (c.req.header("x-forwarded-proto") ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}` : url.origin);
 
     const res = await VideoCoverService.requestForMedia(mediaId, {
         originUrl: origin,
@@ -574,64 +531,38 @@ router.post("/regenerate-covers", requireAuth, async (c) => {
 
     const mediaIds = Array.from(new Set(body.media_ids || []));
     if (mediaIds.length === 0) {
-        return c.json(
-            error(Code.INVALID_PARAMETER, "media_ids is required and cannot be empty"),
-            400,
-        );
+        return c.json(error(Code.INVALID_PARAMETER, "media_ids is required and cannot be empty"), 400);
     }
 
     if (mediaIds.length > 100) {
-        return c.json(
-            error(Code.INVALID_PARAMETER, "Cannot process more than 100 media items at once"),
-            400,
-        );
+        return c.json(error(Code.INVALID_PARAMETER, "Cannot process more than 100 media items at once"), 400);
     }
 
     const mediaList = await db
         .select()
         .from(Media)
-        .where(
-            and(
-                inArray(Media.id, mediaIds),
-                eq(Media.delete_status, DeleteStatus.ACTIVE),
-                isNull(Media.recycle_time),
-            ),
-        );
+        .where(and(inArray(Media.id, mediaIds), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)));
 
     if (mediaList.length === 0) {
         return c.json(error(Code.NOT_FOUND, "No matching media items found"), 404);
     }
 
     // Verify user owns libraries of all found media
-    const uniqueLibraryIds = Array.from(new Set(mediaList.map((m) => m.library_id))).filter(
-        (libId): libId is string => !!libId,
-    );
+    const uniqueLibraryIds = Array.from(new Set(mediaList.map((m) => m.library_id))).filter((libId): libId is string => !!libId);
     const libraries = await db
         .select()
         .from(Library)
-        .where(
-            and(
-                inArray(Library.id, uniqueLibraryIds),
-                eq(Library.delete_status, DeleteStatus.ACTIVE),
-            ),
-        );
+        .where(and(inArray(Library.id, uniqueLibraryIds), eq(Library.delete_status, DeleteStatus.ACTIVE)));
 
-    const isAuthorized =
-        libraries.every((lib) => lib.owner_id === user.id) &&
-        libraries.length === uniqueLibraryIds.length;
+    const isAuthorized = libraries.every((lib) => lib.owner_id === user.id) && libraries.length === uniqueLibraryIds.length;
     if (!isAuthorized) {
-        return c.json(
-            error(Code.UNAUTHORIZED, "You do not have access to some of the selected libraries"),
-            403,
-        );
+        return c.json(error(Code.UNAUTHORIZED, "You do not have access to some of the selected libraries"), 403);
     }
 
     const url = new URL(c.req.url);
     const origin =
         env.UPSTASH_WORKFLOW_URL ||
-        (c.req.header("x-forwarded-proto")
-            ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
-            : url.origin);
+        (c.req.header("x-forwarded-proto") ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}` : url.origin);
 
     let queued = 0;
     let skipped = 0;
@@ -722,13 +653,7 @@ router.get(
         const mediaResults = await db
             .select()
             .from(Media)
-            .where(
-                and(
-                    eq(Media.id, mediaId as string),
-                    eq(Media.delete_status, DeleteStatus.ACTIVE),
-                    isNull(Media.recycle_time),
-                ),
-            )
+            .where(and(eq(Media.id, mediaId as string), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
             .limit(1);
         const media = mediaResults[0];
         if (!media) {
@@ -736,11 +661,7 @@ router.get(
         }
 
         // Verify user owns the library
-        const libResults = await db
-            .select()
-            .from(Library)
-            .where(eq(Library.id, media.library_id))
-            .limit(1);
+        const libResults = await db.select().from(Library).where(eq(Library.id, media.library_id)).limit(1);
         const library = libResults[0];
         if (!library || library.owner_id !== user.id) {
             return c.json(error(Code.UNAUTHORIZED, "You do not have access to this library"), 403);
@@ -758,12 +679,8 @@ router.get(
                 ),
             );
 
-        const videoFiles = tracks.filter(
-            (t) => t.type === TrackType.VIDEO && t.purpose === TrackPurpose.CONTENT,
-        );
-        const audioFiles = tracks.filter(
-            (t) => t.type === TrackType.AUDIO && t.purpose === TrackPurpose.CONTENT,
-        );
+        const videoFiles = tracks.filter((t) => t.type === TrackType.VIDEO && t.purpose === TrackPurpose.CONTENT);
+        const audioFiles = tracks.filter((t) => t.type === TrackType.AUDIO && t.purpose === TrackPurpose.CONTENT);
 
         if (videoFiles.length === 0) {
             return c.json(error(Code.NOT_FOUND, "No video tracks found for this media"), 404);
