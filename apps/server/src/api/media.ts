@@ -6,20 +6,21 @@ import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
 import {
     Media,
-    MediaFile,
+    Track,
     Post,
     File as DbFile,
     PostSource,
     DeleteStatus,
-    MediaFileRole,
+    TrackType,
+    TrackPurpose,
+    TrackQuality,
     AssetAiMetadata,
     EntityType,
     SyncStatus,
     type MediaFileMetadata,
 } from "@/db/schema";
 import { s3 } from "@/global/s3";
-import { and, eq, ilike, SQL, count, desc, or, isNull, isNotNull, sql, inArray } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { and, eq, ilike, SQL, count, desc, or, isNull, inArray } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { Temporal } from "@js-temporal/polyfill";
 import { RecycleService } from "@/services/recycle";
@@ -74,8 +75,11 @@ export const MediaListRequestBodySchema = z.object({
 
 export interface MappedFileRow {
     media_id: string | null;
-    role: MediaFileRole;
-    sort_order: number;
+    type: TrackType;
+    purpose: TrackPurpose;
+    is_original: boolean;
+    quality: TrackQuality;
+    priority: number;
     metadata: MediaFileMetadata;
     file_id: string | null;
     file_path: string | null;
@@ -105,25 +109,30 @@ export function mapMediaToResponse(
     },
     files: MappedFileRow[],
 ) {
-    const sortedFiles = [...files].sort((a, b) => a.sort_order - b.sort_order);
+    const sortedFiles = [...files].sort((a, b) => a.priority - b.priority);
 
     const tracks = sortedFiles
         .filter((f) => f.file_path && f.file_bucket)
         .map((f) => ({
             id: f.file_id || "",
             url: buildCdnUrl(f.file_bucket!, f.file_path!) || "",
-            role: f.role,
-            sort_order: f.sort_order,
+            type: f.type,
+            purpose: f.purpose,
+            is_original: f.is_original,
+            quality: f.quality,
+            priority: f.priority,
             metadata: f.metadata || {},
         }));
 
-    const coverFile = sortedFiles.find((f) => f.role === MediaFileRole.COVER);
+    const coverFile = sortedFiles.find((f) => f.purpose === TrackPurpose.COVER);
     const coverUrl =
         coverFile && coverFile.file_path && coverFile.file_bucket
             ? buildCdnUrl(coverFile.file_bucket, coverFile.file_path)
             : null;
 
-    const primaryFile = sortedFiles.find((f) => f.role === MediaFileRole.PRIMARY);
+    const primaryFile = sortedFiles.find(
+        (f) => f.purpose === TrackPurpose.CONTENT && f.priority === 0,
+    );
     let primaryFileUrl =
         primaryFile && primaryFile.file_path && primaryFile.file_bucket
             ? buildCdnUrl(primaryFile.file_bucket, primaryFile.file_path)
@@ -265,10 +274,13 @@ router.get(
 
             const allFiles = await db
                 .select({
-                    media_id: MediaFile.media_id,
-                    role: MediaFile.role,
-                    sort_order: MediaFile.sort_order,
-                    metadata: MediaFile.metadata,
+                    media_id: Track.media_id,
+                    type: Track.type,
+                    purpose: Track.purpose,
+                    is_original: Track.is_original,
+                    quality: Track.quality,
+                    priority: Track.priority,
+                    metadata: Track.metadata,
                     file_id: DbFile.id,
                     file_path: DbFile.path,
                     file_bucket: DbFile.bucket,
@@ -277,14 +289,14 @@ router.get(
                     width: DbFile.width,
                     height: DbFile.height,
                 })
-                .from(MediaFile)
-                .leftJoin(DbFile, eq(MediaFile.file_id, DbFile.id))
+                .from(Track)
+                .leftJoin(DbFile, eq(Track.file_id, DbFile.id))
                 .where(
                     and(
-                        inArray(MediaFile.media_id, mediaIds),
-                        eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
-                        eq(MediaFile.sync_status, SyncStatus.COMPLETED),
-                        inArray(MediaFile.role, [MediaFileRole.PRIMARY, MediaFileRole.COVER]),
+                        inArray(Track.media_id, mediaIds),
+                        eq(Track.delete_status, DeleteStatus.ACTIVE),
+                        eq(Track.sync_status, SyncStatus.COMPLETED),
+                        inArray(Track.purpose, [TrackPurpose.CONTENT, TrackPurpose.COVER]),
                     ),
                 );
 
@@ -404,10 +416,13 @@ router.get("/detail/:id", requireAuth, async (c) => {
 
     const files = await db
         .select({
-            media_id: MediaFile.media_id,
-            role: MediaFile.role,
-            sort_order: MediaFile.sort_order,
-            metadata: MediaFile.metadata,
+            media_id: Track.media_id,
+            type: Track.type,
+            purpose: Track.purpose,
+            is_original: Track.is_original,
+            quality: Track.quality,
+            priority: Track.priority,
+            metadata: Track.metadata,
             file_id: DbFile.id,
             file_path: DbFile.path,
             file_bucket: DbFile.bucket,
@@ -416,13 +431,13 @@ router.get("/detail/:id", requireAuth, async (c) => {
             width: DbFile.width,
             height: DbFile.height,
         })
-        .from(MediaFile)
-        .leftJoin(DbFile, eq(MediaFile.file_id, DbFile.id))
+        .from(Track)
+        .leftJoin(DbFile, eq(Track.file_id, DbFile.id))
         .where(
             and(
-                eq(MediaFile.media_id, media.id),
-                eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
-                eq(MediaFile.sync_status, SyncStatus.COMPLETED),
+                eq(Track.media_id, media.id),
+                eq(Track.delete_status, DeleteStatus.ACTIVE),
+                eq(Track.sync_status, SyncStatus.COMPLETED),
             ),
         );
 
@@ -731,29 +746,31 @@ router.get(
             return c.json(error(Code.UNAUTHORIZED, "You do not have access to this library"), 403);
         }
 
-        // 2. Fetch associated primary (video) and audio MediaFiles
-        const mediaFiles = await db
+        // 2. Fetch associated video and audio tracks
+        const tracks = await db
             .select()
-            .from(MediaFile)
+            .from(Track)
             .where(
                 and(
-                    eq(MediaFile.media_id, mediaId as string),
-                    eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
-                    eq(MediaFile.sync_status, SyncStatus.COMPLETED),
+                    eq(Track.media_id, mediaId as string),
+                    eq(Track.delete_status, DeleteStatus.ACTIVE),
+                    eq(Track.sync_status, SyncStatus.COMPLETED),
                 ),
             );
 
-        const videoFiles = mediaFiles.filter(
-            (mf) => mf.role === MediaFileRole.PRIMARY || mf.role === MediaFileRole.ALTERNATIVE,
+        const videoFiles = tracks.filter(
+            (t) => t.type === TrackType.VIDEO && t.purpose === TrackPurpose.CONTENT,
         );
-        const audioFiles = mediaFiles.filter((mf) => mf.role === MediaFileRole.AUDIO);
+        const audioFiles = tracks.filter(
+            (t) => t.type === TrackType.AUDIO && t.purpose === TrackPurpose.CONTENT,
+        );
 
         if (videoFiles.length === 0) {
             return c.json(error(Code.NOT_FOUND, "No video tracks found for this media"), 404);
         }
 
         // Fetch physical File records for pre-signed URLs
-        const fileIds = mediaFiles.map((mf) => mf.file_id).filter((fid): fid is string => !!fid);
+        const fileIds = tracks.map((t) => t.file_id).filter((fid): fid is string => !!fid);
 
         if (fileIds.length === 0) {
             return c.json(error(Code.NOT_FOUND, "No physical files found for this media"), 404);
@@ -795,14 +812,19 @@ router.get(
 
             const url = await getPresignedUrlOrCdn(file.path, file.bucket);
             const meta = vf.metadata;
-            let codecs = meta?.codecs || "avc1.640028";
-            if (codecs === "hevc") {
+
+            // DASH manifests require strict RFC 6381 codec parameters.
+            // Generic names (e.g., "hevc", "av1", "h264") must be mapped to precise,
+            // browser-compatible codec profile/level identifier strings.
+            let codecs = meta?.codecs?.toLowerCase() || "avc1.640028";
+            if (["hevc", "h265", "h.265"].includes(codecs)) {
                 codecs = "hvc1.1.6.L150.90";
-            } else if (codecs === "h264") {
+            } else if (["h264", "h.264", "avc"].includes(codecs)) {
                 codecs = "avc1.640028";
             } else if (codecs === "av1") {
                 codecs = "av01.0.08M.08";
             }
+
             const bandwidth = meta?.bandwidth || 1500000;
             const width = meta?.width || file.width || 1280;
             const height = meta?.height || file.height || 720;
@@ -820,7 +842,7 @@ router.get(
             }
 
             videoRepresentations.push(`
-      <Representation id="video_${vf.sort_order}" codecs="${codecs}" bandwidth="${bandwidth}" width="${width}" height="${height}">
+      <Representation id="video_${vf.priority}" codecs="${codecs}" bandwidth="${bandwidth}" width="${width}" height="${height}">
         <BaseURL>${escapeXml(url)}</BaseURL>
         <SegmentBase ${segmentBaseAttrs.join(" ")}>
           <Initialization range="${initRange}" />
@@ -857,7 +879,7 @@ router.get(
             }
 
             audioRepresentations.push(`
-      <Representation id="audio_${af.sort_order}" codecs="${codecs}" bandwidth="${bandwidth}">
+      <Representation id="audio_${af.priority}" codecs="${codecs}" bandwidth="${bandwidth}">
         <BaseURL>${escapeXml(url)}</BaseURL>
         <SegmentBase ${segmentBaseAttrs.join(" ")}>
           <Initialization range="${initRange}" />

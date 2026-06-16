@@ -14,20 +14,18 @@ export enum Platform {
 
 export const PlatformSchema = v.enum_(Platform);
 
-export const TrackRoleSchema = v.picklist([
-    "PRIMARY",
-    "COVER",
-    "ALTERNATIVE",
-    "LIVE_PHOTO_VIDEO",
-    "AUDIO",
-    "SUBTITLE",
-]);
+export const TrackTypeSchema = v.picklist(["IMAGE", "VIDEO", "AUDIO", "SUBTITLE"]);
+export const TrackPurposeSchema = v.picklist(["CONTENT", "COVER", "THUMBNAIL", "PREVIEW"]);
+export const TrackQualitySchema = v.picklist(["ORIGINAL", "HIGH", "MEDIUM", "LOW"]);
 
 export const TrackSchema = v.object({
     id: v.optional(v.string()),
     url: v.string(),
-    role: TrackRoleSchema,
-    sort_order: v.number(),
+    type: TrackTypeSchema,
+    purpose: TrackPurposeSchema,
+    is_original: v.boolean(),
+    quality: TrackQualitySchema,
+    priority: v.number(),
     metadata: v.record(v.string(), v.unknown()),
     mime_type: v.optional(v.nullable(v.string())),
 });

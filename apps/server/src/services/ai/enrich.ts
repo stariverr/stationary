@@ -2,7 +2,7 @@ import { db } from "@/global/db";
 import {
     Post,
     Media,
-    MediaFile,
+    Track,
     File,
     AssetSearchDocument,
     AssetAiMetadata,
@@ -10,7 +10,9 @@ import {
     DeleteStatus,
     ProcessingStatus,
     EmbeddingStatus,
-    MediaFileRole,
+    TrackType,
+    TrackPurpose,
+    TrackQuality,
     MediaType,
     EntityType,
     ModalityType,
@@ -67,9 +69,10 @@ export const AiEnrichmentService = {
         media: typeof Media.$inferSelect,
         post: typeof Post.$inferSelect,
     ): Promise<void> {
-        // 1. Resolve targeted MediaFile role (COVER for Videos, PRIMARY for Images/Live Photos)
-        const targetRole =
-            media.type === MediaType.VIDEO ? MediaFileRole.COVER : MediaFileRole.PRIMARY;
+        // 1. Resolve targeted Track (COVER for Videos, CONTENT IMAGE for others)
+        const isVideo = media.type === MediaType.VIDEO;
+        const trackType = TrackType.IMAGE;
+        const trackPurpose = isVideo ? TrackPurpose.COVER : TrackPurpose.CONTENT;
 
         // Fetch Library to resolve owner_id
         const libraryRows = await db
@@ -92,31 +95,33 @@ export const AiEnrichmentService = {
         }
         const metadataPipelineId = aiService.metadataPipelineId;
 
-        const mediaFile = await db.query.MediaFile.findFirst({
+        const track = await db.query.Track.findFirst({
             where: {
                 media_id: media.id,
-                role: targetRole,
+                type: trackType,
+                purpose: trackPurpose,
+                priority: 0,
                 delete_status: DeleteStatus.ACTIVE,
             },
         });
 
-        if (!mediaFile || !mediaFile.file_id) {
+        if (!track || !track.file_id) {
             console.log(
-                `[AI ENRICH] Target file not found/completed for media ${media.id} (${targetRole}). skipping.`,
+                `[AI ENRICH] Target file not found/completed for media ${media.id} (${trackType}:${trackPurpose}). skipping.`,
             );
             return;
         }
 
         const file = await db.query.File.findFirst({
             where: {
-                id: mediaFile.file_id,
+                id: track.file_id,
                 delete_status: DeleteStatus.ACTIVE,
             },
         });
 
         if (!file) {
             console.log(
-                `[AI ENRICH] Physical S3 file ${mediaFile.file_id} not found in DB for media ${media.id}. skipping.`,
+                `[AI ENRICH] Physical S3 file ${track.file_id} not found in DB for media ${media.id}. skipping.`,
             );
             return;
         }

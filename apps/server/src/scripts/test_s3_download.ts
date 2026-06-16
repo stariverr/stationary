@@ -1,5 +1,5 @@
 import { db } from "@/global/db";
-import { File, MediaFile, DeleteStatus } from "@/db/schema";
+import { File, Track, DeleteStatus } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { s3 } from "@/global/s3";
 

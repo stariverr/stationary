@@ -145,7 +145,7 @@ const onSlideChange = (swiper: unknown) => {
 
 const mapMediaWithSubtitles = (m: MediaInputForSubtitles): MappedSiblingMedia | null => {
     if (!m) return null;
-    const subtitleTracks = (m.tracks || []).filter((t: Track) => t.role === "SUBTITLE");
+    const subtitleTracks = (m.tracks || []).filter((t: Track) => t.type === "SUBTITLE");
     return {
         ...m,
         id: String(m.id || ""),

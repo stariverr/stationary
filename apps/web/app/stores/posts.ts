@@ -120,10 +120,20 @@ export const usePostStore = defineStore("posts", () => {
         const displayTime = apiPost.published_time ?? apiPost.create_time;
 
         const uiMedia = apiPost.media.map((m) => {
-            const primaryTrack = m.tracks.find((t) => t.role === "PRIMARY" && t.sort_order === 0);
-            const coverTrack = m.tracks.find((t) => t.role === "COVER");
-            const liveTrack = m.tracks.find((t) => t.role === "LIVE_PHOTO_VIDEO");
-            const subtitleTracks = m.tracks.filter((t) => t.role === "SUBTITLE");
+            const primaryTrack = m.tracks.find(
+                (t) =>
+                    t.purpose === "CONTENT" &&
+                    t.priority === 0 &&
+                    (m.type === "VIDEO" ? t.type === "VIDEO" : t.type === "IMAGE"),
+            );
+            const coverTrack = m.tracks.find((t) => t.purpose === "COVER");
+            const liveTrack =
+                m.type === "LIVE_PHOTO"
+                    ? m.tracks.find(
+                          (t) => t.type === "VIDEO" && t.purpose === "CONTENT" && t.priority === 0,
+                      )
+                    : null;
+            const subtitleTracks = m.tracks.filter((t) => t.type === "SUBTITLE");
 
             let url = m.url || primaryTrack?.url || null;
 
@@ -239,11 +249,22 @@ export const usePostStore = defineStore("posts", () => {
                 const uiMedia =
                     detail.media?.map((m) => {
                         const primaryTrack = m.tracks.find(
-                            (t) => t.role === "PRIMARY" && t.sort_order === 0,
+                            (t) =>
+                                t.purpose === "CONTENT" &&
+                                t.priority === 0 &&
+                                (m.type === "VIDEO" ? t.type === "VIDEO" : t.type === "IMAGE"),
                         );
-                        const coverTrack = m.tracks.find((t) => t.role === "COVER");
-                        const liveTrack = m.tracks.find((t) => t.role === "LIVE_PHOTO_VIDEO");
-                        const subtitleTracks = m.tracks.filter((t) => t.role === "SUBTITLE");
+                        const coverTrack = m.tracks.find((t) => t.purpose === "COVER");
+                        const liveTrack =
+                            m.type === "LIVE_PHOTO"
+                                ? m.tracks.find(
+                                      (t) =>
+                                          t.type === "VIDEO" &&
+                                          t.purpose === "CONTENT" &&
+                                          t.priority === 0,
+                                  )
+                                : null;
+                        const subtitleTracks = m.tracks.filter((t) => t.type === "SUBTITLE");
 
                         let url = m.url || primaryTrack?.url || null;
 

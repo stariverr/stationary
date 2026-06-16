@@ -2,7 +2,7 @@ import { db } from "@/global/db";
 import {
     Library,
     Media,
-    MediaFile,
+    Track,
     File,
     AssetSearchDocument,
     AssetEmbedding,
@@ -10,7 +10,9 @@ import {
     DeleteStatus,
     EmbeddingStatus,
     EntityType,
-    MediaFileRole,
+    TrackType,
+    TrackPurpose,
+    TrackQuality,
     PostSource,
     MediaType,
 } from "@/db/schema";
@@ -145,21 +147,26 @@ export const HybridSearchService = {
         }
 
         // 4. Fetch additional rich media files and metadata for matching reasons
-        const [mediaFiles, aiMetadatas, mediaDetails] = await Promise.all([
+        const [tracks, aiMetadatas, mediaDetails] = await Promise.all([
             db
                 .select({
-                    mediaId: MediaFile.media_id,
-                    role: MediaFile.role,
+                    mediaId: Track.media_id,
+                    type: Track.type,
+                    purpose: Track.purpose,
+                    priority: Track.priority,
                     filePath: File.path,
                     fileBucket: File.bucket,
                 })
-                .from(MediaFile)
-                .innerJoin(File, eq(MediaFile.file_id, File.id))
+                .from(Track)
+                .innerJoin(File, eq(Track.file_id, File.id))
                 .where(
                     and(
-                        inArray(MediaFile.media_id, candidateMediaIds),
-                        inArray(MediaFile.role, [MediaFileRole.PRIMARY, MediaFileRole.COVER]),
-                        eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
+                        inArray(Track.media_id, candidateMediaIds),
+                        or(
+                            and(eq(Track.purpose, TrackPurpose.CONTENT), eq(Track.priority, 0)),
+                            eq(Track.purpose, TrackPurpose.COVER),
+                        ),
+                        eq(Track.delete_status, DeleteStatus.ACTIVE),
                         eq(File.delete_status, DeleteStatus.ACTIVE),
                     ),
                 ),
@@ -188,17 +195,19 @@ export const HybridSearchService = {
             const mediaId = candidate.mediaId;
             const mediaInfo = mediaDetails.find((m) => m.id === mediaId);
 
-            // Find media url (PRIMARY for video/image) and cover url (COVER for video)
-            const filesForMedia = mediaFiles.filter((f) => f.mediaId === mediaId);
-            const primaryFile = filesForMedia.find((f) => f.role === MediaFileRole.PRIMARY);
-            const coverFile = filesForMedia.find((f) => f.role === MediaFileRole.COVER);
+            // Find media url (CONTENT with priority 0) and cover url (COVER)
+            const tracksForMedia = tracks.filter((f) => f.mediaId === mediaId);
+            const primaryTrack = tracksForMedia.find(
+                (f) => f.purpose === TrackPurpose.CONTENT && f.priority === 0,
+            );
+            const coverTrack = tracksForMedia.find((f) => f.purpose === TrackPurpose.COVER);
 
-            const mediaUrl = primaryFile
-                ? buildCdnUrl(primaryFile.fileBucket, primaryFile.filePath)
+            const mediaUrl = primaryTrack
+                ? buildCdnUrl(primaryTrack.fileBucket, primaryTrack.filePath)
                 : null;
 
-            const coverUrl = coverFile
-                ? buildCdnUrl(coverFile.fileBucket, coverFile.filePath)
+            const coverUrl = coverTrack
+                ? buildCdnUrl(coverTrack.fileBucket, coverTrack.filePath)
                 : null;
 
             // Resolve matched reason

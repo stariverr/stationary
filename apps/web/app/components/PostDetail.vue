@@ -96,7 +96,7 @@ const copyLink = () => {
 const mappedMedia = computed(() => {
     if (!selectedPost.value?.media) return [];
     return selectedPost.value.media.map((m) => {
-        const subtitleTracks = (m.tracks || []).filter((t: Track) => t.role === "SUBTITLE");
+        const subtitleTracks = (m.tracks || []).filter((t: Track) => t.type === "SUBTITLE");
         return {
             ...m,
             subtitles: subtitleTracks.map((sub: Track) => ({

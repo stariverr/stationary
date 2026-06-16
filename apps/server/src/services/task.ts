@@ -2,12 +2,14 @@ import { db } from "@/global/db";
 import {
     Post,
     Media,
-    MediaFile,
+    Track,
     Author,
     File,
     DeleteStatus,
     SyncStatus,
-    MediaFileRole,
+    TrackType,
+    TrackPurpose,
+    TrackQuality,
 } from "@/db/schema";
 import { eq, and, notInArray, inArray, gte, isNull, isNotNull, or, lt } from "drizzle-orm";
 import { downloadStream, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
@@ -333,12 +335,12 @@ export const TaskService = {
                     );
 
                 const mediaFiles = await tx
-                    .select({ file_id: MediaFile.file_id })
-                    .from(MediaFile)
+                    .select({ file_id: Track.file_id })
+                    .from(Track)
                     .where(
                         and(
-                            inArray(MediaFile.media_id, deletedMediaIds),
-                            eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
+                            inArray(Track.media_id, deletedMediaIds),
+                            eq(Track.delete_status, DeleteStatus.ACTIVE),
                         ),
                     );
                 const fileIds = mediaFiles
@@ -346,15 +348,15 @@ export const TaskService = {
                     .filter((fid): fid is string => !!fid);
 
                 await tx
-                    .update(MediaFile)
+                    .update(Track)
                     .set({
                         delete_status: DeleteStatus.DELETED,
                         delete_time: deleteTime,
                     })
                     .where(
                         and(
-                            inArray(MediaFile.media_id, deletedMediaIds),
-                            eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
+                            inArray(Track.media_id, deletedMediaIds),
+                            eq(Track.delete_status, DeleteStatus.ACTIVE),
                         ),
                     );
 
@@ -448,14 +450,14 @@ export const TaskService = {
                     updateData.published_time = incomingPublishedTime ?? fallbackPublishedTime;
                 }
 
-                // Fetch existing active media files to see if any track needs processing
-                const activeMediaFiles = await db
+                // Fetch existing active tracks to see if any track needs processing
+                const activeTracks = await db
                     .select()
-                    .from(MediaFile)
+                    .from(Track)
                     .where(
                         and(
-                            eq(MediaFile.media_id, mediaId),
-                            eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
+                            eq(Track.media_id, mediaId),
+                            eq(Track.delete_status, DeleteStatus.ACTIVE),
                         ),
                     );
 
@@ -463,8 +465,11 @@ export const TaskService = {
 
                 // Check if any incoming track is new, modified, or pending/failed
                 for (const track of mediaData.tracks) {
-                    const existing = activeMediaFiles.find(
-                        (mf) => mf.role === track.role && mf.sort_order === track.sort,
+                    const existing = activeTracks.find(
+                        (t) =>
+                            t.type === track.type &&
+                            t.purpose === track.purpose &&
+                            t.priority === track.priority,
                     );
                     if (!existing) {
                         mediaNeedsProcessing = true;
@@ -472,6 +477,8 @@ export const TaskService = {
                     }
                     if (
                         existing.source_url !== track.url ||
+                        existing.is_original !== track.is_original ||
+                        existing.quality !== track.quality ||
                         existing.sync_status === SyncStatus.FAILED ||
                         existing.sync_status === SyncStatus.PENDING ||
                         JSON.stringify(existing.metadata) !== JSON.stringify(track.metadata || {})
@@ -481,11 +488,14 @@ export const TaskService = {
                     }
                 }
 
-                // Also check if any existing active media files are being removed
+                // Also check if any existing active tracks are being removed
                 if (!mediaNeedsProcessing) {
-                    for (const mf of activeMediaFiles) {
+                    for (const t of activeTracks) {
                         const stillExists = mediaData.tracks.some(
-                            (track) => track.role === mf.role && track.sort === mf.sort_order,
+                            (track) =>
+                                track.type === t.type &&
+                                track.purpose === t.purpose &&
+                                track.priority === t.priority,
                         );
                         if (!stillExists) {
                             mediaNeedsProcessing = true;
@@ -509,37 +519,44 @@ export const TaskService = {
                 }
             }
 
-            // Sync MediaFile records
-            const existingMediaFiles = await db
-                .select()
-                .from(MediaFile)
-                .where(eq(MediaFile.media_id, mediaId));
+            // Sync Track records
+            const existingTracks = await db.select().from(Track).where(eq(Track.media_id, mediaId));
 
-            const processAffiliatedFile = async (
-                role: MediaFileRole,
-                newUrl: string | null | undefined,
-                sortOrder: number = 0,
-                metadata: any = {},
-            ) => {
-                const existing = existingMediaFiles.find(
-                    (mf) =>
-                        mf.role === role &&
-                        mf.sort_order === sortOrder &&
-                        mf.delete_status === DeleteStatus.ACTIVE,
+            const processAffiliatedFile = async (trackInfo: {
+                type: TrackType;
+                purpose: TrackPurpose;
+                is_original: boolean;
+                quality: TrackQuality;
+                priority: number;
+                url: string | null | undefined;
+                metadata?: any;
+            }) => {
+                const existing = existingTracks.find(
+                    (t) =>
+                        t.type === trackInfo.type &&
+                        t.purpose === trackInfo.purpose &&
+                        t.priority === trackInfo.priority &&
+                        t.delete_status === DeleteStatus.ACTIVE,
                 );
-                if (newUrl) {
+                if (trackInfo.url) {
+                    const metadata = trackInfo.metadata || {};
                     if (!existing) {
-                        await db.insert(MediaFile).values({
+                        await db.insert(Track).values({
                             media_id: mediaId,
-                            role: role,
-                            sort_order: sortOrder,
-                            source_url: newUrl,
+                            type: trackInfo.type,
+                            purpose: trackInfo.purpose,
+                            is_original: trackInfo.is_original,
+                            quality: trackInfo.quality,
+                            priority: trackInfo.priority,
+                            source_url: trackInfo.url,
                             metadata: metadata,
                             sync_status: SyncStatus.PENDING,
                         });
                         hasPendingTasks = true;
                     } else if (
-                        existing.source_url !== newUrl ||
+                        existing.source_url !== trackInfo.url ||
+                        existing.is_original !== trackInfo.is_original ||
+                        existing.quality !== trackInfo.quality ||
                         existing.sync_status === SyncStatus.FAILED ||
                         JSON.stringify(existing.metadata) !== JSON.stringify(metadata)
                     ) {
@@ -553,33 +570,35 @@ export const TaskService = {
                                 .where(eq(File.id, existing.file_id));
                         }
                         await db
-                            .update(MediaFile)
+                            .update(Track)
                             .set({
-                                source_url: newUrl,
+                                source_url: trackInfo.url,
+                                is_original: trackInfo.is_original,
+                                quality: trackInfo.quality,
                                 metadata: metadata,
                                 sync_status: SyncStatus.PENDING,
                                 file_id: null,
                                 last_error: null,
                             })
-                            .where(eq(MediaFile.id, existing.id));
+                            .where(eq(Track.id, existing.id));
                         hasPendingTasks = true;
                     } else if (existing.sync_status === "PENDING") {
                         hasPendingTasks = true;
                     }
                 } else if (existing) {
-                    // Do not erase existing cover files if newUrl is null/undefined
-                    if (role === "COVER") {
+                    // Do not erase existing cover files if url is null/undefined
+                    if (trackInfo.purpose === TrackPurpose.COVER) {
                         return;
                     }
                     await db
-                        .update(MediaFile)
+                        .update(Track)
                         .set({
                             source_url: null,
                             file_id: null,
                             sync_status: SyncStatus.COMPLETED,
                             last_error: null,
                         })
-                        .where(eq(MediaFile.id, existing.id));
+                        .where(eq(Track.id, existing.id));
                 }
             };
 
@@ -587,36 +606,31 @@ export const TaskService = {
 
             // Process all tracks in a unified loop
             for (const track of mediaData.tracks) {
-                processedTrackKeys.add(`${track.role}:${track.sort}`);
-                await processAffiliatedFile(
-                    track.role,
-                    track.url,
-                    track.sort,
-                    track.metadata || {},
-                );
+                processedTrackKeys.add(`${track.type}:${track.purpose}:${track.priority}`);
+                await processAffiliatedFile(track);
             }
 
-            // Clean up obsolete MediaFile records across all roles
-            for (const mf of existingMediaFiles) {
-                const key = `${mf.role}:${mf.sort_order}`;
+            // Clean up obsolete Track records across all partitions
+            for (const t of existingTracks) {
+                const key = `${t.type}:${t.purpose}:${t.priority}`;
                 if (!processedTrackKeys.has(key)) {
                     const deleteTime = nowDbTimestamp();
-                    if (mf.file_id) {
+                    if (t.file_id) {
                         await db
                             .update(File)
                             .set({
                                 delete_status: DeleteStatus.DELETED,
                                 delete_time: deleteTime,
                             })
-                            .where(eq(File.id, mf.file_id));
+                            .where(eq(File.id, t.file_id));
                     }
                     await db
-                        .update(MediaFile)
+                        .update(Track)
                         .set({
                             delete_status: DeleteStatus.DELETED,
                             delete_time: deleteTime,
                         })
-                        .where(eq(MediaFile.id, mf.id));
+                        .where(eq(Track.id, t.id));
                 }
             }
         }
@@ -676,28 +690,28 @@ export const TaskService = {
                         .set({ sync_status: SyncStatus.IN_PROGRESS })
                         .where(eq(Media.id, m.id));
 
-                    // Fetch again to ensure we get latest active files
-                    const mediaFiles = await db
+                    // Fetch again to ensure we get latest active tracks
+                    const tracks = await db
                         .select()
-                        .from(MediaFile)
+                        .from(Track)
                         .where(
                             and(
-                                eq(MediaFile.media_id, m.id),
-                                eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
+                                eq(Track.media_id, m.id),
+                                eq(Track.delete_status, DeleteStatus.ACTIVE),
                             ),
                         );
 
                     let allCompleted = true;
 
-                    for (const mf of mediaFiles) {
+                    for (const mf of tracks) {
                         // Already completed or no source url, skipping
                         if (mf.sync_status === SyncStatus.COMPLETED || !mf.source_url) continue;
 
                         // Mark as IN_PROGRESS
                         await db
-                            .update(MediaFile)
+                            .update(Track)
                             .set({ sync_status: SyncStatus.IN_PROGRESS })
-                            .where(eq(MediaFile.id, mf.id));
+                            .where(eq(Track.id, mf.id));
 
                         try {
                             const response = await downloadStream(mf.source_url);
@@ -709,7 +723,7 @@ export const TaskService = {
 
                                 // Auto-convert Bilibili JSON subtitle to WebVTT
                                 if (
-                                    mf.role === MediaFileRole.SUBTITLE &&
+                                    mf.type === TrackType.SUBTITLE &&
                                     mf.metadata.format === "json"
                                 ) {
                                     const jsonText = await response.text();
@@ -737,9 +751,7 @@ export const TaskService = {
                                     | { initialization: string; index_range: string }
                                     | undefined;
                                 if (
-                                    (mf.role === MediaFileRole.PRIMARY ||
-                                        mf.role === MediaFileRole.ALTERNATIVE ||
-                                        mf.role === MediaFileRole.AUDIO) &&
+                                    (mf.type === TrackType.VIDEO || mf.type === TrackType.AUDIO) &&
                                     responseBody instanceof ReadableStream
                                 ) {
                                     const res = await extractSegmentBase(responseBody);
@@ -748,17 +760,31 @@ export const TaskService = {
                                 }
 
                                 let prefix = "";
-                                if (mf.role === MediaFileRole.PRIMARY)
-                                    prefix = `video_${mf.sort_order}`;
-                                else if (mf.role === MediaFileRole.AUDIO)
-                                    prefix = `audio_${mf.sort_order}`;
-                                else if (mf.role === MediaFileRole.ALTERNATIVE) prefix = "alt";
-                                else if (mf.role === MediaFileRole.LIVE_PHOTO_VIDEO)
-                                    prefix = "live";
-                                else if (mf.role === MediaFileRole.COVER) prefix = "cover";
-                                else if (mf.role === MediaFileRole.SUBTITLE) {
+                                if (
+                                    mf.type === TrackType.VIDEO &&
+                                    mf.purpose === TrackPurpose.CONTENT
+                                ) {
+                                    prefix = `video_${mf.priority}`;
+                                } else if (
+                                    mf.type === TrackType.AUDIO &&
+                                    mf.purpose === TrackPurpose.CONTENT
+                                ) {
+                                    prefix = `audio_${mf.priority}`;
+                                } else if (mf.purpose === TrackPurpose.COVER) {
+                                    prefix = "cover";
+                                } else if (
+                                    mf.type === TrackType.SUBTITLE &&
+                                    mf.purpose === TrackPurpose.CONTENT
+                                ) {
                                     const lang = mf.metadata.language || "unknown";
                                     prefix = `subtitle_${lang}`;
+                                } else if (
+                                    mf.type === TrackType.IMAGE &&
+                                    mf.purpose === TrackPurpose.CONTENT
+                                ) {
+                                    prefix = `image_${mf.priority}`;
+                                } else {
+                                    prefix = `track_${mf.priority}`;
                                 }
 
                                 const path = `v2/p/${postId.slice(-2)}/${postId}/${index}_${prefix}.${ext}`;
@@ -812,21 +838,21 @@ export const TaskService = {
                                 }
 
                                 await db
-                                    .update(MediaFile)
+                                    .update(Track)
                                     .set({
                                         file_id: fileResults[0].id,
                                         sync_status: SyncStatus.COMPLETED,
                                         last_error: null,
                                         metadata: updatedMetadata,
                                     })
-                                    .where(eq(MediaFile.id, mf.id));
+                                    .where(eq(Track.id, mf.id));
                             }
                         } catch (e) {
                             const errorMsg = e instanceof Error ? e.message : String(e);
                             await db
-                                .update(MediaFile)
+                                .update(Track)
                                 .set({ sync_status: SyncStatus.FAILED, last_error: errorMsg })
-                                .where(eq(MediaFile.id, mf.id));
+                                .where(eq(Track.id, mf.id));
                             allCompleted = false;
                             throw e;
                         }
@@ -1031,17 +1057,17 @@ export const TaskService = {
             const mediaIds = postMedia.map((m) => m.id);
 
             if (mediaIds.length > 0) {
-                // Reset failed media files to PENDING
+                // Reset failed tracks to PENDING
                 await db
-                    .update(MediaFile)
+                    .update(Track)
                     .set({
                         sync_status: SyncStatus.PENDING,
                         last_error: null,
                     })
                     .where(
                         and(
-                            inArray(MediaFile.media_id, mediaIds),
-                            eq(MediaFile.sync_status, SyncStatus.FAILED),
+                            inArray(Track.media_id, mediaIds),
+                            eq(Track.sync_status, SyncStatus.FAILED),
                         ),
                     );
 
@@ -1067,59 +1093,80 @@ export const TaskService = {
                 })
                 .where(eq(Post.id, post.id));
 
-            const postMediaFiles =
+            const postTracks =
                 mediaIds.length > 0
                     ? await db
                           .select()
-                          .from(MediaFile)
+                          .from(Track)
                           .where(
                               and(
-                                  inArray(MediaFile.media_id, mediaIds),
-                                  eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
+                                  inArray(Track.media_id, mediaIds),
+                                  eq(Track.delete_status, DeleteStatus.ACTIVE),
                               ),
                           )
                     : [];
 
             const mappedMedia = postMedia.map((m) => {
-                let tracks = postMediaFiles
+                let tracks = postTracks
                     .filter((mf) => mf.media_id === m.id)
                     .map((mf) => ({
                         url: mf.source_url || "",
-                        role: mf.role,
-                        sort: mf.sort_order,
+                        type: mf.type,
+                        purpose: mf.purpose,
+                        is_original: mf.is_original,
+                        quality: mf.quality,
+                        priority: mf.priority,
                         metadata: mf.metadata || {},
                     }));
 
                 if (tracks.length === 0) {
                     if (m.primary_url) {
+                        let primaryType = TrackType.IMAGE;
+                        if (m.type === "VIDEO") primaryType = TrackType.VIDEO;
+                        else if (m.type === "AUDIO") primaryType = TrackType.AUDIO;
                         tracks.push({
                             url: m.primary_url,
-                            role: MediaFileRole.PRIMARY,
-                            sort: 0,
+                            type: primaryType,
+                            purpose: TrackPurpose.CONTENT,
+                            is_original: true,
+                            quality: TrackQuality.ORIGINAL,
+                            priority: 0,
                             metadata: {},
                         });
                     }
                     if (m.cover_url) {
                         tracks.push({
                             url: m.cover_url,
-                            role: MediaFileRole.COVER,
-                            sort: 0,
+                            type: TrackType.IMAGE,
+                            purpose: TrackPurpose.COVER,
+                            is_original: false,
+                            quality: TrackQuality.ORIGINAL,
+                            priority: 0,
                             metadata: {},
                         });
                     }
                     if (m.alternative_url) {
+                        let altType = TrackType.IMAGE;
+                        if (m.type === "VIDEO") altType = TrackType.VIDEO;
+                        else if (m.type === "AUDIO") altType = TrackType.AUDIO;
                         tracks.push({
                             url: m.alternative_url,
-                            role: MediaFileRole.ALTERNATIVE,
-                            sort: 0,
+                            type: altType,
+                            purpose: TrackPurpose.CONTENT,
+                            is_original: true,
+                            quality: TrackQuality.MEDIUM,
+                            priority: 1,
                             metadata: {},
                         });
                     }
                     if (m.live_photo_url) {
                         tracks.push({
                             url: m.live_photo_url,
-                            role: MediaFileRole.LIVE_PHOTO_VIDEO,
-                            sort: 0,
+                            type: TrackType.VIDEO,
+                            purpose: TrackPurpose.CONTENT,
+                            is_original: true,
+                            quality: TrackQuality.ORIGINAL,
+                            priority: 0,
                             metadata: {},
                         });
                     }
@@ -1226,7 +1273,7 @@ export const TaskService = {
                         ),
                     );
 
-                // 3. Find and update stuck media files under these media items
+                // 3. Find and update stuck tracks under these media items
                 const mediaItems = await tx
                     .select({ id: Media.id })
                     .from(Media)
@@ -1235,7 +1282,7 @@ export const TaskService = {
                 const mediaIds = mediaItems.map((m) => m.id);
                 if (mediaIds.length > 0) {
                     await tx
-                        .update(MediaFile)
+                        .update(Track)
                         .set({
                             sync_status: SyncStatus.FAILED,
                             last_error: "Post sync timed out",
@@ -1243,8 +1290,8 @@ export const TaskService = {
                         })
                         .where(
                             and(
-                                inArray(MediaFile.media_id, mediaIds),
-                                inArray(MediaFile.sync_status, [
+                                inArray(Track.media_id, mediaIds),
+                                inArray(Track.sync_status, [
                                     SyncStatus.PENDING,
                                     SyncStatus.IN_PROGRESS,
                                 ]),

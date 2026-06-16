@@ -1,6 +1,6 @@
 import { and, count, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/global/db";
-import { Post, Media, MediaFile, File, Library, Author, DeleteStatus } from "@/db/schema";
+import { Post, Media, Track, File, Library, Author, DeleteStatus } from "@/db/schema";
 import { nowDbTimestamp } from "@/lib/utils/time";
 import { RecycleService } from "./recycle";
 
@@ -28,16 +28,16 @@ export const DeleteService = {
 
             let fileIds: string[] = [];
             if (mediaIds.length > 0) {
-                const mediaFiles = await tx
-                    .select({ file_id: MediaFile.file_id })
-                    .from(MediaFile)
+                const tracks = await tx
+                    .select({ file_id: Track.file_id })
+                    .from(Track)
                     .where(
                         and(
-                            inArray(MediaFile.media_id, mediaIds),
-                            eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
+                            inArray(Track.media_id, mediaIds),
+                            eq(Track.delete_status, DeleteStatus.ACTIVE),
                         ),
                     );
-                fileIds = mediaFiles.map((mf) => mf.file_id).filter((fid): fid is string => !!fid);
+                fileIds = tracks.map((mf) => mf.file_id).filter((fid): fid is string => !!fid);
             }
 
             // 3. Perform synchronous updates
@@ -51,9 +51,9 @@ export const DeleteService = {
                     .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
                     .where(inArray(Media.id, mediaIds));
                 await tx
-                    .update(MediaFile)
+                    .update(Track)
                     .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
-                    .where(inArray(MediaFile.media_id, mediaIds));
+                    .where(inArray(Track.media_id, mediaIds));
             }
             if (fileIds.length > 0) {
                 await tx
@@ -77,27 +77,22 @@ export const DeleteService = {
                 .limit(1);
             if (medias.length === 0) return { mediaUpdated: 0 };
 
-            const mediaFiles = await tx
-                .select({ file_id: MediaFile.file_id })
-                .from(MediaFile)
+            const tracks = await tx
+                .select({ file_id: Track.file_id })
+                .from(Track)
                 .where(
-                    and(
-                        eq(MediaFile.media_id, mediaId),
-                        eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
-                    ),
+                    and(eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)),
                 );
-            const fileIds = mediaFiles
-                .map((mf) => mf.file_id)
-                .filter((fid): fid is string => !!fid);
+            const fileIds = tracks.map((mf) => mf.file_id).filter((fid): fid is string => !!fid);
 
             await tx
                 .update(Media)
                 .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
                 .where(eq(Media.id, mediaId));
             await tx
-                .update(MediaFile)
+                .update(Track)
                 .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
-                .where(eq(MediaFile.media_id, mediaId));
+                .where(eq(Track.media_id, mediaId));
             if (fileIds.length > 0) {
                 await tx
                     .update(File)
@@ -213,19 +208,16 @@ export const DeleteService = {
                 ),
             db
                 .select({ count: count() })
-                .from(MediaFile)
+                .from(Track)
                 .where(
-                    and(
-                        eq(MediaFile.file_id, fileId),
-                        eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
-                    ),
+                    and(eq(Track.file_id, fileId), eq(Track.delete_status, DeleteStatus.ACTIVE)),
                 ),
         ]);
 
         const authors = authorCount[0]?.count ?? 0;
         const libraries = libraryCount[0]?.count ?? 0;
-        const mediaFiles = mediaFileCount[0]?.count ?? 0;
+        const tracks = mediaFileCount[0]?.count ?? 0;
 
-        return authors + libraries + mediaFiles === 0;
+        return authors + libraries + tracks === 0;
     },
 };

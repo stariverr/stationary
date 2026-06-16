@@ -3,11 +3,13 @@ import { and, eq, lt, isNull, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import {
     Media,
-    MediaFile,
+    Track,
     File,
     DeleteStatus,
     SyncStatus,
-    MediaFileRole,
+    TrackType,
+    TrackPurpose,
+    TrackQuality,
     MediaType,
 } from "@/db/schema";
 import { env } from "@/global/env";
@@ -87,18 +89,20 @@ export const VideoCoverService = {
             };
         }
 
-        // 2. Fetch existing primary & cover
-        const mediaFiles = await db
+        // 2. Fetch existing tracks
+        const tracks = await db
             .select()
-            .from(MediaFile)
+            .from(Track)
             .where(
                 and(
-                    eq(MediaFile.media_id, mediaId),
-                    eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
+                    eq(Track.media_id, mediaId),
+                    eq(Track.delete_status, DeleteStatus.ACTIVE),
                 ),
             );
-        const primary = mediaFiles.find((mf) => mf.role === "PRIMARY");
-        const cover = mediaFiles.find((mf) => mf.role === MediaFileRole.COVER);
+        const primary = tracks.find(
+            (t) => t.type === TrackType.VIDEO && t.purpose === TrackPurpose.CONTENT && t.priority === 0
+        );
+        const cover = tracks.find((t) => t.purpose === TrackPurpose.COVER);
 
         if (!primary || primary.sync_status !== "COMPLETED" || !primary.file_id) {
             console.log(
@@ -166,7 +170,7 @@ export const VideoCoverService = {
         // 3. Upsert PENDING COVER record to prevent multiple triggers and track status
         if (cover) {
             await db
-                .update(MediaFile)
+                .update(Track)
                 .set({
                     sync_status: SyncStatus.PENDING,
                     last_error: null,
@@ -174,13 +178,16 @@ export const VideoCoverService = {
                     is_generated: true,
                     update_time: now,
                 })
-                .where(eq(MediaFile.id, cover.id));
+                .where(eq(Track.id, cover.id));
         } else {
             await db
-                .insert(MediaFile)
+                .insert(Track)
                 .values({
                     media_id: mediaId,
-                    role: MediaFileRole.COVER,
+                    type: TrackType.IMAGE,
+                    purpose: TrackPurpose.COVER,
+                    quality: TrackQuality.ORIGINAL,
+                    priority: 0,
                     sync_status: SyncStatus.PENDING,
                     last_error: null,
                     metadata,
@@ -189,7 +196,7 @@ export const VideoCoverService = {
                     update_time: now,
                 })
                 .onConflictDoUpdate({
-                    target: [MediaFile.media_id, MediaFile.role, MediaFile.sort_order],
+                    target: [Track.media_id, Track.type, Track.purpose, Track.priority],
                     set: {
                         sync_status: SyncStatus.PENDING,
                         last_error: null,
@@ -233,14 +240,14 @@ export const VideoCoverService = {
             );
             const failNow = nowDbTimestamp();
             await db
-                .update(MediaFile)
+                .update(Track)
                 .set({
                     sync_status: SyncStatus.FAILED,
                     last_error: err.message || String(err),
                     update_time: failNow,
                 })
                 .where(
-                    and(eq(MediaFile.media_id, mediaId), eq(MediaFile.role, MediaFileRole.COVER)),
+                    and(eq(Track.media_id, mediaId), eq(Track.purpose, TrackPurpose.COVER)),
                 );
             throw err;
         }
@@ -269,17 +276,19 @@ export const VideoCoverService = {
             throw new Error(`Media ${mediaId} is invalid or not a video.`);
         }
 
-        const mediaFiles = await db
+        const tracks = await db
             .select()
-            .from(MediaFile)
+            .from(Track)
             .where(
                 and(
-                    eq(MediaFile.media_id, mediaId),
-                    eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
+                    eq(Track.media_id, mediaId),
+                    eq(Track.delete_status, DeleteStatus.ACTIVE),
                 ),
             );
-        const primary = mediaFiles.find((mf) => mf.role === "PRIMARY");
-        const cover = mediaFiles.find((mf) => mf.role === MediaFileRole.COVER);
+        const primary = tracks.find(
+            (t) => t.type === TrackType.VIDEO && t.purpose === TrackPurpose.CONTENT && t.priority === 0
+        );
+        const cover = tracks.find((t) => t.purpose === TrackPurpose.COVER);
 
         if (!primary || primary.sync_status !== "COMPLETED" || !primary.file_id) {
             throw new Error(
@@ -291,13 +300,13 @@ export const VideoCoverService = {
         const progressNow = nowDbTimestamp();
         if (cover) {
             await db
-                .update(MediaFile)
+                .update(Track)
                 .set({
                     sync_status: SyncStatus.IN_PROGRESS,
                     last_error: null,
                     update_time: progressNow,
                 })
-                .where(eq(MediaFile.id, cover.id));
+                .where(eq(Track.id, cover.id));
         }
 
         // Final idempotency / bypass check inside the generator worker to handle race conditions
@@ -408,16 +417,16 @@ export const VideoCoverService = {
 
             const coverFileId = coverFileResults[0].id;
 
-            // Save MediaFile
+            // Save Track
             const metadata = {
                 primary_file_id: primary.file_id,
                 seek_seconds: 1,
             };
-
+ 
             const completedNow = nowDbTimestamp();
             if (cover) {
                 await db
-                    .update(MediaFile)
+                    .update(Track)
                     .set({
                         file_id: coverFileId,
                         sync_status: SyncStatus.COMPLETED,
@@ -426,13 +435,16 @@ export const VideoCoverService = {
                         is_generated: true,
                         update_time: completedNow,
                     })
-                    .where(eq(MediaFile.id, cover.id));
+                    .where(eq(Track.id, cover.id));
             } else {
                 await db
-                    .insert(MediaFile)
+                    .insert(Track)
                     .values({
                         media_id: media.id,
-                        role: MediaFileRole.COVER,
+                        type: TrackType.IMAGE,
+                        purpose: TrackPurpose.COVER,
+                        quality: TrackQuality.ORIGINAL,
+                        priority: 0,
                         file_id: coverFileId,
                         sync_status: SyncStatus.COMPLETED,
                         last_error: null,
@@ -442,7 +454,7 @@ export const VideoCoverService = {
                         update_time: completedNow,
                     })
                     .onConflictDoUpdate({
-                        target: [MediaFile.media_id, MediaFile.role, MediaFile.sort_order],
+                        target: [Track.media_id, Track.type, Track.purpose, Track.priority],
                         set: {
                             file_id: coverFileId,
                             sync_status: SyncStatus.COMPLETED,
@@ -455,7 +467,7 @@ export const VideoCoverService = {
                         },
                     });
             }
-
+ 
             console.log(
                 `[VideoCoverService] Generated cover successfully completed for media ${mediaId}.`,
             );
@@ -466,14 +478,14 @@ export const VideoCoverService = {
             );
             const failNow = nowDbTimestamp();
             await db
-                .update(MediaFile)
+                .update(Track)
                 .set({
                     sync_status: SyncStatus.FAILED,
                     last_error: errorMsg,
                     update_time: failNow,
                 })
                 .where(
-                    and(eq(MediaFile.media_id, mediaId), eq(MediaFile.role, MediaFileRole.COVER)),
+                    and(eq(Track.media_id, mediaId), eq(Track.purpose, TrackPurpose.COVER)),
                 );
             throw err;
         }
@@ -499,50 +511,52 @@ export const VideoCoverService = {
             return await withLock(
                 lockKey,
                 async () => {
-                    const primaryMediaFile = alias(MediaFile, "primary_media_file");
-                    const coverMediaFile = alias(MediaFile, "cover_media_file");
-
+                    const primaryTrack = alias(Track, "primary_track");
+                    const coverTrack = alias(Track, "cover_track");
+ 
                     const staleThreshold = Temporal.Now.instant().subtract({
                         minutes: staleMinutes,
                     });
-
+ 
                     // Query criteria
                     const whereConditions = [
                         eq(Media.type, MediaType.VIDEO),
                         eq(Media.delete_status, DeleteStatus.ACTIVE),
                         isNull(Media.recycle_time),
-                        eq(primaryMediaFile.role, MediaFileRole.PRIMARY),
-                        eq(primaryMediaFile.sync_status, SyncStatus.COMPLETED),
-                        eq(primaryMediaFile.delete_status, DeleteStatus.ACTIVE),
+                        eq(primaryTrack.type, TrackType.VIDEO),
+                        eq(primaryTrack.purpose, TrackPurpose.CONTENT),
+                        eq(primaryTrack.priority, 0),
+                        eq(primaryTrack.sync_status, SyncStatus.COMPLETED),
+                        eq(primaryTrack.delete_status, DeleteStatus.ACTIVE),
                     ];
-
+ 
                     if (libraryId) {
                         whereConditions.push(eq(Media.library_id, libraryId));
                     }
-
+ 
                     // Query one more row than limit to check hasMore
                     const queryLimit = limit + 1;
-
+ 
                     const results = await db
                         .select({
                             mediaId: Media.id,
-                            primaryFileId: primaryMediaFile.file_id,
-                            coverId: coverMediaFile.id,
-                            coverFileId: coverMediaFile.file_id,
-                            coverSourceUrl: coverMediaFile.source_url,
-                            coverSyncStatus: coverMediaFile.sync_status,
-                            coverUpdateTime: coverMediaFile.update_time,
-                            coverMetadata: coverMediaFile.metadata,
-                            coverIsGenerated: coverMediaFile.is_generated,
+                            primaryFileId: primaryTrack.file_id,
+                            coverId: coverTrack.id,
+                            coverFileId: coverTrack.file_id,
+                            coverSourceUrl: coverTrack.source_url,
+                            coverSyncStatus: coverTrack.sync_status,
+                            coverUpdateTime: coverTrack.update_time,
+                            coverMetadata: coverTrack.metadata,
+                            coverIsGenerated: coverTrack.is_generated,
                         })
                         .from(Media)
-                        .innerJoin(primaryMediaFile, and(eq(Media.id, primaryMediaFile.media_id)))
+                        .innerJoin(primaryTrack, and(eq(Media.id, primaryTrack.media_id)))
                         .leftJoin(
-                            coverMediaFile,
+                            coverTrack,
                             and(
-                                eq(Media.id, coverMediaFile.media_id),
-                                eq(coverMediaFile.role, MediaFileRole.COVER),
-                                eq(coverMediaFile.delete_status, DeleteStatus.ACTIVE),
+                                eq(Media.id, coverTrack.media_id),
+                                eq(coverTrack.purpose, TrackPurpose.COVER),
+                                eq(coverTrack.delete_status, DeleteStatus.ACTIVE),
                             ),
                         )
                         .where(and(...whereConditions));
@@ -684,13 +698,13 @@ export const VideoCoverService = {
 };
 
 function isPhysicalCoverValid(
-    cover: typeof MediaFile.$inferSelect | undefined,
+    cover: typeof Track.$inferSelect | undefined,
     primaryFileId: string | null,
 ): boolean {
     if (!cover || !cover.file_id) return false;
     if (cover.sync_status !== SyncStatus.COMPLETED) return false;
     if (cover.is_generated) {
-        return cover.metadata.primary_file_id === primaryFileId;
+        return (cover.metadata as any).primary_file_id === primaryFileId;
     }
     return true;
 }

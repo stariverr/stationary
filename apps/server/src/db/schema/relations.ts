@@ -27,21 +27,21 @@ export const relations = defineRelations(schema, (r) => ({
             from: [r.Media.post_id],
             to: [r.Post.id],
         }),
-        mediaFiles: r.many.MediaFile(),
+        tracks: r.many.Track(),
     },
-    MediaFile: {
+    Track: {
         media: r.one.Media({
-            from: [r.MediaFile.media_id],
+            from: [r.Track.media_id],
             to: [r.Media.id],
         }),
         file: r.one.File({
-            from: [r.MediaFile.file_id],
+            from: [r.Track.file_id],
             to: [r.File.id],
-            alias: 'media_file_file',
+            alias: 'track_file',
         }),
     },
     File: {
-        mediaFiles: r.many.MediaFile({ alias: 'media_file_file' }),
+        tracks: r.many.Track({ alias: 'track_file' }),
         authorsAsAvatar: r.many.Author({ alias: 'author_avatar' }),
         authorsAsThumb: r.many.Author({ alias: 'author_avatar_thumb' }),
     },

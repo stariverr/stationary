@@ -16,7 +16,9 @@ import {
     File as DbFile,
     DeleteStatus,
     SyncStatus,
-    MediaFileRole,
+    TrackType,
+    TrackPurpose,
+    TrackQuality,
     PostSource,
     MediaType,
     EntityType,
@@ -24,9 +26,8 @@ import {
     AssetAiMetadata,
     Media,
     Post,
-    MediaFile,
 } from "@/db/schema";
-import { eq, and, lt, inArray, sql, or, isNull, isNotNull } from "drizzle-orm";
+import { eq, and, lt, inArray, sql } from "drizzle-orm";
 import { DeleteService } from "@/services/delete";
 import { s3 } from "@/global/s3";
 
@@ -67,8 +68,6 @@ const SegmentBaseSchema = z.object({
         .nullish()
         .transform((v) => v ?? undefined),
 });
-
-const TrackRoleSchema = z.enum(MediaFileRole);
 
 const TrackMetadataSchema = z.object({
     codecs: z
@@ -112,9 +111,11 @@ const TrackMetadataSchema = z.object({
 
 const TrackSchema = z.object({
     url: z.string(),
-    role: TrackRoleSchema,
-    /** The sort order of the track */
-    sort: z.number().default(0),
+    type: z.enum(TrackType),
+    purpose: z.enum(TrackPurpose).default(TrackPurpose.CONTENT),
+    is_original: z.boolean().default(true),
+    quality: z.enum(TrackQuality).default(TrackQuality.ORIGINAL),
+    priority: z.number().default(0),
     metadata: TrackMetadataSchema.nullish().transform((v) => v ?? {}),
 });
 
@@ -393,17 +394,21 @@ export const coverWorkflowHandler = serve(
             );
             const { mediaId } = CoverWorkflowPayloadSchema.parse(context.requestPayload);
             try {
-                const { MediaFile } = await import("@/db/schema");
+                const { Track, TrackType, TrackPurpose, TrackQuality } =
+                    await import("@/db/schema");
                 await db
-                    .insert(MediaFile)
+                    .insert(Track)
                     .values({
                         media_id: mediaId,
-                        role: MediaFileRole.COVER,
+                        type: TrackType.IMAGE,
+                        purpose: TrackPurpose.COVER,
+                        quality: TrackQuality.ORIGINAL,
+                        priority: 0,
                         sync_status: SyncStatus.FAILED,
                         last_error: failResponse || "Workflow retries exhausted.",
                     })
                     .onConflictDoUpdate({
-                        target: [MediaFile.media_id, MediaFile.role, MediaFile.sort_order],
+                        target: [Track.media_id, Track.type, Track.purpose, Track.priority],
                         set: {
                             sync_status: SyncStatus.FAILED,
                             last_error: failResponse || "Workflow retries exhausted.",

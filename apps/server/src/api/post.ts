@@ -8,12 +8,14 @@ import { Code } from "@/lib/code";
 import { requireAuth } from "@/lib/auth/middleware";
 import {
     Media,
-    MediaFile,
+    Track,
     Post,
     File as DbFile,
     DeleteStatus,
     PostSource,
-    MediaFileRole,
+    TrackType,
+    TrackPurpose,
+    TrackQuality,
     AssetAiMetadata,
     EntityType,
     Author,
@@ -181,10 +183,13 @@ router.get(
 
                 const allFiles = await db
                     .select({
-                        media_id: MediaFile.media_id,
-                        role: MediaFile.role,
-                        sort_order: MediaFile.sort_order,
-                        metadata: MediaFile.metadata,
+                        media_id: Track.media_id,
+                        type: Track.type,
+                        purpose: Track.purpose,
+                        is_original: Track.is_original,
+                        quality: Track.quality,
+                        priority: Track.priority,
+                        metadata: Track.metadata,
                         file_id: DbFile.id,
                         file_path: DbFile.path,
                         file_bucket: DbFile.bucket,
@@ -193,14 +198,14 @@ router.get(
                         width: DbFile.width,
                         height: DbFile.height,
                     })
-                    .from(MediaFile)
-                    .leftJoin(DbFile, eq(MediaFile.file_id, DbFile.id))
+                    .from(Track)
+                    .leftJoin(DbFile, eq(Track.file_id, DbFile.id))
                     .where(
                         and(
-                            inArray(MediaFile.media_id, allMediaIds),
-                            eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
-                            eq(MediaFile.sync_status, SyncStatus.COMPLETED),
-                            inArray(MediaFile.role, [MediaFileRole.PRIMARY, MediaFileRole.COVER]),
+                            inArray(Track.media_id, allMediaIds),
+                            eq(Track.delete_status, DeleteStatus.ACTIVE),
+                            eq(Track.sync_status, SyncStatus.COMPLETED),
+                            inArray(Track.purpose, [TrackPurpose.CONTENT, TrackPurpose.COVER]),
                         ),
                     );
 
@@ -319,8 +324,11 @@ export const PostDetailResponseBodySchema = z.object({
                     z.object({
                         id: z.string().optional(),
                         url: z.string(),
-                        role: z.string(),
-                        sort_order: z.number(),
+                        type: z.string(),
+                        purpose: z.string(),
+                        is_original: z.boolean(),
+                        quality: z.string(),
+                        priority: z.number(),
                         metadata: z.record(z.string(), z.any()),
                     }),
                 ),
@@ -429,10 +437,13 @@ router.get(
 
             const allFiles = await db
                 .select({
-                    media_id: MediaFile.media_id,
-                    role: MediaFile.role,
-                    sort_order: MediaFile.sort_order,
-                    metadata: MediaFile.metadata,
+                    media_id: Track.media_id,
+                    type: Track.type,
+                    purpose: Track.purpose,
+                    is_original: Track.is_original,
+                    quality: Track.quality,
+                    priority: Track.priority,
+                    metadata: Track.metadata,
                     file_id: DbFile.id,
                     file_path: DbFile.path,
                     file_bucket: DbFile.bucket,
@@ -441,13 +452,13 @@ router.get(
                     width: DbFile.width,
                     height: DbFile.height,
                 })
-                .from(MediaFile)
-                .leftJoin(DbFile, eq(MediaFile.file_id, DbFile.id))
+                .from(Track)
+                .leftJoin(DbFile, eq(Track.file_id, DbFile.id))
                 .where(
                     and(
-                        inArray(MediaFile.media_id, allMediaIds),
-                        eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
-                        eq(MediaFile.sync_status, SyncStatus.COMPLETED),
+                        inArray(Track.media_id, allMediaIds),
+                        eq(Track.delete_status, DeleteStatus.ACTIVE),
+                        eq(Track.sync_status, SyncStatus.COMPLETED),
                     ),
                 );
 

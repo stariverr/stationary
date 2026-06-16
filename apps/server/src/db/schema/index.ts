@@ -88,25 +88,45 @@ export const SyncStatusEnum = pgEnum("sync_status", [
     SyncStatus.FAILED,
 ]);
 
-export enum MediaFileRole {
-    PRIMARY = "PRIMARY",
-    ALTERNATIVE = "ALTERNATIVE",
-    COVER = "COVER",
-    LIVE_PHOTO_VIDEO = "LIVE_PHOTO_VIDEO",
+export enum TrackType {
+    IMAGE = "IMAGE",
+    VIDEO = "VIDEO",
     AUDIO = "AUDIO",
     SUBTITLE = "SUBTITLE",
 }
-export const MediaFileRoleEnum = pgEnum("media_file_role", [
-    MediaFileRole.PRIMARY,
-    MediaFileRole.ALTERNATIVE,
-    MediaFileRole.COVER,
-    MediaFileRole.LIVE_PHOTO_VIDEO,
-    MediaFileRole.AUDIO,
-    MediaFileRole.SUBTITLE,
-    // "THUMBNAIL",
-    // "TRANSCODED",
-    // "PREVIEW",
+export const TrackTypeEnum = pgEnum("track_type", [
+    TrackType.IMAGE,
+    TrackType.VIDEO,
+    TrackType.AUDIO,
+    TrackType.SUBTITLE,
 ]);
+
+export enum TrackPurpose {
+    CONTENT = "CONTENT",
+    COVER = "COVER",
+    THUMBNAIL = "THUMBNAIL",
+    PREVIEW = "PREVIEW",
+}
+export const TrackPurposeEnum = pgEnum("track_purpose", [
+    TrackPurpose.CONTENT,
+    TrackPurpose.COVER,
+    TrackPurpose.THUMBNAIL,
+    TrackPurpose.PREVIEW,
+]);
+
+export enum TrackQuality {
+    ORIGINAL = "ORIGINAL",
+    HIGH = "HIGH",
+    MEDIUM = "MEDIUM",
+    LOW = "LOW",
+}
+export const TrackQualityEnum = pgEnum("track_quality", [
+    TrackQuality.ORIGINAL,
+    TrackQuality.HIGH,
+    TrackQuality.MEDIUM,
+    TrackQuality.LOW,
+]);
+
 
 export enum AccessRole {
     VIEWER = "VIEWER",
@@ -398,9 +418,9 @@ export type MediaFileMetadata = VideoTrackMetadata &
     SubtitleTrackMetadata &
     CoverMetadata;
 
-// MediaFile Model
-export const MediaFile = pgTable(
-    "media_file",
+// Track Model
+export const Track = pgTable(
+    "track",
     {
         id: uuid("id")
             .primaryKey()
@@ -411,14 +431,17 @@ export const MediaFile = pgTable(
          * - Can be null because the file does not exist at first.
          */
         file_id: uuid("file_id"),
-        role: MediaFileRoleEnum("role").notNull(),
-        /** Sort Order of Media Variant (Not media.sort_order, which is sort order of media in the post) */
-        sort_order: integer("sort_order").default(0).notNull(),
+        type: TrackTypeEnum("type").notNull(),
+        purpose: TrackPurposeEnum("purpose").notNull(),
+        is_original: boolean("is_original").default(true).notNull(),
+        is_generated: boolean("is_generated").default(false).notNull(),
+        quality: TrackQualityEnum("quality").notNull(),
+        /** Sorting/fallback priority of Track Variant */
+        priority: integer("priority").default(0).notNull(),
         source_url: text("source_url").default(""),
         sync_status: SyncStatusEnum("sync_status").default(SyncStatus.PENDING).notNull(),
         last_error: text("last_error"),
         metadata: jsonb("metadata").$type<MediaFileMetadata>().default({}).notNull(),
-        is_generated: boolean("is_generated").default(false).notNull(),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),
@@ -429,13 +452,15 @@ export const MediaFile = pgTable(
         delete_status: DeleteStatusEnum("delete_status").default(DeleteStatus.ACTIVE).notNull(),
     },
     (table) => [
-        uniqueIndex("media_file_media_role_sort_unique").on(
+        uniqueIndex("track_media_type_purpose_priority_unique").on(
             table.media_id,
-            table.role,
-            table.sort_order,
+            table.type,
+            table.purpose,
+            table.priority,
         ),
     ],
 );
+
 
 // External API Token
 export const ExternalApiToken = pgTable("external_api_token", {
