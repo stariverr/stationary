@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { db } from "@/global/db";
 import { z } from "zod";
+import { mapMediaToResponse } from "./media";
 import { validator } from "hono/validator";
 import { error, success } from "@/lib/response";
 import { Code } from "@/lib/code";
@@ -16,6 +17,7 @@ import {
     AssetAiMetadata,
     EntityType,
     Author,
+    SyncStatus,
 } from "@/db/schema";
 import { and, eq, ilike, SQL, count, asc, sql, isNull, inArray, lte } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -115,33 +117,10 @@ router.get(
             .limit(pageSize)
             .offset(offset);
 
-        interface PostListMediaItem {
-            id: string;
-            eid: string;
-            source: typeof Media.$inferSelect.source;
-            title: string;
-            description: string;
-            type: typeof Media.$inferSelect.type;
-            sort_order: number;
-            primary_file_url: string | null;
-            cover_file_url: string | null;
-            create_time: string | null;
-            published_time: string | null;
-            sync_status: string;
-            last_error: string | null;
-            ai_status: string;
-            ai_error: string | null;
-        }
-
         const postIds = rawPosts.map((p) => p.id);
-        const mediaByPostId = new Map<string, PostListMediaItem[]>();
+        const mediaByPostId = new Map<string, any[]>();
 
         if (postIds.length > 0) {
-            const primaryMediaFile = alias(MediaFile, "primary_media_file");
-            const coverMediaFile = alias(MediaFile, "cover_media_file");
-            const primaryDbFile = alias(DbFile, "primary_db_file");
-            const coverDbFile = alias(DbFile, "cover_db_file");
-
             const mediaRows = await db
                 .select({
                     id: Media.id,
@@ -154,39 +133,10 @@ router.get(
                     sort_order: Media.sort_order,
                     create_time: Media.create_time,
                     published_time: Media.published_time,
-                    primary_file_path: primaryDbFile.path,
-                    primary_file_bucket: primaryDbFile.bucket,
-                    cover_file_path: coverDbFile.path,
-                    cover_file_bucket: coverDbFile.bucket,
                     sync_status: Media.sync_status,
                     last_error: Media.last_error,
-                    ai_status: AssetAiMetadata.processing_status,
-                    ai_error: AssetAiMetadata.last_error,
                 })
                 .from(Media)
-                .leftJoin(
-                    primaryMediaFile,
-                    and(
-                        eq(Media.id, primaryMediaFile.media_id),
-                        eq(primaryMediaFile.role, MediaFileRole.PRIMARY),
-                    ),
-                )
-                .leftJoin(primaryDbFile, eq(primaryMediaFile.file_id, primaryDbFile.id))
-                .leftJoin(
-                    coverMediaFile,
-                    and(
-                        eq(Media.id, coverMediaFile.media_id),
-                        eq(coverMediaFile.role, MediaFileRole.COVER),
-                    ),
-                )
-                .leftJoin(coverDbFile, eq(coverMediaFile.file_id, coverDbFile.id))
-                .leftJoin(
-                    AssetAiMetadata,
-                    and(
-                        eq(Media.id, AssetAiMetadata.entity_id),
-                        eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
-                    ),
-                )
                 .where(
                     and(
                         inArray(Media.post_id, postIds),
@@ -196,28 +146,89 @@ router.get(
                 )
                 .orderBy(asc(Media.sort_order));
 
+            const allMediaIds = mediaRows.map((mr) => mr.id);
+            const filesByMediaId = new Map<string, any[]>();
+            const aiMetadataMap = new Map<string, { ai_status: string; ai_error: string | null }>();
+
+            if (allMediaIds.length > 0) {
+                const aiMetadatas = await db
+                    .select({
+                        entity_id: AssetAiMetadata.entity_id,
+                        processing_status: AssetAiMetadata.processing_status,
+                        last_error: AssetAiMetadata.last_error,
+                    })
+                    .from(AssetAiMetadata)
+                    .where(
+                        and(
+                            inArray(AssetAiMetadata.entity_id, allMediaIds),
+                            eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
+                        ),
+                    );
+
+                for (const meta of aiMetadatas) {
+                    const existing = aiMetadataMap.get(meta.entity_id);
+                    if (
+                        !existing ||
+                        meta.processing_status === "COMPLETED" ||
+                        (existing.ai_status !== "COMPLETED" && meta.processing_status === "FAILED")
+                    ) {
+                        aiMetadataMap.set(meta.entity_id, {
+                            ai_status: meta.processing_status,
+                            ai_error: meta.last_error,
+                        });
+                    }
+                }
+
+                const allFiles = await db
+                    .select({
+                        media_id: MediaFile.media_id,
+                        role: MediaFile.role,
+                        sort_order: MediaFile.sort_order,
+                        metadata: MediaFile.metadata,
+                        file_id: DbFile.id,
+                        file_path: DbFile.path,
+                        file_bucket: DbFile.bucket,
+                        mime_type: DbFile.mime_type,
+                        extension: DbFile.extension,
+                        width: DbFile.width,
+                        height: DbFile.height,
+                    })
+                    .from(MediaFile)
+                    .leftJoin(DbFile, eq(MediaFile.file_id, DbFile.id))
+                    .where(
+                        and(
+                            inArray(MediaFile.media_id, allMediaIds),
+                            eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
+                            eq(MediaFile.sync_status, SyncStatus.COMPLETED),
+                            inArray(MediaFile.role, [MediaFileRole.PRIMARY, MediaFileRole.COVER]),
+                        ),
+                    );
+
+                for (const file of allFiles) {
+                    if (!file.media_id) continue;
+                    if (!filesByMediaId.has(file.media_id)) {
+                        filesByMediaId.set(file.media_id, []);
+                    }
+                    filesByMediaId.get(file.media_id)!.push(file);
+                }
+            }
+
             for (const row of mediaRows) {
                 if (!row.post_id) continue;
                 if (!mediaByPostId.has(row.post_id)) {
                     mediaByPostId.set(row.post_id, []);
                 }
-                mediaByPostId.get(row.post_id)!.push({
-                    id: row.id,
-                    eid: row.eid,
-                    source: row.source,
-                    title: row.title,
-                    description: row.description,
-                    type: row.type,
-                    sort_order: row.sort_order,
-                    primary_file_url: buildCdnUrl(row.primary_file_bucket, row.primary_file_path),
-                    cover_file_url: buildCdnUrl(row.cover_file_bucket, row.cover_file_path),
-                    create_time: toIsoTimestamp(row.create_time),
-                    published_time: toIsoTimestamp(row.published_time),
-                    sync_status: row.sync_status,
-                    last_error: row.last_error,
-                    ai_status: row.ai_status ?? "PENDING",
-                    ai_error: row.ai_error,
-                });
+                const files = filesByMediaId.get(row.id) || [];
+                const aiMeta = aiMetadataMap.get(row.id);
+                const response = mapMediaToResponse(
+                    {
+                        ...row,
+                        ai_status: aiMeta?.ai_status,
+                        ai_error: aiMeta?.ai_error,
+                    },
+                    files as any,
+                );
+                mediaByPostId.get(row.post_id)!.push(response);
             }
         }
 
@@ -288,21 +299,31 @@ export const PostDetailResponseBodySchema = z.object({
             z.object({
                 id: z.uuid(),
                 eid: z.string().optional(),
+                post_id: z.uuid().nullable().optional(),
                 source: z.string().optional(),
                 title: z.string().nullable().optional(),
                 description: z.string().nullable().optional(),
                 type: z.string().optional(),
                 sort_order: z.number().optional(),
-                primary_file_url: z.string().nullable().optional(),
-                alternative_file_url: z.string().nullable().optional(),
-                live_photo_video_url: z.string().nullable().optional(),
-                cover_file_url: z.string().nullable().optional(),
                 create_time: z.string().optional(),
                 published_time: z.string().nullable().optional(),
                 sync_status: z.string().optional(),
                 last_error: z.string().nullable().optional(),
                 ai_status: z.string().optional(),
                 ai_error: z.string().nullable().optional(),
+                url: z.string().nullable().optional(),
+                cover_url: z.string().nullable().optional(),
+                width: z.number().nullable().optional(),
+                height: z.number().nullable().optional(),
+                tracks: z.array(
+                    z.object({
+                        id: z.string().optional(),
+                        url: z.string(),
+                        role: z.string(),
+                        sort_order: z.number(),
+                        metadata: z.record(z.string(), z.any()),
+                    }),
+                ),
             }),
         )
         .optional(),
@@ -358,6 +379,7 @@ router.get(
             .select({
                 id: Media.id,
                 eid: Media.eid,
+                post_id: Media.post_id,
                 source: Media.source,
                 title: Media.title,
                 description: Media.description,
@@ -365,84 +387,94 @@ router.get(
                 sort_order: Media.sort_order,
                 create_time: Media.create_time,
                 published_time: Media.published_time,
-                file_role: MediaFile.role,
-                file_path: DbFile.path,
-                file_bucket: DbFile.bucket,
                 sync_status: Media.sync_status,
                 last_error: Media.last_error,
-                ai_status: AssetAiMetadata.processing_status,
-                ai_error: AssetAiMetadata.last_error,
             })
             .from(Media)
-            .leftJoin(MediaFile, eq(Media.id, MediaFile.media_id))
-            .leftJoin(DbFile, eq(MediaFile.file_id, DbFile.id))
-            .leftJoin(
-                AssetAiMetadata,
-                and(
-                    eq(Media.id, AssetAiMetadata.entity_id),
-                    eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
-                ),
-            )
             .where(and(eq(Media.post_id, id), activeMediaFilter))
-            .orderBy(asc(Media.sort_order), asc(MediaFile.sort_order));
+            .orderBy(asc(Media.sort_order));
 
-        const mediaById = new Map<
-            string,
-            {
-                id: string;
-                eid: string;
-                source: typeof Media.$inferSelect.source;
-                title: string;
-                description: string;
-                type: typeof Media.$inferSelect.type;
-                sort_order: number;
-                create_time: Temporal.Instant;
-                published_time: Temporal.Instant | null;
-                sync_status: string;
-                last_error: string | null;
-                ai_status: string;
-                ai_error: string | null;
-                files: Partial<
-                    Record<
-                        typeof MediaFile.$inferSelect.role,
-                        { path: string | null; bucket: string | null }
-                    >
-                >;
-            }
-        >();
+        const allMediaIds = mediaRows.map((mr) => mr.id);
+        const filesByMediaId = new Map<string, any[]>();
+        const aiMetadataMap = new Map<string, { ai_status: string; ai_error: string | null }>();
 
-        for (const row of mediaRows) {
-            const existing = mediaById.get(row.id);
-            const media = existing ?? {
-                id: row.id,
-                eid: row.eid,
-                source: row.source,
-                title: row.title,
-                description: row.description,
-                type: row.type,
-                sort_order: row.sort_order,
-                create_time: row.create_time,
-                published_time: row.published_time,
-                sync_status: row.sync_status,
-                last_error: row.last_error,
-                ai_status: row.ai_status ?? "PENDING",
-                ai_error: row.ai_error,
-                files: {},
-            };
+        if (allMediaIds.length > 0) {
+            const aiMetadatas = await db
+                .select({
+                    entity_id: AssetAiMetadata.entity_id,
+                    processing_status: AssetAiMetadata.processing_status,
+                    last_error: AssetAiMetadata.last_error,
+                })
+                .from(AssetAiMetadata)
+                .where(
+                    and(
+                        inArray(AssetAiMetadata.entity_id, allMediaIds),
+                        eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
+                    ),
+                );
 
-            if (row.file_role) {
-                media.files[row.file_role] = {
-                    path: row.file_path ?? null,
-                    bucket: row.file_bucket ?? null,
-                };
+            for (const meta of aiMetadatas) {
+                const existing = aiMetadataMap.get(meta.entity_id);
+                if (
+                    !existing ||
+                    meta.processing_status === "COMPLETED" ||
+                    (existing.ai_status !== "COMPLETED" && meta.processing_status === "FAILED")
+                ) {
+                    aiMetadataMap.set(meta.entity_id, {
+                        ai_status: meta.processing_status,
+                        ai_error: meta.last_error,
+                    });
+                }
             }
 
-            if (!existing) {
-                mediaById.set(row.id, media);
+            const allFiles = await db
+                .select({
+                    media_id: MediaFile.media_id,
+                    role: MediaFile.role,
+                    sort_order: MediaFile.sort_order,
+                    metadata: MediaFile.metadata,
+                    file_id: DbFile.id,
+                    file_path: DbFile.path,
+                    file_bucket: DbFile.bucket,
+                    mime_type: DbFile.mime_type,
+                    extension: DbFile.extension,
+                    width: DbFile.width,
+                    height: DbFile.height,
+                })
+                .from(MediaFile)
+                .leftJoin(DbFile, eq(MediaFile.file_id, DbFile.id))
+                .where(
+                    and(
+                        inArray(MediaFile.media_id, allMediaIds),
+                        eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
+                        eq(MediaFile.sync_status, SyncStatus.COMPLETED),
+                    ),
+                );
+
+            for (const file of allFiles) {
+                if (!file.media_id) continue;
+                if (!filesByMediaId.has(file.media_id)) {
+                    filesByMediaId.set(file.media_id, []);
+                }
+                filesByMediaId.get(file.media_id)!.push(file);
             }
         }
 
-        const media = Array.from(mediaById.values());
+        const mediaResponses = mediaRows.map((m) => {
+            const files = filesByMediaId.get(m.id) || [];
+            const aiMeta = aiMetadataMap.get(m.id);
+            return {
+                ...mapMediaToResponse(
+                    {
+                        ...m,
+                        ai_status: aiMeta?.ai_status,
+                        ai_error: aiMeta?.ai_error,
+                    },
+                    files,
+                ),
+                post_eid: postData.eid,
+            };
+        });
 
         const result: z.infer<typeof PostDetailResponseBodySchema> = {
             id: postData.id,
@@ -460,37 +492,10 @@ router.get(
             create_time: toIsoTimestamp(postData.create_time) ?? undefined,
             published_time: toIsoTimestamp(postData.published_time),
             media_count: postData.media_count,
-            type: media.length > 0 ? "MULTI_MEDIA" : "TEXT",
+            type: mediaResponses.length > 0 ? "MULTI_MEDIA" : "TEXT",
             sync_status: postData.sync_status,
             last_error: postData.last_error,
-            media: media.map((m) => {
-                return {
-                    id: m.id,
-                    eid: m.eid,
-                    post_eid: postData.eid,
-                    source: m.source,
-                    title: m.title,
-                    description: m.description,
-                    type: m.type,
-                    sort_order: m.sort_order,
-                    primary_file_url: buildCdnUrl(m.files.PRIMARY?.bucket, m.files.PRIMARY?.path),
-                    alternative_file_url: buildCdnUrl(
-                        m.files.ALTERNATIVE?.bucket,
-                        m.files.ALTERNATIVE?.path,
-                    ),
-                    live_photo_video_url: buildCdnUrl(
-                        m.files.LIVE_PHOTO_VIDEO?.bucket,
-                        m.files.LIVE_PHOTO_VIDEO?.path,
-                    ),
-                    cover_file_url: buildCdnUrl(m.files.COVER?.bucket, m.files.COVER?.path),
-                    create_time: toIsoTimestamp(m.create_time) ?? undefined,
-                    published_time: toIsoTimestamp(m.published_time),
-                    sync_status: m.sync_status,
-                    last_error: m.last_error,
-                    ai_status: m.ai_status,
-                    ai_error: m.ai_error,
-                };
-            }),
+            media: mediaResponses,
         };
 
         return c.json(success(Code.SUCCESS, result));

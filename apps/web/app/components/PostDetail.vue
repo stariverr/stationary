@@ -178,6 +178,9 @@ const copyLink = () => {
                                 v-if="media.type === 'VIDEO'"
                                 :src="media.url || ''"
                                 :poster="media.thumbnail || media.poster || ''"
+                                :subtitles="media.subtitles"
+                                :width="media.width"
+                                :height="media.height"
                                 class="max-h-full max-w-full h-full w-auto"
                             />
                             <img
@@ -258,6 +261,9 @@ const copyLink = () => {
                                         v-if="media.type === 'VIDEO'"
                                         :src="media.url || ''"
                                         :poster="media.thumbnail || media.poster || ''"
+                                        :subtitles="media.subtitles"
+                                        :width="media.width"
+                                        :height="media.height"
                                         class="w-full h-full"
                                     />
                                     <img

@@ -144,22 +144,8 @@ export const VideoCoverService = {
 
         // If not forced, check if a valid generated/completed cover already exists
         if (!options?.force) {
-            const hasActiveCover =
-                cover &&
-                (!!cover.source_url || (!!cover.file_id && cover.sync_status === "COMPLETED"));
-
-            let needsRegeneration = false;
-            if (cover && (cover.metadata as any)?.generated) {
-                const lastPrimaryId = (cover.metadata as any).primary_file_id;
-                if (lastPrimaryId !== primary.file_id) {
-                    needsRegeneration = true;
-                    console.log(
-                        `[VideoCoverService] Primary file ID changed from ${lastPrimaryId} to ${primary.file_id} for media ${mediaId}. Requesting cover regeneration.`,
-                    );
-                }
-            }
-
-            if (hasActiveCover && !needsRegeneration) {
+            const hasExternalCover = !!cover?.source_url;
+            if (hasExternalCover || isPhysicalCoverValid(cover, primary.file_id)) {
                 console.log(
                     `[VideoCoverService] Media ${mediaId} already has a valid cover. Skipping.`,
                 );
@@ -172,7 +158,6 @@ export const VideoCoverService = {
         }
 
         const metadata = {
-            generated: true,
             primary_file_id: primary.file_id,
         };
 
@@ -186,6 +171,7 @@ export const VideoCoverService = {
                     sync_status: SyncStatus.PENDING,
                     last_error: null,
                     metadata,
+                    is_generated: true,
                     update_time: now,
                 })
                 .where(eq(MediaFile.id, cover.id));
@@ -198,6 +184,7 @@ export const VideoCoverService = {
                     sync_status: SyncStatus.PENDING,
                     last_error: null,
                     metadata,
+                    is_generated: true,
                     create_time: now,
                     update_time: now,
                 })
@@ -207,6 +194,7 @@ export const VideoCoverService = {
                         sync_status: SyncStatus.PENDING,
                         last_error: null,
                         metadata,
+                        is_generated: true,
                         delete_status: DeleteStatus.ACTIVE,
                         delete_time: null,
                         update_time: now,
@@ -313,18 +301,7 @@ export const VideoCoverService = {
         }
 
         // Final idempotency / bypass check inside the generator worker to handle race conditions
-        const coverMetadata = cover?.metadata as any;
         const hasExternalCover = !!cover?.source_url;
-        const hasCurrentGeneratedCover =
-            !!cover?.file_id &&
-            cover.sync_status === "COMPLETED" &&
-            coverMetadata?.generated === true &&
-            coverMetadata?.primary_file_id === primary.file_id;
-        const hasNonGeneratedCover =
-            !!cover?.file_id &&
-            cover.sync_status === "COMPLETED" &&
-            coverMetadata?.generated !== true;
-
         if (hasExternalCover && options?.replaceExternalCover !== true) {
             console.log(
                 `[VideoCoverService] External cover already exists for media ${mediaId} and replaceExternalCover is not set. Skipping.`,
@@ -332,13 +309,11 @@ export const VideoCoverService = {
             return;
         }
 
-        if (!options?.force) {
-            if (hasCurrentGeneratedCover || hasNonGeneratedCover) {
-                console.log(
-                    `[VideoCoverService] Valid cover already exists for media ${mediaId}. Skipping cover generation.`,
-                );
-                return;
-            }
+        if (!options?.force && isPhysicalCoverValid(cover, primary.file_id)) {
+            console.log(
+                `[VideoCoverService] Valid cover already exists for media ${mediaId}. Skipping cover generation.`,
+            );
+            return;
         }
 
         try {
@@ -435,7 +410,6 @@ export const VideoCoverService = {
 
             // Save MediaFile
             const metadata = {
-                generated: true,
                 primary_file_id: primary.file_id,
                 seek_seconds: 1,
             };
@@ -449,6 +423,7 @@ export const VideoCoverService = {
                         sync_status: SyncStatus.COMPLETED,
                         last_error: null,
                         metadata,
+                        is_generated: true,
                         update_time: completedNow,
                     })
                     .where(eq(MediaFile.id, cover.id));
@@ -462,6 +437,7 @@ export const VideoCoverService = {
                         sync_status: SyncStatus.COMPLETED,
                         last_error: null,
                         metadata,
+                        is_generated: true,
                         create_time: completedNow,
                         update_time: completedNow,
                     })
@@ -472,6 +448,7 @@ export const VideoCoverService = {
                             sync_status: SyncStatus.COMPLETED,
                             last_error: null,
                             metadata,
+                            is_generated: true,
                             delete_status: DeleteStatus.ACTIVE,
                             delete_time: null,
                             update_time: completedNow,
@@ -556,6 +533,7 @@ export const VideoCoverService = {
                             coverSyncStatus: coverMediaFile.sync_status,
                             coverUpdateTime: coverMediaFile.update_time,
                             coverMetadata: coverMediaFile.metadata,
+                            coverIsGenerated: coverMediaFile.is_generated,
                         })
                         .from(Media)
                         .innerJoin(primaryMediaFile, and(eq(Media.id, primaryMediaFile.media_id)))
@@ -590,6 +568,7 @@ export const VideoCoverService = {
                             coverSyncStatus,
                             coverUpdateTime,
                             coverMetadata,
+                            coverIsGenerated,
                         } = row;
 
                         if (!primaryFileId) {
@@ -624,11 +603,11 @@ export const VideoCoverService = {
                             // 4. COVER.sync_status IN (PENDING, IN_PROGRESS) and update_time older than staleMinutes
                             isMatched = true;
                         } else {
-                            // 5. COVER.metadata.generated = true and COVER.metadata.primary_file_id != PRIMARY.file_id
-                            const metadata = coverMetadata as any;
+                            // 5. COVER.is_generated = true and COVER.metadata.primary_file_id != PRIMARY.file_id
+                            const metadata = coverMetadata;
                             if (
+                                coverIsGenerated === true &&
                                 metadata &&
-                                metadata.generated === true &&
                                 metadata.primary_file_id !== primaryFileId
                             ) {
                                 isMatched = true;
@@ -703,3 +682,15 @@ export const VideoCoverService = {
         }
     },
 };
+
+function isPhysicalCoverValid(
+    cover: typeof MediaFile.$inferSelect | undefined,
+    primaryFileId: string | null,
+): boolean {
+    if (!cover || !cover.file_id) return false;
+    if (cover.sync_status !== SyncStatus.COMPLETED) return false;
+    if (cover.is_generated) {
+        return cover.metadata.primary_file_id === primaryFileId;
+    }
+    return true;
+}

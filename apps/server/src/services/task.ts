@@ -5,26 +5,167 @@ import {
     MediaFile,
     Author,
     File,
-    Library,
     DeleteStatus,
     SyncStatus,
     MediaFileRole,
 } from "@/db/schema";
 import { eq, and, notInArray, inArray, gte, isNull, isNotNull, or, lt } from "drizzle-orm";
-import {
-    downloadStream,
-    downloadMedia,
-    getExtensionFromContentType,
-    uploadToS3,
-} from "@/lib/utils/media";
+import { downloadStream, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
 import { VideoCoverService } from "@/services/video_cover";
 import { withLock } from "@/lib/utils/lock";
 import { env } from "@/global/env";
 import { Client } from "@upstash/workflow";
-import { kv } from "@/global/kv";
 import type { PostItemData, MediaItemData } from "@/api/task";
 import { nowDbTimestamp } from "@/lib/utils/time";
 import { Temporal } from "@js-temporal/polyfill";
+
+function formatVttTime(seconds: number): string {
+    const ms = Math.floor((seconds % 1) * 1000)
+        .toString()
+        .padStart(3, "0");
+    const totalSecs = Math.floor(seconds);
+    const s = (totalSecs % 60).toString().padStart(2, "0");
+    const m = (Math.floor(totalSecs / 60) % 60).toString().padStart(2, "0");
+    const h = Math.floor(totalSecs / 3600)
+        .toString()
+        .padStart(2, "0");
+    return `${h}:${m}:${s}.${ms}`;
+}
+
+function convertBiliJsonToVtt(jsonText: string): string {
+    const data = JSON.parse(jsonText);
+    let vtt = "WEBVTT\n\n";
+    if (data && Array.isArray(data.body)) {
+        for (const [idx, item] of data.body.entries()) {
+            const from = formatVttTime(item.from || 0);
+            const to = formatVttTime(item.to || 0);
+            const content = item.content || "";
+            vtt += `${idx + 1}\n${from} --> ${to}\n${content}\n\n`;
+        }
+    }
+    return vtt;
+}
+
+async function extractSegmentBase(stream: ReadableStream): Promise<{
+    segment_base?: {
+        initialization: string;
+        index_range: string;
+        timescale?: number;
+        earliest_presentation_time?: string;
+    };
+    stream: ReadableStream;
+}> {
+    const maxHeaderSize = 32768;
+    const chunks: Uint8Array[] = [];
+    let bytesRead = 0;
+    const reader = stream.getReader();
+    let done = false;
+    let sidxRange:
+        | {
+              initialization: string;
+              index_range: string;
+              timescale?: number;
+              earliest_presentation_time?: string;
+          }
+        | undefined = undefined;
+
+    while (bytesRead < maxHeaderSize) {
+        const { value, done: readDone } = await reader.read();
+        if (readDone) {
+            done = true;
+            break;
+        }
+        if (value) {
+            chunks.push(value);
+            bytesRead += value.length;
+        }
+    }
+
+    const headerBuffer = new Uint8Array(bytesRead);
+    let offset = 0;
+    for (const chunk of chunks) {
+        headerBuffer.set(chunk, offset);
+        offset += chunk.length;
+    }
+
+    offset = 0;
+    const view = new DataView(
+        headerBuffer.buffer,
+        headerBuffer.byteOffset,
+        headerBuffer.byteLength,
+    );
+    while (offset + 8 <= bytesRead) {
+        const size = view.getUint32(offset);
+        const type = String.fromCharCode(
+            headerBuffer[offset + 4],
+            headerBuffer[offset + 5],
+            headerBuffer[offset + 6],
+            headerBuffer[offset + 7],
+        );
+
+        if (type === "sidx") {
+            const version = view.getUint8(offset + 8);
+            const timescale = view.getUint32(offset + 16);
+            let earliestPresentationTime = 0n;
+            if (version === 0) {
+                earliestPresentationTime = BigInt(view.getUint32(offset + 20));
+            } else {
+                earliestPresentationTime = view.getBigUint64(offset + 20);
+            }
+            sidxRange = {
+                initialization: `0-${offset - 1}`,
+                index_range: `${offset}-${offset + size - 1}`,
+                timescale,
+                earliest_presentation_time: earliestPresentationTime.toString(),
+            };
+            break;
+        }
+
+        if (size === 0) {
+            break;
+        }
+        if (size === 1) {
+            if (offset + 16 > bytesRead) break;
+            const sizeLarge = view.getBigUint64(offset + 8);
+            offset += Number(sizeLarge);
+        } else {
+            offset += size;
+        }
+    }
+
+    const reconstructedStream = new ReadableStream({
+        async start(controller) {
+            for (const chunk of chunks) {
+                controller.enqueue(chunk);
+            }
+            if (done) {
+                controller.close();
+                return;
+            }
+            try {
+                while (true) {
+                    const { value, done: readDone } = await reader.read();
+                    if (readDone) {
+                        controller.close();
+                        break;
+                    }
+                    if (value) {
+                        controller.enqueue(value);
+                    }
+                }
+            } catch (err) {
+                controller.error(err);
+            } finally {
+                reader.releaseLock();
+            }
+        },
+    });
+
+    return {
+        segment_base: sidxRange,
+        stream: reconstructedStream,
+    };
+}
 
 export const TaskService = {
     /**
@@ -285,10 +426,6 @@ export const TaskService = {
                     description: mediaData.description || "",
                     type: mediaData.type,
                     sort_order: index,
-                    primary_url: mediaData.primary_file_url,
-                    alternative_url: mediaData.alternative_file_url || null,
-                    live_photo_url: mediaData.live_photo_video_url || null,
-                    cover_url: mediaData.cover_file_url || null,
                     published_time: fallbackPublishedTime,
                     sync_status: SyncStatus.PENDING,
                 };
@@ -311,23 +448,50 @@ export const TaskService = {
                     updateData.published_time = incomingPublishedTime ?? fallbackPublishedTime;
                 }
 
+                // Fetch existing active media files to see if any track needs processing
+                const activeMediaFiles = await db
+                    .select()
+                    .from(MediaFile)
+                    .where(
+                        and(
+                            eq(MediaFile.media_id, mediaId),
+                            eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
+                        ),
+                    );
+
                 let mediaNeedsProcessing = false;
 
-                if (m.primary_url !== mediaData.primary_file_url) {
-                    updateData.primary_url = mediaData.primary_file_url;
-                    mediaNeedsProcessing = true;
+                // Check if any incoming track is new, modified, or pending/failed
+                for (const track of mediaData.tracks) {
+                    const existing = activeMediaFiles.find(
+                        (mf) => mf.role === track.role && mf.sort_order === track.sort,
+                    );
+                    if (!existing) {
+                        mediaNeedsProcessing = true;
+                        break;
+                    }
+                    if (
+                        existing.source_url !== track.url ||
+                        existing.sync_status === SyncStatus.FAILED ||
+                        existing.sync_status === SyncStatus.PENDING ||
+                        JSON.stringify(existing.metadata) !== JSON.stringify(track.metadata || {})
+                    ) {
+                        mediaNeedsProcessing = true;
+                        break;
+                    }
                 }
-                if (m.alternative_url !== (mediaData.alternative_file_url || null)) {
-                    updateData.alternative_url = mediaData.alternative_file_url || null;
-                    mediaNeedsProcessing = true;
-                }
-                if (m.live_photo_url !== (mediaData.live_photo_video_url || null)) {
-                    updateData.live_photo_url = mediaData.live_photo_video_url || null;
-                    mediaNeedsProcessing = true;
-                }
-                if (m.cover_url !== (mediaData.cover_file_url || null)) {
-                    updateData.cover_url = mediaData.cover_file_url || null;
-                    mediaNeedsProcessing = true;
+
+                // Also check if any existing active media files are being removed
+                if (!mediaNeedsProcessing) {
+                    for (const mf of activeMediaFiles) {
+                        const stillExists = mediaData.tracks.some(
+                            (track) => track.role === mf.role && track.sort === mf.sort_order,
+                        );
+                        if (!stillExists) {
+                            mediaNeedsProcessing = true;
+                            break;
+                        }
+                    }
                 }
 
                 if (
@@ -354,20 +518,30 @@ export const TaskService = {
             const processAffiliatedFile = async (
                 role: MediaFileRole,
                 newUrl: string | null | undefined,
+                sortOrder: number = 0,
+                metadata: any = {},
             ) => {
-                const existing = existingMediaFiles.find((mf) => mf.role === role);
+                const existing = existingMediaFiles.find(
+                    (mf) =>
+                        mf.role === role &&
+                        mf.sort_order === sortOrder &&
+                        mf.delete_status === DeleteStatus.ACTIVE,
+                );
                 if (newUrl) {
                     if (!existing) {
                         await db.insert(MediaFile).values({
                             media_id: mediaId,
                             role: role,
+                            sort_order: sortOrder,
                             source_url: newUrl,
+                            metadata: metadata,
                             sync_status: SyncStatus.PENDING,
                         });
                         hasPendingTasks = true;
                     } else if (
                         existing.source_url !== newUrl ||
-                        existing.sync_status === SyncStatus.FAILED
+                        existing.sync_status === SyncStatus.FAILED ||
+                        JSON.stringify(existing.metadata) !== JSON.stringify(metadata)
                     ) {
                         if (existing.file_id) {
                             await db
@@ -382,6 +556,7 @@ export const TaskService = {
                             .update(MediaFile)
                             .set({
                                 source_url: newUrl,
+                                metadata: metadata,
                                 sync_status: SyncStatus.PENDING,
                                 file_id: null,
                                 last_error: null,
@@ -408,13 +583,42 @@ export const TaskService = {
                 }
             };
 
-            await processAffiliatedFile(MediaFileRole.PRIMARY, mediaData.primary_file_url);
-            await processAffiliatedFile(MediaFileRole.ALTERNATIVE, mediaData.alternative_file_url);
-            await processAffiliatedFile(
-                MediaFileRole.LIVE_PHOTO_VIDEO,
-                mediaData.live_photo_video_url,
-            );
-            await processAffiliatedFile(MediaFileRole.COVER, mediaData.cover_file_url);
+            const processedTrackKeys = new Set<string>();
+
+            // Process all tracks in a unified loop
+            for (const track of mediaData.tracks) {
+                processedTrackKeys.add(`${track.role}:${track.sort}`);
+                await processAffiliatedFile(
+                    track.role,
+                    track.url,
+                    track.sort,
+                    track.metadata || {},
+                );
+            }
+
+            // Clean up obsolete MediaFile records across all roles
+            for (const mf of existingMediaFiles) {
+                const key = `${mf.role}:${mf.sort_order}`;
+                if (!processedTrackKeys.has(key)) {
+                    const deleteTime = nowDbTimestamp();
+                    if (mf.file_id) {
+                        await db
+                            .update(File)
+                            .set({
+                                delete_status: DeleteStatus.DELETED,
+                                delete_time: deleteTime,
+                            })
+                            .where(eq(File.id, mf.file_id));
+                    }
+                    await db
+                        .update(MediaFile)
+                        .set({
+                            delete_status: DeleteStatus.DELETED,
+                            delete_time: deleteTime,
+                        })
+                        .where(eq(MediaFile.id, mf.id));
+                }
+            }
         }
 
         // 4. Check if Avatar needs processing
@@ -472,11 +676,16 @@ export const TaskService = {
                         .set({ sync_status: SyncStatus.IN_PROGRESS })
                         .where(eq(Media.id, m.id));
 
-                    // Fetch again to ensure we get latest
+                    // Fetch again to ensure we get latest active files
                     const mediaFiles = await db
                         .select()
                         .from(MediaFile)
-                        .where(eq(MediaFile.media_id, m.id));
+                        .where(
+                            and(
+                                eq(MediaFile.media_id, m.id),
+                                eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
+                            ),
+                        );
 
                     let allCompleted = true;
 
@@ -492,26 +701,81 @@ export const TaskService = {
 
                         try {
                             const response = await downloadStream(mf.source_url);
-                            if (response && response.body) {
-                                const contentType = response.headers.get("Content-Type");
-                                const contentLength = response.headers.get("Content-Length");
-                                const ext = getExtensionFromContentType(contentType);
+                            if (response) {
+                                let contentType = response.headers.get("Content-Type");
+                                let contentLength = response.headers.get("Content-Length");
+                                let ext = getExtensionFromContentType(contentType, mf.source_url);
+                                let responseBody: ReadableStream | Uint8Array;
+
+                                // Auto-convert Bilibili JSON subtitle to WebVTT
+                                if (
+                                    mf.role === MediaFileRole.SUBTITLE &&
+                                    mf.metadata.format === "json"
+                                ) {
+                                    const jsonText = await response.text();
+                                    try {
+                                        const vttText = convertBiliJsonToVtt(jsonText);
+                                        responseBody = new TextEncoder().encode(vttText);
+                                        contentType = "text/vtt";
+                                        contentLength = responseBody.length.toString();
+                                        ext = "vtt";
+                                    } catch (err) {
+                                        console.error(
+                                            "Failed to convert Bilibili JSON subtitle:",
+                                            err,
+                                        );
+                                        responseBody = new TextEncoder().encode(jsonText);
+                                    }
+                                } else {
+                                    if (!response.body) {
+                                        throw new Error("Response body is empty");
+                                    }
+                                    responseBody = response.body;
+                                }
+
+                                let segmentBase:
+                                    | { initialization: string; index_range: string }
+                                    | undefined;
+                                if (
+                                    (mf.role === MediaFileRole.PRIMARY ||
+                                        mf.role === MediaFileRole.ALTERNATIVE ||
+                                        mf.role === MediaFileRole.AUDIO) &&
+                                    responseBody instanceof ReadableStream
+                                ) {
+                                    const res = await extractSegmentBase(responseBody);
+                                    segmentBase = res.segment_base;
+                                    responseBody = res.stream;
+                                }
 
                                 let prefix = "";
-                                if (mf.role === "PRIMARY") prefix = "file";
-                                else if (mf.role === "ALTERNATIVE") prefix = "alt";
-                                else if (mf.role === "LIVE_PHOTO_VIDEO") prefix = "live";
-                                else if (mf.role === "COVER") prefix = "cover";
+                                if (mf.role === MediaFileRole.PRIMARY)
+                                    prefix = `video_${mf.sort_order}`;
+                                else if (mf.role === MediaFileRole.AUDIO)
+                                    prefix = `audio_${mf.sort_order}`;
+                                else if (mf.role === MediaFileRole.ALTERNATIVE) prefix = "alt";
+                                else if (mf.role === MediaFileRole.LIVE_PHOTO_VIDEO)
+                                    prefix = "live";
+                                else if (mf.role === MediaFileRole.COVER) prefix = "cover";
+                                else if (mf.role === MediaFileRole.SUBTITLE) {
+                                    const lang = mf.metadata.language || "unknown";
+                                    prefix = `subtitle_${lang}`;
+                                }
 
                                 const path = `v2/p/${postId.slice(-2)}/${postId}/${index}_${prefix}.${ext}`;
 
+                                const S3Data = responseBody;
                                 await uploadToS3(
                                     path,
-                                    response.body,
+                                    S3Data,
                                     contentType || "application/octet-stream",
                                     env.S3_BUCKET,
                                     contentLength ? parseInt(contentLength) : undefined,
                                 );
+
+                                const width = mf.metadata?.width ?? null;
+                                const height = mf.metadata?.height ?? null;
+                                const duration = mf.metadata?.duration ?? null;
+                                const size = contentLength ? parseInt(contentLength) : null;
 
                                 const fileResults = await db
                                     .insert(File)
@@ -520,15 +784,32 @@ export const TaskService = {
                                         mime_type: contentType || "application/octet-stream",
                                         extension: ext,
                                         bucket: env.S3_BUCKET,
+                                        width: width,
+                                        height: height,
+                                        duration: duration ? Math.round(duration) : null,
+                                        size: size,
                                     })
                                     .onConflictDoUpdate({
                                         target: File.path,
                                         set: {
                                             mime_type: contentType || "application/octet-stream",
                                             extension: ext,
+                                            width: width,
+                                            height: height,
+                                            duration: duration ? Math.round(duration) : null,
+                                            size: size,
+                                            delete_status: DeleteStatus.ACTIVE,
+                                            delete_time: null,
                                         },
                                     })
                                     .returning({ id: File.id });
+
+                                const updatedMetadata = {
+                                    ...mf.metadata,
+                                };
+                                if (segmentBase) {
+                                    updatedMetadata.segment_base = segmentBase;
+                                }
 
                                 await db
                                     .update(MediaFile)
@@ -536,6 +817,7 @@ export const TaskService = {
                                         file_id: fileResults[0].id,
                                         sync_status: SyncStatus.COMPLETED,
                                         last_error: null,
+                                        metadata: updatedMetadata,
                                     })
                                     .where(eq(MediaFile.id, mf.id));
                             }
@@ -623,7 +905,7 @@ export const TaskService = {
                     if (avatarResponse && avatarResponse.body) {
                         const avatarContentType = avatarResponse.headers.get("Content-Type");
                         const avatarContentLength = avatarResponse.headers.get("Content-Length");
-                        const ext = getExtensionFromContentType(avatarContentType);
+                        const ext = getExtensionFromContentType(avatarContentType, avatarUrl);
                         const path = `v2/a/${authorId.slice(-2)}/${authorId}/original.${ext}`;
 
                         await uploadToS3(
@@ -647,6 +929,8 @@ export const TaskService = {
                                 set: {
                                     mime_type: avatarContentType || "application/octet-stream",
                                     extension: ext,
+                                    delete_status: DeleteStatus.ACTIVE,
+                                    delete_time: null,
                                 },
                             })
                             .returning({ id: File.id });
@@ -783,24 +1067,73 @@ export const TaskService = {
                 })
                 .where(eq(Post.id, post.id));
 
-            // Reconstruct PostItemData
-            const author = post.author_id
-                ? (
-                      await db.select().from(Author).where(eq(Author.id, post.author_id)).limit(1)
-                  )[0] || null
-                : null;
+            const postMediaFiles =
+                mediaIds.length > 0
+                    ? await db
+                          .select()
+                          .from(MediaFile)
+                          .where(
+                              and(
+                                  inArray(MediaFile.media_id, mediaIds),
+                                  eq(MediaFile.delete_status, DeleteStatus.ACTIVE),
+                              ),
+                          )
+                    : [];
 
-            const mappedMedia = postMedia.map((m) => ({
-                external_id: m.eid,
-                title: m.title,
-                description: m.description,
-                type: m.type,
-                primary_file_url: m.primary_url ?? "",
-                alternative_file_url: m.alternative_url,
-                live_photo_video_url: m.live_photo_url,
-                cover_file_url: m.cover_url,
-                published_time: m.published_time ?? undefined,
-            }));
+            const mappedMedia = postMedia.map((m) => {
+                let tracks = postMediaFiles
+                    .filter((mf) => mf.media_id === m.id)
+                    .map((mf) => ({
+                        url: mf.source_url || "",
+                        role: mf.role,
+                        sort: mf.sort_order,
+                        metadata: mf.metadata || {},
+                    }));
+
+                if (tracks.length === 0) {
+                    if (m.primary_url) {
+                        tracks.push({
+                            url: m.primary_url,
+                            role: MediaFileRole.PRIMARY,
+                            sort: 0,
+                            metadata: {},
+                        });
+                    }
+                    if (m.cover_url) {
+                        tracks.push({
+                            url: m.cover_url,
+                            role: MediaFileRole.COVER,
+                            sort: 0,
+                            metadata: {},
+                        });
+                    }
+                    if (m.alternative_url) {
+                        tracks.push({
+                            url: m.alternative_url,
+                            role: MediaFileRole.ALTERNATIVE,
+                            sort: 0,
+                            metadata: {},
+                        });
+                    }
+                    if (m.live_photo_url) {
+                        tracks.push({
+                            url: m.live_photo_url,
+                            role: MediaFileRole.LIVE_PHOTO_VIDEO,
+                            sort: 0,
+                            metadata: {},
+                        });
+                    }
+                }
+
+                return {
+                    external_id: m.eid,
+                    title: m.title,
+                    description: m.description,
+                    type: m.type,
+                    tracks,
+                    published_time: m.published_time ?? undefined,
+                };
+            });
 
             postsToProcess.push({
                 id: post.id,

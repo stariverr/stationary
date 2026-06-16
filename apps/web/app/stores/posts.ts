@@ -120,17 +120,30 @@ export const usePostStore = defineStore("posts", () => {
         const displayTime = apiPost.published_time ?? apiPost.create_time;
 
         const uiMedia = apiPost.media.map((m) => {
+            const primaryTrack = m.tracks.find((t) => t.role === "PRIMARY" && t.sort_order === 0);
+            const coverTrack = m.tracks.find((t) => t.role === "COVER");
+            const liveTrack = m.tracks.find((t) => t.role === "LIVE_PHOTO_VIDEO");
+            const subtitleTracks = m.tracks.filter((t) => t.role === "SUBTITLE");
+
+            let url = m.url || primaryTrack?.url || null;
+
             return {
                 ...m,
                 type: m.type,
-                url: m.primary_file_url || null,
-                thumbnail: m.cover_file_url || null,
-                live_url: m.live_photo_video_url || null,
-                poster: m.cover_file_url || null,
+                url: url,
+                thumbnail: coverTrack?.url || m.cover_url || null,
+                live_url: liveTrack?.url || null,
+                poster: coverTrack?.url || m.cover_url || null,
                 sync_status: m.sync_status || "PENDING",
                 last_error: m.last_error || null,
                 ai_status: m.ai_status || "PENDING",
                 ai_error: m.ai_error || null,
+                subtitles: subtitleTracks.map((sub) => ({
+                    url: sub.url,
+                    language: sub.metadata?.language || "unknown",
+                    label: sub.metadata?.label || sub.metadata?.language || "unknown",
+                    format: sub.metadata?.format === "json" ? "vtt" : sub.metadata?.format || "vtt",
+                })),
             };
         });
 
@@ -224,17 +237,35 @@ export const usePostStore = defineStore("posts", () => {
 
                 const uiMedia =
                     detail.media?.map((m) => {
+                        const primaryTrack = m.tracks.find(
+                            (t) => t.role === "PRIMARY" && t.sort_order === 0,
+                        );
+                        const coverTrack = m.tracks.find((t) => t.role === "COVER");
+                        const liveTrack = m.tracks.find((t) => t.role === "LIVE_PHOTO_VIDEO");
+                        const subtitleTracks = m.tracks.filter((t) => t.role === "SUBTITLE");
+
+                        let url = m.url || primaryTrack?.url || null;
+
                         return {
                             ...m,
-                            type: m.type as "VIDEO" | "IMAGE" | "LIVE_PHOTO",
-                            url: m.primary_file_url || null,
-                            thumbnail: m.cover_file_url || null,
-                            live_url: m.live_photo_video_url || null,
-                            poster: m.cover_file_url || null,
+                            type: m.type as "VIDEO" | "IMAGE" | "LIVE_PHOTO" | "AUDIO" | "PDF",
+                            url: url,
+                            thumbnail: coverTrack?.url || m.cover_url || null,
+                            live_url: liveTrack?.url || null,
+                            poster: coverTrack?.url || m.cover_url || null,
                             sync_status: m.sync_status || "PENDING",
                             last_error: m.last_error || null,
                             ai_status: m.ai_status || "PENDING",
                             ai_error: m.ai_error || null,
+                            subtitles: subtitleTracks.map((sub) => ({
+                                url: sub.url,
+                                language: sub.metadata?.language || "unknown",
+                                label: sub.metadata?.label || sub.metadata?.language || "unknown",
+                                format:
+                                    sub.metadata?.format === "json"
+                                        ? "vtt"
+                                        : sub.metadata?.format || "vtt",
+                            })),
                         };
                     }) || [];
 

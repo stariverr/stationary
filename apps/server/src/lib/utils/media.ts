@@ -296,8 +296,8 @@ export function obfuscateId(id: number | string): string {
 /**
  * Gets a file extension from a mime type.
  */
-export function getExtensionFromContentType(contentType: string | null): string {
-    if (!contentType) return "bin";
+export function getExtensionFromContentType(contentType: string | null, url?: string): string {
+    if (!contentType) return getExtensionFromUrl(url) || "bin";
     const mimeMap: Record<string, string> = {
         "image/jpeg": "jpg",
         "image/png": "png",
@@ -316,7 +316,31 @@ export function getExtensionFromContentType(contentType: string | null): string 
     };
 
     const type = contentType.split(";")[0].toLowerCase().trim();
-    return mimeMap[type] || type.split("/")[1] || "bin";
+    let ext = mimeMap[type] || type.split("/")[1] || "bin";
+
+    if ((ext === "plain" || ext === "bin") && url) {
+        const urlExt = getExtensionFromUrl(url);
+        if (urlExt) {
+            ext = urlExt;
+        }
+    }
+    return ext;
+}
+
+function getExtensionFromUrl(url?: string): string | null {
+    if (!url) return null;
+    try {
+        const urlObj = new URL(url.startsWith("//") ? `https:${url}` : url);
+        const pathname = urlObj.pathname;
+        const lastDot = pathname.lastIndexOf(".");
+        if (lastDot !== -1) {
+            const ext = pathname.slice(lastDot + 1).toLowerCase();
+            if (/^[a-z0-9]{2,5}$/.test(ext)) {
+                return ext;
+            }
+        }
+    } catch {}
+    return null;
 }
 
 /**

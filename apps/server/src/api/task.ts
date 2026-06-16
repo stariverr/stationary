@@ -41,29 +41,96 @@ const AuthorSchema = z.object({
     avatar_file_url: z.string().nullable().optional(),
 });
 
-const TimestampSchema = z.string().transform((val) => {
-    // Handle Unix timestamps (numeric strings)
-    if (/^\d+$/.test(val)) {
-        const num = Number.parseInt(val);
-        // If it's 10 digits, assume seconds; if 13, assume milliseconds
-        if (val.length === 10) return Temporal.Instant.fromEpochMilliseconds(num * 1000);
-        if (val.length === 13) return Temporal.Instant.fromEpochMilliseconds(num);
-        // Fallback for other lengths
-        return Temporal.Instant.fromEpochMilliseconds(num);
-    }
-    return Temporal.Instant.from(val);
+const TimestampSchema = z
+    .preprocess((val) => (val === null || val === "" ? undefined : val), z.string().optional())
+    .transform((val) => {
+        if (val === undefined) return undefined;
+        // Handle Unix timestamps (numeric strings)
+        if (/^\d+$/.test(val)) {
+            const num = Number.parseInt(val);
+            // If it's 10 digits, assume seconds; if 13, assume milliseconds
+            if (val.length === 10) return Temporal.Instant.fromEpochMilliseconds(num * 1000);
+            if (val.length === 13) return Temporal.Instant.fromEpochMilliseconds(num);
+            // Fallback for other lengths
+            return Temporal.Instant.fromEpochMilliseconds(num);
+        }
+        return Temporal.Instant.from(val);
+    });
+
+const SegmentBaseSchema = z.object({
+    initialization: z
+        .string()
+        .nullish()
+        .transform((v) => v ?? undefined),
+    index_range: z
+        .string()
+        .nullish()
+        .transform((v) => v ?? undefined),
+});
+
+const TrackRoleSchema = z.enum(MediaFileRole);
+
+const TrackMetadataSchema = z.object({
+    codecs: z
+        .string()
+        .nullish()
+        .transform((v) => v ?? undefined),
+    bandwidth: z
+        .number()
+        .nullish()
+        .transform((v) => v ?? undefined),
+    width: z
+        .number()
+        .nullish()
+        .transform((v) => v ?? undefined),
+    height: z
+        .number()
+        .nullish()
+        .transform((v) => v ?? undefined),
+    duration: z
+        .number()
+        .nullish()
+        .transform((v) => v ?? undefined),
+    language: z
+        .string()
+        .nullish()
+        .transform((v) => v ?? undefined),
+    label: z
+        .string()
+        .nullish()
+        .transform((v) => v ?? undefined),
+    format: z
+        .string()
+        .nullish()
+        .transform((v) => v ?? undefined),
+    type: z
+        .enum(["mp4", "fmp4"])
+        .nullish()
+        .transform((v) => v ?? undefined),
+    segment_base: SegmentBaseSchema.nullish().transform((v) => v ?? undefined),
+});
+
+const TrackSchema = z.object({
+    url: z.string(),
+    role: TrackRoleSchema,
+    /** The sort order of the track */
+    sort: z.number().default(0),
+    metadata: TrackMetadataSchema.nullish().transform((v) => v ?? {}),
 });
 
 const MediaItemSchema = z
     .object({
         external_id: z.string().optional(),
-        title: z.string().nullable().default(""),
-        description: z.string().nullable().default(""),
+        title: z
+            .string()
+            .nullish()
+            .transform((v) => v ?? ""),
+        description: z
+            .string()
+            .nullish()
+            .transform((v) => v ?? ""),
         type: z.enum(MediaType),
-        primary_file_url: z.string(),
-        alternative_file_url: z.string().nullable().optional(),
-        live_photo_video_url: z.string().nullable().optional(),
-        cover_file_url: z.string().nullable().optional(),
+        tracks: z.array(TrackSchema).default([]),
         /** Media Duration (in seconds) */
         duration: z.number().nullable().optional(),
         published_time: TimestampSchema.optional(),

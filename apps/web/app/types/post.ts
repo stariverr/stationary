@@ -14,7 +14,22 @@ export enum Platform {
 
 export const PlatformSchema = v.enum_(Platform);
 
-// --- Backend API Schemas ---
+export const TrackRoleSchema = v.picklist([
+    "PRIMARY",
+    "COVER",
+    "ALTERNATIVE",
+    "LIVE_PHOTO_VIDEO",
+    "AUDIO",
+    "SUBTITLE",
+]);
+
+export const TrackSchema = v.object({
+    id: v.optional(v.string()),
+    url: v.string(),
+    role: TrackRoleSchema,
+    sort_order: v.number(),
+    metadata: v.record(v.string(), v.any()),
+});
 
 export const ApiPostMediaSchema = v.object({
     id: v.pipe(v.string(), v.uuid()),
@@ -22,18 +37,17 @@ export const ApiPostMediaSchema = v.object({
     source: v.optional(v.string()),
     title: v.nullish(v.string()),
     description: v.nullish(v.string()),
-    type: v.picklist(["IMAGE", "VIDEO", "LIVE_PHOTO"]),
+    type: v.picklist(["IMAGE", "VIDEO", "LIVE_PHOTO", "AUDIO", "PDF"]),
     sort_order: v.number(),
-    primary_file_url: v.optional(v.nullable(v.string())),
-    cover_file_url: v.optional(v.nullable(v.string())),
-    alternative_file_url: v.optional(v.nullable(v.string())),
-    live_photo_video_url: v.optional(v.nullable(v.string())),
     create_time: v.optional(v.string()),
     published_time: v.optional(v.nullable(v.string())),
     sync_status: v.optional(v.nullable(v.string())),
     last_error: v.optional(v.nullable(v.string())),
     ai_status: v.optional(v.nullable(v.string())),
     ai_error: v.optional(v.nullable(v.string())),
+    url: v.optional(v.nullable(v.string())),
+    cover_url: v.optional(v.nullable(v.string())),
+    tracks: v.array(TrackSchema),
 });
 export type ApiPostMedia = v.InferOutput<typeof ApiPostMediaSchema>;
 
@@ -84,18 +98,16 @@ export const PostMediaSchema = v.object({
     source: v.optional(v.string()),
     title: v.nullish(v.string()),
     description: v.nullish(v.string()),
-    type: v.picklist(["IMAGE", "VIDEO", "LIVE_PHOTO"]),
+    type: v.picklist(["IMAGE", "VIDEO", "LIVE_PHOTO", "AUDIO", "PDF"]),
     sort_order: v.number(),
-    primary_file_url: v.optional(v.nullable(v.string())),
-    cover_file_url: v.optional(v.nullable(v.string())),
-    alternative_file_url: v.optional(v.nullable(v.string())),
-    live_photo_video_url: v.optional(v.nullable(v.string())),
     create_time: v.optional(v.string()),
     published_time: v.optional(v.nullable(v.string())),
     sync_status: v.optional(v.nullable(v.string())),
     last_error: v.optional(v.nullable(v.string())),
     ai_status: v.optional(v.nullable(v.string())),
     ai_error: v.optional(v.nullable(v.string())),
+    cover_url: v.optional(v.nullable(v.string())),
+    tracks: v.array(TrackSchema),
 
     // Mapped fields for UI
     url: v.nullable(v.string()),

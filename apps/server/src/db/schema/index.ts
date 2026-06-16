@@ -45,11 +45,15 @@ export enum MediaType {
     IMAGE = "IMAGE",
     VIDEO = "VIDEO",
     LIVE_PHOTO = "LIVE_PHOTO",
+    AUDIO = "AUDIO",
+    PDF = "PDF",
 }
 export const MediaTypeEnum = pgEnum("media_type", [
     MediaType.IMAGE,
     MediaType.VIDEO,
     MediaType.LIVE_PHOTO,
+    MediaType.AUDIO,
+    MediaType.PDF,
 ]);
 
 export enum PostSource {
@@ -89,12 +93,16 @@ export enum MediaFileRole {
     ALTERNATIVE = "ALTERNATIVE",
     COVER = "COVER",
     LIVE_PHOTO_VIDEO = "LIVE_PHOTO_VIDEO",
+    AUDIO = "AUDIO",
+    SUBTITLE = "SUBTITLE",
 }
 export const MediaFileRoleEnum = pgEnum("media_file_role", [
     MediaFileRole.PRIMARY,
     MediaFileRole.ALTERNATIVE,
     MediaFileRole.COVER,
     MediaFileRole.LIVE_PHOTO_VIDEO,
+    MediaFileRole.AUDIO,
+    MediaFileRole.SUBTITLE,
     // "THUMBNAIL",
     // "TRANSCODED",
     // "PREVIEW",
@@ -346,6 +354,50 @@ export const Media = pgTable(
     ],
 );
 
+export interface VideoTrackMetadata {
+    type?: "mp4" | "fmp4";
+    codecs?: string;
+    bandwidth?: number;
+    width?: number;
+    height?: number;
+    duration?: number;
+    segment_base?: {
+        initialization?: string;
+        index_range?: string;
+        timescale?: number;
+        earliest_presentation_time?: string;
+    };
+}
+
+export interface AudioTrackMetadata {
+    codecs?: string;
+    bandwidth?: number;
+    label?: string;
+    duration?: number;
+    segment_base?: {
+        initialization?: string;
+        index_range?: string;
+        timescale?: number;
+        earliest_presentation_time?: string;
+    };
+}
+
+export interface SubtitleTrackMetadata {
+    language?: string;
+    label?: string;
+    format?: string;
+}
+
+export interface CoverMetadata {
+    primary_file_id?: string;
+    seek_seconds?: number;
+}
+
+export type MediaFileMetadata = VideoTrackMetadata &
+    AudioTrackMetadata &
+    SubtitleTrackMetadata &
+    CoverMetadata;
+
 // MediaFile Model
 export const MediaFile = pgTable(
     "media_file",
@@ -365,7 +417,8 @@ export const MediaFile = pgTable(
         source_url: text("source_url").default(""),
         sync_status: SyncStatusEnum("sync_status").default(SyncStatus.PENDING).notNull(),
         last_error: text("last_error"),
-        metadata: jsonb("metadata").default({}).notNull(),
+        metadata: jsonb("metadata").$type<MediaFileMetadata>().default({}).notNull(),
+        is_generated: boolean("is_generated").default(false).notNull(),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),

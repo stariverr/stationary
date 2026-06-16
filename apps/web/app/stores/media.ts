@@ -17,7 +17,7 @@ export const MediaListResponseBodySchema = v.object({
     post_media_count: v.nullable(v.number()),
     media_count: v.number(),
     url: v.nullable(v.string()),
-    cover: v.optional(v.nullable(v.string())),
+    cover_url: v.optional(v.nullable(v.string())),
     sync_status: v.optional(v.nullable(v.string())),
     last_error: v.optional(v.nullable(v.string())),
     ai_status: v.optional(v.nullable(v.string())),
@@ -157,7 +157,7 @@ export const useMediaStore = defineStore("media", () => {
         return {
             ...apiMedia,
             url: apiMedia.url,
-            poster: apiMedia.cover || null,
+            poster: apiMedia.cover_url || null,
             sync_status: apiMedia.sync_status || "PENDING",
             last_error: apiMedia.last_error || null,
             ai_status: apiMedia.ai_status || "PENDING",
