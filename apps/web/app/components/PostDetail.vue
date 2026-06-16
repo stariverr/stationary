@@ -17,8 +17,10 @@ import {
     Sidebar,
 } from "@lucide/vue";
 import { Swiper, SwiperSlide } from "swiper/vue";
+import type { Swiper as SwiperClass } from "swiper";
 import "swiper/css";
 import { getOptimizedImageUrl, getOptimizedSrcset } from "@/utils/image";
+import { type Track } from "@/types/post";
 
 const { selectedPost, selectedPostId, selectedPostDetail } = usePosts();
 const { expandDetailByDefault } = useUserSettings();
@@ -44,14 +46,14 @@ watch(selectedPostId, (newId) => {
     }
 });
 
-const swiperInstance = ref<any>(null);
+const swiperInstance = ref<SwiperClass | null>(null);
 
-const onSwiper = (swiper: any) => {
+const onSwiper = (swiper: SwiperClass) => {
     swiperInstance.value = swiper;
     currentIndex.value = swiper.activeIndex;
 };
 
-const onSlideChange = (swiper: any) => {
+const onSlideChange = (swiper: SwiperClass) => {
     currentIndex.value = swiper.activeIndex;
 };
 
@@ -90,29 +92,37 @@ const copyLink = () => {
     const url = window.location.origin + "/posts/" + selectedPost.value.id;
     navigator.clipboard.writeText(url);
 };
+
+const mappedMedia = computed(() => {
+    if (!selectedPost.value?.media) return [];
+    return selectedPost.value.media.map((m) => {
+        const subtitleTracks = (m.tracks || []).filter((t: Track) => t.role === "SUBTITLE");
+        return {
+            ...m,
+            subtitles: subtitleTracks.map((sub: Track) => ({
+                url: sub.url,
+                language: (sub.metadata?.language as string) || "unknown",
+                label: (sub.metadata?.label as string) || (sub.metadata?.language as string) || "unknown",
+                format: sub.metadata?.format === "json" ? "vtt" : (sub.metadata?.format as string) || "vtt",
+            })),
+        };
+    });
+});
 </script>
 
 <template>
-    <div
-        v-if="selectedPost"
-        :class="[
-            showLightbox
-                ? 'fixed inset-0 z-[200] pointer-events-none'
-                : 'fixed inset-y-0 right-0 z-60 md:relative md:z-auto h-full bg-[#f8f8f8] border-l border-[#e5e5e5] w-full md:w-[480px] shrink-0 flex flex-col shadow-2xl overflow-hidden lg:overflow-visible',
-        ]"
-    >
+    <div v-if="selectedPost" :class="[
+        showLightbox
+            ? 'fixed inset-0 z-[200] pointer-events-none'
+            : 'fixed inset-y-0 right-0 z-60 md:relative md:z-auto h-full bg-[#f8f8f8] border-l border-[#e5e5e5] w-full md:w-[480px] shrink-0 flex flex-col shadow-2xl overflow-hidden lg:overflow-visible',
+    ]">
         <!-- Standard Header (Desktop Sidebar or Mobile Detail View) -->
-        <div
-            v-if="!showLightbox"
-            class="h-14 border-b border-[#e5e5e5] px-4 flex items-center justify-between bg-white shrink-0 z-10 pointer-events-auto"
-        >
+        <div v-if="!showLightbox"
+            class="h-14 border-b border-[#e5e5e5] px-4 flex items-center justify-between bg-white shrink-0 z-10 pointer-events-auto">
             <div class="flex items-center gap-2 overflow-hidden">
                 <!-- Mobile Back Button -->
-                <button
-                    v-if="isMobile"
-                    @click="closeDetail"
-                    class="p-1 -ml-1 hover:bg-gray-100 rounded-md text-gray-700 transition-colors"
-                >
+                <button v-if="isMobile" @click="closeDetail"
+                    class="p-1 -ml-1 hover:bg-gray-100 rounded-md text-gray-700 transition-colors">
                     <ChevronLeft class="w-6 h-6" />
                 </button>
                 <h2 class="font-semibold text-sm truncate max-w-[200px]">
@@ -120,101 +130,67 @@ const copyLink = () => {
                 </h2>
             </div>
             <div class="flex items-center gap-2">
-                <button
-                    @click="copyLink"
-                    class="p-1 hover:bg-gray-200 rounded-md text-gray-500 transition-colors"
-                    :title="$t('common.copy_link')"
-                >
+                <button @click="copyLink" class="p-1 hover:bg-gray-200 rounded-md text-gray-500 transition-colors"
+                    :title="$t('common.copy_link')">
                     <LinkIcon class="w-4 h-4" />
                 </button>
-                <button
-                    @click.stop="closeDetail"
-                    v-if="!isMobile"
-                    class="p-1 hover:bg-gray-200 rounded-md text-gray-500 transition-colors"
-                >
+                <button @click.stop="closeDetail" v-if="!isMobile"
+                    class="p-1 hover:bg-gray-200 rounded-md text-gray-500 transition-colors">
                     <X class="w-4 h-4" />
                 </button>
             </div>
         </div>
 
         <!-- Media Section (Immersive Lightbox) -->
-        <div
-            v-if="showLightbox"
-            class="fixed inset-0 z-[200] bg-black flex items-center justify-center group/carousel pointer-events-auto"
-        >
+        <div v-if="showLightbox"
+            class="fixed inset-0 z-[200] bg-black flex items-center justify-center group/carousel pointer-events-auto">
             <!-- Close Button Overlay (Top-Left) -->
-            <button
-                @click="closeLightbox"
-                class="absolute top-4 left-4 p-2 rounded-full bg-black/50 text-white hover:bg-white/20 transition-colors z-[210]"
-            >
+            <button @click="closeLightbox"
+                class="absolute top-4 left-4 p-2 rounded-full bg-black/50 text-white hover:bg-white/20 transition-colors z-[210]">
                 <X class="w-6 h-6" />
             </button>
 
             <!-- Media Counter -->
-            <div
-                v-if="(selectedPost.media?.length || 0) > 1"
-                class="absolute top-4 right-4 px-3 py-1 rounded-full bg-black/50 text-white text-sm font-medium z-100 font-mono"
-            >
-                {{ currentIndex + 1 }} / {{ selectedPost.media?.length }}
+            <div v-if="mappedMedia.length > 1"
+                class="absolute top-4 right-4 px-3 py-1 rounded-full bg-black/50 text-white text-sm font-medium z-100 font-mono">
+                {{ currentIndex + 1 }} / {{ mappedMedia.length }}
             </div>
 
             <!-- Carousel -->
             <!-- Carousel -->
             <div class="w-full h-full overflow-hidden">
-                <swiper
-                    :slides-per-view="1"
-                    :loop="(selectedPost.media?.length || 0) > 1"
-                    @swiper="onSwiper"
-                    @slideChange="onSlideChange"
-                    class="w-full h-full"
-                >
-                    <swiper-slide
-                        v-for="(media, index) in selectedPost.media"
-                        :key="index"
-                        class="flex items-center justify-center bg-transparent"
-                    >
+                <swiper :slides-per-view="1" :loop="mappedMedia.length > 1" @swiper="onSwiper"
+                    @slideChange="onSlideChange" class="w-full h-full">
+                    <swiper-slide v-for="(media, index) in mappedMedia" :key="index"
+                        class="flex items-center justify-center bg-transparent">
                         <div class="w-full h-full flex items-center justify-center relative">
-                            <VideoPlayer
-                                v-if="media.type === 'VIDEO'"
-                                :src="media.url || ''"
-                                :poster="media.thumbnail || media.poster || ''"
-                                :subtitles="media.subtitles"
-                                :width="media.width"
-                                :height="media.height"
-                                class="max-h-full max-w-full h-full w-auto"
-                            />
-                            <img
-                                v-else
-                                :src="media.url || ''"
-                                class="max-h-full max-w-full object-contain"
-                            />
+                            <VideoPlayer v-if="media.type === 'VIDEO'" :src="media.url || ''"
+                                :poster="media.thumbnail || media.poster || ''" :subtitles="media.subtitles"
+                                :width="media.width" :height="media.height"
+                                class="max-h-full max-w-full h-full w-auto" />
+                            <HeicImage v-else :src="media.url || ''" :mime-type="media.mime_type || undefined"
+                                class="max-h-full max-w-full object-contain" />
                         </div>
                     </swiper-slide>
                 </swiper>
             </div>
 
             <!-- Nav Buttons -->
-            <button
-                v-if="(selectedPost.media?.length || 0) > 1"
+            <button v-if="mappedMedia.length > 1"
                 class="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 z-100 pointer-events-auto"
-                @click.stop="scrollPrev"
-            >
+                @click.stop="scrollPrev">
                 <ChevronLeft class="w-6 h-6" />
             </button>
-            <button
-                v-if="(selectedPost.media?.length || 0) > 1"
+            <button v-if="mappedMedia.length > 1"
                 class="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 z-100 pointer-events-auto"
-                @click.stop="scrollNext"
-            >
+                @click.stop="scrollNext">
                 <ChevronRight class="w-6 h-6" />
             </button>
         </div>
 
         <!-- Info Section -->
-        <div
-            v-if="!showLightbox"
-            class="bg-white flex flex-col shrink-0 relative z-110 flex-1 min-h-0 pointer-events-auto"
-        >
+        <div v-if="!showLightbox"
+            class="bg-white flex flex-col shrink-0 relative z-110 flex-1 min-h-0 pointer-events-auto">
             <div class="flex-1 overflow-y-auto p-6 space-y-6">
                 <!-- Content -->
                 <div class="space-y-4">
@@ -222,79 +198,49 @@ const copyLink = () => {
                         <h1 class="text-xl font-bold text-gray-900 leading-tight">
                             {{ selectedPost.title }}
                         </h1>
-                        <span
-                            class="px-2 py-1 bg-gray-100 rounded text-xs font-medium text-gray-500 uppercase"
-                            >{{ selectedPost.type }}</span
-                        >
+                        <span class="px-2 py-1 bg-gray-100 rounded text-xs font-medium text-gray-500 uppercase">{{
+                            selectedPost.type }}</span>
                     </div>
 
                     <!-- Media Carousel (Embedded in Content for Standard/Mobile View) -->
-                    <div
-                        v-if="selectedPost.type !== 'TEXT'"
+                    <div v-if="selectedPost.type !== 'TEXT'"
                         class="w-[calc(100%+3rem)] -mx-6 md:w-full md:mx-0 md:rounded-lg aspect-square md:aspect-4/3 bg-black overflow-hidden my-4 cursor-pointer relative group/carousel"
-                        @click="showLightbox = true"
-                    >
+                        @click="showLightbox = true">
                         <!-- Media Counter (Embedded) -->
-                        <div
-                            v-if="(selectedPost.media?.length || 0) > 1"
-                            class="absolute top-4 right-4 px-2 py-0.5 rounded-full bg-black/50 text-white text-[10px] font-medium z-100 font-mono"
-                        >
-                            {{ currentIndex + 1 }} / {{ selectedPost.media?.length }}
+                        <div v-if="mappedMedia.length > 1"
+                            class="absolute top-4 right-4 px-2 py-0.5 rounded-full bg-black/50 text-white text-[10px] font-medium z-100 font-mono">
+                            {{ currentIndex + 1 }} / {{ mappedMedia.length }}
                         </div>
 
-                        <swiper
-                            :slides-per-view="1"
-                            :loop="(selectedPost.media?.length || 0) > 1"
-                            @swiper="onSwiper"
-                            @slideChange="onSlideChange"
-                            class="h-full"
-                        >
-                            <swiper-slide
-                                v-for="(media, index) in selectedPost.media"
-                                :key="index"
-                                class="bg-transparent flex items-center justify-center"
-                            >
-                                <div
-                                    class="w-full h-full flex items-center justify-center relative"
-                                >
-                                    <VideoPlayer
-                                        v-if="media.type === 'VIDEO'"
-                                        :src="media.url || ''"
-                                        :poster="media.thumbnail || media.poster || ''"
-                                        :subtitles="media.subtitles"
-                                        :width="media.width"
-                                        :height="media.height"
-                                        class="w-full h-full"
-                                    />
-                                    <img
-                                        v-else
-                                        :src="
-                                            getOptimizedImageUrl(media.url || '', {
-                                                width: 960,
-                                                fit: 'scale-down',
-                                            })
-                                        "
-                                        :srcset="getOptimizedSrcset(media.url || '', 'detail')"
+                        <swiper :slides-per-view="1" :loop="mappedMedia.length > 1" @swiper="onSwiper"
+                            @slideChange="onSlideChange" class="h-full">
+                            <swiper-slide v-for="(media, index) in mappedMedia" :key="index"
+                                class="bg-transparent flex items-center justify-center">
+                                <div class="w-full h-full flex items-center justify-center relative">
+                                    <VideoPlayer v-if="media.type === 'VIDEO'" :src="media.url || ''"
+                                        :poster="media.thumbnail || media.poster || ''" :subtitles="media.subtitles"
+                                        :width="media.width" :height="media.height" class="w-full h-full" />
+                                    <HeicImage v-else :src="getOptimizedImageUrl(media.url || '', {
+                                        width: 960,
+                                        fit: 'scale-down',
+                                    })
+                                        " :srcset="getOptimizedSrcset(media.url || '', 'detail')"
                                         sizes="(max-width: 768px) 100vw, 480px"
-                                        class="w-full h-full object-cover"
-                                    />
+                                        :mime-type="media.mime_type || undefined"
+                                        class="w-full h-full object-cover" />
                                 </div>
                             </swiper-slide>
                         </swiper>
 
                         <!-- Nav Buttons for Embedded -->
-                        <button
-                            v-if="(selectedPost.media?.length || 0) > 1"
+                        <button v-if="mappedMedia.length > 1"
                             class="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 z-100 pointer-events-auto"
-                            @click.stop="scrollPrev"
-                        >
+                            @click.stop="scrollPrev">
                             <ChevronLeft class="w-5 h-5" />
                         </button>
-                        <button
-                            v-if="(selectedPost.media?.length || 0) > 1"
+                        <button v-if="mappedMedia.length > 1"
                             class="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 z-100 pointer-events-auto"
-                            @click.stop="scrollNext"
-                        >
+                            @click.stop="scrollNext">
                             <ChevronRight class="w-5 h-5" />
                         </button>
                     </div>
@@ -309,49 +255,36 @@ const copyLink = () => {
                 <!-- Metadata Grid -->
                 <div class="grid grid-cols-2 gap-4">
                     <div class="space-y-1">
-                        <div
-                            class="text-[10px] uppercase text-gray-400 font-semibold tracking-wider"
-                        >
+                        <div class="text-[10px] uppercase text-gray-400 font-semibold tracking-wider">
                             {{ $t("common.author") }}
                         </div>
                         <div class="flex items-center gap-2">
-                            <img
-                                v-if="selectedPost.author_avatar_url"
-                                :src="selectedPost.author_avatar_url"
-                                alt="avatar"
-                                class="w-6 h-6 rounded-full object-cover shrink-0"
-                                loading="lazy"
-                            />
-                            <div
-                                v-else
-                                class="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-xs text-gray-500 shrink-0"
-                            >
+                            <img v-if="selectedPost.author_avatar_url" :src="selectedPost.author_avatar_url"
+                                alt="avatar" class="w-6 h-6 rounded-full object-cover shrink-0" loading="lazy" />
+                            <div v-else
+                                class="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-xs text-gray-500 shrink-0">
                                 <User class="w-3 h-3" />
                             </div>
                             <span class="text-sm font-medium text-gray-900 truncate">{{
                                 selectedPost.author
-                            }}</span>
+                                }}</span>
                         </div>
                     </div>
 
                     <div class="space-y-1">
-                        <div
-                            class="text-[10px] uppercase text-gray-400 font-semibold tracking-wider"
-                        >
+                        <div class="text-[10px] uppercase text-gray-400 font-semibold tracking-wider">
                             {{ $t("common.platform") }}
                         </div>
                         <div class="flex items-center gap-2">
                             <Globe class="w-3 h-3 text-gray-400" />
                             <span class="text-sm text-gray-900">{{
                                 $t("platforms." + selectedPost.platform)
-                            }}</span>
+                                }}</span>
                         </div>
                     </div>
 
                     <div class="space-y-1">
-                        <div
-                            class="text-[10px] uppercase text-gray-400 font-semibold tracking-wider"
-                        >
+                        <div class="text-[10px] uppercase text-gray-400 font-semibold tracking-wider">
                             {{ $t("common.created") }}
                         </div>
                         <div class="flex items-center gap-2">
@@ -361,39 +294,29 @@ const copyLink = () => {
                     </div>
 
                     <div v-if="selectedPost.type !== 'TEXT'" class="space-y-1">
-                        <div
-                            class="text-[10px] uppercase text-gray-400 font-semibold tracking-wider"
-                        >
+                        <div class="text-[10px] uppercase text-gray-400 font-semibold tracking-wider">
                             {{ $t("common.dimensions") }}
                         </div>
                         <div class="flex items-center gap-2">
                             <FileImage class="w-3 h-3 text-gray-400" />
-                            <span class="text-sm text-gray-900"
-                                >{{ selectedPost.media?.[0]?.width || selectedPost.width }} x
-                                {{ selectedPost.media?.[0]?.height || selectedPost.height }}</span
-                            >
+                            <span class="text-sm text-gray-900">{{ selectedPost.media?.[0]?.width || selectedPost.width
+                                }} x
+                                {{ selectedPost.media?.[0]?.height || selectedPost.height }}</span>
                         </div>
                     </div>
                 </div>
 
                 <div v-if="selectedPost.eid || selectedPost.originalUrl" class="space-y-3 pt-2">
-                    <div
-                        v-if="selectedPost.eid"
-                        class="flex items-center justify-between text-sm py-2 px-3 bg-white border border-gray-200 rounded-lg"
-                    >
+                    <div v-if="selectedPost.eid"
+                        class="flex items-center justify-between text-sm py-2 px-3 bg-white border border-gray-200 rounded-lg">
                         <span class="text-gray-500">EID</span>
                         <span class="font-mono text-gray-900">{{ selectedPost.eid }}</span>
                     </div>
-                    <div
-                        v-if="selectedPost.originalUrl"
-                        class="flex items-center justify-between text-sm py-2 px-3 bg-white border border-gray-200 rounded-lg"
-                    >
+                    <div v-if="selectedPost.originalUrl"
+                        class="flex items-center justify-between text-sm py-2 px-3 bg-white border border-gray-200 rounded-lg">
                         <span class="text-gray-500">Source</span>
-                        <a
-                            :href="selectedPost.originalUrl"
-                            target="_blank"
-                            class="text-blue-600 hover:underline truncate max-w-[200px] flex items-center gap-1"
-                        >
+                        <a :href="selectedPost.originalUrl" target="_blank"
+                            class="text-blue-600 hover:underline truncate max-w-[200px] flex items-center gap-1">
                             Link
                             <LinkIcon class="w-3 h-3" />
                         </a>
@@ -404,22 +327,16 @@ const copyLink = () => {
 
                 <!-- Tags -->
                 <div class="space-y-3">
-                    <label
-                        class="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1"
-                    >
+                    <label class="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1">
                         <Tag class="w-3 h-3" /> {{ $t("common.tags") }}
                     </label>
                     <div class="flex flex-wrap gap-2">
-                        <span
-                            v-for="tag in selectedPost.tags"
-                            :key="tag"
-                            class="px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-md text-xs text-gray-700 font-medium hover:bg-gray-100 transition-colors cursor-pointer"
-                        >
+                        <span v-for="tag in selectedPost.tags" :key="tag"
+                            class="px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-md text-xs text-gray-700 font-medium hover:bg-gray-100 transition-colors cursor-pointer">
                             #{{ tag }}
                         </span>
                         <button
-                            class="px-3 py-1.5 border border-dashed border-gray-300 rounded-md text-xs text-gray-400 hover:text-gray-600 hover:border-gray-400 transition-colors"
-                        >
+                            class="px-3 py-1.5 border border-dashed border-gray-300 rounded-md text-xs text-gray-400 hover:text-gray-600 hover:border-gray-400 transition-colors">
                             + {{ $t("common.add_tag") }}
                         </button>
                     </div>

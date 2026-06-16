@@ -49,8 +49,8 @@ export function getOptimizedImageUrl(
 ): string {
     if (!url) return "";
 
-    // Skip video formats and AVIF source files (Cloudflare Resizing does not support AVIF as a source image)
-    if (url.match(/\.(mp4|webm|mov|ogg|avi|avif)($|\?)/i)) {
+    // Skip video formats, AVIF source files, and HEIC/HEIF files (Cloudflare Resizing does not support them as source images)
+    if (url.match(/\.(mp4|webm|mov|ogg|avi|avif|heic|heif)($|\?)/i)) {
         return url;
     }
 
@@ -96,8 +96,8 @@ export function getOptimizedSrcset(
 ): string {
     if (!url) return "";
 
-    // Skip generating srcset for AVIF source files to avoid duplicate entries of same unoptimized URL
-    if (url.match(/\.avif($|\?)/i)) {
+    // Skip generating srcset for AVIF and HEIC source files to avoid duplicate entries of same unoptimized URL
+    if (url.match(/\.(avif|heic|heif)($|\?)/i)) {
         return "";
     }
 

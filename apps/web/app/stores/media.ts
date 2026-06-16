@@ -17,14 +17,57 @@ export const MediaListResponseBodySchema = v.object({
     post_media_count: v.nullable(v.number()),
     media_count: v.number(),
     url: v.nullable(v.string()),
+    mime_type: v.optional(v.nullable(v.string())),
     cover_url: v.optional(v.nullable(v.string())),
     sync_status: v.optional(v.nullable(v.string())),
     last_error: v.optional(v.nullable(v.string())),
     ai_status: v.optional(v.nullable(v.string())),
     ai_error: v.optional(v.nullable(v.string())),
+    matched_reason: v.optional(v.nullable(v.unknown())),
+    matched_details: v.optional(v.nullable(v.unknown())),
+    score: v.optional(v.nullable(v.number())),
 });
 
 export type MediaListItem = v.InferOutput<typeof MediaListResponseBodySchema>;
+
+export interface MatchedDetails {
+    keyword?: Record<string, unknown> | null;
+    text_semantic?: {
+        distance?: number | null;
+        caption?: string | null;
+    } | null;
+    visual_semantic?: {
+        distance?: number | null;
+        scene?: string | null;
+        styles?: string[] | null;
+    } | null;
+}
+
+export interface MappedMediaItem {
+    id: string;
+    eid: string;
+    post_id: string | null;
+    source: string;
+    title: string | null;
+    type: string;
+    create_time: string;
+    published_time: string | null;
+    post_media_count: number | null;
+    media_count: number;
+    url: string | null;
+    mime_type: string | null;
+    cover_url?: string | null;
+    cover?: string | null;
+    poster: string | null;
+    sync_status: string;
+    last_error: string | null;
+    ai_status: string;
+    ai_error: string | null;
+    matched_reason?: unknown;
+    matched_details?: MatchedDetails;
+    score?: number | null;
+    date: string;
+}
 
 export const useMediaStore = defineStore("media", () => {
     const route = useRoute();
@@ -46,7 +89,7 @@ export const useMediaStore = defineStore("media", () => {
     const selectedMediaId = ref<string | null>(null);
 
     // Debounce keyword search to prevent spamming backend requests
-    let debounceTimeout: any = null;
+    let debounceTimeout: ReturnType<typeof setTimeout> | null = null;
     watch(keyword, (newVal) => {
         if (debounceTimeout) clearTimeout(debounceTimeout);
         if (!newVal) {
@@ -152,16 +195,18 @@ export const useMediaStore = defineStore("media", () => {
         { deep: true },
     );
 
-    const mapApiMediaToUiMedia = (apiMedia: MediaListItem) => {
+    const mapApiMediaToUiMedia = (apiMedia: MediaListItem): MappedMediaItem => {
         const displayTime = apiMedia.published_time ?? apiMedia.create_time;
         return {
             ...apiMedia,
             url: apiMedia.url,
+            mime_type: apiMedia.mime_type || null,
             poster: apiMedia.cover_url || null,
             sync_status: apiMedia.sync_status || "PENDING",
             last_error: apiMedia.last_error || null,
             ai_status: apiMedia.ai_status || "PENDING",
             ai_error: apiMedia.ai_error || null,
+            matched_details: (apiMedia.matched_details as MatchedDetails) || undefined,
             date: displayTime
                 ? Temporal.Instant.from(displayTime)
                       .toZonedDateTimeISO(Temporal.Now.timeZoneId())
@@ -176,6 +221,25 @@ export const useMediaStore = defineStore("media", () => {
                 : "Unknown",
         };
     };
+
+    interface ApiSearchItem {
+        id: string;
+        title: string | null;
+        type?: string;
+        create_time?: string;
+        published_time?: string | null;
+        media_url?: string | null;
+        url?: string | null;
+        cover_url?: string | null;
+        cover?: string | null;
+        sync_status?: string | null;
+        last_error?: string | null;
+        ai_status?: string | null;
+        ai_error?: string | null;
+        matched_reason?: unknown;
+        matched_details?: unknown;
+        score?: number | null;
+    }
 
     const {
         data: mediaData,
@@ -195,7 +259,7 @@ export const useMediaStore = defineStore("media", () => {
             },
         ]),
         placeholderData: keepPreviousData,
-        queryFn: async () => {
+        queryFn: async (): Promise<{ list: MappedMediaItem[]; total: number }> => {
             const hasKeyword = !!searchKeyword.value?.trim();
             const isAi = useAiSearch.value;
             console.log(
@@ -210,7 +274,7 @@ export const useMediaStore = defineStore("media", () => {
                 console.log("[DEBUG STORE] Fetching from /search");
                 const response = await useApi<{
                     success: boolean;
-                    data: { list: any[]; total: number; hasMore: boolean };
+                    data: { list: ApiSearchItem[]; total: number; hasMore: boolean };
                 }>("/search", {
                     query: {
                         page: page.value,
@@ -222,7 +286,7 @@ export const useMediaStore = defineStore("media", () => {
                 });
 
                 if (response && response.success && response.data) {
-                    const mappedList = response.data.list.map((item) => {
+                    const mappedList: MappedMediaItem[] = response.data.list.map((item) => {
                         const displayTime = item.published_time ?? item.create_time;
                         return {
                             id: item.id,
@@ -232,19 +296,21 @@ export const useMediaStore = defineStore("media", () => {
                             title: item.title,
                             type: item.type || "IMAGE",
                             create_time: item.create_time || "",
-                            published_time: item.published_time,
+                            published_time: item.published_time || null,
                             post_media_count: 1,
                             media_count: 1,
-                            url: item.media_url || item.url,
+                            url: item.media_url || item.url || null,
+                            mime_type: null,
                             cover: item.cover_url || item.cover || null,
+                            cover_url: item.cover_url || item.cover || null,
                             poster: item.cover_url || item.cover || null,
                             sync_status: item.sync_status || "PENDING",
                             last_error: item.last_error || null,
                             ai_status: item.ai_status || "PENDING",
                             ai_error: item.ai_error || null,
                             matched_reason: item.matched_reason,
-                            matched_details: item.matched_details,
-                            score: item.score,
+                            matched_details: (item.matched_details as MatchedDetails) || undefined,
+                            score: item.score || null,
                             date: displayTime
                                 ? Temporal.Instant.from(displayTime)
                                       .toZonedDateTimeISO(Temporal.Now.timeZoneId())
@@ -291,7 +357,7 @@ export const useMediaStore = defineStore("media", () => {
         },
     });
 
-    const medias = computed(() => mediaData.value?.list || []);
+    const medias = computed<MappedMediaItem[]>(() => mediaData.value?.list || []);
     const total = computed(() => mediaData.value?.total || 0);
     const isLoadingMedia = computed(() => isLoadingMediaQuery.value);
 
@@ -299,7 +365,7 @@ export const useMediaStore = defineStore("media", () => {
         refetchMedia();
     });
 
-    const selectedMedia = computed(() => {
+    const selectedMedia = computed<MappedMediaItem | null>(() => {
         if (!selectedMediaId.value) return null;
         return medias.value.find((m) => m.id === selectedMediaId.value) || null;
     });
@@ -308,8 +374,14 @@ export const useMediaStore = defineStore("media", () => {
         selectedMediaId.value = id;
     };
 
-    const retrySync = async (mediaIds: string[]) => {
-        const response = await useApi<any>("/task/retry-sync", {
+    interface ApiResponse<T = unknown> {
+        success: boolean;
+        message?: string;
+        data?: T;
+    }
+
+    const retrySync = async (mediaIds: string[]): Promise<ApiResponse> => {
+        const response = await useApi<ApiResponse>("/task/retry-sync", {
             method: "POST",
             body: { media_ids: mediaIds },
         });
@@ -319,8 +391,8 @@ export const useMediaStore = defineStore("media", () => {
         return response;
     };
 
-    const queueAi = async (mediaIds: string[]) => {
-        const response = await useApi<any>("/task/queue-ai", {
+    const queueAi = async (mediaIds: string[]): Promise<ApiResponse> => {
+        const response = await useApi<ApiResponse>("/task/queue-ai", {
             method: "POST",
             body: { media_ids: mediaIds },
         });

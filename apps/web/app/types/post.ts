@@ -28,8 +28,10 @@ export const TrackSchema = v.object({
     url: v.string(),
     role: TrackRoleSchema,
     sort_order: v.number(),
-    metadata: v.record(v.string(), v.any()),
+    metadata: v.record(v.string(), v.unknown()),
+    mime_type: v.optional(v.nullable(v.string())),
 });
+export type Track = v.InferOutput<typeof TrackSchema>;
 
 export const ApiPostMediaSchema = v.object({
     id: v.pipe(v.string(), v.uuid()),
@@ -111,6 +113,7 @@ export const PostMediaSchema = v.object({
 
     // Mapped fields for UI
     url: v.nullable(v.string()),
+    mime_type: v.optional(v.nullable(v.string())),
     live_url: v.nullable(v.string()),
     thumbnail: v.nullable(v.string()),
     poster: v.nullable(v.string()),
