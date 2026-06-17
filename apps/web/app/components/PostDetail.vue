@@ -50,11 +50,11 @@ const swiperInstance = ref<SwiperClass | null>(null);
 
 const onSwiper = (swiper: SwiperClass) => {
     swiperInstance.value = swiper;
-    currentIndex.value = swiper.activeIndex;
+    currentIndex.value = swiper.realIndex;
 };
 
 const onSlideChange = (swiper: SwiperClass) => {
-    currentIndex.value = swiper.activeIndex;
+    currentIndex.value = swiper.realIndex;
 };
 
 // Reset index when post changes
@@ -171,6 +171,7 @@ const mappedMedia = computed(() => {
                 <swiper
                     :slides-per-view="1"
                     :loop="mappedMedia.length > 1"
+                    :initial-slide="currentIndex"
                     @swiper="onSwiper"
                     @slideChange="onSlideChange"
                     class="w-full h-full"
@@ -258,6 +259,7 @@ const mappedMedia = computed(() => {
                         <swiper
                             :slides-per-view="1"
                             :loop="mappedMedia.length > 1"
+                            :initial-slide="currentIndex"
                             @swiper="onSwiper"
                             @slideChange="onSlideChange"
                             class="h-full"
@@ -287,6 +289,8 @@ const mappedMedia = computed(() => {
                                         "
                                         :live-src="media.live_url || ''"
                                         :mime-type="media.mime_type || undefined"
+                                        :width="media.width"
+                                        :height="media.height"
                                         class="w-full h-full object-cover"
                                     />
                                     <HeicImage

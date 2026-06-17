@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, useAttrs, computed } from "vue";
+import { CircleDotDashed } from "@lucide/vue";
 
 defineOptions({
     inheritAttrs: false,
@@ -131,6 +132,29 @@ const isCover = computed(() => {
     const className = attrs.class;
     return hasClass(className, "object-cover") || hasClass(className, "w-full");
 });
+
+// Aspect ratio style to shrink-wrap inner container without overflowing
+const aspectRatioStyle = computed(() => {
+    if (isCover.value) return {};
+    const w = Number(props.width);
+    const h = Number(props.height);
+    if (w && h) {
+        return {
+            aspectRatio: `${w} / ${h}`,
+        };
+    }
+    return {};
+});
+
+const innerContainerClass = computed(() => {
+    if (isCover.value) return "w-full h-full";
+    const w = Number(props.width);
+    const h = Number(props.height);
+    if (w && h) {
+        return "max-h-full max-w-full";
+    }
+    return "w-full h-full";
+});
 </script>
 
 <template>
@@ -143,19 +167,21 @@ const isCover = computed(() => {
         @touchend="stopPlayback"
     >
         <!-- Inner container that matches the image size exactly to align video, image, and badge -->
-        <div class="relative flex items-center justify-center" :class="isCover ? 'w-full h-full' : 'max-h-full max-w-full'">
-            <!-- iOS style Live badge in the bottom-left corner of the actual image -->
+        <div class="relative flex items-center justify-center" :class="innerContainerClass" :style="aspectRatioStyle">
+            <!-- iOS style Live badge in the top-left corner of the actual image -->
             <div
-                class="absolute bottom-3 left-3 px-2 py-1 rounded-md bg-black/60 text-white font-medium text-[10px] flex items-center gap-1.5 backdrop-blur-md z-20 border border-white/10 select-none shadow-sm uppercase tracking-wider transition-opacity duration-200 cursor-pointer"
-                :class="videoPlaying ? 'opacity-95' : 'opacity-70 group-hover/live-photo:opacity-100'"
+                class="absolute top-3 left-3 flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full bg-black/30 text-white select-none backdrop-blur-xl z-20 cursor-pointer transition-all duration-300 ease-out active:scale-95 group/live-photo-badge live-badge"
+                :class="
+                    videoPlaying
+                        ? 'opacity-95 scale-105 bg-black/40 live-badge-playing'
+                        : 'opacity-80 hover:opacity-100 hover:scale-105 hover:bg-black/40'
+                "
                 @click.stop="togglePlay"
             >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="w-3.5 h-3.5 text-white fill-white/10">
-                    <circle cx="12" cy="12" r="3" fill="currentColor" />
-                    <circle cx="12" cy="12" r="6" stroke-dasharray="2 2" />
-                    <circle cx="12" cy="12" r="9" />
-                </svg>
-                <span>Live</span>
+                <CircleDotDashed class="w-3.5 h-3.5 text-white select-none live-photo-icon" :class="{ 'is-playing': videoPlaying }" />
+                <span class="text-[9px] font-bold uppercase tracking-[0.18em] select-none text-white/95 leading-none">{{
+                    $t("media.live")
+                }}</span>
             </div>
 
             <!-- Static Cover Image (Supports HEIC via HeicImage wrapper, inherits dimensions/fit from parent) -->
@@ -215,5 +241,35 @@ const isCover = computed(() => {
     -webkit-transform: translateZ(0) !important;
     transform: translateZ(0) !important;
     backface-visibility: hidden !important;
+}
+
+/* Premium Live Photo Badge styles */
+.live-badge {
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.25),
+        0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+.live-badge-playing {
+    box-shadow:
+        0 6px 16px rgba(0, 0, 0, 0.35),
+        0 0 0 1px rgba(255, 255, 255, 0.2),
+        0 0 8px rgba(255, 255, 255, 0.1);
+}
+
+.live-photo-icon {
+    transform-origin: center;
+}
+.live-photo-icon.is-playing {
+    animation: live-spin 10s linear infinite;
+}
+
+@keyframes live-spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
 }
 </style>

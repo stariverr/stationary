@@ -149,6 +149,7 @@
         }
     },
     "media": {
+        "live": "实况",
         "actions": {
             "regenerate_cover": "重新生成封面",
             "regenerate_covers": "批量重新生成视频封面"

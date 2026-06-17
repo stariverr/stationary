@@ -147,6 +147,7 @@
         }
     },
     "media": {
+        "live": "實況",
         "actions": {
             "regenerate_cover": "重新生成封面",
             "regenerate_covers": "批量重新生成影片封面"

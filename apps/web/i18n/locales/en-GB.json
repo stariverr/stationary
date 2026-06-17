@@ -49,6 +49,7 @@
         }
     },
     "media": {
+        "live": "Live",
         "actions": {
             "regenerate_cover": "Regenerate cover",
             "regenerate_covers": "Regenerate video covers"

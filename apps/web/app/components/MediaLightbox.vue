@@ -124,7 +124,7 @@ const onSwiper = (swiper: unknown) => {
 };
 
 const onSlideChange = (swiper: unknown) => {
-    currentIndex.value = (swiper as { activeIndex: number }).activeIndex;
+    currentIndex.value = (swiper as { realIndex: number }).realIndex;
 };
 
 const mapMediaWithSubtitles = (m: MediaInputForSubtitles): MappedSiblingMedia | null => {
@@ -317,6 +317,8 @@ const formatDate = (dateStr: string) => {
                                         "
                                         :live-src="media.live_url || ''"
                                         :mime-type="media.mime_type || media.mimeType || undefined"
+                                        :width="media.width"
+                                        :height="media.height"
                                         class="max-h-full max-w-full object-contain drop-shadow-2xl rounded-sm"
                                     />
                                     <HeicImage
