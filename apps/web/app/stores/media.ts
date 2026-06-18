@@ -79,11 +79,9 @@ export const useMediaStore = defineStore("media", () => {
     const keyword = ref((route.query.keyword as string) || "");
     const searchKeyword = ref(keyword.value);
     const source = ref<string | undefined>((route.query.source as string) || undefined);
-    const displayMode = ref<"flat" | "stacked">(
-        (route.query.display_mode as "flat" | "stacked") || "flat",
-    );
+    const displayMode = ref<"flat" | "stacked">((route.query.display_mode as "flat" | "stacked") || "flat");
     const page = ref(parseInt(route.query.page as string) || 1);
-    const count = ref(20);
+    const count = ref(parseInt(route.query.count as string) || 20);
     const useAiSearch = ref(true);
 
     const selectedMediaId = ref<string | null>(null);
@@ -123,13 +121,9 @@ export const useMediaStore = defineStore("media", () => {
             source: source.value,
             page: page.value,
             display_mode: displayMode.value,
+            count: count.value,
         }),
-        ({
-            keyword: newKeyword,
-            source: newSource,
-            page: newPage,
-            display_mode: newDisplayMode,
-        }) => {
+        ({ keyword: newKeyword, source: newSource, page: newPage, display_mode: newDisplayMode, count: newCount }) => {
             const query = { ...route.query };
             let changed = false;
 
@@ -155,10 +149,8 @@ export const useMediaStore = defineStore("media", () => {
             updateParam("keyword", newKeyword || undefined);
             updateParam("source", newSource);
             updateParam("page", newPage && newPage > 1 ? newPage.toString() : undefined);
-            updateParam(
-                "display_mode",
-                newDisplayMode && newDisplayMode !== "flat" ? newDisplayMode : undefined,
-            );
+            updateParam("display_mode", newDisplayMode && newDisplayMode !== "flat" ? newDisplayMode : undefined);
+            updateParam("count", newCount && newCount !== 20 ? newCount.toString() : undefined);
 
             if (changed) {
                 router.push({ query });
@@ -181,15 +173,16 @@ export const useMediaStore = defineStore("media", () => {
             if (newQuery.source !== undefined && newQuery.source !== source.value) {
                 source.value = (newQuery.source as string) || undefined;
             }
-            if (
-                newQuery.display_mode !== undefined &&
-                newQuery.display_mode !== displayMode.value
-            ) {
+            if (newQuery.display_mode !== undefined && newQuery.display_mode !== displayMode.value) {
                 displayMode.value = (newQuery.display_mode as "flat" | "stacked") || "flat";
             }
             const queryPage = parseInt(newQuery.page as string) || 1;
             if (queryPage !== page.value) {
                 page.value = queryPage;
+            }
+            const queryCount = parseInt(newQuery.count as string) || 20;
+            if (queryCount !== count.value) {
+                count.value = queryCount;
             }
         },
         { deep: true },
@@ -208,16 +201,14 @@ export const useMediaStore = defineStore("media", () => {
             ai_error: apiMedia.ai_error || null,
             matched_details: (apiMedia.matched_details as MatchedDetails) || undefined,
             date: displayTime
-                ? Temporal.Instant.from(displayTime)
-                      .toZonedDateTimeISO(Temporal.Now.timeZoneId())
-                      .toLocaleString(undefined, {
-                          year: "numeric",
-                          month: "2-digit",
-                          day: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          second: "2-digit",
-                      })
+                ? Temporal.Instant.from(displayTime).toZonedDateTimeISO(Temporal.Now.timeZoneId()).toLocaleString(undefined, {
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                  })
                 : "Unknown",
         };
     };
@@ -262,14 +253,7 @@ export const useMediaStore = defineStore("media", () => {
         queryFn: async (): Promise<{ list: MappedMediaItem[]; total: number }> => {
             const hasKeyword = !!searchKeyword.value?.trim();
             const isAi = useAiSearch.value;
-            console.log(
-                "[DEBUG STORE] queryFn called. hasKeyword:",
-                hasKeyword,
-                "isAi:",
-                isAi,
-                "useAiSearch:",
-                useAiSearch.value,
-            );
+            console.log("[DEBUG STORE] queryFn called. hasKeyword:", hasKeyword, "isAi:", isAi, "useAiSearch:", useAiSearch.value);
             if (hasKeyword && isAi) {
                 console.log("[DEBUG STORE] Fetching from /search");
                 const response = await useApi<{

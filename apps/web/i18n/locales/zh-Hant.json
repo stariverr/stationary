@@ -28,7 +28,8 @@
     },
     "grid": {
         "showing_items": "顯示 {count} 項",
-        "page_info": "第 {current} 頁，共 {total} 頁"
+        "page_info": "第 {current} / {total} 頁",
+        "items_per_page": "每頁 {count} 條"
     },
     "platforms": {
         "XHS": "小紅書",
@@ -54,8 +55,8 @@
         "general": {
             "title": "常規設定",
             "desc": "基本應用偏好和顯示設定。",
-            "expand_detail": "預設展開詳情",
-            "expand_detail_desc": "在資訊流中自動展開貼文詳情。",
+            "expand_detail": "沉浸式展開詳情",
+            "expand_detail_desc": "在資訊流中自動以沉浸式展示貼文詳情。",
             "language": "介面語言",
             "language_desc": "選擇您的首選語言。",
             "other_title": "系統工具",

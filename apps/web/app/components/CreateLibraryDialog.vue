@@ -1,13 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -59,11 +52,7 @@ interface FetchErrorLike {
 
 const getCreateLibraryErrorDescription = (e: unknown) => {
     const err = e as FetchErrorLike;
-    const backendMessage =
-        err?.data?.message ||
-        err?.data?.error ||
-        err?.response?._data?.message ||
-        err?.response?._data?.error;
+    const backendMessage = err?.data?.message || err?.data?.error || err?.response?._data?.message || err?.response?._data?.error;
 
     if (backendMessage) {
         return backendMessage;
@@ -88,10 +77,7 @@ const handleSubmit = async () => {
 
     try {
         isCreating.value = true;
-        await libraryStore.createLibrary(
-            name.value.trim(),
-            description.value.trim(),
-        );
+        await libraryStore.createLibrary(name.value.trim(), description.value.trim());
         emit("update:open", false);
         toast.success("Library created", {
             description: `${name.value.trim()} is now your active library.`,
@@ -117,30 +103,19 @@ const handleOpenChange = (val: boolean) => {
         <DialogContent class="sm:max-w-md">
             <DialogHeader>
                 <DialogTitle>Create Library</DialogTitle>
-                <DialogDescription>
-                    Create a new library to organize your collections
-                    separately.
-                </DialogDescription>
+                <DialogDescription> Create a new library to organize your collections separately. </DialogDescription>
             </DialogHeader>
 
             <form @submit.prevent="handleSubmit" class="grid gap-4 py-2">
                 <div class="grid gap-2">
                     <Label for="library-name">Name</Label>
-                    <Input
-                        id="library-name"
-                        v-model="name"
-                        placeholder="My Library"
-                        :disabled="isCreating"
-                        autofocus
-                    />
+                    <Input id="library-name" v-model="name" placeholder="My Library" :disabled="isCreating" autofocus />
                 </div>
 
                 <div class="grid gap-2">
                     <Label for="library-description">
                         Description
-                        <span class="text-muted-foreground font-normal"
-                            >(optional)</span
-                        >
+                        <span class="text-muted-foreground font-normal">(optional)</span>
                     </Label>
                     <Textarea
                         id="library-description"
@@ -153,18 +128,8 @@ const handleOpenChange = (val: boolean) => {
                 </div>
 
                 <DialogFooter class="pt-2">
-                    <Button
-                        type="button"
-                        variant="outline"
-                        :disabled="isCreating"
-                        @click="handleOpenChange(false)"
-                    >
-                        Cancel
-                    </Button>
-                    <Button
-                        type="submit"
-                        :disabled="!name.trim() || isCreating"
-                    >
+                    <Button type="button" variant="outline" :disabled="isCreating" @click="handleOpenChange(false)"> Cancel </Button>
+                    <Button type="submit" :disabled="!name.trim() || isCreating">
                         <Loader2 v-if="isCreating" class="animate-spin" />
                         {{ isCreating ? "Creating..." : "Create" }}
                     </Button>

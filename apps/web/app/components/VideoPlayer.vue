@@ -32,20 +32,12 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const isDash = computed(() => {
-    return (
-        props.src.endsWith(".mpd") ||
-        props.src.includes("manifest.mpd") ||
-        props.src.includes("application/dash+xml")
-    );
+    return props.src.endsWith(".mpd") || props.src.includes("manifest.mpd") || props.src.includes("application/dash+xml");
 });
 
 const absoluteSrc = computed(() => {
     if (!props.src) return "";
-    if (
-        props.src.startsWith("http://") ||
-        props.src.startsWith("https://") ||
-        props.src.startsWith("blob:")
-    ) {
+    if (props.src.startsWith("http://") || props.src.startsWith("https://") || props.src.startsWith("blob:")) {
         return props.src;
     }
     if (typeof window !== "undefined") {
@@ -67,9 +59,7 @@ const aspectStyle = computed(() => {
     return {};
 });
 
-const processedSubtitles = ref<
-    { url: string; language: string; label: string; default: boolean }[]
->([]);
+const processedSubtitles = ref<{ url: string; language: string; label: string; default: boolean }[]>([]);
 
 const loadSubtitles = async () => {
     // Revoke previous blob URLs to prevent memory leaks
@@ -252,12 +242,7 @@ onBeforeUnmount(() => {
     >
         <ClientOnly>
             <!-- Do not use native 'controls' when using Plyr to avoid layering issues -->
-            <video
-                ref="videoRef"
-                playsinline
-                class="plyr-video w-full h-auto max-h-full"
-                :poster="props.poster"
-            >
+            <video ref="videoRef" playsinline class="plyr-video w-full h-auto max-h-full" :poster="props.poster">
                 <track
                     v-for="track in processedSubtitles"
                     :key="track.url"

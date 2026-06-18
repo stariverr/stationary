@@ -1,4 +1,4 @@
-import * as v from 'valibot';
+import * as v from "valibot";
 
 // Define the schema for our public environment variables
 const PublicEnvSchema = v.object({
@@ -12,7 +12,7 @@ const PublicEnvSchema = v.object({
  */
 export const useSafeEnv = () => {
     const config = useRuntimeConfig();
-    
+
     try {
         return v.parse(PublicEnvSchema, {
             apiBaseUrl: config.public.apiBaseUrl,

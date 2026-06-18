@@ -26,11 +26,20 @@
         "classic_search": "传统搜索",
         "ai_search_tooltip": "开启 AI 智能/语义搜索",
         "classic_search_tooltip": "仅使用常规关键字搜索",
-        "settings": "设置"
+        "settings": "设置",
+        "immersive_view": "沉浸式视图",
+        "standard_view": "标准视图",
+        "post_collections": "帖子合集",
+        "media_assets": "媒体素材",
+        "filters": "高级筛选",
+        "sort_by": "排序方式",
+        "batch_select": "批量选择"
     },
     "grid": {
         "showing_items": "显示 {count} 项",
-        "page_info": "第 {current} 页，共 {total} 页"
+        "page_info": "第 {current} / {total} 页",
+        "items_per_page": "每页 {count} 条",
+        "items_per_page_label": "每页显示"
     },
     "platforms": {
         "XHS": "小红书",
@@ -56,8 +65,8 @@
         "general": {
             "title": "常规设置",
             "desc": "基本应用偏好和显示设置。",
-            "expand_detail": "默认展开详情",
-            "expand_detail_desc": "在信息流中自动展开帖子详情。",
+            "expand_detail": "沉浸式展开详情",
+            "expand_detail_desc": "在信息流中自动以沉浸式展示帖子详情。",
             "language": "界面语言",
             "language_desc": "选择您的首选语言。",
             "other_title": "系统工具",

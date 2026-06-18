@@ -1,27 +1,13 @@
 <script setup lang="ts">
 import { Temporal } from "@js-temporal/polyfill";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { type AcceptableValue } from "reka-ui";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-    Select,
-    SelectContent,
-    SelectGroup,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { useUserSettings } from "@/composables/useUserSettings";
 import { authClient, useSession } from "@/lib/auth-client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { computed, ref, watch } from "vue";
@@ -30,18 +16,7 @@ import { toast } from "@/components/ui/sonner";
 import { useLibraryStore } from "@/stores/library";
 import { useUserStore } from "@/stores/user";
 import { storeToRefs } from "pinia";
-import {
-    Key,
-    Copy,
-    Plus,
-    Check,
-    Loader2,
-    Trash2,
-    AlertTriangle,
-    Calendar,
-    Layers,
-    Sparkles,
-} from "@lucide/vue";
+import { Key, Copy, Plus, Check, Loader2, Trash2, AlertTriangle, Calendar, Layers, Sparkles } from "@lucide/vue";
 
 const props = defineProps({
     open: { type: Boolean, default: false },
@@ -63,13 +38,11 @@ interface NuxtI18nComposer {
     t: (key: string, values?: Record<string, unknown>) => string;
 }
 
-const { expandDetailByDefault } = useUserSettings();
 const { locale, setLocale, locales, t } = useI18n() as unknown as NuxtI18nComposer;
 const session = useSession();
 
 const userStore = useUserStore();
-const { userProfile } = storeToRefs(userStore);
-
+const { userProfile, expandDetailByDefault } = storeToRefs(userStore);
 const displayName = computed(() => userProfile.value?.name || "User");
 const displayImage = computed(() => userProfile.value?.image || "");
 const userEmail = computed(() => userProfile.value?.email || "");
@@ -144,9 +117,7 @@ const triggerCoverRecovery = async () => {
             body: {},
         });
         if (res && res.success && res.data) {
-            toast.success(
-                t("settings.general.video_cover_recovery_success", { count: res.data.queued }),
-            );
+            toast.success(t("settings.general.video_cover_recovery_success", { count: res.data.queued }));
         } else {
             throw new Error(res?.message || "Server error");
         }
@@ -209,8 +180,7 @@ const generateToken = async () => {
         const payload = {
             name: newTokenName.value.trim(),
             library_id: newTokenLibraryId.value === "all" ? null : newTokenLibraryId.value,
-            expires_in_seconds:
-                newTokenExpiresIn.value === "0" ? null : Number(newTokenExpiresIn.value),
+            expires_in_seconds: newTokenExpiresIn.value === "0" ? null : Number(newTokenExpiresIn.value),
         };
         const res = await useApi<ApiResponse<{ token: string }>>("/user/tokens", {
             method: "POST",
@@ -272,9 +242,7 @@ const copyToClipboard = async (text: string) => {
 const getLibraryName = (libId: string | null) => {
     if (!libId) return t("settings.api_keys.scope_all");
     const lib = libraryStore.libraries.find((l) => l.id === libId);
-    return lib
-        ? t("settings.api_keys.scope_single", { name: lib.name })
-        : t("settings.api_keys.unknown_library");
+    return lib ? t("settings.api_keys.scope_single", { name: lib.name }) : t("settings.api_keys.unknown_library");
 };
 
 const formatDate = (dateStr: string | null | undefined) => {
@@ -332,14 +300,11 @@ const fetchAiConfig = async () => {
                 openai_api_key: res.data.openai_api_key || "",
                 openai_base_url: res.data.openai_base_url || "",
                 openai_model_embedding_text: res.data.openai_model_embedding_text || "",
-                openai_model_embedding_text_map_to:
-                    res.data.openai_model_embedding_text_map_to || "",
+                openai_model_embedding_text_map_to: res.data.openai_model_embedding_text_map_to || "",
                 openai_model_embedding_image: res.data.openai_model_embedding_image || "",
-                openai_model_embedding_image_map_to:
-                    res.data.openai_model_embedding_image_map_to || "",
+                openai_model_embedding_image_map_to: res.data.openai_model_embedding_image_map_to || "",
                 openai_model_describe_image: res.data.openai_model_describe_image || "",
-                openai_model_describe_image_map_to:
-                    res.data.openai_model_describe_image_map_to || "",
+                openai_model_describe_image_map_to: res.data.openai_model_describe_image_map_to || "",
                 gemini_api_key: res.data.gemini_api_key || "",
                 gemini_base_url: res.data.gemini_base_url || "",
             };
@@ -430,42 +395,28 @@ watch(
                                 <CardContent class="grid gap-6">
                                     <div class="flex items-center justify-between">
                                         <div class="space-y-0.5">
-                                            <Label class="text-base">{{
-                                                $t("settings.general.expand_detail")
-                                            }}</Label>
+                                            <Label class="text-base">{{ $t("settings.general.expand_detail") }}</Label>
                                             <p class="text-sm text-muted-foreground">
                                                 {{ $t("settings.general.expand_detail_desc") }}
                                             </p>
                                         </div>
-                                        <Switch
-                                            :checked="expandDetailByDefault"
-                                            @update:checked="expandDetailByDefault = $event"
-                                        />
+                                        <Switch v-model="expandDetailByDefault" />
                                     </div>
 
                                     <div class="grid gap-3">
                                         <div class="space-y-0.5">
-                                            <Label class="text-base">{{
-                                                $t("settings.general.language")
-                                            }}</Label>
+                                            <Label class="text-base">{{ $t("settings.general.language") }}</Label>
                                             <p class="text-sm text-muted-foreground">
                                                 {{ $t("settings.general.language_desc") }}
                                             </p>
                                         </div>
-                                        <Select
-                                            :model-value="locale"
-                                            @update:model-value="handleLocaleChange"
-                                        >
+                                        <Select :model-value="locale" @update:model-value="handleLocaleChange">
                                             <SelectTrigger class="w-[200px]">
                                                 <SelectValue placeholder="Select a language" />
                                             </SelectTrigger>
                                             <SelectContent>
                                                 <SelectGroup>
-                                                    <SelectItem
-                                                        v-for="l in localeOptions"
-                                                        :key="l.code"
-                                                        :value="l.code"
-                                                    >
+                                                    <SelectItem v-for="l in localeOptions" :key="l.code" :value="l.code">
                                                         {{ l.name }}
                                                     </SelectItem>
                                                 </SelectGroup>
@@ -498,16 +449,11 @@ watch(
                                         :disabled="isRecovering"
                                         @click="triggerCoverRecovery"
                                     >
-                                        <Loader2
-                                            v-if="isRecovering"
-                                            class="w-4 h-4 mr-2 animate-spin"
-                                        />
+                                        <Loader2 v-if="isRecovering" class="w-4 h-4 mr-2 animate-spin" />
                                         <Check v-else class="w-4 h-4 mr-2" />
                                         {{
                                             isRecovering
-                                                ? $t(
-                                                      "settings.general.video_cover_recovery_loading",
-                                                  )
+                                                ? $t("settings.general.video_cover_recovery_loading")
                                                 : $t("settings.general.video_cover_recovery_btn")
                                         }}
                                     </Button>
@@ -539,19 +485,10 @@ watch(
                                 </CardDescription>
                             </CardHeader>
                             <CardContent class="space-y-6">
-                                <div
-                                    v-if="session.data?.user"
-                                    class="flex items-center gap-4 p-4 border rounded-xl bg-gray-50/30"
-                                >
+                                <div v-if="session.data?.user" class="flex items-center gap-4 p-4 border rounded-xl bg-gray-50/30">
                                     <Avatar class="w-16 h-16 border-2 border-white shadow-sm">
-                                        <AvatarImage
-                                            v-if="displayImage"
-                                            :src="displayImage"
-                                            :alt="displayName"
-                                        />
-                                        <AvatarFallback
-                                            class="bg-blue-100 text-blue-700 text-xl font-bold"
-                                        >
+                                        <AvatarImage v-if="displayImage" :src="displayImage" :alt="displayName" />
+                                        <AvatarFallback class="bg-blue-100 text-blue-700 text-xl font-bold">
                                             {{ displayName.charAt(0)?.toUpperCase() || "U" }}
                                         </AvatarFallback>
                                     </Avatar>
@@ -576,9 +513,7 @@ watch(
                                 <div class="grid gap-4">
                                     <div class="grid gap-2">
                                         <Label>{{ $t("settings.account.user_id") }}</Label>
-                                        <div
-                                            class="p-2 bg-gray-50 border rounded text-xs font-mono text-gray-500 truncate"
-                                        >
+                                        <div class="p-2 bg-gray-50 border rounded text-xs font-mono text-gray-500 truncate">
                                             {{ session.data?.user?.id || "N/A" }}
                                         </div>
                                     </div>
@@ -599,9 +534,7 @@ watch(
                             <!-- Case 1: Display newly generated token (Copy once view) -->
                             <Card v-if="generatedToken" class="border-amber-200 bg-amber-50/20">
                                 <CardHeader>
-                                    <CardTitle
-                                        class="flex items-center gap-2 text-amber-800 text-lg font-bold"
-                                    >
+                                    <CardTitle class="flex items-center gap-2 text-amber-800 text-lg font-bold">
                                         <AlertTriangle class="w-5 h-5 text-amber-600" />
                                         {{ $t("settings.api_keys.copy_title") }}
                                     </CardTitle>
@@ -621,17 +554,11 @@ watch(
                                             class="border-amber-300 hover:bg-amber-100 text-amber-800"
                                             @click="copyToClipboard(generatedToken)"
                                         >
-                                            <Check
-                                                v-if="justCopied"
-                                                class="w-4 h-4 text-green-600"
-                                            />
+                                            <Check v-if="justCopied" class="w-4 h-4 text-green-600" />
                                             <Copy v-else class="w-4 h-4" />
                                         </Button>
                                     </div>
-                                    <Button
-                                        class="w-full bg-amber-600 hover:bg-amber-700 text-white mt-2"
-                                        @click="generatedToken = null"
-                                    >
+                                    <Button class="w-full bg-amber-600 hover:bg-amber-700 text-white mt-2" @click="generatedToken = null">
                                         {{ $t("settings.api_keys.copy_done") }}
                                     </Button>
                                 </CardContent>
@@ -648,15 +575,11 @@ watch(
                                     </CardHeader>
                                     <CardContent class="grid gap-4">
                                         <div class="grid gap-2">
-                                            <Label for="token-name">{{
-                                                $t("settings.api_keys.key_name")
-                                            }}</Label>
+                                            <Label for="token-name">{{ $t("settings.api_keys.key_name") }}</Label>
                                             <Input
                                                 id="token-name"
                                                 v-model="newTokenName"
-                                                :placeholder="
-                                                    $t('settings.api_keys.key_name_placeholder')
-                                                "
+                                                :placeholder="$t('settings.api_keys.key_name_placeholder')"
                                                 :disabled="isGenerating"
                                             />
                                         </div>
@@ -671,24 +594,13 @@ watch(
                                                     <SelectContent>
                                                         <SelectGroup>
                                                             <SelectItem value="all">
-                                                                {{
-                                                                    $t(
-                                                                        "settings.api_keys.scope_all",
-                                                                    )
-                                                                }}
+                                                                {{ $t("settings.api_keys.scope_all") }}
                                                             </SelectItem>
-                                                            <SelectItem
-                                                                v-for="lib in libraryStore.libraries"
-                                                                :key="lib.id"
-                                                                :value="lib.id"
-                                                            >
+                                                            <SelectItem v-for="lib in libraryStore.libraries" :key="lib.id" :value="lib.id">
                                                                 {{
-                                                                    $t(
-                                                                        "settings.api_keys.scope_single",
-                                                                        {
-                                                                            name: lib.name,
-                                                                        },
-                                                                    )
+                                                                    $t("settings.api_keys.scope_single", {
+                                                                        name: lib.name,
+                                                                    })
                                                                 }}
                                                             </SelectItem>
                                                         </SelectGroup>
@@ -697,68 +609,40 @@ watch(
                                             </div>
 
                                             <div class="grid gap-2">
-                                                <Label>{{
-                                                    $t("settings.api_keys.expiration")
-                                                }}</Label>
+                                                <Label>{{ $t("settings.api_keys.expiration") }}</Label>
                                                 <Select v-model="newTokenExpiresIn">
                                                     <SelectTrigger>
-                                                        <SelectValue
-                                                            placeholder="Select expiration"
-                                                        />
+                                                        <SelectValue placeholder="Select expiration" />
                                                     </SelectTrigger>
                                                     <SelectContent>
                                                         <SelectGroup>
-                                                            <SelectItem value="0">{{
-                                                                $t("settings.api_keys.exp_never")
-                                                            }}</SelectItem>
-                                                            <SelectItem value="604800">{{
-                                                                $t("settings.api_keys.exp_7d")
-                                                            }}</SelectItem>
-                                                            <SelectItem value="2592000">{{
-                                                                $t("settings.api_keys.exp_30d")
-                                                            }}</SelectItem>
-                                                            <SelectItem value="7776000">{{
-                                                                $t("settings.api_keys.exp_90d")
-                                                            }}</SelectItem>
+                                                            <SelectItem value="0">{{ $t("settings.api_keys.exp_never") }}</SelectItem>
+                                                            <SelectItem value="604800">{{ $t("settings.api_keys.exp_7d") }}</SelectItem>
+                                                            <SelectItem value="2592000">{{ $t("settings.api_keys.exp_30d") }}</SelectItem>
+                                                            <SelectItem value="7776000">{{ $t("settings.api_keys.exp_90d") }}</SelectItem>
                                                         </SelectGroup>
                                                     </SelectContent>
                                                 </Select>
                                             </div>
                                         </div>
 
-                                        <Button
-                                            class="w-full mt-2"
-                                            :disabled="!newTokenName.trim() || isGenerating"
-                                            @click="generateToken"
-                                        >
-                                            <Loader2
-                                                v-if="isGenerating"
-                                                class="w-4 h-4 mr-2 animate-spin"
-                                            />
+                                        <Button class="w-full mt-2" :disabled="!newTokenName.trim() || isGenerating" @click="generateToken">
+                                            <Loader2 v-if="isGenerating" class="w-4 h-4 mr-2 animate-spin" />
                                             <Plus v-else class="w-4 h-4 mr-2" />
-                                            {{
-                                                isGenerating
-                                                    ? $t("settings.api_keys.generating")
-                                                    : $t("settings.api_keys.generate_btn")
-                                            }}
+                                            {{ isGenerating ? $t("settings.api_keys.generating") : $t("settings.api_keys.generate_btn") }}
                                         </Button>
                                     </CardContent>
                                 </Card>
 
                                 <Card>
                                     <CardHeader class="pb-3">
-                                        <CardTitle>{{
-                                            $t("settings.api_keys.active_title")
-                                        }}</CardTitle>
+                                        <CardTitle>{{ $t("settings.api_keys.active_title") }}</CardTitle>
                                         <CardDescription>
                                             {{ $t("settings.api_keys.active_desc") }}
                                         </CardDescription>
                                     </CardHeader>
                                     <CardContent>
-                                        <div
-                                            v-if="isLoading"
-                                            class="flex flex-col items-center justify-center py-10 text-muted-foreground"
-                                        >
+                                        <div v-if="isLoading" class="flex flex-col items-center justify-center py-10 text-muted-foreground">
                                             <Loader2 class="w-8 h-8 animate-spin mb-2" />
                                             <p class="text-sm">
                                                 {{ $t("settings.api_keys.loading") }}
@@ -781,53 +665,32 @@ watch(
                                             >
                                                 <div class="space-y-1 min-w-0 flex-1 pr-4">
                                                     <div class="flex items-center gap-2">
-                                                        <span
-                                                            class="font-bold text-sm text-gray-900 truncate"
-                                                            >{{ token.name }}</span
-                                                        >
+                                                        <span class="font-bold text-sm text-gray-900 truncate">{{ token.name }}</span>
                                                         <span
                                                             class="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-gray-100 border text-gray-600"
                                                         >
-                                                            {{ token.prefix }}_{{
-                                                                token.first_four || ""
-                                                            }}...{{ token.last_four }}
+                                                            {{ token.prefix }}_{{ token.first_four || "" }}...{{ token.last_four }}
                                                         </span>
                                                     </div>
 
-                                                    <div
-                                                        class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground"
-                                                    >
+                                                    <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                                                         <span class="flex items-center gap-1">
-                                                            <Layers
-                                                                class="w-3.5 h-3.5 opacity-60"
-                                                            />
+                                                            <Layers class="w-3.5 h-3.5 opacity-60" />
                                                             {{ getLibraryName(token.library_id) }}
                                                         </span>
                                                         <span class="flex items-center gap-1">
-                                                            <Calendar
-                                                                class="w-3.5 h-3.5 opacity-60"
-                                                            />
+                                                            <Calendar class="w-3.5 h-3.5 opacity-60" />
                                                             {{
-                                                                $t(
-                                                                    "settings.api_keys.expires_label",
-                                                                    {
-                                                                        date: formatDate(
-                                                                            token.expires_at,
-                                                                        ),
-                                                                    },
-                                                                )
+                                                                $t("settings.api_keys.expires_label", {
+                                                                    date: formatDate(token.expires_at),
+                                                                })
                                                             }}
                                                         </span>
                                                         <span v-if="token.last_used_at">
                                                             {{
-                                                                $t(
-                                                                    "settings.api_keys.last_used_label",
-                                                                    {
-                                                                        date: formatDate(
-                                                                            token.last_used_at,
-                                                                        ),
-                                                                    },
-                                                                )
+                                                                $t("settings.api_keys.last_used_label", {
+                                                                    date: formatDate(token.last_used_at),
+                                                                })
                                                             }}
                                                         </span>
                                                         <span v-else>
@@ -843,10 +706,7 @@ watch(
                                                     :disabled="isRevoking === token.id"
                                                     @click="revokeToken(token.id)"
                                                 >
-                                                    <Loader2
-                                                        v-if="isRevoking === token.id"
-                                                        class="w-4 h-4 animate-spin"
-                                                    />
+                                                    <Loader2 v-if="isRevoking === token.id" class="w-4 h-4 animate-spin" />
                                                     <Trash2 v-else class="w-4 h-4" />
                                                 </Button>
                                             </div>
@@ -875,11 +735,7 @@ watch(
                                             </SelectTrigger>
                                             <SelectContent>
                                                 <SelectGroup>
-                                                    <SelectItem
-                                                        v-for="lib in libraryStore.libraries"
-                                                        :key="lib.id"
-                                                        :value="lib.id"
-                                                    >
+                                                    <SelectItem v-for="lib in libraryStore.libraries" :key="lib.id" :value="lib.id">
                                                         {{ lib.name }}
                                                     </SelectItem>
                                                 </SelectGroup>
@@ -907,213 +763,110 @@ watch(
                                                 <SelectContent>
                                                     <SelectGroup>
                                                         <SelectItem :value="null">
-                                                            {{
-                                                                $t(
-                                                                    "settings.ai_config.provider_disabled",
-                                                                )
-                                                            }}
+                                                            {{ $t("settings.ai_config.provider_disabled") }}
                                                         </SelectItem>
                                                         <SelectItem value="gemini">
-                                                            {{
-                                                                $t(
-                                                                    "settings.ai_config.provider_gemini",
-                                                                )
-                                                            }}
+                                                            {{ $t("settings.ai_config.provider_gemini") }}
                                                         </SelectItem>
                                                         <SelectItem value="openai">
-                                                            {{
-                                                                $t(
-                                                                    "settings.ai_config.provider_openai",
-                                                                )
-                                                            }}
+                                                            {{ $t("settings.ai_config.provider_openai") }}
                                                         </SelectItem>
                                                     </SelectGroup>
                                                 </SelectContent>
                                             </Select>
                                         </div>
 
-                                        <div
-                                            v-if="aiConfig.ai_provider === 'gemini'"
-                                            class="grid gap-4 border-t pt-4 mt-2"
-                                        >
+                                        <div v-if="aiConfig.ai_provider === 'gemini'" class="grid gap-4 border-t pt-4 mt-2">
                                             <div class="grid gap-2">
-                                                <Label>{{
-                                                    $t("settings.ai_config.api_key")
-                                                }}</Label>
+                                                <Label>{{ $t("settings.ai_config.api_key") }}</Label>
                                                 <Input
                                                     type="password"
                                                     v-model="aiConfig.gemini_api_key"
-                                                    :placeholder="
-                                                        $t('settings.ai_config.api_key_placeholder')
-                                                    "
+                                                    :placeholder="$t('settings.ai_config.api_key_placeholder')"
                                                 />
                                             </div>
                                             <div class="grid gap-2">
-                                                <Label>{{
-                                                    $t("settings.ai_config.base_url")
-                                                }}</Label>
+                                                <Label>{{ $t("settings.ai_config.base_url") }}</Label>
                                                 <Input
                                                     v-model="aiConfig.gemini_base_url"
-                                                    :placeholder="
-                                                        $t(
-                                                            'settings.ai_config.base_url_placeholder',
-                                                        )
-                                                    "
+                                                    :placeholder="$t('settings.ai_config.base_url_placeholder')"
                                                 />
                                             </div>
                                         </div>
 
-                                        <div
-                                            v-else-if="aiConfig.ai_provider === 'openai'"
-                                            class="grid gap-4 border-t pt-4 mt-2"
-                                        >
+                                        <div v-else-if="aiConfig.ai_provider === 'openai'" class="grid gap-4 border-t pt-4 mt-2">
                                             <div class="grid gap-2">
-                                                <Label>{{
-                                                    $t("settings.ai_config.api_key")
-                                                }}</Label>
+                                                <Label>{{ $t("settings.ai_config.api_key") }}</Label>
                                                 <Input
                                                     type="password"
                                                     v-model="aiConfig.openai_api_key"
-                                                    :placeholder="
-                                                        $t('settings.ai_config.api_key_placeholder')
-                                                    "
+                                                    :placeholder="$t('settings.ai_config.api_key_placeholder')"
                                                 />
                                             </div>
                                             <div class="grid gap-2">
-                                                <Label>{{
-                                                    $t("settings.ai_config.base_url")
-                                                }}</Label>
+                                                <Label>{{ $t("settings.ai_config.base_url") }}</Label>
                                                 <Input
                                                     v-model="aiConfig.openai_base_url"
-                                                    :placeholder="
-                                                        $t(
-                                                            'settings.ai_config.base_url_placeholder',
-                                                        )
-                                                    "
+                                                    :placeholder="$t('settings.ai_config.base_url_placeholder')"
                                                 />
                                             </div>
 
                                             <div class="grid grid-cols-2 gap-4">
                                                 <div class="grid gap-2">
-                                                    <Label>{{
-                                                        $t(
-                                                            "settings.ai_config.text_embedding_model",
-                                                        )
-                                                    }}</Label>
+                                                    <Label>{{ $t("settings.ai_config.text_embedding_model") }}</Label>
                                                     <Input
-                                                        v-model="
-                                                            aiConfig.openai_model_embedding_text
-                                                        "
-                                                        :placeholder="
-                                                            $t(
-                                                                'settings.ai_config.text_embedding_model_placeholder',
-                                                            )
-                                                        "
+                                                        v-model="aiConfig.openai_model_embedding_text"
+                                                        :placeholder="$t('settings.ai_config.text_embedding_model_placeholder')"
                                                     />
                                                 </div>
                                                 <div class="grid gap-2">
-                                                    <Label>{{
-                                                        $t("settings.ai_config.text_embedding_dim")
-                                                    }}</Label>
+                                                    <Label>{{ $t("settings.ai_config.text_embedding_dim") }}</Label>
                                                     <Input
-                                                        v-model="
-                                                            aiConfig.openai_model_embedding_text_map_to
-                                                        "
-                                                        :placeholder="
-                                                            $t(
-                                                                'settings.ai_config.text_embedding_dim_placeholder',
-                                                            )
-                                                        "
+                                                        v-model="aiConfig.openai_model_embedding_text_map_to"
+                                                        :placeholder="$t('settings.ai_config.text_embedding_dim_placeholder')"
                                                     />
                                                 </div>
                                             </div>
 
                                             <div class="grid grid-cols-2 gap-4">
                                                 <div class="grid gap-2">
-                                                    <Label>{{
-                                                        $t(
-                                                            "settings.ai_config.image_embedding_model",
-                                                        )
-                                                    }}</Label>
+                                                    <Label>{{ $t("settings.ai_config.image_embedding_model") }}</Label>
                                                     <Input
-                                                        v-model="
-                                                            aiConfig.openai_model_embedding_image
-                                                        "
-                                                        :placeholder="
-                                                            $t(
-                                                                'settings.ai_config.image_embedding_model_placeholder',
-                                                            )
-                                                        "
+                                                        v-model="aiConfig.openai_model_embedding_image"
+                                                        :placeholder="$t('settings.ai_config.image_embedding_model_placeholder')"
                                                     />
                                                 </div>
                                                 <div class="grid gap-2">
-                                                    <Label>{{
-                                                        $t("settings.ai_config.image_embedding_dim")
-                                                    }}</Label>
+                                                    <Label>{{ $t("settings.ai_config.image_embedding_dim") }}</Label>
                                                     <Input
-                                                        v-model="
-                                                            aiConfig.openai_model_embedding_image_map_to
-                                                        "
-                                                        :placeholder="
-                                                            $t(
-                                                                'settings.ai_config.image_embedding_dim_placeholder',
-                                                            )
-                                                        "
+                                                        v-model="aiConfig.openai_model_embedding_image_map_to"
+                                                        :placeholder="$t('settings.ai_config.image_embedding_dim_placeholder')"
                                                     />
                                                 </div>
                                             </div>
 
                                             <div class="grid grid-cols-2 gap-4">
                                                 <div class="grid gap-2">
-                                                    <Label>{{
-                                                        $t(
-                                                            "settings.ai_config.describe_image_model",
-                                                        )
-                                                    }}</Label>
+                                                    <Label>{{ $t("settings.ai_config.describe_image_model") }}</Label>
                                                     <Input
-                                                        v-model="
-                                                            aiConfig.openai_model_describe_image
-                                                        "
-                                                        :placeholder="
-                                                            $t(
-                                                                'settings.ai_config.describe_image_model_placeholder',
-                                                            )
-                                                        "
+                                                        v-model="aiConfig.openai_model_describe_image"
+                                                        :placeholder="$t('settings.ai_config.describe_image_model_placeholder')"
                                                     />
                                                 </div>
                                                 <div class="grid gap-2">
-                                                    <Label>{{
-                                                        $t("settings.ai_config.describe_image_dim")
-                                                    }}</Label>
+                                                    <Label>{{ $t("settings.ai_config.describe_image_dim") }}</Label>
                                                     <Input
-                                                        v-model="
-                                                            aiConfig.openai_model_describe_image_map_to
-                                                        "
-                                                        :placeholder="
-                                                            $t(
-                                                                'settings.ai_config.describe_image_dim_placeholder',
-                                                            )
-                                                        "
+                                                        v-model="aiConfig.openai_model_describe_image_map_to"
+                                                        :placeholder="$t('settings.ai_config.describe_image_dim_placeholder')"
                                                     />
                                                 </div>
                                             </div>
                                         </div>
 
-                                        <Button
-                                            class="w-full mt-4"
-                                            :disabled="isSavingConfig"
-                                            @click="saveAiConfig"
-                                        >
-                                            <Loader2
-                                                v-if="isSavingConfig"
-                                                class="w-4 h-4 mr-2 animate-spin"
-                                            />
+                                        <Button class="w-full mt-4" :disabled="isSavingConfig" @click="saveAiConfig">
+                                            <Loader2 v-if="isSavingConfig" class="w-4 h-4 mr-2 animate-spin" />
                                             <Sparkles v-else class="w-4 h-4 mr-2" />
-                                            {{
-                                                isSavingConfig
-                                                    ? $t("settings.ai_config.saving")
-                                                    : $t("settings.ai_config.save_btn")
-                                            }}
+                                            {{ isSavingConfig ? $t("settings.ai_config.saving") : $t("settings.ai_config.save_btn") }}
                                         </Button>
                                     </template>
                                 </CardContent>

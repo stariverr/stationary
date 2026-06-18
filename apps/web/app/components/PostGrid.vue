@@ -6,42 +6,40 @@ import {
     ChevronRight,
     LayoutGrid,
     List,
-    Menu,
     Search,
+    Sidebar,
     X,
     MoreHorizontal,
+    SlidersHorizontal,
+    ChevronDown,
 } from "@lucide/vue";
 import { useDebounceFn } from "@vueuse/core";
-import {
-    PaginationRoot,
-    PaginationList,
-    PaginationListItem,
-    PaginationPrev,
-    PaginationNext,
-    PaginationEllipsis,
-} from "reka-ui";
+import { PaginationRoot, PaginationList, PaginationListItem, PaginationPrev, PaginationNext, PaginationEllipsis } from "reka-ui";
 import { Button } from "@/components/ui/button";
 import { useLibraryStore } from "@/stores/library";
 
-const { posts, selectedPostId, selectPost, fetchPosts, isLoading, keyword, source, total, page } =
-    usePosts();
+const { posts, selectedPostId, selectPost, fetchPosts, isLoading, keyword, source, total, page, count } = usePosts();
 const { toggleSidebar } = useLayout();
 const libraryStore = useLibraryStore();
 const { isMultiSelectClick } = useMultiSelectModifier();
 
-const PAGE_SIZE = 20;
-const totalPages = computed(() => Math.ceil((total.value || 0) / PAGE_SIZE));
+const totalPages = computed(() => Math.ceil((total.value || 0) / (count.value || 20)));
+
+const pageSize = computed({
+    get: () => count.value,
+    set: async (val) => {
+        page.value = 1;
+        await fetchPosts({ page: 1, count: val });
+    },
+});
 const selectedPostIds = ref<Set<string>>(new Set());
 const isSelectionMode = ref(false);
+const showFilters = ref(false);
 const selectedPostIdList = computed(() => Array.from(selectedPostIds.value));
 const selectedPostCount = computed(() => selectedPostIds.value.size);
-const visiblePostIds = computed(() =>
-    ((posts.value as Post[]) || []).map((post) => String(post.id)),
-);
+const visiblePostIds = computed(() => ((posts.value as Post[]) || []).map((post) => String(post.id)));
 const areAllVisiblePostsSelected = computed(
-    () =>
-        visiblePostIds.value.length > 0 &&
-        visiblePostIds.value.every((id) => selectedPostIds.value.has(id)),
+    () => visiblePostIds.value.length > 0 && visiblePostIds.value.every((id) => selectedPostIds.value.has(id)),
 );
 
 watch(
@@ -74,13 +72,11 @@ const changePage = async (newPage: number) => {
     if (scrollContainer.value) {
         scrollContainer.value.scrollTop = 0;
     }
-    await fetchPosts({ page: newPage, count: PAGE_SIZE });
+    await fetchPosts({ page: newPage, count: count.value });
 };
 
 const isPrevDisabled = computed(() => page.value <= 1 || isLoading.value);
-const isNextDisabled = computed(
-    () => (totalPages.value && page.value >= totalPages.value) || isLoading.value,
-);
+const isNextDisabled = computed(() => (totalPages.value && page.value >= totalPages.value) || isLoading.value);
 
 const jumpPage = ref(page.value);
 watch(page, (val) => {
@@ -157,7 +153,7 @@ const toggleVisiblePosts = () => {
 
 const handleMoved = async () => {
     exitSelectionMode();
-    await fetchPosts({ page: page.value, count: PAGE_SIZE });
+    await fetchPosts({ page: page.value, count: count.value });
 };
 
 const handlePostClick = (post: Post, event: MouseEvent) => {
@@ -233,7 +229,7 @@ const handleKeydown = (e: KeyboardEvent) => {
 };
 
 onMounted(() => {
-    fetchPosts({ count: PAGE_SIZE }); // Initial fetch
+    fetchPosts({ count: count.value }); // Initial fetch
     window.addEventListener("keydown", handleKeydown);
 });
 
@@ -246,89 +242,184 @@ onUnmounted(() => {
     <div class="flex-1 min-h-0 flex flex-col bg-white overflow-hidden relative">
         <!-- Header -->
         <div
-            class="h-14 border-b border-gray-100 flex items-center justify-between px-3 sm:px-6 shrink-0"
+            class="h-[60px] sm:h-14 border-b border-gray-100/80 flex items-center gap-2 px-3 sm:px-6 shrink-0 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
         >
-            <div class="flex items-center gap-3">
+            <!-- Left side: Sidebar Toggle & Page Title -->
+            <div class="flex items-center gap-3 shrink-0">
                 <button
                     @click="toggleSidebar"
-                    class="p-1.5 -ml-2 hover:bg-gray-100 rounded-md text-gray-500 transition-colors"
+                    class="h-10 w-10 rounded-xl -ml-1 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-900 active:scale-[0.98] transition-all cursor-pointer"
+                    title="Toggle Sidebar"
                 >
-                    <Menu class="w-5 h-5" />
+                    <Sidebar class="w-5 h-5" />
                 </button>
+                <h1 class="font-semibold text-base text-gray-900 hidden md:flex items-center gap-2 select-none whitespace-nowrap shrink-0">
+                    <span>{{ $t("common.post_collections", "Post Collections") }}</span>
+                    <span v-if="total" class="text-[11px] font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full font-mono">{{
+                        total
+                    }}</span>
+                </h1>
             </div>
 
-            <div class="flex-1 max-w-2xl px-1 sm:px-4 flex items-center gap-1.5 sm:gap-3">
-                <!-- Platform Select -->
-                <div class="relative min-w-[80px] sm:min-w-[120px]">
-                    <select
-                        v-model="source"
-                        class="w-full bg-gray-50 border border-gray-100 text-gray-900 text-xs sm:text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-1.5 sm:p-2 appearance-none pr-6 sm:pr-8 cursor-pointer hover:bg-gray-100 transition-colors"
-                    >
-                        <option v-for="p in platforms" :key="String(p.value)" :value="p.value">
-                            {{ p.label }}
-                        </option>
-                    </select>
-                    <div
-                        class="absolute inset-y-0 right-0 flex items-center px-1.5 sm:px-2 pointer-events-none text-gray-400"
-                    >
-                        <ChevronRight class="w-3.5 h-3.5 sm:w-4 sm:h-4 rotate-90" />
-                    </div>
-                </div>
-
-                <!-- Search Input -->
-                <div class="relative flex-1 group">
+            <!-- Right side: Filters & Actions Group -->
+            <div class="flex min-w-0 items-center gap-2 sm:gap-3 flex-1 justify-end">
+                <!-- Search Input (Unified height and border radius, remove shadow-sm) -->
+                <div class="relative min-w-0 flex-1 sm:max-w-[220px] group transition-all duration-300">
                     <Search
-                        class="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400 group-focus-within:text-blue-500 transition-colors"
+                        class="absolute left-3.5 top-1/2 -translate-y-1/2 w-[18px] h-[18px] sm:w-4 sm:h-4 text-slate-400 group-focus-within:text-blue-600 transition-colors"
                     />
                     <input
                         v-model="keyword"
                         type="text"
-                        :placeholder="$t('common.search', 'Search posts...')"
-                        class="w-full bg-gray-50 border border-gray-100 text-gray-900 text-xs sm:text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block pl-8 sm:pl-10 pr-8 sm:pr-10 py-1.5 sm:py-2 hover:bg-gray-100 focus:bg-white transition-all outline-none"
+                        :placeholder="$t('common.search', 'Search...')"
+                        class="w-full h-10 rounded-2xl sm:h-9 sm:rounded-lg bg-slate-50/90 border border-slate-200/80 text-slate-900 text-sm font-medium focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 block pl-10 pr-8 hover:bg-white focus:bg-white transition-all placeholder:text-slate-400"
                     />
                     <button
                         v-if="keyword"
                         @click="clearSearch"
-                        class="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 p-0.5 hover:bg-gray-200 rounded-full transition-colors text-gray-400"
+                        class="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 hover:bg-slate-200 rounded-full transition-colors text-slate-400"
                     >
-                        <X class="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                        <X class="w-3 h-3" />
+                    </button>
+                </div>
+
+                <!-- Toggle Filters Button (Unified height and border radius, remove shadow-sm) -->
+                <button
+                    @click="showFilters = !showFilters"
+                    :class="[
+                        showFilters || source
+                            ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300'
+                            : 'bg-white border-slate-200/80 text-slate-600 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900',
+                    ]"
+                    class="flex h-10 w-10 rounded-xl sm:h-9 sm:w-auto sm:rounded-lg items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3.5 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 shadow-[0_1px_2px_rgba(15,23,42,0.04)] active:scale-[0.98]"
+                    title="Filters"
+                >
+                    <SlidersHorizontal class="w-3.5 h-3.5" />
+                    <span class="hidden lg:inline">{{ $t("common.filters", "Filters") }}</span>
+                    <span v-if="source" class="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                </button>
+
+                <!-- Action Toolbar Divider -->
+                <div class="h-5 w-[1px] bg-gray-200 hidden sm:block mx-0.5"></div>
+
+                <!-- Batch Select Button (Unified height, remove shadow-sm) -->
+                <button
+                    @click="toggleSelectionMode"
+                    :class="[
+                        isSelectionMode
+                            ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300'
+                            : 'bg-white border-slate-200/80 text-slate-600 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900',
+                    ]"
+                    class="flex h-10 w-10 rounded-xl sm:h-9 sm:w-auto sm:rounded-lg items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 shadow-[0_1px_2px_rgba(15,23,42,0.04)] active:scale-[0.98]"
+                    title="Batch Select"
+                >
+                    <CheckSquare class="w-3.5 h-3.5" />
+                    <span class="hidden lg:inline">{{ $t("common.batch_select", "Batch Select") }}</span>
+                </button>
+
+                <!-- Layout Switchers (Unified height and border radius, remove shadow-sm) -->
+                <div class="hidden sm:flex items-center gap-0.5 bg-gray-100/70 p-0.5 rounded-lg border border-gray-200/50 shrink-0 h-9">
+                    <button
+                        class="flex items-center justify-center h-7 w-7 bg-white text-gray-900 border border-gray-200/30 rounded-md transition-all cursor-pointer"
+                        title="Grid Layout"
+                    >
+                        <LayoutGrid class="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                        class="flex items-center justify-center h-7 w-7 text-gray-500 hover:text-gray-900 hover:bg-white/50 rounded-md transition-all cursor-pointer"
+                        title="List Layout"
+                    >
+                        <List class="w-3.5 h-3.5" />
                     </button>
                 </div>
             </div>
+        </div>
 
-            <div class="flex items-center gap-1 sm:gap-2">
-                <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    :class="isSelectionMode ? 'bg-gray-100 text-gray-900' : 'text-gray-500'"
-                    :aria-pressed="isSelectionMode"
-                    aria-label="Select items"
-                    title="Select items"
-                    @click="toggleSelectionMode"
-                    class="h-8 w-8 p-0"
-                >
-                    <CheckSquare class="w-4 h-4 sm:w-5 h-5" />
-                </Button>
-                <button
-                    class="hidden sm:block p-1.5 hover:bg-gray-100 rounded-md text-gray-500 transition-colors"
-                >
-                    <LayoutGrid class="w-5 h-5" />
-                </button>
-                <button
-                    class="hidden sm:block p-1.5 hover:bg-gray-100 rounded-md text-gray-500 transition-colors"
-                >
-                    <List class="w-5 h-5" />
-                </button>
+        <!-- Collapsible Filter panel -->
+        <div
+            class="transition-all duration-300 ease-in-out border-b border-[#c2c6d6]/30 bg-[#f9f9ff] flex flex-col shrink-0 overflow-hidden"
+            :class="[showFilters ? 'max-h-[160px] p-5 opacity-100' : 'max-h-0 !py-0 opacity-0 border-b-0']"
+        >
+            <div class="space-y-4">
+                <!-- Platform pill tags (Horizontal Scrollable list matching Stitch, remove shadow-sm) -->
+                <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+                    <span class="text-[#424754] font-semibold text-xs whitespace-nowrap select-none mr-2"
+                        >{{ $t("common.platform", "Platform") }}:</span
+                    >
+                    <button
+                        v-for="p in platforms"
+                        :key="String(p.value)"
+                        @click="source = p.value"
+                        class="px-4 py-1.5 rounded-full border text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
+                        :class="
+                            source === p.value
+                                ? 'bg-[#151c27] border-transparent text-[#f9f9ff]'
+                                : 'bg-white border-[#c2c6d6]/60 text-[#424754] hover:bg-[#f9f9ff] hover:text-[#151c27] hover:border-[#c2c6d6]/80'
+                        "
+                    >
+                        {{ p.label }}
+                    </button>
+                </div>
+
+                <!-- Sorting and Dropdowns row -->
+                <div class="flex flex-wrap items-center gap-6 text-xs border-t border-[#c2c6d6]/30 pt-3.5">
+                    <!-- Sort by Dropdown -->
+                    <div class="flex items-center gap-2">
+                        <span class="text-[#424754] font-semibold select-none">{{ $t("common.sort_by", "Sort by") }}:</span>
+                        <div class="relative">
+                            <select
+                                class="appearance-none bg-white border border-[#c2c6d6]/60 hover:border-[#c2c6d6]/80 text-[#151c27] rounded-lg py-1.5 pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#0058be]/10 cursor-pointer transition-all"
+                            >
+                                <option>Latest</option>
+                                <option>Oldest</option>
+                            </select>
+                            <ChevronDown
+                                class="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                            />
+                        </div>
+                    </div>
+
+                    <!-- Media Type Dropdown -->
+                    <div class="flex items-center gap-2">
+                        <span class="text-[#424754] font-semibold select-none">Media Type:</span>
+                        <div class="relative">
+                            <select
+                                class="appearance-none bg-white border border-[#c2c6d6]/60 hover:border-[#c2c6d6]/80 text-[#151c27] rounded-lg py-1.5 pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#0058be]/10 cursor-pointer transition-all"
+                            >
+                                <option>All Types</option>
+                                <option>Video Only</option>
+                                <option>Image Only</option>
+                            </select>
+                            <ChevronDown
+                                class="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                            />
+                        </div>
+                    </div>
+
+                    <!-- Items per Page Dropdown -->
+                    <div class="flex items-center gap-2">
+                        <span class="text-[#424754] font-semibold select-none">{{ $t("grid.items_per_page_label", "每页显示") }}:</span>
+                        <div class="relative">
+                            <select
+                                v-model="pageSize"
+                                class="appearance-none bg-white border border-[#c2c6d6]/60 hover:border-[#c2c6d6]/80 text-[#151c27] rounded-lg py-1.5 pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#0058be]/10 cursor-pointer transition-all"
+                            >
+                                <option :value="20">20</option>
+                                <option :value="50">50</option>
+                                <option :value="100">100</option>
+                            </select>
+                            <ChevronDown
+                                class="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                            />
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
         <!-- Content -->
-        <div ref="scrollContainer" class="flex-1 overflow-y-auto p-6">
-            <div
-                v-if="Array.isArray(posts)"
-                ref="gridContainer"
-                class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4"
-            >
+        <div ref="scrollContainer" class="flex-1 overflow-y-auto p-6 pb-20 sm:pb-6">
+            <div v-if="Array.isArray(posts)" ref="gridContainer" class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
                 <PostCard
                     v-for="(post, index) in posts"
                     :key="post.id"
@@ -345,65 +436,96 @@ onUnmounted(() => {
 
         <!-- Footer / Pagination -->
         <div
-            class="h-14 border-t border-gray-100 flex items-center justify-between px-3 sm:px-6 shrink-0 text-sm text-gray-500 bg-white"
+            class="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 h-10 px-1 bg-white/90 backdrop-blur-md border border-slate-200/60 shadow-[0_8px_24px_rgba(15,23,42,0.08)] rounded-full flex items-center justify-center w-max sm:relative sm:bottom-auto sm:left-auto sm:translate-x-0 sm:z-auto sm:h-14 sm:px-6 sm:border-0 sm:border-t sm:border-slate-100 sm:shadow-[0_-2px_10px_rgba(15,23,42,0.015)] sm:rounded-none sm:bg-white/95 sm:w-full sm:justify-between"
         >
-            <div class="hidden sm:block tabular-nums">
-                {{ Array.isArray(posts) ? $t("grid.showing_items", { count: posts.length }) : "" }}
+            <!-- Left side: Total items count (hidden on mobile, shown on desktop) -->
+            <div class="hidden sm:block text-slate-500 text-sm select-none font-medium">
+                {{ $t("grid.showing_items", { count: total || 0 }) }}
             </div>
 
-            <div class="flex items-center gap-2 sm:gap-4">
+            <!-- Right side: Pagination (centered on mobile, right-aligned on desktop) -->
+            <div class="flex items-center sm:gap-4">
                 <PaginationRoot
                     :total="total || 0"
                     :sibling-count="1"
-                    :items-per-page="PAGE_SIZE"
+                    :items-per-page="count || 20"
                     :page="page"
                     @update:page="changePage"
                     class="flex items-center"
                 >
-                    <PaginationList v-slot="{ items }" class="flex items-center gap-1">
-                        <PaginationPrev as-child>
-                            <Button
-                                variant="outline"
-                                class="w-8 h-8 sm:w-9 sm:h-9 p-0"
-                                :disabled="isPrevDisabled"
-                            >
-                                <ChevronLeft class="w-4 h-4" />
-                            </Button>
-                        </PaginationPrev>
-
-                        <template v-for="(p, index) in items" :key="index">
-                            <PaginationListItem v-if="p.type === 'page'" :value="p.value" as-child>
+                    <PaginationList v-slot="{ items }" class="flex items-center gap-1.5">
+                        <!-- Mobile Layout: A single unified pill selector -->
+                        <div class="flex sm:hidden items-center p-0.5">
+                            <PaginationPrev as-child>
                                 <Button
-                                    :variant="p.value === page ? 'default' : 'outline'"
-                                    class="w-8 h-8 sm:w-9 sm:h-9 p-0 tabular-nums"
+                                    variant="ghost"
+                                    class="w-8 h-8 rounded-full p-0 text-slate-600 hover:text-slate-900"
+                                    :disabled="isPrevDisabled"
                                 >
-                                    {{ p.value }}
+                                    <ChevronLeft class="w-4 h-4" />
                                 </Button>
-                            </PaginationListItem>
-                            <PaginationEllipsis
-                                v-else-if="p.type === 'ellipsis'"
-                                class="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center"
-                            >
-                                <MoreHorizontal class="w-4 h-4 text-gray-400" />
-                            </PaginationEllipsis>
-                        </template>
+                            </PaginationPrev>
+                            <span class="text-xs font-semibold text-slate-700 px-3 min-w-[3.5rem] text-center select-none tabular-nums">
+                                {{ page }} / {{ totalPages }}
+                            </span>
+                            <PaginationNext as-child>
+                                <Button
+                                    variant="ghost"
+                                    class="w-8 h-8 rounded-full p-0 text-slate-600 hover:text-slate-900"
+                                    :disabled="isNextDisabled"
+                                >
+                                    <ChevronRight class="w-4 h-4" />
+                                </Button>
+                            </PaginationNext>
+                        </div>
 
-                        <PaginationNext as-child>
-                            <Button
-                                variant="outline"
-                                class="w-8 h-8 sm:w-9 sm:h-9 p-0"
-                                :disabled="isNextDisabled"
-                            >
-                                <ChevronRight class="w-4 h-4" />
-                            </Button>
-                        </PaginationNext>
+                        <!-- Desktop Layout: Standard items -->
+                        <div class="hidden sm:flex items-center gap-1.5">
+                            <PaginationPrev as-child>
+                                <Button
+                                    variant="outline"
+                                    class="w-9 h-9 rounded-lg border-slate-200/80 hover:bg-slate-50 text-slate-700 p-0"
+                                    :disabled="isPrevDisabled"
+                                >
+                                    <ChevronLeft class="w-4 h-4" />
+                                </Button>
+                            </PaginationPrev>
+
+                            <template v-for="(p, index) in items" :key="index">
+                                <PaginationListItem v-if="p.type === 'page'" :value="p.value" as-child>
+                                    <Button
+                                        :variant="p.value === page ? 'default' : 'outline'"
+                                        class="w-9 h-9 rounded-lg border-slate-200/80 text-slate-700 p-0 tabular-nums transition-all"
+                                        :class="
+                                            p.value === page
+                                                ? 'bg-slate-900 hover:bg-slate-800 text-white border-transparent shadow-sm'
+                                                : 'hover:bg-slate-50'
+                                        "
+                                    >
+                                        {{ p.value }}
+                                    </Button>
+                                </PaginationListItem>
+                                <PaginationEllipsis v-else-if="p.type === 'ellipsis'" class="w-9 h-9 flex items-center justify-center">
+                                    <MoreHorizontal class="w-4 h-4 text-gray-400" />
+                                </PaginationEllipsis>
+                            </template>
+
+                            <PaginationNext as-child>
+                                <Button
+                                    variant="outline"
+                                    class="w-9 h-9 rounded-lg border-slate-200/80 hover:bg-slate-50 text-slate-700 p-0"
+                                    :disabled="isNextDisabled"
+                                >
+                                    <ChevronRight class="w-4 h-4" />
+                                </Button>
+                            </PaginationNext>
+                        </div>
                     </PaginationList>
                 </PaginationRoot>
 
-                <div
-                    class="flex items-center gap-3 border-l border-gray-200 pl-2 sm:pl-4 tabular-nums"
-                >
+                <div class="hidden sm:flex items-center gap-3 border-l border-gray-200 pl-4 tabular-nums">
                     <i18n-t
+                        tag="div"
                         keypath="grid.page_info"
                         scope="global"
                         class="flex items-center gap-1.5 text-gray-500 text-sm hidden sm:flex"
@@ -412,7 +534,7 @@ onUnmounted(() => {
                             <input
                                 v-model="jumpPage"
                                 type="text"
-                                class="w-10 h-7 text-center bg-gray-50 border border-gray-200 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all tabular-nums"
+                                class="w-10 h-7 text-center bg-gray-50 border border-gray-200 rounded-md text-sm focus:ring-2 focus:ring-blue-500/10 focus:border-transparent outline-none transition-all tabular-nums"
                                 @keyup.enter="handleJump"
                                 @blur="handleJump"
                             />

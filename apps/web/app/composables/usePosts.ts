@@ -26,9 +26,7 @@ export const usePosts = () => {
             set: (val) => (store.source = val),
         }),
         selectPost: store.selectPost,
-        fetchPosts: async (
-            params: { page?: number; count?: number; keyword?: string; source?: string } = {},
-        ) => {
+        fetchPosts: async (params: { page?: number; count?: number; keyword?: string; source?: string } = {}) => {
             if (params.page !== undefined) store.page = params.page;
             if (params.count !== undefined) store.count = params.count;
             if (params.keyword !== undefined) store.keyword = params.keyword;

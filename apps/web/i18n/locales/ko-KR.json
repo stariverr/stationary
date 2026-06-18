@@ -23,7 +23,8 @@
     },
     "grid": {
         "showing_items": "{count}개 항목 표시",
-        "page_info": "{current} / {total} 페이지"
+        "page_info": "{current} / {total} 페이지",
+        "items_per_page": "페이지당 {count}개"
     },
     "platforms": {
         "XHS": "샤오홍슈",

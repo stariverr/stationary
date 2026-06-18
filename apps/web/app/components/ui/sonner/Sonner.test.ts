@@ -9,10 +9,7 @@ describe("shadcn Sonner setup", () => {
     });
 
     test("library dialog uses the local shadcn sonner export", () => {
-        const dialog = readFileSync(
-            "app/components/CreateLibraryDialog.vue",
-            "utf8",
-        );
+        const dialog = readFileSync("app/components/CreateLibraryDialog.vue", "utf8");
 
         expect(dialog).toContain('from "@/components/ui/sonner"');
         expect(dialog).not.toContain('from "vue-sonner"');

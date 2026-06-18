@@ -25,7 +25,7 @@ export const usePostStore = defineStore("posts", () => {
     const searchKeyword = ref(keyword.value);
     const source = ref<string | undefined>((route.query.source as string) || undefined);
     const page = ref(parseInt(route.query.page as string) || 1);
-    const count = ref(20);
+    const count = ref(parseInt(route.query.count as string) || 20);
 
     // Debounce keyword search to prevent spamming backend requests
     let debounceTimeout: any = null;
@@ -58,8 +58,8 @@ export const usePostStore = defineStore("posts", () => {
     // Synchronize URL query parameters with internal state
     // Synchronize URL query parameters with internal state
     watch(
-        () => ({ keyword: keyword.value, source: source.value, page: page.value }),
-        ({ keyword: newKeyword, source: newSource, page: newPage }) => {
+        () => ({ keyword: keyword.value, source: source.value, page: page.value, count: count.value }),
+        ({ keyword: newKeyword, source: newSource, page: newPage, count: newCount }) => {
             const query = { ...route.query };
             let changed = false;
 
@@ -85,6 +85,7 @@ export const usePostStore = defineStore("posts", () => {
             updateParam("keyword", newKeyword || undefined);
             updateParam("source", newSource);
             updateParam("page", newPage && newPage > 1 ? newPage.toString() : undefined);
+            updateParam("count", newCount && newCount !== 20 ? newCount.toString() : undefined);
 
             if (changed) {
                 router.push({ query });
@@ -112,6 +113,10 @@ export const usePostStore = defineStore("posts", () => {
             if (queryPage !== page.value) {
                 page.value = queryPage;
             }
+            const queryCount = parseInt(newQuery.count as string) || 20;
+            if (queryCount !== count.value) {
+                count.value = queryCount;
+            }
         },
         { deep: true },
     );
@@ -121,18 +126,11 @@ export const usePostStore = defineStore("posts", () => {
 
         const uiMedia = apiPost.media.map((m) => {
             const primaryTrack = m.tracks.find(
-                (t) =>
-                    t.purpose === "CONTENT" &&
-                    t.priority === 0 &&
-                    (m.type === "VIDEO" ? t.type === "VIDEO" : t.type === "IMAGE"),
+                (t) => t.purpose === "CONTENT" && t.priority === 0 && (m.type === "VIDEO" ? t.type === "VIDEO" : t.type === "IMAGE"),
             );
             const coverTrack = m.tracks.find((t) => t.purpose === "COVER");
             const liveTrack =
-                m.type === "LIVE_PHOTO"
-                    ? m.tracks.find(
-                          (t) => t.type === "VIDEO" && t.purpose === "CONTENT" && t.priority === 0,
-                      )
-                    : null;
+                m.type === "LIVE_PHOTO" ? m.tracks.find((t) => t.type === "VIDEO" && t.purpose === "CONTENT" && t.priority === 0) : null;
             const subtitleTracks = m.tracks.filter((t) => t.type === "SUBTITLE");
 
             let url = m.url || primaryTrack?.url || null;
@@ -167,16 +165,14 @@ export const usePostStore = defineStore("posts", () => {
             create_time: apiPost.create_time || undefined,
             published_time: apiPost.published_time || undefined,
             date: displayTime
-                ? Temporal.Instant.from(displayTime)
-                      .toZonedDateTimeISO(Temporal.Now.timeZoneId())
-                      .toLocaleString(undefined, {
-                          year: "numeric",
-                          month: "2-digit",
-                          day: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          second: "2-digit",
-                      })
+                ? Temporal.Instant.from(displayTime).toZonedDateTimeISO(Temporal.Now.timeZoneId()).toLocaleString(undefined, {
+                      year: "numeric",
+                      month: "2-digit",
+                      day: "2-digit",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      second: "2-digit",
+                  })
                 : "Unknown",
             platform: (apiPost.source || "UNKNOWN") as Platform,
             type: apiPost.type as "TEXT" | "MULTI_MEDIA",
@@ -238,9 +234,7 @@ export const usePostStore = defineStore("posts", () => {
         enabled: computed(() => !!selectedPostId.value),
         queryFn: async () => {
             if (!selectedPostId.value) return null;
-            const response = await useApi<{ success: boolean; data: ApiPostDetail }>(
-                `/post/detail/${selectedPostId.value}`,
-            );
+            const response = await useApi<{ success: boolean; data: ApiPostDetail }>(`/post/detail/${selectedPostId.value}`);
 
             if (response && response.success && response.data) {
                 const detail = response.data;
@@ -257,12 +251,7 @@ export const usePostStore = defineStore("posts", () => {
                         const coverTrack = m.tracks.find((t) => t.purpose === "COVER");
                         const liveTrack =
                             m.type === "LIVE_PHOTO"
-                                ? m.tracks.find(
-                                      (t) =>
-                                          t.type === "VIDEO" &&
-                                          t.purpose === "CONTENT" &&
-                                          t.priority === 0,
-                                  )
+                                ? m.tracks.find((t) => t.type === "VIDEO" && t.purpose === "CONTENT" && t.priority === 0)
                                 : null;
                         const subtitleTracks = m.tracks.filter((t) => t.type === "SUBTITLE");
 
@@ -284,10 +273,7 @@ export const usePostStore = defineStore("posts", () => {
                                 url: sub.url,
                                 language: sub.metadata?.language || "unknown",
                                 label: sub.metadata?.label || sub.metadata?.language || "unknown",
-                                format:
-                                    sub.metadata?.format === "json"
-                                        ? "vtt"
-                                        : sub.metadata?.format || "vtt",
+                                format: sub.metadata?.format === "json" ? "vtt" : sub.metadata?.format || "vtt",
                             })),
                         };
                     }) || [];
@@ -302,16 +288,14 @@ export const usePostStore = defineStore("posts", () => {
                     platform: (detail.source || "UNKNOWN") as Platform,
                     author: detail.author_name || "Unknown",
                     date: displayTime
-                        ? Temporal.Instant.from(displayTime)
-                              .toZonedDateTimeISO(Temporal.Now.timeZoneId())
-                              .toLocaleString(undefined, {
-                                  year: "numeric",
-                                  month: "2-digit",
-                                  day: "2-digit",
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                  second: "2-digit",
-                              })
+                        ? Temporal.Instant.from(displayTime).toZonedDateTimeISO(Temporal.Now.timeZoneId()).toLocaleString(undefined, {
+                              year: "numeric",
+                              month: "2-digit",
+                              day: "2-digit",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              second: "2-digit",
+                          })
                         : "Unknown",
                     width: 1080,
                     height: 1920,
@@ -330,9 +314,7 @@ export const usePostStore = defineStore("posts", () => {
 
     const posts = computed(() => postsData.value?.list || []);
     const total = computed(() => postsData.value?.total || 0);
-    const selectedPost = computed(
-        () => detailData.value || posts.value.find((p) => p.id == selectedPostId.value) || null,
-    );
+    const selectedPost = computed(() => detailData.value || posts.value.find((p) => p.id == selectedPostId.value) || null);
 
     const selectPost = (id: string | number) => {
         selectedPostId.value = id;

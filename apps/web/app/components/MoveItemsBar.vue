@@ -1,13 +1,6 @@
 <script setup lang="ts">
 import type { AcceptableValue } from "reka-ui";
-import {
-    Select,
-    SelectContent,
-    SelectGroup,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { useLibraryStore } from "@/stores/library";
@@ -54,9 +47,7 @@ const hasSelectedFailedSync = computed(() => {
     );
     const directFailedPost = postStore.posts.some(
         (p: Post) =>
-            props.postIds.includes(String(p.id)) &&
-            (p.sync_status === "FAILED" ||
-                p.media?.some((m) => m.sync_status === "FAILED")),
+            props.postIds.includes(String(p.id)) && (p.sync_status === "FAILED" || p.media?.some((m) => m.sync_status === "FAILED")),
     );
     return directFailedMedia || directFailedPost;
 });
@@ -147,12 +138,15 @@ const handleBatchRegenerate = async () => {
 
     try {
         isRegenerating.value = true;
-        const response = await useApi<{ success: boolean; data: { queued: number; skipped: number }; message?: string }>("/media/regenerate-covers", {
-            method: "POST",
-            body: {
-                media_ids: videoIds,
+        const response = await useApi<{ success: boolean; data: { queued: number; skipped: number }; message?: string }>(
+            "/media/regenerate-covers",
+            {
+                method: "POST",
+                body: {
+                    media_ids: videoIds,
+                },
             },
-        });
+        );
         if (response && response.success && response.data) {
             const { queued, skipped } = response.data;
             toast.success(
@@ -174,9 +168,7 @@ const handleBatchRegenerate = async () => {
     }
 };
 
-const targetLibraries = computed(() =>
-    libraryStore.libraries.filter((library) => library.id !== libraryStore.activeLibraryId),
-);
+const targetLibraries = computed(() => libraryStore.libraries.filter((library) => library.id !== libraryStore.activeLibraryId));
 
 const itemCount = computed(() => props.postIds.length + props.mediaIds.length);
 const hasTargetLibrary = computed(() => targetLibraries.value.length > 0);
@@ -268,39 +260,52 @@ const handleMove = async () => {
 <template>
     <div class="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">
         <div
-            class="pointer-events-auto flex w-full max-w-4xl flex-col gap-3 rounded-lg border bg-white p-3 shadow-lg sm:flex-row sm:items-center sm:justify-between">
+            class="pointer-events-auto flex w-full max-w-4xl flex-col gap-3 rounded-lg border bg-white p-3 shadow-lg sm:flex-row sm:items-center sm:justify-between"
+        >
             <div class="flex min-w-0 items-center gap-3">
-                <div class="whitespace-nowrap tabular-nums text-sm font-semibold text-gray-900">
-                    {{ itemCount }} selected
-                </div>
+                <div class="whitespace-nowrap tabular-nums text-sm font-semibold text-gray-900">{{ itemCount }} selected</div>
                 <div v-if="itemCount > 0" class="hidden truncate text-sm text-muted-foreground sm:block">
                     Move {{ itemSummary || "selected items" }} to
                 </div>
-                <div v-else class="hidden truncate text-sm text-muted-foreground sm:block">
-                    Choose items to move
-                </div>
+                <div v-else class="hidden truncate text-sm text-muted-foreground sm:block">Choose items to move</div>
             </div>
 
             <div class="flex flex-wrap items-center gap-2 sm:flex-nowrap">
-                <Button type="button" variant="outline" size="sm" :disabled="!canSelectVisible || isMoving"
-                    @click="emit('toggleVisible')">
+                <Button type="button" variant="outline" size="sm" :disabled="!canSelectVisible || isMoving" @click="emit('toggleVisible')">
                     <CheckSquare />
                     {{ allVisibleSelected ? "Deselect visible" : "Select visible" }}
                 </Button>
-                <Button v-if="hasSelectedVideos" type="button" variant="outline" size="sm"
-                    :disabled="isMoving || isRegenerating" @click="handleBatchRegenerate">
+                <Button
+                    v-if="hasSelectedVideos"
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    :disabled="isMoving || isRegenerating"
+                    @click="handleBatchRegenerate"
+                >
                     <Loader2 v-if="isRegenerating" class="animate-spin" />
                     <FileImage v-else />
                     {{ $t("media.actions.regenerate_covers", "Regenerate Covers") }}
                 </Button>
-                <Button v-if="hasSelectedFailedSync" type="button" variant="outline" size="sm"
-                    :disabled="isMoving || isRegenerating || isRetryingSync" @click="handleBatchRetrySync">
+                <Button
+                    v-if="hasSelectedFailedSync"
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    :disabled="isMoving || isRegenerating || isRetryingSync"
+                    @click="handleBatchRetrySync"
+                >
                     <Loader2 v-if="isRetryingSync" class="animate-spin" />
                     <RefreshCw v-else />
                     {{ $t("media.actions.retry_sync", "Retry Sync") }}
                 </Button>
-                <Button type="button" variant="outline" size="sm" :disabled="isMoving || isRegenerating || isQueueingAi"
-                    @click="handleBatchQueueAi">
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    :disabled="isMoving || isRegenerating || isQueueingAi"
+                    @click="handleBatchQueueAi"
+                >
                     <Loader2 v-if="isQueueingAi" class="animate-spin" />
                     <Sparkles v-else />
                     {{ $t("media.actions.queue_ai", "Queue for AI") }}
@@ -317,14 +322,19 @@ const handleMove = async () => {
                         </SelectGroup>
                     </SelectContent>
                 </Select>
-                <Button type="button" size="sm" :disabled="!hasTargetLibrary || itemCount === 0 || isMoving"
-                    @click="handleMove">
+                <Button type="button" size="sm" :disabled="!hasTargetLibrary || itemCount === 0 || isMoving" @click="handleMove">
                     <Loader2 v-if="isMoving" class="animate-spin" />
                     <MoveRight v-else />
                     Move
                 </Button>
-                <Button type="button" variant="ghost" size="icon-sm" :disabled="isMoving" aria-label="Cancel selection"
-                    @click="emit('cancel')">
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    :disabled="isMoving"
+                    aria-label="Cancel selection"
+                    @click="emit('cancel')"
+                >
                     <X />
                 </Button>
             </div>

@@ -232,47 +232,65 @@ const handleQueueAi = async () => {
                     <div class="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
                         <span>{{ media.date }}</span>
                     </div>
-                    <div class="flex items-center gap-1.5 mt-1">
-                        <!-- Media Sync Status Badge -->
-                        <span
-                            v-if="media.sync_status && media.sync_status !== 'COMPLETED'"
-                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors border"
-                            :class="
-                                media.sync_status === 'IN_PROGRESS'
-                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                    : media.sync_status === 'FAILED'
-                                      ? 'bg-red-50 text-red-700 border-red-200 cursor-help'
-                                      : 'bg-amber-50 text-amber-700 border-amber-200'
-                            "
-                            :title="media.sync_status === 'FAILED' ? media.last_error || 'Unknown Error' : undefined"
-                        >
-                            <Clock v-if="media.sync_status === 'PENDING'" class="size-3" />
-                            <Loader2 v-else-if="media.sync_status === 'IN_PROGRESS'" class="size-3 animate-spin" />
-                            <AlertCircle v-else-if="media.sync_status === 'FAILED'" class="size-3" />
-                            {{ media.sync_status }}
-                        </span>
+                    <div class="flex items-center gap-2 mt-1">
+                        <!-- Media Sync Status (Low Presence) -->
+                        <template v-if="media.sync_status && media.sync_status !== 'COMPLETED'">
+                            <span
+                                v-if="media.sync_status === 'PENDING'"
+                                class="inline-flex items-center gap-1 text-[10px] font-medium text-gray-400"
+                            >
+                                <Clock class="size-3 shrink-0" />
+                                <span>Pending Sync</span>
+                            </span>
+                            <span
+                                v-else-if="media.sync_status === 'IN_PROGRESS'"
+                                class="inline-flex items-center gap-1 text-[10px] font-medium text-blue-500 animate-pulse"
+                            >
+                                <Loader2 class="size-3 animate-spin shrink-0" />
+                                <span>Syncing...</span>
+                            </span>
+                            <span
+                                v-else-if="media.sync_status === 'FAILED'"
+                                class="inline-flex items-center gap-1 text-[10px] font-medium text-red-500 cursor-help"
+                                :title="media.last_error || 'Sync failed'"
+                            >
+                                <AlertCircle class="size-3 shrink-0" />
+                                <span>Sync Failed</span>
+                            </span>
+                        </template>
 
-                        <!-- Media AI Status Badge -->
-                        <span
-                            v-if="media.ai_status"
-                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors border"
-                            :class="
-                                media.ai_status === 'COMPLETED'
-                                    ? 'bg-purple-50 text-purple-700 border-purple-200'
-                                    : media.ai_status === 'IN_PROGRESS'
-                                      ? 'bg-indigo-50 text-indigo-700 border-indigo-200 animate-pulse'
-                                      : media.ai_status === 'FAILED'
-                                        ? 'bg-red-50 text-red-700 border-red-200 cursor-help'
-                                        : 'bg-slate-50 text-slate-700 border-slate-200'
-                            "
-                            :title="media.ai_status === 'FAILED' ? media.ai_error || 'Unknown Error' : undefined"
-                        >
-                            <Clock v-if="media.ai_status === 'PENDING'" class="size-3" />
-                            <Loader2 v-else-if="media.ai_status === 'IN_PROGRESS'" class="size-3 animate-spin" />
-                            <AlertCircle v-else-if="media.ai_status === 'FAILED'" class="size-3" />
-                            <Sparkles v-else class="size-3" />
-                            AI: {{ media.ai_status === "COMPLETED" ? "Ready" : media.ai_status }}
-                        </span>
+                        <!-- Media AI Status Badge (Low Presence) -->
+                        <template v-if="media.ai_status">
+                            <span
+                                v-if="media.ai_status === 'COMPLETED'"
+                                class="inline-flex items-center gap-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 select-none"
+                            >
+                                <Sparkles class="size-3 text-gray-400 dark:text-gray-500 shrink-0" />
+                                <span>AI Ready</span>
+                            </span>
+                            <span
+                                v-else-if="media.ai_status === 'PENDING'"
+                                class="inline-flex items-center gap-1 text-[10px] font-medium text-gray-400"
+                            >
+                                <Clock class="size-3 shrink-0" />
+                                <span>AI Pending</span>
+                            </span>
+                            <span
+                                v-else-if="media.ai_status === 'IN_PROGRESS'"
+                                class="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-400 animate-pulse"
+                            >
+                                <Loader2 class="size-3 animate-spin shrink-0" />
+                                <span>Enriching...</span>
+                            </span>
+                            <span
+                                v-else-if="media.ai_status === 'FAILED'"
+                                class="inline-flex items-center gap-1 text-[10px] font-medium text-red-400 cursor-help"
+                                :title="media.ai_error || 'AI Enrichment failed'"
+                            >
+                                <AlertCircle class="size-3 shrink-0" />
+                                <span>AI Failed</span>
+                            </span>
+                        </template>
                     </div>
                     <div v-if="media.matched_details" class="flex flex-wrap gap-1 mt-1.5 animate-fade-in">
                         <span

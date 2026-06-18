@@ -1,10 +1,16 @@
-import { defineStore } from 'pinia';
+import { defineStore } from "pinia";
+import { ref } from "vue";
 
-export const useLayoutStore = defineStore('layout', () => {
+export const useLayoutStore = defineStore("layout", () => {
     const isSidebarOpen = ref(false);
+    const isSidebarCollapsed = ref(false);
 
     const toggleSidebar = () => {
-        isSidebarOpen.value = !isSidebarOpen.value;
+        if (typeof window !== "undefined" && window.innerWidth < 768) {
+            isSidebarOpen.value = !isSidebarOpen.value;
+        } else {
+            isSidebarCollapsed.value = !isSidebarCollapsed.value;
+        }
     };
 
     const closeSidebar = () => {
@@ -13,7 +19,8 @@ export const useLayoutStore = defineStore('layout', () => {
 
     return {
         isSidebarOpen,
+        isSidebarCollapsed,
         toggleSidebar,
-        closeSidebar
+        closeSidebar,
     };
 });

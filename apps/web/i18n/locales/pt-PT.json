@@ -23,7 +23,8 @@
     },
     "grid": {
         "showing_items": "A mostrar {count} itens",
-        "page_info": "Página {current} de {total}"
+        "page_info": "Pág. {current} / {total}",
+        "items_per_page": "{count} / página"
     },
     "platforms": {
         "XHS": "Rednote",

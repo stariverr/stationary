@@ -39,25 +39,16 @@ const showCreateDialog = ref(false);
         >
             <div class="flex items-center gap-2.5 flex-1 overflow-hidden">
                 <Avatar class="h-8 w-8">
-                    <AvatarImage
-                        v-if="displayImage"
-                        :src="displayImage"
-                    />
-                    <AvatarFallback
-                        class="text-xs font-medium bg-blue-50 text-blue-600"
-                    >
+                    <AvatarImage v-if="displayImage" :src="displayImage" />
+                    <AvatarFallback class="text-xs font-medium bg-blue-50 text-blue-600">
                         {{ displayName.charAt(0) || "U" }}
                     </AvatarFallback>
                 </Avatar>
                 <div class="flex flex-col items-start overflow-hidden min-w-0">
-                    <span
-                        class="text-sm font-semibold truncate w-full text-left leading-tight text-gray-900"
-                    >
+                    <span class="text-sm font-semibold truncate w-full text-left leading-tight text-gray-900">
                         {{ activeLibrary?.name || "Loading..." }}
                     </span>
-                    <span
-                        class="text-xs text-gray-500 truncate w-full text-left leading-tight mt-0.5"
-                    >
+                    <span class="text-xs text-gray-500 truncate w-full text-left leading-tight mt-0.5">
                         {{ displayName }}
                     </span>
                 </div>
@@ -69,30 +60,18 @@ const showCreateDialog = ref(false);
             <!-- User Account Section -->
             <div v-if="session.data?.user" class="flex items-center gap-2 p-2">
                 <Avatar class="h-8 w-8">
-                    <AvatarImage
-                        v-if="displayImage"
-                        :src="displayImage"
-                    />
-                    <AvatarFallback>{{
-                        displayName.charAt(0) || "U"
-                    }}</AvatarFallback>
+                    <AvatarImage v-if="displayImage" :src="displayImage" />
+                    <AvatarFallback>{{ displayName.charAt(0) || "U" }}</AvatarFallback>
                 </Avatar>
                 <div class="flex flex-col space-y-1 overflow-hidden">
-                    <span class="text-sm font-medium leading-none truncate">{{
-                        displayName
-                    }}</span>
-                    <span
-                        class="text-xs text-muted-foreground leading-none truncate"
-                        >{{ userEmail }}</span
-                    >
+                    <span class="text-sm font-medium leading-none truncate">{{ displayName }}</span>
+                    <span class="text-xs text-muted-foreground leading-none truncate">{{ userEmail }}</span>
                 </div>
             </div>
 
             <DropdownMenuSeparator />
 
-            <DropdownMenuLabel class="text-xs text-muted-foreground font-normal"
-                >Libraries</DropdownMenuLabel
-            >
+            <DropdownMenuLabel class="text-xs text-muted-foreground font-normal">Libraries</DropdownMenuLabel>
 
             <div class="max-h-48 overflow-y-auto custom-scrollbar">
                 <DropdownMenuItem
@@ -103,44 +82,30 @@ const showCreateDialog = ref(false);
                 >
                     <div class="flex items-center gap-2 overflow-hidden flex-1">
                         <Avatar class="h-5 w-5 rounded-sm shrink-0">
-                            <AvatarFallback
-                                class="rounded-sm text-[8px] bg-primary text-primary-foreground"
-                            >
+                            <AvatarFallback class="rounded-sm text-[8px] bg-primary text-primary-foreground">
                                 {{ lib.name.charAt(0).toUpperCase() }}
                             </AvatarFallback>
                         </Avatar>
                         <span class="truncate">{{ lib.name }}</span>
                     </div>
-                    <Check
-                        v-if="activeLibrary?.id === lib.id"
-                        class="w-4 h-4 text-blue-600 shrink-0"
-                    />
+                    <Check v-if="activeLibrary?.id === lib.id" class="w-4 h-4 text-blue-600 shrink-0" />
                 </DropdownMenuItem>
             </div>
 
             <DropdownMenuSeparator />
 
-            <DropdownMenuItem
-                class="cursor-pointer"
-                @click="showCreateDialog = true"
-            >
+            <DropdownMenuItem class="cursor-pointer" @click="showCreateDialog = true">
                 <Plus class="mr-2 h-4 w-4" />
                 <span>Create Library</span>
             </DropdownMenuItem>
 
             <DropdownMenuSeparator />
 
-            <DropdownMenuItem
-                class="cursor-pointer"
-                @click="$emit('open-settings')"
-            >
+            <DropdownMenuItem class="cursor-pointer" @click="$emit('open-settings')">
                 <Settings class="mr-2 h-4 w-4" />
                 <span>Settings</span>
             </DropdownMenuItem>
-            <DropdownMenuItem
-                class="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
-                @click="authClient.signOut()"
-            >
+            <DropdownMenuItem class="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50" @click="authClient.signOut()">
                 <LogOut class="mr-2 h-4 w-4" />
                 <span>Log out</span>
             </DropdownMenuItem>

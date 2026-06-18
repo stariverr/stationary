@@ -56,11 +56,7 @@ export const useLibraryStore = defineStore("library", () => {
     }
 
     const activeLibrary = computed(() => {
-        return (
-            libraries.value.find((l) => l.id === activeLibraryId.value) ||
-            libraries.value[0] ||
-            null
-        );
+        return libraries.value.find((l) => l.id === activeLibraryId.value) || libraries.value[0] || null;
     });
 
     const setActiveLibrary = (id: string) => {

@@ -1,69 +1,45 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick, type Ref } from "vue";
-import {
-    X,
-    Info,
-    Tag,
-    Calendar,
-    User,
-    FileImage,
-    Globe,
-    Hash,
-    Link as LinkIcon,
-    ChevronLeft,
-    ChevronRight,
-    Maximize2,
-    Minimize2,
-    Sidebar,
-} from "@lucide/vue";
-import { Swiper, SwiperSlide } from "swiper/vue";
-import type { Swiper as SwiperClass } from "swiper";
-import "swiper/css";
-import { getOptimizedImageUrl, getOptimizedSrcset } from "@/utils/image";
-import { type Track } from "@/types/post";
+import { ref, watch, onMounted, onUnmounted } from "vue";
+import { X, Link as LinkIcon, ChevronLeft, Maximize2, Minimize2 } from "@lucide/vue";
+import { useUserStore } from "@/stores/user";
+import { storeToRefs } from "pinia";
 
-const { selectedPost, selectedPostId, selectedPostDetail } = usePosts();
-const { expandDetailByDefault } = useUserSettings();
+const { selectedPost, selectedPostId } = usePosts();
+const userStore = useUserStore();
+const { expandDetailByDefault } = storeToRefs(userStore);
 const route = useRoute();
 
-const showLightbox = ref(false);
+const isImmersiveView = ref(false);
+const isMediaOnly = ref(false);
+const currentIndex = ref(0);
 
-const closeLightbox = () => {
-    if (expandDetailByDefault.value) {
-        closeDetail();
+const closeImmersiveView = () => {
+    if (isMediaOnly.value) {
+        isMediaOnly.value = false;
     } else {
-        showLightbox.value = false;
+        closeDetail();
     }
 };
-
-const currentIndex = ref(0);
 
 // Reset expansion state when opening a new post, honoring preference
 watch(selectedPostId, (newId) => {
     if (newId) {
-        showLightbox.value = expandDetailByDefault.value;
+        isImmersiveView.value = isMobile.value ? false : expandDetailByDefault.value;
+        isMediaOnly.value = false;
         currentIndex.value = 0;
     }
 });
 
-const swiperInstance = ref<SwiperClass | null>(null);
-
-const onSwiper = (swiper: SwiperClass) => {
-    swiperInstance.value = swiper;
-    currentIndex.value = swiper.realIndex;
-};
-
-const onSlideChange = (swiper: SwiperClass) => {
-    currentIndex.value = swiper.realIndex;
-};
+watch(expandDetailByDefault, (newVal) => {
+    if (!isMobile.value) {
+        isImmersiveView.value = newVal;
+    }
+});
 
 // Reset index when post changes
 watch(selectedPostId, () => {
     currentIndex.value = 0;
 });
-
-const scrollPrev = () => swiperInstance.value?.slidePrev();
-const scrollNext = () => swiperInstance.value?.slideNext();
 
 const closeDetail = () => {
     selectedPostId.value = null;
@@ -76,15 +52,39 @@ const closeDetail = () => {
 
 const isMobile = ref(false);
 
+const handleResize = () => {
+    isMobile.value = window.innerWidth < 768;
+};
+
+const handleKeydown = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+        if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "TEXTAREA") {
+            return;
+        }
+        if (isMediaOnly.value) {
+            isMediaOnly.value = false;
+        } else if (isImmersiveView.value) {
+            closeImmersiveView();
+        } else {
+            closeDetail();
+        }
+    }
+};
+
 onMounted(() => {
     isMobile.value = window.innerWidth < 768;
-    // Mobile defaults to Standard view.
     if (isMobile.value) {
-        showLightbox.value = false;
+        isImmersiveView.value = false;
+    } else {
+        isImmersiveView.value = expandDetailByDefault.value;
     }
-    window.addEventListener("resize", () => {
-        isMobile.value = window.innerWidth < 768;
-    });
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("keydown", handleKeydown);
+});
+
+onUnmounted(() => {
+    window.removeEventListener("resize", handleResize);
+    window.removeEventListener("keydown", handleKeydown);
 });
 
 const copyLink = () => {
@@ -92,353 +92,105 @@ const copyLink = () => {
     const url = window.location.origin + "/posts/" + selectedPost.value.id;
     navigator.clipboard.writeText(url);
 };
-
-const mappedMedia = computed(() => {
-    if (!selectedPost.value?.media) return [];
-    return selectedPost.value.media.map((m) => {
-        const subtitleTracks = (m.tracks || []).filter((t: Track) => t.type === "SUBTITLE");
-        return {
-            ...m,
-            subtitles: subtitleTracks.map((sub: Track) => ({
-                url: sub.url,
-                language: (sub.metadata?.language as string) || "unknown",
-                label: (sub.metadata?.label as string) || (sub.metadata?.language as string) || "unknown",
-                format: sub.metadata?.format === "json" ? "vtt" : (sub.metadata?.format as string) || "vtt",
-            })),
-        };
-    });
-});
 </script>
 
 <template>
     <div
         v-if="selectedPost"
         :class="[
-            showLightbox
-                ? 'fixed inset-0 z-[200] pointer-events-none'
+            isImmersiveView || isMediaOnly
+                ? 'fixed inset-0 z-[150] flex bg-black/95 pointer-events-auto'
                 : 'fixed inset-y-0 right-0 z-60 md:relative md:z-auto h-full bg-[#f8f8f8] border-l border-[#e5e5e5] w-full md:w-[480px] shrink-0 flex flex-col shadow-2xl overflow-hidden lg:overflow-visible',
         ]"
     >
-        <!-- Standard Header (Desktop Sidebar or Mobile Detail View) -->
-        <div
-            v-if="!showLightbox"
-            class="h-14 border-b border-[#e5e5e5] px-4 flex items-center justify-between bg-white shrink-0 z-10 pointer-events-auto"
-        >
-            <div class="flex items-center gap-2 overflow-hidden">
-                <!-- Mobile Back Button -->
-                <button v-if="isMobile" @click="closeDetail" class="p-1 -ml-1 hover:bg-gray-100 rounded-md text-gray-700 transition-colors">
-                    <ChevronLeft class="w-6 h-6" />
-                </button>
-                <h2 class="font-semibold text-sm truncate max-w-[200px]">
-                    {{ selectedPost.title }}
-                </h2>
-            </div>
-            <div class="flex items-center gap-2">
+        <!-- IMMERSIVE / MEDIA-ONLY LAYOUT -->
+        <template v-if="isImmersiveView || isMediaOnly">
+            <!-- Left Side: Large Media Player -->
+            <div class="flex-1 h-full relative flex items-center justify-center min-w-0">
+                <!-- Close Button Overlay (Top-Left) -->
                 <button
-                    @click="copyLink"
-                    class="p-1 hover:bg-gray-200 rounded-md text-gray-500 transition-colors"
-                    :title="$t('common.copy_link')"
+                    @click="closeImmersiveView"
+                    class="absolute top-4 left-4 p-2 rounded-full bg-black/50 text-white hover:bg-white/20 transition-colors z-[210]"
                 >
-                    <LinkIcon class="w-4 h-4" />
+                    <X class="w-6 h-6" />
                 </button>
-                <button @click.stop="closeDetail" v-if="!isMobile" class="p-1 hover:bg-gray-200 rounded-md text-gray-500 transition-colors">
-                    <X class="w-4 h-4" />
-                </button>
+
+                <PostMediaCarousel
+                    :post="selectedPost"
+                    layout="immersive"
+                    v-model:currentIndex="currentIndex"
+                    @click-media="isMediaOnly = true"
+                />
             </div>
-        </div>
 
-        <!-- Media Section (Immersive Lightbox) -->
-        <div v-if="showLightbox" class="fixed inset-0 z-[200] bg-black flex items-center justify-center group/carousel pointer-events-auto">
-            <!-- Close Button Overlay (Top-Left) -->
-            <button
-                @click="closeLightbox"
-                class="absolute top-4 left-4 p-2 rounded-full bg-black/50 text-white hover:bg-white/20 transition-colors z-[210]"
-            >
-                <X class="w-6 h-6" />
-            </button>
-
-            <!-- Media Counter -->
+            <!-- Right Side: Details Column -->
             <div
-                v-if="mappedMedia.length > 1"
-                class="absolute top-4 right-4 px-3 py-1 rounded-full bg-black/50 text-white text-sm font-medium z-100 font-mono"
+                v-if="!isMediaOnly"
+                class="w-full md:w-[480px] h-full bg-white border-l border-gray-200 shrink-0 flex flex-col overflow-hidden shadow-2xl pointer-events-auto"
             >
-                {{ currentIndex + 1 }} / {{ mappedMedia.length }}
-            </div>
-
-            <!-- Carousel -->
-            <!-- Carousel -->
-            <div class="w-full h-full overflow-hidden">
-                <swiper
-                    :slides-per-view="1"
-                    :loop="mappedMedia.length > 1"
-                    :initial-slide="currentIndex"
-                    @swiper="onSwiper"
-                    @slideChange="onSlideChange"
-                    class="w-full h-full"
-                >
-                    <swiper-slide
-                        v-for="(media, index) in mappedMedia"
-                        :key="index"
-                        class="flex items-center justify-center bg-transparent"
-                    >
-                        <div class="w-full h-full flex items-center justify-center relative">
-                            <VideoPlayer
-                                v-if="media.type === 'VIDEO'"
-                                :src="media.url || ''"
-                                :poster="media.thumbnail || media.poster || ''"
-                                :subtitles="media.subtitles"
-                                :width="media.width"
-                                :height="media.height"
-                                class="max-h-full max-w-full h-full w-auto"
-                            />
-                            <LivePhotoPlayer
-                                v-else-if="media.type === 'LIVE_PHOTO'"
-                                :src="media.url || ''"
-                                :live-src="media.live_url || ''"
-                                :mime-type="media.mime_type || undefined"
-                                :width="media.width"
-                                :height="media.height"
-                                class="max-h-full max-w-full object-contain"
-                            />
-                            <HeicImage
-                                v-else
-                                :src="media.url || ''"
-                                :mime-type="media.mime_type || undefined"
-                                class="max-h-full max-w-full object-contain"
-                            />
-                        </div>
-                    </swiper-slide>
-                </swiper>
-            </div>
-
-            <!-- Nav Buttons -->
-            <button
-                v-if="mappedMedia.length > 1"
-                class="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 z-100 pointer-events-auto"
-                @click.stop="scrollPrev"
-            >
-                <ChevronLeft class="w-6 h-6" />
-            </button>
-            <button
-                v-if="mappedMedia.length > 1"
-                class="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 z-100 pointer-events-auto"
-                @click.stop="scrollNext"
-            >
-                <ChevronRight class="w-6 h-6" />
-            </button>
-        </div>
-
-        <!-- Info Section -->
-        <div v-if="!showLightbox" class="bg-white flex flex-col shrink-0 relative z-110 flex-1 min-h-0 pointer-events-auto">
-            <div class="flex-1 overflow-y-auto p-6 space-y-6">
-                <!-- Content -->
-                <div class="space-y-4">
-                    <div class="flex items-start justify-between">
-                        <h1 class="text-xl font-bold text-gray-900 leading-tight">
-                            {{ selectedPost.title }}
-                        </h1>
-                        <span class="px-2 py-1 bg-gray-100 rounded text-xs font-medium text-gray-500 uppercase">{{
-                            selectedPost.type
-                        }}</span>
+                <!-- Details Header in Immersive Mode -->
+                <div class="h-14 border-b border-[#e5e5e5] px-4 flex items-center justify-between bg-white shrink-0 z-10">
+                    <div class="flex items-center gap-2 overflow-hidden">
+                        <h2 class="font-semibold text-sm text-gray-700">
+                            {{ $t("common.post_info") }}
+                        </h2>
                     </div>
-
-                    <!-- Media Carousel (Embedded in Content for Standard/Mobile View) -->
-                    <div
-                        v-if="selectedPost.type !== 'TEXT'"
-                        class="w-[calc(100%+3rem)] -mx-6 md:w-full md:mx-0 md:rounded-lg aspect-square md:aspect-4/3 bg-transparent overflow-hidden my-4 cursor-pointer relative group/carousel"
-                        @click="showLightbox = true"
-                    >
-                        <!-- Media Counter (Embedded) -->
-                        <div
-                            v-if="mappedMedia.length > 1"
-                            class="absolute top-4 right-4 px-2 py-0.5 rounded-full bg-black/50 text-white text-[10px] font-medium z-100 font-mono"
-                        >
-                            {{ currentIndex + 1 }} / {{ mappedMedia.length }}
-                        </div>
-
-                        <swiper
-                            :slides-per-view="1"
-                            :loop="mappedMedia.length > 1"
-                            :initial-slide="currentIndex"
-                            @swiper="onSwiper"
-                            @slideChange="onSlideChange"
-                            class="h-full"
-                        >
-                            <swiper-slide
-                                v-for="(media, index) in mappedMedia"
-                                :key="index"
-                                class="bg-transparent flex items-center justify-center"
-                            >
-                                <div class="w-full h-full flex items-center justify-center relative">
-                                    <VideoPlayer
-                                        v-if="media.type === 'VIDEO'"
-                                        :src="media.url || ''"
-                                        :poster="media.thumbnail || media.poster || ''"
-                                        :subtitles="media.subtitles"
-                                        :width="media.width"
-                                        :height="media.height"
-                                        class="w-full h-full"
-                                    />
-                                    <LivePhotoPlayer
-                                        v-else-if="media.type === 'LIVE_PHOTO'"
-                                        :src="
-                                            getOptimizedImageUrl(media.url || '', {
-                                                width: 960,
-                                                fit: 'scale-down',
-                                            })
-                                        "
-                                        :live-src="media.live_url || ''"
-                                        :mime-type="media.mime_type || undefined"
-                                        :width="media.width"
-                                        :height="media.height"
-                                        class="w-full h-full object-cover"
-                                    />
-                                    <HeicImage
-                                        v-else
-                                        :src="
-                                            getOptimizedImageUrl(media.url || '', {
-                                                width: 960,
-                                                fit: 'scale-down',
-                                            })
-                                        "
-                                        :srcset="getOptimizedSrcset(media.url || '', 'detail')"
-                                        sizes="(max-width: 768px) 100vw, 480px"
-                                        :mime-type="media.mime_type || undefined"
-                                        class="w-full h-full object-cover"
-                                    />
-                                </div>
-                            </swiper-slide>
-                        </swiper>
-
-                        <!-- Nav Buttons for Embedded -->
+                    <div class="flex items-center gap-2">
                         <button
-                            v-if="mappedMedia.length > 1"
-                            class="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 z-100 pointer-events-auto"
-                            @click.stop="scrollPrev"
+                            @click="copyLink"
+                            class="p-1 hover:bg-gray-200 rounded-md text-gray-500 transition-colors"
+                            :title="$t('common.copy_link')"
                         >
-                            <ChevronLeft class="w-5 h-5" />
+                            <LinkIcon class="w-4 h-4" />
                         </button>
-                        <button
-                            v-if="mappedMedia.length > 1"
-                            class="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 z-100 pointer-events-auto"
-                            @click.stop="scrollNext"
-                        >
-                            <ChevronRight class="w-5 h-5" />
-                        </button>
-                    </div>
-
-                    <p class="text-sm text-gray-600 leading-relaxed whitespace-pre-line">
-                        {{ selectedPost.description || $t("common.no_description") }}
-                    </p>
-                </div>
-
-                <hr class="border-gray-200" />
-
-                <!-- Metadata Grid -->
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="space-y-1">
-                        <div class="text-[10px] uppercase text-gray-400 font-semibold tracking-wider">
-                            {{ $t("common.author") }}
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <img
-                                v-if="selectedPost.author_avatar_url"
-                                :src="selectedPost.author_avatar_url"
-                                alt="avatar"
-                                class="w-6 h-6 rounded-full object-cover shrink-0"
-                                loading="lazy"
-                            />
-                            <div
-                                v-else
-                                class="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-xs text-gray-500 shrink-0"
-                            >
-                                <User class="w-3 h-3" />
-                            </div>
-                            <span class="text-sm font-medium text-gray-900 truncate">{{ selectedPost.author }}</span>
-                        </div>
-                    </div>
-
-                    <div class="space-y-1">
-                        <div class="text-[10px] uppercase text-gray-400 font-semibold tracking-wider">
-                            {{ $t("common.platform") }}
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <Globe class="w-3 h-3 text-gray-400" />
-                            <span class="text-sm text-gray-900">{{ $t("platforms." + selectedPost.platform) }}</span>
-                        </div>
-                    </div>
-
-                    <div class="space-y-1">
-                        <div class="text-[10px] uppercase text-gray-400 font-semibold tracking-wider">
-                            {{ $t("common.created") }}
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <Calendar class="w-3 h-3 text-gray-400" />
-                            <span class="text-sm text-gray-900">{{ selectedPost.date }}</span>
-                        </div>
-                    </div>
-
-                    <div v-if="selectedPost.type !== 'TEXT'" class="space-y-1">
-                        <div class="text-[10px] uppercase text-gray-400 font-semibold tracking-wider">
-                            {{ $t("common.dimensions") }}
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <FileImage class="w-3 h-3 text-gray-400" />
-                            <span class="text-sm text-gray-900"
-                                >{{ selectedPost.media?.[0]?.width || selectedPost.width }} x
-                                {{ selectedPost.media?.[0]?.height || selectedPost.height }}</span
-                            >
-                        </div>
-                    </div>
-                </div>
-
-                <div v-if="selectedPost.eid || selectedPost.originalUrl" class="space-y-3 pt-2">
-                    <div
-                        v-if="selectedPost.eid"
-                        class="flex items-center justify-between text-sm py-2 px-3 bg-white border border-gray-200 rounded-lg"
-                    >
-                        <span class="text-gray-500">EID</span>
-                        <span class="font-mono text-gray-900">{{ selectedPost.eid }}</span>
-                    </div>
-                    <div
-                        v-if="selectedPost.originalUrl"
-                        class="flex items-center justify-between text-sm py-2 px-3 bg-white border border-gray-200 rounded-lg"
-                    >
-                        <span class="text-gray-500">Source</span>
-                        <a
-                            :href="selectedPost.originalUrl"
-                            target="_blank"
-                            class="text-blue-600 hover:underline truncate max-w-[200px] flex items-center gap-1"
-                        >
-                            Link
-                            <LinkIcon class="w-3 h-3" />
-                        </a>
-                    </div>
-                </div>
-
-                <hr class="border-gray-200" />
-
-                <!-- Tags -->
-                <div class="space-y-3">
-                    <label class="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1">
-                        <Tag class="w-3 h-3" /> {{ $t("common.tags") }}
-                    </label>
-                    <div class="flex flex-wrap gap-2">
-                        <span
-                            v-for="tag in selectedPost.tags"
-                            :key="tag"
-                            class="px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-md text-xs text-gray-700 font-medium hover:bg-gray-100 transition-colors cursor-pointer"
-                        >
-                            #{{ tag }}
-                        </span>
-                        <button
-                            class="px-3 py-1.5 border border-dashed border-gray-300 rounded-md text-xs text-gray-400 hover:text-gray-600 hover:border-gray-400 transition-colors"
-                        >
-                            + {{ $t("common.add_tag") }}
+                        <button @click.stop="closeDetail" class="p-1 hover:bg-gray-200 rounded-md text-gray-500 transition-colors">
+                            <X class="w-4 h-4" />
                         </button>
                     </div>
                 </div>
+
+                <!-- Details Content -->
+                <PostDetailInfo :post="selectedPost" :show-media="false" v-model:currentIndex="currentIndex" />
             </div>
-        </div>
+        </template>
+
+        <!-- STANDARD LAYOUT -->
+        <template v-else>
+            <!-- Standard Header -->
+            <div class="h-14 border-b border-[#e5e5e5] px-4 flex items-center justify-between bg-white shrink-0 z-10 pointer-events-auto">
+                <div class="flex items-center gap-2 overflow-hidden">
+                    <!-- Mobile Back Button -->
+                    <button
+                        v-if="isMobile"
+                        @click="closeDetail"
+                        class="p-1 -ml-1 hover:bg-gray-100 rounded-md text-gray-700 transition-colors"
+                    >
+                        <ChevronLeft class="w-6 h-6" />
+                    </button>
+                    <h2 class="font-semibold text-sm text-gray-700">
+                        {{ $t("common.post_info") }}
+                    </h2>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button
+                        @click="copyLink"
+                        class="p-1 hover:bg-gray-200 rounded-md text-gray-500 transition-colors"
+                        :title="$t('common.copy_link')"
+                    >
+                        <LinkIcon class="w-4 h-4" />
+                    </button>
+                    <button
+                        @click.stop="closeDetail"
+                        v-if="!isMobile"
+                        class="p-1 hover:bg-gray-200 rounded-md text-gray-500 transition-colors"
+                    >
+                        <X class="w-4 h-4" />
+                    </button>
+                </div>
+            </div>
+
+            <!-- Standard Details Content (with embedded media) -->
+            <PostDetailInfo :post="selectedPost" :show-media="true" v-model:currentIndex="currentIndex" @click-media="isMediaOnly = true" />
+        </template>
     </div>
 </template>

@@ -26,11 +26,20 @@
         "classic_search": "Classic Search",
         "ai_search_tooltip": "Enable AI semantic search",
         "classic_search_tooltip": "Perform traditional keyword search only",
-        "settings": "Settings"
+        "settings": "Settings",
+        "immersive_view": "Immersive View",
+        "standard_view": "Standard View",
+        "post_collections": "Post Collections",
+        "media_assets": "Media Assets",
+        "filters": "Filters",
+        "sort_by": "Sort by",
+        "batch_select": "Batch Select"
     },
     "grid": {
         "showing_items": "Showing {count} items",
-        "page_info": "Page {current} of {total}"
+        "page_info": "Page {current} / {total}",
+        "items_per_page": "{count} / page",
+        "items_per_page_label": "Page size"
     },
     "platforms": {
         "XHS": "Rednote",
@@ -56,8 +65,8 @@
         "general": {
             "title": "General Settings",
             "desc": "Basic application preferences and display settings.",
-            "expand_detail": "Expand Detail by Default",
-            "expand_detail_desc": "Automatically expand post details in the feed.",
+            "expand_detail": "Immersive Detail by Default",
+            "expand_detail_desc": "Automatically show post details in immersive mode in the feed.",
             "language": "Interface Language",
             "language_desc": "Select your preferred language.",
             "other_title": "System Tools",

@@ -23,7 +23,8 @@
     },
     "grid": {
         "showing_items": "{count} 件を表示中",
-        "page_info": "{total} ページ中 {current} ページ目"
+        "page_info": "{current} / {total} ページ",
+        "items_per_page": "ページあたり {count} 件"
     },
     "platforms": {
         "XHS": "小紅書 (RED)",

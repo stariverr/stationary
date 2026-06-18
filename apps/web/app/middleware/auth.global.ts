@@ -17,7 +17,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
             return navigateTo("/");
         }
     } catch (e) {
-        console.error('Middleware Error:', e);
+        console.error("Middleware Error:", e);
         if (to.path !== "/login") {
             return navigateTo("/login");
         }

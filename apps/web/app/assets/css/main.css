@@ -114,10 +114,24 @@
 @layer base {
     * {
         @apply border-border outline-ring/50;
-        font-family: ui-sans-serif, Inter Variable, Inter, Google Sans, MiSans VF, MiSans, sans-serif;
+        font-family:
+            ui-sans-serif,
+            Inter Variable,
+            Inter,
+            Google Sans,
+            MiSans VF,
+            MiSans,
+            sans-serif;
     }
 
+    html,
     body {
         @apply bg-background text-foreground;
+        overflow: hidden;
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        overscroll-behavior: none;
     }
 }

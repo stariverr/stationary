@@ -1,8 +1,6 @@
-const trimTrailingSlash = (value: string) =>
-    value.endsWith("/") ? value.slice(0, -1) : value;
+const trimTrailingSlash = (value: string) => (value.endsWith("/") ? value.slice(0, -1) : value);
 
-const trimLeadingSlash = (value: string) =>
-    value.startsWith("/") ? value.slice(1) : value;
+const trimLeadingSlash = (value: string) => (value.startsWith("/") ? value.slice(1) : value);
 
 const stripCloudflareImagePrefix = (pathname: string) => {
     const prefix = "/cdn-cgi/image/";
@@ -43,10 +41,7 @@ export interface ImageOptimizerOptions {
 /**
  * Generates an optimized image URL using Cloudflare Image Resizing or returns the original if bypassed.
  */
-export function getOptimizedImageUrl(
-    url: string | null | undefined,
-    options: ImageOptimizerOptions = {},
-): string {
+export function getOptimizedImageUrl(url: string | null | undefined, options: ImageOptimizerOptions = {}): string {
     if (!url) return "";
 
     // Skip video formats, AVIF source files, and HEIC/HEIF files (Cloudflare Resizing does not support them as source images)
@@ -61,8 +56,7 @@ export function getOptimizedImageUrl(
 
     const config = useRuntimeConfig();
     const provider = config.public.imageProvider || "cloudflare";
-    const configuredCdnBase =
-        typeof config.public.cdnBaseUrl === "string" ? config.public.cdnBaseUrl : "";
+    const configuredCdnBase = typeof config.public.cdnBaseUrl === "string" ? config.public.cdnBaseUrl : "";
     const fallbackOrigin = trimTrailingSlash(configuredCdnBase);
     const assetUrl = resolveAssetUrlParts(url, fallbackOrigin);
 
@@ -90,10 +84,7 @@ export function getOptimizedImageUrl(
 /**
  * Generates the responsive srcset attribute for list (4:3 ratio) or detail view.
  */
-export function getOptimizedSrcset(
-    url: string | null | undefined,
-    type: "list" | "detail",
-): string {
+export function getOptimizedSrcset(url: string | null | undefined, type: "list" | "detail"): string {
     if (!url) return "";
 
     // Skip generating srcset for AVIF and HEIC source files to avoid duplicate entries of same unoptimized URL

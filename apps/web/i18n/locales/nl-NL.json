@@ -23,7 +23,8 @@
     },
     "grid": {
         "showing_items": "{count} items weergeven",
-        "page_info": "Pagina {current} van {total}"
+        "page_info": "Pag. {current} / {total}",
+        "items_per_page": "{count} / pagina"
     },
     "platforms": {
         "XHS": "Rednote",

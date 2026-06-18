@@ -3,7 +3,7 @@ import { useUserStore } from "@/stores/user";
 import { useSession } from "@/lib/auth-client";
 import { watch, onMounted } from "vue";
 
-const { isSidebarOpen, closeSidebar } = useLayout();
+const { isSidebarOpen, isSidebarCollapsed, closeSidebar } = useLayout();
 const route = useRoute();
 
 const userStore = useUserStore();
@@ -30,15 +30,21 @@ onMounted(() => {
 });
 
 // Watch the route path to automatically close the mobile sidebar menu on page change
-watch(() => route.fullPath, () => {
-    closeSidebar();
-});
+watch(
+    () => route.fullPath,
+    () => {
+        closeSidebar();
+    },
+);
 </script>
 
 <template>
     <div class="w-full h-dvh bg-white flex overflow-hidden font-sans text-gray-900">
         <!-- Left Sidebar (Desktop) -->
-        <LeftSidebar class="hidden md:flex w-64 shrink-0" />
+        <LeftSidebar
+            class="hidden md:flex shrink-0 transition-all duration-300 ease-in-out"
+            :class="isSidebarCollapsed ? 'w-0 !px-0 !border-r-0 opacity-0 overflow-hidden pointer-events-none' : 'w-64'"
+        />
 
         <!-- Left Sidebar (Mobile Overlay) -->
         <div v-if="isSidebarOpen" class="fixed inset-0 z-40 flex md:hidden">

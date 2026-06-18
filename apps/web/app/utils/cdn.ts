@@ -2,10 +2,7 @@
  * @deprecated Backend APIs now return complete asset URLs. Keep this only for
  * legacy compatibility; do not use it for new frontend media rendering paths.
  */
-export function cdnPrefix(
-    bucket: string | null | undefined,
-    path: string | null | undefined,
-): string | null {
+export function cdnPrefix(bucket: string | null | undefined, path: string | null | undefined): string | null {
     void bucket;
 
     if (!path) return null;

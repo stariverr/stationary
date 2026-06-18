@@ -1,26 +1,10 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from "vue";
 import type { Post } from "@/types/post";
-import {
-    Play,
-    Loader2,
-    FileImage,
-    Link as LinkIcon,
-    Trash,
-    Clock,
-    CheckCircle2,
-    AlertCircle,
-    Sparkles,
-    RefreshCw,
-} from "@lucide/vue";
+import { Play, Loader2, FileImage, Link as LinkIcon, Trash, Clock, CheckCircle2, AlertCircle, Sparkles, RefreshCw } from "@lucide/vue";
 import { Checkbox } from "@/components/ui/checkbox";
 import { getOptimizedImageUrl, getOptimizedSrcset } from "@/utils/image";
-import {
-    ContextMenu,
-    ContextMenuContent,
-    ContextMenuItem,
-    ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { toast } from "@/components/ui/sonner";
 import { useApi } from "@/composables/useApi";
 import { usePostStore } from "@/stores/posts";
@@ -185,11 +169,7 @@ const getPlatformBadgeClass = (platform: string) => {
                 @mouseleave="handleMouseLeave"
                 @click="emit('click', $event)"
             >
-                <div
-                    v-if="showCheckbox || isHovered"
-                    class="absolute top-4 left-4 z-20"
-                    @click.stop
-                >
+                <div v-if="showCheckbox || isHovered" class="absolute top-4 left-4 z-20" @click.stop>
                     <Checkbox
                         :model-value="isChecked"
                         class="size-5 border-white/80 bg-white/90 shadow-sm data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
@@ -198,17 +178,13 @@ const getPlatformBadgeClass = (platform: string) => {
                     />
                 </div>
 
-                <div
-                    class="relative aspect-4/3 rounded-lg overflow-hidden border border-gray-100 bg-gray-50"
-                >
+                <div class="relative aspect-4/3 rounded-lg overflow-hidden border border-gray-100 bg-gray-50">
                     <!-- Text Card -->
                     <div
                         v-if="post.type === 'TEXT'"
                         class="w-full h-full p-4 flex flex-col justify-center items-center bg-gray-50 text-gray-400"
                     >
-                        <span class="text-xs text-center line-clamp-4">{{
-                            post.description || post.title || "Pure Text"
-                        }}</span>
+                        <span class="text-xs text-center line-clamp-4">{{ post.description || post.title || "Pure Text" }}</span>
                     </div>
 
                     <!-- Image Card -->
@@ -275,10 +251,7 @@ const getPlatformBadgeClass = (platform: string) => {
                         <div
                             class="absolute inset-0 flex items-center justify-center bg-black/10 group-hover:bg-transparent transition-colors pointer-events-none"
                         >
-                            <div
-                                v-if="!isHovered"
-                                class="bg-white/90 p-2 rounded-full shadow-sm backdrop-blur-sm"
-                            >
+                            <div v-if="!isHovered" class="bg-white/90 p-2 rounded-full shadow-sm backdrop-blur-sm">
                                 <Play class="w-4 h-4 text-black fill-black ml-0.5" />
                             </div>
                         </div>
@@ -315,94 +288,80 @@ const getPlatformBadgeClass = (platform: string) => {
                         </span>
                     </div>
 
-                    <h3
-                        class="text-sm font-medium text-gray-900 line-clamp-1 group-hover:text-blue-600 transition-colors mt-0.5"
-                    >
+                    <h3 class="text-sm font-medium text-gray-900 line-clamp-1 group-hover:text-blue-600 transition-colors mt-0.5">
                         {{ post.title }}
                     </h3>
                     <div class="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
                         <span
                             v-if="
-                                post.type !== 'TEXT' &&
-                                (post.media?.[0]?.width || post.width) &&
-                                (post.media?.[0]?.height || post.height)
+                                post.type !== 'TEXT' && (post.media?.[0]?.width || post.width) && (post.media?.[0]?.height || post.height)
                             "
-                            >{{ post.media?.[0]?.width || post.width }}x{{
-                                post.media?.[0]?.height || post.height
-                            }}</span
+                            >{{ post.media?.[0]?.width || post.width }}x{{ post.media?.[0]?.height || post.height }}</span
                         >
                         <span v-if="post.type !== 'TEXT' && post.size">{{ post.size }}</span>
                     </div>
-                    <div class="flex items-center gap-1.5 mt-1">
-                        <!-- Post Sync Status Badge -->
-                        <span
-                            v-if="post.sync_status && post.sync_status !== 'COMPLETED'"
-                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors border"
-                            :class="
-                                post.sync_status === 'IN_PROGRESS'
-                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                    : post.sync_status === 'FAILED'
-                                      ? 'bg-red-50 text-red-700 border-red-200 cursor-help'
-                                      : 'bg-amber-50 text-amber-700 border-amber-200'
-                            "
-                            :title="
-                                post.sync_status === 'FAILED'
-                                    ? post.last_error || 'Unknown Error'
-                                    : undefined
-                            "
-                        >
-                            <Clock v-if="post.sync_status === 'PENDING'" class="size-3" />
-                            <Loader2
+                    <div class="flex items-center gap-2 mt-1">
+                        <!-- Post Sync Status (Low Presence) -->
+                        <template v-if="post.sync_status && post.sync_status !== 'COMPLETED'">
+                            <span
+                                v-if="post.sync_status === 'PENDING'"
+                                class="inline-flex items-center gap-1 text-[10px] font-medium text-gray-400"
+                            >
+                                <Clock class="size-3 shrink-0" />
+                                <span>Pending Sync</span>
+                            </span>
+                            <span
                                 v-else-if="post.sync_status === 'IN_PROGRESS'"
-                                class="size-3 animate-spin"
-                            />
-                            <AlertCircle v-else-if="post.sync_status === 'FAILED'" class="size-3" />
-                            {{ post.sync_status }}
-                        </span>
+                                class="inline-flex items-center gap-1 text-[10px] font-medium text-blue-500 animate-pulse"
+                            >
+                                <Loader2 class="size-3 animate-spin shrink-0" />
+                                <span>Syncing...</span>
+                            </span>
+                            <span
+                                v-else-if="post.sync_status === 'FAILED'"
+                                class="inline-flex items-center gap-1 text-[10px] font-medium text-red-500 cursor-help"
+                                :title="post.last_error || 'Sync failed'"
+                            >
+                                <AlertCircle class="size-3 shrink-0" />
+                                <span>Sync Failed</span>
+                            </span>
+                        </template>
 
-                        <!-- AI Status Badge for the Post's Primary Media -->
-                        <span
-                            v-if="post.media?.[0]?.ai_status"
-                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors border"
-                            :class="
-                                post.media[0].ai_status === 'COMPLETED'
-                                    ? 'bg-purple-50 text-purple-700 border-purple-200'
-                                    : post.media[0].ai_status === 'IN_PROGRESS'
-                                      ? 'bg-indigo-50 text-indigo-700 border-indigo-200 animate-pulse'
-                                      : post.media[0].ai_status === 'FAILED'
-                                        ? 'bg-red-50 text-red-700 border-red-200 cursor-help'
-                                        : 'bg-slate-50 text-slate-700 border-slate-200'
-                            "
-                            :title="
-                                post.media[0].ai_status === 'FAILED'
-                                    ? post.media[0].ai_error || 'Unknown Error'
-                                    : undefined
-                            "
-                        >
-                            <Clock v-if="post.media[0].ai_status === 'PENDING'" class="size-3" />
-                            <Loader2
+                        <!-- AI Status Badge (Low Presence) -->
+                        <template v-if="post.media?.[0]?.ai_status">
+                            <span
+                                v-if="post.media[0].ai_status === 'COMPLETED'"
+                                class="inline-flex items-center gap-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 select-none"
+                            >
+                                <Sparkles class="size-3 text-gray-400 dark:text-gray-500 shrink-0" />
+                                <span>AI Ready</span>
+                            </span>
+                            <span
+                                v-else-if="post.media[0].ai_status === 'PENDING'"
+                                class="inline-flex items-center gap-1 text-[10px] font-medium text-gray-400"
+                            >
+                                <Clock class="size-3 shrink-0" />
+                                <span>AI Pending</span>
+                            </span>
+                            <span
                                 v-else-if="post.media[0].ai_status === 'IN_PROGRESS'"
-                                class="size-3 animate-spin"
-                            />
-                            <AlertCircle
+                                class="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-400 animate-pulse"
+                            >
+                                <Loader2 class="size-3 animate-spin shrink-0" />
+                                <span>Enriching...</span>
+                            </span>
+                            <span
                                 v-else-if="post.media[0].ai_status === 'FAILED'"
-                                class="size-3"
-                            />
-                            <Sparkles v-else class="size-3" />
-                            AI:
-                            {{
-                                post.media[0].ai_status === "COMPLETED"
-                                    ? "Ready"
-                                    : post.media[0].ai_status
-                            }}
-                        </span>
+                                class="inline-flex items-center gap-1 text-[10px] font-medium text-red-400 cursor-help"
+                                :title="post.media[0].ai_error || 'AI Enrichment failed'"
+                            >
+                                <AlertCircle class="size-3 shrink-0" />
+                                <span>AI Failed</span>
+                            </span>
+                        </template>
                     </div>
                     <div class="flex flex-wrap gap-1 mt-2">
-                        <span
-                            v-for="tag in post.tags"
-                            :key="tag"
-                            class="px-1.5 py-0.5 bg-gray-100 text-xs text-gray-600 rounded-md"
-                        >
+                        <span v-for="tag in post.tags" :key="tag" class="px-1.5 py-0.5 bg-gray-100 text-xs text-gray-600 rounded-md">
                             #{{ tag }}
                         </span>
                     </div>
@@ -430,11 +389,7 @@ const getPlatformBadgeClass = (platform: string) => {
                 <RefreshCw v-else class="w-4 h-4" />
                 <span>{{ $t("post.actions.retry_sync", "Retry Sync") }}</span>
             </ContextMenuItem>
-            <ContextMenuItem
-                :disabled="isQueueingAi"
-                class="flex items-center gap-2"
-                @click.stop="handleQueueAi"
-            >
+            <ContextMenuItem :disabled="isQueueingAi" class="flex items-center gap-2" @click.stop="handleQueueAi">
                 <Loader2 v-if="isQueueingAi" class="w-4 h-4 animate-spin" />
                 <Sparkles v-else class="w-4 h-4" />
                 <span>{{ $t("post.actions.queue_ai", "Queue for AI") }}</span>
@@ -443,10 +398,7 @@ const getPlatformBadgeClass = (platform: string) => {
                 <LinkIcon class="w-4 h-4" />
                 <span>{{ $t("common.copy_link", "Copy Link") }}</span>
             </ContextMenuItem>
-            <ContextMenuItem
-                class="flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50"
-                @click.stop="handleDelete"
-            >
+            <ContextMenuItem class="flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50" @click.stop="handleDelete">
                 <Trash class="w-4 h-4" />
                 <span>{{ $t("common.delete", "Delete") }}</span>
             </ContextMenuItem>

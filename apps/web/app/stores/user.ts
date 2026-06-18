@@ -18,6 +18,18 @@ export const useUserStore = defineStore("user", () => {
     const userProfile = ref<BusinessUser | null>(null);
     const isLoading = ref(false);
 
+    if (typeof window !== "undefined") {
+        const stored = localStorage.getItem("expandDetailByDefault");
+        console.log("[useUserStore] Initialized expandDetailByDefault from localStorage:", stored);
+        if (stored !== null) {
+            expandDetailByDefault.value = stored === "true";
+        }
+        watch(expandDetailByDefault, (newVal) => {
+            console.log("[useUserStore] expandDetailByDefault watch fired. New value:", newVal);
+            localStorage.setItem("expandDetailByDefault", String(newVal));
+        });
+    }
+
     const toggleExpandDefault = () => {
         expandDetailByDefault.value = !expandDetailByDefault.value;
     };
