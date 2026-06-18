@@ -122,6 +122,12 @@
             MiSans VF,
             MiSans,
             sans-serif;
+        touch-action: pan-x pan-y; /* Disable global double-tap zoom and pinch zoom, preserve normal scrolling */
+    }
+
+    /* Allow specific components to opt-in to zooming or custom touch behaviors */
+    .allow-zoom {
+        touch-action: auto !important;
     }
 
     html,

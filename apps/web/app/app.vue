@@ -12,35 +12,58 @@ useHead({
 });
 
 onMounted(() => {
-    // 1. 禁止双指/鼠标 wheel 放大 (Ctrl/Cmd + Wheel)
+    // 1. Prevent pinch/wheel zoom (Ctrl/Cmd + Wheel)
     const handleWheel = (e: WheelEvent) => {
         if (e.ctrlKey) {
             e.preventDefault();
         }
     };
 
-    // 2. 禁止手势放大 (gesturestart) - 主要针对 iOS Safari
+    // 2. Prevent gesture zoom (gesturestart) - primarily for iOS Safari
     const handleGestureStart = (e: Event) => {
         e.preventDefault();
     };
 
-    // 3. 禁止双指 touchstart/touchmove 放大
+    // 3. Prevent multi-touch pinch zoom
     const handleTouchStart = (e: TouchEvent) => {
         if (e.touches.length > 1) {
             e.preventDefault();
         }
     };
 
-    // 添加事件监听器，使用 { passive: false } 允许 preventDefault
+    // 4. Prevent double-tap to zoom (touchend)
+    let lastTouchEnd = 0;
+    const handleTouchEnd = (e: TouchEvent) => {
+        const now = Date.now();
+        if (now - lastTouchEnd <= 300) {
+            const target = e.target as HTMLElement | null;
+            if (target) {
+                const tagName = target.tagName.toLowerCase();
+                // Exclude inputs, textareas, selects, and contenteditable elements to keep focus and text selection working normally
+                if (["input", "textarea", "select"].includes(tagName) || target.isContentEditable) {
+                    return;
+                }
+                // Prevent default double-tap to zoom behavior
+                e.preventDefault();
+                // Programmatically dispatch click event to keep fast/double clicking functional on buttons/links
+                target.click();
+            }
+        }
+        lastTouchEnd = now;
+    };
+
+    // Add event listeners with { passive: false } to allow preventDefault
     document.addEventListener("wheel", handleWheel, { passive: false });
     document.addEventListener("gesturestart", handleGestureStart, { passive: false });
     document.addEventListener("touchstart", handleTouchStart, { passive: false });
+    document.addEventListener("touchend", handleTouchEnd, { passive: false });
 
-    // 组件卸载时清理事件监听器
+    // Clean up event listeners when component is unmounted
     onBeforeUnmount(() => {
         document.removeEventListener("wheel", handleWheel);
         document.removeEventListener("gesturestart", handleGestureStart);
         document.removeEventListener("touchstart", handleTouchStart);
+        document.removeEventListener("touchend", handleTouchEnd);
     });
 });
 </script>
