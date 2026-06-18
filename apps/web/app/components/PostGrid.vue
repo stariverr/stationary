@@ -338,7 +338,7 @@ onUnmounted(() => {
         <!-- Collapsible Filter panel -->
         <div
             class="transition-all duration-300 ease-in-out border-b border-[#c2c6d6]/30 bg-[#f9f9ff] flex flex-col shrink-0 overflow-hidden"
-            :class="[showFilters ? 'max-h-[160px] p-5 opacity-100' : 'max-h-0 !py-0 opacity-0 border-b-0']"
+            :class="[showFilters ? 'max-h-[240px] p-5 opacity-100' : 'max-h-0 !py-0 opacity-0 border-b-0']"
         >
             <div class="space-y-4">
                 <!-- Platform pill tags (Horizontal Scrollable list matching Stitch, remove shadow-sm) -->
