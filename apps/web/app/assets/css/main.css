@@ -123,6 +123,34 @@
             MiSans,
             sans-serif;
         touch-action: pan-x pan-y; /* Disable global double-tap zoom and pinch zoom, preserve normal scrolling */
+        -webkit-touch-callout: none; /* Disable default touch callout (link/image preview popup) on iOS by default */
+    }
+
+    /* Disable text selection only on UI widgets, buttons, and list cards to prevent touch conflicts */
+    button,
+    a,
+    svg,
+    i,
+    select,
+    [role="button"],
+    [role="menuitem"],
+    [role="tab"],
+    .select-none,
+    .group.relative.flex.flex-col {
+        -webkit-user-select: none;
+        user-select: none;
+    }
+
+    /* Ensure inputs, textareas, editable containers, and custom selectable nodes allow normal copy-paste/selection */
+    input,
+    textarea,
+    [contenteditable="true"],
+    .selectable,
+    .allow-select,
+    .allow-select * {
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-touch-callout: default;
     }
 
     /* Allow specific components to opt-in to zooming or custom touch behaviors */
