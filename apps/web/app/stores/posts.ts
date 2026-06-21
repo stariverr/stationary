@@ -26,6 +26,18 @@ export const usePostStore = defineStore("posts", () => {
     const source = ref<string | undefined>((route.query.source as string) || undefined);
     const page = ref(parseInt(route.query.page as string) || 1);
     const count = ref(parseInt(route.query.count as string) || 20);
+    const sortBy = ref((route.query.sort_by as string) || "import_time");
+    const sortOrder = ref((route.query.sort_order as string) || "desc");
+    const authorIds = ref<string[]>(
+        (route.query.author_ids as string)
+            ? (route.query.author_ids as string).split(",").filter(Boolean)
+            : (route.query.author_id as string)
+              ? [route.query.author_id as string]
+              : [],
+    );
+    const mediaType = ref<string | undefined>((route.query.media_type as string) || undefined);
+    const authorSearchKeyword = ref("");
+    const authorCache = ref<Record<string, { id: string; nickname: string; platform: string; avatar_url: string | null }>>({});
 
     // Debounce keyword search to prevent spamming backend requests
     let debounceTimeout: any = null;
@@ -43,9 +55,41 @@ export const usePostStore = defineStore("posts", () => {
     });
 
     // Reset page to 1 when search filters change
-    watch(source, () => {
-        page.value = 1;
-    });
+    watch(
+        () => [source.value, sortBy.value, sortOrder.value, [...authorIds.value], mediaType.value],
+        () => {
+            page.value = 1;
+        },
+    );
+
+    // Resolve missing authors in cache
+    watch(
+        [authorIds, () => libraryStore.activeLibraryId],
+        async () => {
+            const missingIds = authorIds.value.filter((id) => !authorCache.value[id]);
+            if (missingIds.length > 0 && libraryStore.activeLibraryId) {
+                try {
+                    const response = await useApi<{
+                        success: boolean;
+                        data: { id: string; nickname: string; platform: string; avatar_url: string | null }[];
+                    }>("/post/authors", {
+                        query: {
+                            library_id: libraryStore.activeLibraryId,
+                            author_ids: missingIds.join(","),
+                        },
+                    });
+                    if (response && response.success && response.data) {
+                        for (const auth of response.data) {
+                            authorCache.value[auth.id] = auth;
+                        }
+                    }
+                } catch (err) {
+                    console.error("Failed to resolve missing authors:", err);
+                }
+            }
+        },
+        { immediate: true, deep: true },
+    );
 
     // Reset page to 1 when library changes
     watch(
@@ -58,8 +102,26 @@ export const usePostStore = defineStore("posts", () => {
     // Synchronize URL query parameters with internal state
     // Synchronize URL query parameters with internal state
     watch(
-        () => ({ keyword: keyword.value, source: source.value, page: page.value, count: count.value }),
-        ({ keyword: newKeyword, source: newSource, page: newPage, count: newCount }) => {
+        () => ({
+            keyword: keyword.value,
+            source: source.value,
+            page: page.value,
+            count: count.value,
+            sort_by: sortBy.value,
+            sort_order: sortOrder.value,
+            author_ids: authorIds.value.length ? authorIds.value.join(",") : undefined,
+            media_type: mediaType.value,
+        }),
+        ({
+            keyword: newKeyword,
+            source: newSource,
+            page: newPage,
+            count: newCount,
+            sort_by: newSortBy,
+            sort_order: newSortOrder,
+            author_ids: newAuthorIds,
+            media_type: newMediaType,
+        }) => {
             const query = { ...route.query };
             let changed = false;
 
@@ -86,6 +148,15 @@ export const usePostStore = defineStore("posts", () => {
             updateParam("source", newSource);
             updateParam("page", newPage && newPage > 1 ? newPage.toString() : undefined);
             updateParam("count", newCount && newCount !== 20 ? newCount.toString() : undefined);
+            updateParam("sort_by", newSortBy === "import_time" ? undefined : newSortBy);
+            updateParam("sort_order", newSortOrder === "desc" ? undefined : newSortOrder);
+            updateParam("author_ids", newAuthorIds);
+            updateParam("media_type", newMediaType);
+
+            if (query.author_id !== undefined) {
+                delete query.author_id;
+                changed = true;
+            }
 
             if (changed) {
                 router.push({ query });
@@ -116,6 +187,23 @@ export const usePostStore = defineStore("posts", () => {
             const queryCount = parseInt(newQuery.count as string) || 20;
             if (queryCount !== count.value) {
                 count.value = queryCount;
+            }
+            const querySortBy = (newQuery.sort_by as string) || "import_time";
+            if (querySortBy !== sortBy.value) {
+                sortBy.value = querySortBy;
+            }
+            const querySortOrder = (newQuery.sort_order as string) || "desc";
+            if (querySortOrder !== sortOrder.value) {
+                sortOrder.value = querySortOrder;
+            }
+            const queryAuthorIds = (newQuery.author_ids as string) || (newQuery.author_id as string) || "";
+            const parsedAuthorIds = queryAuthorIds ? queryAuthorIds.split(",").filter(Boolean) : [];
+            if (JSON.stringify(parsedAuthorIds) !== JSON.stringify(authorIds.value)) {
+                authorIds.value = parsedAuthorIds;
+            }
+            const queryMediaType = (newQuery.media_type as string) || undefined;
+            if (queryMediaType !== mediaType.value) {
+                mediaType.value = queryMediaType;
             }
         },
         { deep: true },
@@ -199,6 +287,10 @@ export const usePostStore = defineStore("posts", () => {
                 keyword: searchKeyword.value,
                 source: source.value,
                 library_id: libraryStore.activeLibraryId,
+                sort_by: sortBy.value,
+                sort_order: sortOrder.value,
+                author_ids: authorIds.value.join(","),
+                media_type: mediaType.value,
             },
         ]),
         enabled: isListEnabled,
@@ -214,6 +306,10 @@ export const usePostStore = defineStore("posts", () => {
                     keyword: searchKeyword.value,
                     source: source.value,
                     library_id: libraryStore.activeLibraryId,
+                    sort_by: sortBy.value,
+                    sort_order: sortOrder.value,
+                    author_ids: authorIds.value.join(","),
+                    media_type: mediaType.value,
                 },
             });
             if (response && response.success && response.data) {
@@ -225,6 +321,32 @@ export const usePostStore = defineStore("posts", () => {
             return { list: [], total: 0 };
         },
     });
+
+    // TanStack Query for Authors List
+    const { data: authorsData } = useQuery({
+        queryKey: computed(() => ["authors", libraryStore.activeLibraryId, authorSearchKeyword.value]),
+        enabled: computed(() => !!libraryStore.activeLibraryId && isListEnabled.value),
+        queryFn: async () => {
+            const response = await useApi<{
+                success: boolean;
+                data: { id: string; nickname: string; platform: string; avatar_url: string | null }[];
+            }>("/post/authors", {
+                query: {
+                    library_id: libraryStore.activeLibraryId,
+                    keyword: authorSearchKeyword.value || undefined,
+                },
+            });
+            if (response && response.success && response.data) {
+                for (const auth of response.data) {
+                    authorCache.value[auth.id] = auth;
+                }
+                return response.data;
+            }
+            return [];
+        },
+    });
+
+    const authors = computed(() => authorsData.value || []);
 
     const isLoadingPosts = computed(() => isLoadingPostsQuery.value);
 
@@ -349,12 +471,19 @@ export const usePostStore = defineStore("posts", () => {
         source,
         page,
         count,
+        sortBy,
+        sortOrder,
+        authorIds,
+        mediaType,
+        authorSearchKeyword,
+        authorCache,
         // Computed
         posts,
         total,
         selectedPost,
         isLoadingPosts,
         isLoadingDetail,
+        authors,
         // Actions
         selectPost,
         refetchPosts,

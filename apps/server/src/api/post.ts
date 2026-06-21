@@ -20,8 +20,9 @@ import {
     EntityType,
     Author,
     SyncStatus,
+    MediaType,
 } from "@/db/schema";
-import { and, eq, ilike, SQL, count, asc, sql, isNull, inArray, lte } from "drizzle-orm";
+import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lte, exists } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Temporal } from "@js-temporal/polyfill";
 import { RecycleService } from "@/services/recycle";
@@ -30,14 +31,8 @@ import { buildCdnUrl } from "@/lib/utils/cdn";
 import { toIsoTimestamp } from "@/lib/utils/time";
 
 const router = new Hono();
-const activePostFilter = and(
-    eq(Post.delete_status, DeleteStatus.ACTIVE),
-    isNull(Post.recycle_time),
-);
-const activeMediaFilter = and(
-    eq(Media.delete_status, DeleteStatus.ACTIVE),
-    isNull(Media.recycle_time),
-);
+const activePostFilter = and(eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time));
+const activeMediaFilter = and(eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time));
 
 /** Post List Request Body Schema */
 export const PostListRequestBodySchema = z.object({
@@ -48,16 +43,14 @@ export const PostListRequestBodySchema = z.object({
     ),
     count: z.preprocess(
         (val) => (val === "" || val === undefined ? undefined : Number(val)),
-        z
-            .number()
-            .int()
-            .positive()
-            .gte(10, "Count must be 10 or greater.")
-            .lte(100, "Count must be 100 or less.")
-            .optional(),
+        z.number().int().positive().gte(10, "Count must be 10 or greater.").lte(100, "Count must be 100 or less.").optional(),
     ),
     keyword: z.string().optional(),
     source: z.enum(PostSource).optional(),
+    sort_by: z.enum(["import_time", "published_time"]).optional(),
+    sort_order: z.enum(["asc", "desc"]).optional(),
+    author_ids: z.string().optional(),
+    media_type: z.nativeEnum(MediaType).optional(),
 });
 
 // Post List
@@ -81,6 +74,10 @@ router.get(
 
         const keyword = c.req.valid("query").keyword;
         const source = c.req.valid("query").source;
+        const sortBy = c.req.valid("query").sort_by ?? "published_time";
+        const sortOrder = c.req.valid("query").sort_order ?? "desc";
+        const authorIdsStr = c.req.valid("query").author_ids;
+        const mediaType = c.req.valid("query").media_type;
 
         const where: SQL[] = [];
 
@@ -92,8 +89,39 @@ router.get(
         if (source) {
             where.push(eq(Post.source, source));
         }
+        if (authorIdsStr) {
+            const authorIds = authorIdsStr.split(",").filter((id) => id.trim().length > 0);
+            if (authorIds.length > 0) {
+                where.push(inArray(Post.author_id, authorIds));
+            }
+        }
+        if (mediaType) {
+            where.push(
+                exists(
+                    db
+                        .select()
+                        .from(Media)
+                        .where(
+                            and(
+                                eq(Media.post_id, Post.id),
+                                eq(Media.type, mediaType),
+                                eq(Media.delete_status, DeleteStatus.ACTIVE),
+                                isNull(Media.recycle_time),
+                            ),
+                        ),
+                ),
+            );
+        }
 
         const authorAvatarFile = alias(DbFile, "author_avatar_file");
+
+        let orderColumn: any;
+        if (sortBy === "import_time") {
+            orderColumn = Post.create_time;
+        } else {
+            orderColumn = sql`coalesce(${Post.published_time}, ${Post.create_time})`;
+        }
+        const orderByExpr = sortOrder === "asc" ? asc(orderColumn) : desc(orderColumn);
 
         const rawPosts = await db
             .select({
@@ -115,7 +143,7 @@ router.get(
             .leftJoin(Author, eq(Post.author_id, Author.id))
             .leftJoin(authorAvatarFile, eq(Author.avatar_file_id, authorAvatarFile.id))
             .where(and(activePostFilter, ...where))
-            .orderBy(asc(sql`coalesce(${Post.published_time}, ${Post.create_time})`))
+            .orderBy(orderByExpr)
             .limit(pageSize)
             .offset(offset);
 
@@ -160,12 +188,7 @@ router.get(
                         last_error: AssetAiMetadata.last_error,
                     })
                     .from(AssetAiMetadata)
-                    .where(
-                        and(
-                            inArray(AssetAiMetadata.entity_id, allMediaIds),
-                            eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
-                        ),
-                    );
+                    .where(and(inArray(AssetAiMetadata.entity_id, allMediaIds), eq(AssetAiMetadata.entity_type, EntityType.MEDIA)));
 
                 for (const meta of aiMetadatas) {
                     const existing = aiMetadataMap.get(meta.entity_id);
@@ -274,6 +297,70 @@ router.get(
                 total: total[0].total,
             }),
         );
+    },
+);
+
+router.get(
+    "/authors",
+    requireAuth,
+    validator("query", (value, c) => {
+        const schema = z.object({
+            library_id: z.uuid(),
+            keyword: z.string().optional(),
+            author_ids: z.string().optional(),
+        });
+        const parsed = schema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(error(Code.INVALID_PARAMETER, "Invalid request parameters"), 400);
+        }
+        return parsed.data;
+    }),
+    async (c) => {
+        const { library_id, keyword, author_ids } = c.req.valid("query");
+
+        const whereClause: SQL[] = [
+            eq(Post.library_id, library_id),
+            eq(Post.delete_status, DeleteStatus.ACTIVE),
+            isNull(Post.recycle_time),
+            eq(Author.delete_status, DeleteStatus.ACTIVE),
+        ];
+
+        if (keyword) {
+            whereClause.push(ilike(Author.nickname, `%${keyword}%`));
+        }
+
+        if (author_ids) {
+            const ids = author_ids.split(",").filter((id) => id.trim().length > 0);
+            if (ids.length > 0) {
+                whereClause.push(inArray(Author.id, ids));
+            }
+        }
+
+        const authorList = await db
+            .select({
+                id: Author.id,
+                nickname: Author.nickname,
+                platform: Author.platform,
+                avatar_file_id: Author.avatar_file_id,
+                avatar_bucket: DbFile.bucket,
+                avatar_path: DbFile.path,
+            })
+            .from(Author)
+            .innerJoin(Post, eq(Post.author_id, Author.id))
+            .leftJoin(DbFile, eq(Author.avatar_file_id, DbFile.id))
+            .where(and(...whereClause))
+            .groupBy(Author.id, Author.nickname, Author.platform, Author.avatar_file_id, DbFile.bucket, DbFile.path)
+            .orderBy(asc(Author.nickname))
+            .limit(50);
+
+        const result = authorList.map((auth) => ({
+            id: auth.id,
+            nickname: auth.nickname,
+            platform: auth.platform,
+            avatar_url: auth.avatar_path ? buildCdnUrl(auth.avatar_bucket, auth.avatar_path) : null,
+        }));
+
+        return c.json(success(Code.SUCCESS, result));
     },
 );
 
@@ -414,12 +501,7 @@ router.get(
                     last_error: AssetAiMetadata.last_error,
                 })
                 .from(AssetAiMetadata)
-                .where(
-                    and(
-                        inArray(AssetAiMetadata.entity_id, allMediaIds),
-                        eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
-                    ),
-                );
+                .where(and(inArray(AssetAiMetadata.entity_id, allMediaIds), eq(AssetAiMetadata.entity_type, EntityType.MEDIA)));
 
             for (const meta of aiMetadatas) {
                 const existing = aiMetadataMap.get(meta.entity_id);
@@ -495,10 +577,7 @@ router.get(
             description: postData.description,
             tags: postData.tags,
             author_name: postData.author_name,
-            author_avatar_url: buildCdnUrl(
-                postData.author_avatar_bucket,
-                postData.author_avatar_path,
-            ),
+            author_avatar_url: buildCdnUrl(postData.author_avatar_bucket, postData.author_avatar_path),
             author_external_id: postData.author_external_id,
             create_time: toIsoTimestamp(postData.create_time) ?? undefined,
             published_time: toIsoTimestamp(postData.published_time),

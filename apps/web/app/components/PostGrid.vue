@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Post } from "@/types/post";
 import {
+    Check,
     CheckSquare,
     ChevronLeft,
     ChevronRight,
@@ -12,15 +13,34 @@ import {
     MoreHorizontal,
     Filter,
     ChevronDown,
+    User,
 } from "@lucide/vue";
-import { useDebounceFn } from "@vueuse/core";
+import { useDebounceFn, onClickOutside } from "@vueuse/core";
 import { PaginationRoot, PaginationList, PaginationListItem, PaginationPrev, PaginationNext, PaginationEllipsis } from "reka-ui";
 import { Button } from "@/components/ui/button";
 import { NumberField, NumberFieldInput } from "@/components/ui/number-field";
 import { useVisualViewportBottomOffset } from "@/composables/useVisualViewportBottomOffset";
 import { useLibraryStore } from "@/stores/library";
 
-const { posts, selectedPostId, selectPost, fetchPosts, isLoading, keyword, source, total, page, count } = usePosts();
+const {
+    posts,
+    selectedPostId,
+    selectPost,
+    fetchPosts,
+    isLoading,
+    keyword,
+    source,
+    total,
+    page,
+    count,
+    sortBy,
+    sortOrder,
+    authorIds,
+    mediaType,
+    authors,
+    authorSearchKeyword,
+    authorCache,
+} = usePosts();
 const { toggleSidebar } = useLayout();
 const libraryStore = useLibraryStore();
 const { isMultiSelectClick } = useMultiSelectModifier();
@@ -45,8 +65,83 @@ const areAllVisiblePostsSelected = computed(
     () => visiblePostIds.value.length > 0 && visiblePostIds.value.every((id) => selectedPostIds.value.has(id)),
 );
 
+const sortValue = computed({
+    get: () => `${sortBy.value}_${sortOrder.value}`,
+    set: (val) => {
+        const parts = val.split("_");
+        const order = parts.pop() || "desc";
+        const by = parts.join("_");
+        sortBy.value = by;
+        sortOrder.value = order;
+    },
+});
+
+const showAuthorDropdown = ref(false);
+const authorDropdownRef = ref<HTMLElement | null>(null);
+const localAuthorSearch = ref("");
+
+const debounceSearchAuthor = useDebounceFn((val: string) => {
+    authorSearchKeyword.value = val;
+}, 300);
+
+watch(localAuthorSearch, (newVal) => {
+    debounceSearchAuthor(newVal);
+});
+
+onClickOutside(authorDropdownRef, () => {
+    showAuthorDropdown.value = false;
+});
+
+const toggleAuthor = (id: string) => {
+    const index = authorIds.value.indexOf(id);
+    if (index > -1) {
+        authorIds.value = authorIds.value.filter((aid) => aid !== id);
+    } else {
+        authorIds.value = [...authorIds.value, id];
+    }
+};
+
+const removeAuthor = (id: string) => {
+    authorIds.value = authorIds.value.filter((aid) => aid !== id);
+};
+
+const getAuthorName = (id: string) => {
+    const auth = authorCache.value[id];
+    return auth ? auth.nickname : "Loading...";
+};
+
+const getAuthorPlatform = (id: string) => {
+    const auth = authorCache.value[id];
+    return auth ? auth.platform : "";
+};
+
+const getPlatformStyle = (platform: string) => {
+    switch (platform) {
+        case "XHS":
+            return "bg-red-50 text-red-600 border border-red-100/60";
+        case "DOUYIN":
+            return "bg-slate-900/5 text-slate-800 border border-slate-200/50";
+        case "BILIBILI":
+            return "bg-pink-50 text-pink-600 border border-pink-100/60";
+        case "X":
+            return "bg-slate-100 text-slate-700 border border-slate-200/60";
+        case "TIKTOK":
+            return "bg-teal-50 text-teal-700 border border-teal-100/60";
+        case "INSTAGRAM":
+            return "bg-purple-50 text-purple-600 border border-purple-100/60";
+        case "YOUTUBE":
+            return "bg-rose-50 text-rose-600 border border-rose-100/60";
+        default:
+            return "bg-slate-100 text-slate-500 border border-slate-200/40";
+    }
+};
+
+const hasActiveFilters = computed(() => {
+    return !!source.value || authorIds.value.length > 0 || !!mediaType.value;
+});
+
 watch(
-    () => [keyword.value, source.value, libraryStore.activeLibraryId],
+    () => [keyword.value, source.value, sortBy.value, sortOrder.value, [...authorIds.value], mediaType.value, libraryStore.activeLibraryId],
     () => {
         exitSelectionMode();
     },
@@ -315,7 +410,7 @@ onUnmounted(() => {
                 <button
                     @click="showFilters = !showFilters"
                     :class="[
-                        showFilters || source
+                        showFilters || hasActiveFilters
                             ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300'
                             : 'bg-white border-slate-200/80 text-slate-600 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900',
                     ]"
@@ -324,7 +419,7 @@ onUnmounted(() => {
                 >
                     <Filter class="w-3.5 h-3.5" />
                     <span class="hidden lg:inline">{{ $t("common.filters", "Filters") }}</span>
-                    <span v-if="source" class="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                    <span v-if="hasActiveFilters" class="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
                 </button>
 
                 <!-- Action Toolbar Divider -->
@@ -364,8 +459,8 @@ onUnmounted(() => {
         </div>
 
         <div
-            class="sticky top-15 sm:top-14 z-20 transition-all duration-300 ease-in-out border-b border-[#c2c6d6]/30 bg-[#f9f9ff] flex flex-col shrink-0 overflow-hidden"
-            :class="[showFilters ? 'max-h-90 p-5 opacity-100' : 'max-h-0 py-0! opacity-0 border-b-0']"
+            class="sticky top-15 sm:top-14 z-20 transition-all duration-300 ease-in-out border-b border-[#c2c6d6]/30 bg-[#f9f9ff] flex flex-col shrink-0"
+            :class="[showFilters ? 'max-h-90 p-5 opacity-100 overflow-visible' : 'max-h-0 py-0! opacity-0 border-b-0 overflow-hidden']"
         >
             <div class="space-y-4">
                 <!-- Platform pill tags (Horizontal Scrollable list matching Stitch, remove shadow-sm) -->
@@ -395,30 +490,173 @@ onUnmounted(() => {
                         <span class="text-[#424754] font-semibold select-none">{{ $t("common.sort_by", "Sort by") }}:</span>
                         <div class="relative">
                             <select
-                                class="appearance-none bg-white border border-[#c2c6d6]/60 hover:border-[#c2c6d6]/80 text-[#151c27] rounded-lg py-1.5 pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#0058be]/10 cursor-pointer transition-all"
+                                v-model="sortValue"
+                                class="h-9 appearance-none bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-lg pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/10 cursor-pointer transition-all shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
                             >
-                                <option>Latest</option>
-                                <option>Oldest</option>
+                                <option value="import_time_desc">
+                                    {{ $t("common.sort_import_time_desc", "Import Time (New -> Old)") }}
+                                </option>
+                                <option value="import_time_asc">{{ $t("common.sort_import_time_asc", "Import Time (Old -> New)") }}</option>
+                                <option value="published_time_desc">
+                                    {{ $t("common.sort_published_time_desc", "Creation Time (New -> Old)") }}
+                                </option>
+                                <option value="published_time_asc">
+                                    {{ $t("common.sort_published_time_asc", "Creation Time (Old -> New)") }}
+                                </option>
                             </select>
                             <ChevronDown
-                                class="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                                class="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
                             />
+                        </div>
+                    </div>
+
+                    <!-- Author Dropdown -->
+                    <div ref="authorDropdownRef" class="flex items-center gap-2 relative">
+                        <span class="text-[#424754] font-semibold select-none">{{ $t("common.author", "Author") }}:</span>
+                        <div class="relative">
+                            <button
+                                @click="showAuthorDropdown = !showAuthorDropdown"
+                                type="button"
+                                class="flex items-center flex-wrap gap-1.5 bg-white hover:bg-slate-50/10 border border-slate-200 hover:border-slate-300 text-[#151c27] rounded-lg py-2 px-2.5 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#0058be]/10 cursor-pointer transition-all select-none min-h-9 min-w-48 max-w-md w-auto shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                            >
+                                <div class="flex items-center gap-1.5 pl-1 pr-1 py-0.5 text-slate-500 shrink-0 select-none">
+                                    <User class="w-3.5 h-3.5 text-slate-400" />
+                                    <span v-if="authorIds.length === 0" class="text-slate-700 font-semibold">{{
+                                        $t("common.all_authors", "All Authors")
+                                    }}</span>
+                                </div>
+                                <div v-if="authorIds.length > 0" class="flex flex-wrap gap-1.5 items-center">
+                                    <template v-if="authorIds.length <= 2">
+                                        <span
+                                            v-for="id in authorIds"
+                                            :key="id"
+                                            class="inline-flex items-center gap-1.5 bg-slate-100/90 border border-slate-200/50 text-slate-700 pl-2 pr-1 py-1 rounded text-xs font-semibold transition-all hover:bg-slate-200/50 hover:text-slate-900"
+                                            @click.stop
+                                        >
+                                            <span class="truncate max-w-16 text-slate-800">{{ getAuthorName(id) }}</span>
+                                            <span
+                                                class="text-[9px] leading-3 font-bold border px-1 py-px rounded scale-95 origin-left shrink-0 animate-in fade-in"
+                                                :class="getPlatformStyle(getAuthorPlatform(id))"
+                                            >
+                                                {{ $t(`platforms.${getAuthorPlatform(id)}`, getAuthorPlatform(id)) }}
+                                            </span>
+                                            <span
+                                                @click.stop="removeAuthor(id)"
+                                                class="text-slate-400 hover:text-slate-600 transition-all hover:bg-slate-200/80 p-0.5 rounded cursor-pointer shrink-0"
+                                            >
+                                                <X class="w-3 h-3 stroke-[2.5]" />
+                                            </span>
+                                        </span>
+                                    </template>
+                                    <template v-else>
+                                        <span
+                                            class="bg-blue-50 border border-blue-100 text-blue-600 px-2 py-0.5 rounded text-[11px] font-bold shrink-0 animate-in fade-in"
+                                        >
+                                            {{
+                                                $t("common.n_authors_selected", { count: authorIds.length }, `${authorIds.length} Selected`)
+                                            }}
+                                        </span>
+                                    </template>
+                                </div>
+                                <ChevronDown class="w-3.5 h-3.5 text-slate-400 shrink-0 ml-auto mr-1" />
+                            </button>
+
+                            <!-- Combobox Dropdown Card -->
+                            <div
+                                v-if="showAuthorDropdown"
+                                class="absolute left-0 mt-1.5 w-64 bg-white/95 backdrop-blur-md border border-slate-200/80 rounded-xl shadow-[0_12px_30px_-4px_rgba(15,23,42,0.08),0_4px_12px_-2px_rgba(15,23,42,0.03)] z-40 p-1.5 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200"
+                            >
+                                <div
+                                    class="flex items-center border border-slate-200/60 rounded-md bg-slate-50/50 px-2 h-8 gap-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/5 transition-all"
+                                >
+                                    <Search class="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                    <input
+                                        v-model="localAuthorSearch"
+                                        type="text"
+                                        :placeholder="$t('common.search_authors_placeholder', 'Search authors...')"
+                                        class="w-full text-xs font-semibold bg-transparent border-0 outline-none text-slate-700 placeholder:text-slate-400"
+                                    />
+                                    <button
+                                        v-if="localAuthorSearch"
+                                        @click="localAuthorSearch = ''"
+                                        type="button"
+                                        class="text-slate-400 hover:text-slate-600 cursor-pointer p-0.5 rounded-full hover:bg-slate-100"
+                                    >
+                                        <X class="w-3 h-3" />
+                                    </button>
+                                </div>
+                                <div class="max-h-48 overflow-y-auto flex flex-col gap-0.5 pr-0.5 scrollbar-thin">
+                                    <div
+                                        v-for="author in authors"
+                                        :key="author.id"
+                                        @click="toggleAuthor(author.id)"
+                                        class="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer select-none transition-colors group"
+                                    >
+                                        <div class="flex items-center gap-2 min-w-0">
+                                            <div
+                                                class="w-3.5 h-3.5 rounded flex items-center justify-center border shrink-0 transition-all duration-150"
+                                                :class="[
+                                                    authorIds.includes(author.id)
+                                                        ? 'border-blue-600 bg-blue-600 text-white'
+                                                        : 'border-slate-300 bg-white group-hover:border-slate-400/80',
+                                                ]"
+                                            >
+                                                <Check v-if="authorIds.includes(author.id)" class="w-2.5 h-2.5 stroke-3" />
+                                            </div>
+                                            <span class="text-xs font-semibold text-slate-700 truncate">
+                                                {{ author.nickname }}
+                                            </span>
+                                        </div>
+                                        <span
+                                            class="text-[9px] font-bold border px-1.5 py-0.5 rounded shrink-0 ml-2 shadow-[0_1px_1px_rgba(0,0,0,0.01)] transition-colors duration-150"
+                                            :class="getPlatformStyle(author.platform)"
+                                        >
+                                            {{ $t(`platforms.${author.platform}`, author.platform) }}
+                                        </span>
+                                    </div>
+                                    <div
+                                        v-if="authors.length === 0"
+                                        class="text-center py-4 text-xs text-slate-400 font-medium select-none"
+                                    >
+                                        {{ $t("common.no_authors_found", "No authors found") }}
+                                    </div>
+                                </div>
+                                <div
+                                    v-if="authorIds.length > 0"
+                                    class="border-t border-slate-100 pt-1.5 px-1 pb-0.5 shrink-0 flex items-center justify-between"
+                                >
+                                    <span class="text-[9px] text-slate-400 font-semibold pl-1 select-none">
+                                        已选 {{ authorIds.length }} 位
+                                    </span>
+                                    <button
+                                        @click="authorIds = []"
+                                        type="button"
+                                        class="text-[10px] font-bold text-rose-500 hover:text-rose-600 hover:bg-rose-50/50 px-2 py-0.5 rounded transition-colors cursor-pointer"
+                                    >
+                                        {{ $t("common.clear_all", "Clear") }}
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
                     <!-- Media Type Dropdown -->
                     <div class="flex items-center gap-2">
-                        <span class="text-[#424754] font-semibold select-none">Media Type:</span>
+                        <span class="text-[#424754] font-semibold select-none">{{ $t("common.media_type", "Media Type") }}:</span>
                         <div class="relative">
                             <select
-                                class="appearance-none bg-white border border-[#c2c6d6]/60 hover:border-[#c2c6d6]/80 text-[#151c27] rounded-lg py-1.5 pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#0058be]/10 cursor-pointer transition-all"
+                                v-model="mediaType"
+                                class="h-9 appearance-none bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-lg pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/10 cursor-pointer transition-all shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
                             >
-                                <option>All Types</option>
-                                <option>Video Only</option>
-                                <option>Image Only</option>
+                                <option :value="undefined">{{ $t("common.all_media_types", "All Types") }}</option>
+                                <option value="IMAGE">{{ $t("common.media_type_image", "Image") }}</option>
+                                <option value="VIDEO">{{ $t("common.media_type_video", "Video") }}</option>
+                                <option value="LIVE_PHOTO">{{ $t("common.media_type_live_photo", "Live Photo") }}</option>
+                                <option value="AUDIO">{{ $t("common.media_type_audio", "Audio") }}</option>
+                                <option value="PDF">{{ $t("common.media_type_pdf", "PDF") }}</option>
                             </select>
                             <ChevronDown
-                                class="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                                class="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
                             />
                         </div>
                     </div>
@@ -429,14 +667,14 @@ onUnmounted(() => {
                         <div class="relative">
                             <select
                                 v-model="pageSize"
-                                class="appearance-none bg-white border border-[#c2c6d6]/60 hover:border-[#c2c6d6]/80 text-[#151c27] rounded-lg py-1.5 pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#0058be]/10 cursor-pointer transition-all"
+                                class="h-9 appearance-none bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-lg pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/10 cursor-pointer transition-all shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
                             >
                                 <option :value="20">20</option>
                                 <option :value="50">50</option>
                                 <option :value="100">100</option>
                             </select>
                             <ChevronDown
-                                class="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                                class="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
                             />
                         </div>
                     </div>
