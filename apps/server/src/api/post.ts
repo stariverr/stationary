@@ -591,6 +591,7 @@ router.get(
             sync_status: postData.sync_status,
             last_error: postData.last_error,
             media: mediaResponses,
+            url: postData.url,
         };
 
         return c.json(success(Code.SUCCESS, result));
