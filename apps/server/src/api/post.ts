@@ -308,6 +308,7 @@ router.get(
             library_id: z.uuid(),
             keyword: z.string().optional(),
             author_ids: z.string().optional(),
+            platform: z.string().optional(),
         });
         const parsed = schema.safeParse(value);
         if (!parsed.success) {
@@ -316,7 +317,7 @@ router.get(
         return parsed.data;
     }),
     async (c) => {
-        const { library_id, keyword, author_ids } = c.req.valid("query");
+        const { library_id, keyword, author_ids, platform } = c.req.valid("query");
 
         const whereClause: SQL[] = [
             eq(Post.library_id, library_id),
@@ -334,6 +335,10 @@ router.get(
             if (ids.length > 0) {
                 whereClause.push(inArray(Author.id, ids));
             }
+        }
+
+        if (platform) {
+            whereClause.push(eq(Author.platform, platform as any));
         }
 
         const authorList = await db

@@ -99,6 +99,16 @@ export const usePostStore = defineStore("posts", () => {
         },
     );
 
+    // Filter out author selections when platform (source) changes
+    watch(source, (newSource) => {
+        if (newSource) {
+            authorIds.value = authorIds.value.filter((id) => {
+                const author = authorCache.value[id];
+                return !author || author.platform === newSource;
+            });
+        }
+    });
+
     // Synchronize URL query parameters with internal state
     // Synchronize URL query parameters with internal state
     watch(
@@ -324,7 +334,7 @@ export const usePostStore = defineStore("posts", () => {
 
     // TanStack Query for Authors List
     const { data: authorsData } = useQuery({
-        queryKey: computed(() => ["authors", libraryStore.activeLibraryId, authorSearchKeyword.value]),
+        queryKey: computed(() => ["authors", libraryStore.activeLibraryId, authorSearchKeyword.value, source.value]),
         enabled: computed(() => !!libraryStore.activeLibraryId && isListEnabled.value),
         queryFn: async () => {
             const response = await useApi<{
@@ -334,6 +344,7 @@ export const usePostStore = defineStore("posts", () => {
                 query: {
                     library_id: libraryStore.activeLibraryId,
                     keyword: authorSearchKeyword.value || undefined,
+                    platform: source.value || undefined,
                 },
             });
             if (response && response.success && response.data) {
