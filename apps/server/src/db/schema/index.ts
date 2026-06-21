@@ -147,7 +147,7 @@ export const Author = pgTable(
         delete_time: temporal("delete_time"),
         delete_status: DeleteStatusEnum("delete_status").default(DeleteStatus.ACTIVE).notNull(),
     },
-    (table) => [uniqueIndex("author_platform_eid_active_unique").on(table.platform, table.eid).where(sql`delete_status = 'ACTIVE'`)],
+    (table) => [uniqueIndex("author_platform_eid_unique").on(table.platform, table.eid)],
 );
 
 export const Library = pgTable("library", {
