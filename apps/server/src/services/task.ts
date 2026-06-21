@@ -163,37 +163,28 @@ export const TaskService = {
         let authorId: string | null = null;
         if (postData.author.external_id && postData.platform) {
             try {
-                let author = await db.query.Author.findFirst({
-                    where: {
+                const results = await db
+                    .insert(Author)
+                    .values({
                         eid: postData.author.external_id,
+                        short_eid: postData.author.short_id || "",
+                        nickname: postData.author.name,
                         platform: postData.platform,
-                    },
-                });
-
-                if (!author) {
-                    const results = await db
-                        .insert(Author)
-                        .values({
-                            eid: postData.author.external_id,
-                            short_eid: postData.author.short_id || "",
+                    })
+                    .onConflictDoUpdate({
+                        target: [Author.platform, Author.eid],
+                        set: {
                             nickname: postData.author.name,
-                            platform: postData.platform,
-                        })
-                        .returning();
-                    author = results[0];
-                } else {
-                    const updatedFields: Record<string, any> = {};
-                    if (author.nickname !== postData.author.name) {
-                        updatedFields.nickname = postData.author.name;
-                    }
-                    if (postData.author.short_id && author.short_eid !== postData.author.short_id) {
-                        updatedFields.short_eid = postData.author.short_id;
-                    }
-                    if (Object.keys(updatedFields).length > 0) {
-                        await db.update(Author).set(updatedFields).where(eq(Author.id, author.id));
-                    }
+                            short_eid: postData.author.short_id || "",
+                            delete_status: DeleteStatus.ACTIVE,
+                            delete_time: null,
+                        },
+                    })
+                    .returning();
+                const author = results[0];
+                if (author) {
+                    authorId = author.id;
                 }
-                authorId = author.id;
             } catch (e) {
                 console.error(e);
             }

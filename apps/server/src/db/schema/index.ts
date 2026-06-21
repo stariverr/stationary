@@ -48,13 +48,7 @@ export enum MediaType {
     AUDIO = "AUDIO",
     PDF = "PDF",
 }
-export const MediaTypeEnum = pgEnum("media_type", [
-    MediaType.IMAGE,
-    MediaType.VIDEO,
-    MediaType.LIVE_PHOTO,
-    MediaType.AUDIO,
-    MediaType.PDF,
-]);
+export const MediaTypeEnum = pgEnum("media_type", [MediaType.IMAGE, MediaType.VIDEO, MediaType.LIVE_PHOTO, MediaType.AUDIO, MediaType.PDF]);
 
 export enum PostSource {
     UNKNOWN = "UNKNOWN",
@@ -81,12 +75,7 @@ export enum SyncStatus {
     COMPLETED = "COMPLETED",
     FAILED = "FAILED",
 }
-export const SyncStatusEnum = pgEnum("sync_status", [
-    SyncStatus.PENDING,
-    SyncStatus.IN_PROGRESS,
-    SyncStatus.COMPLETED,
-    SyncStatus.FAILED,
-]);
+export const SyncStatusEnum = pgEnum("sync_status", [SyncStatus.PENDING, SyncStatus.IN_PROGRESS, SyncStatus.COMPLETED, SyncStatus.FAILED]);
 
 export enum TrackType {
     IMAGE = "IMAGE",
@@ -94,12 +83,7 @@ export enum TrackType {
     AUDIO = "AUDIO",
     SUBTITLE = "SUBTITLE",
 }
-export const TrackTypeEnum = pgEnum("track_type", [
-    TrackType.IMAGE,
-    TrackType.VIDEO,
-    TrackType.AUDIO,
-    TrackType.SUBTITLE,
-]);
+export const TrackTypeEnum = pgEnum("track_type", [TrackType.IMAGE, TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]);
 
 export enum TrackPurpose {
     CONTENT = "CONTENT",
@@ -120,24 +104,14 @@ export enum TrackQuality {
     MEDIUM = "MEDIUM",
     LOW = "LOW",
 }
-export const TrackQualityEnum = pgEnum("track_quality", [
-    TrackQuality.ORIGINAL,
-    TrackQuality.HIGH,
-    TrackQuality.MEDIUM,
-    TrackQuality.LOW,
-]);
-
+export const TrackQualityEnum = pgEnum("track_quality", [TrackQuality.ORIGINAL, TrackQuality.HIGH, TrackQuality.MEDIUM, TrackQuality.LOW]);
 
 export enum AccessRole {
     VIEWER = "VIEWER",
     EDITOR = "EDITOR",
     ADMIN = "ADMIN",
 }
-export const AccessRoleEnum = pgEnum("access_role", [
-    AccessRole.VIEWER,
-    AccessRole.EDITOR,
-    AccessRole.ADMIN,
-]);
+export const AccessRoleEnum = pgEnum("access_role", [AccessRole.VIEWER, AccessRole.EDITOR, AccessRole.ADMIN]);
 
 /** Soft delete status enum
  * - `ACTIVE`: Not deleted
@@ -149,32 +123,32 @@ export enum DeleteStatus {
     DELETED = "DELETED",
     PURGED = "PURGED",
 }
-export const DeleteStatusEnum = pgEnum("delete_status", [
-    DeleteStatus.ACTIVE,
-    DeleteStatus.DELETED,
-    DeleteStatus.PURGED,
-]);
+export const DeleteStatusEnum = pgEnum("delete_status", [DeleteStatus.ACTIVE, DeleteStatus.DELETED, DeleteStatus.PURGED]);
 
-export const Author = pgTable("author", {
-    id: uuid("id")
-        .primaryKey()
-        .notNull()
-        .$defaultFn(() => uuidv7.generate()),
-    eid: text("eid").notNull().default(""),
-    short_eid: text("short_eid").notNull().default(""),
-    nickname: text("nickname").notNull().default(""),
-    signature: text("signature").notNull().default(""),
-    platform: PostSourceEnum("platform").notNull(),
-    avatar_file_id: uuid("avatar_file_id"),
-    /** Avatar Thumb Path */
-    avatar_thumb_file_id: uuid("avatar_thumb_file_id"),
-    create_time: temporal("create_time")
-        .default(sql`now()`)
-        .notNull(),
-    update_time: temporal("update_time"),
-    delete_time: temporal("delete_time"),
-    delete_status: DeleteStatusEnum("delete_status").default(DeleteStatus.ACTIVE).notNull(),
-});
+export const Author = pgTable(
+    "author",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        eid: text("eid").notNull().default(""),
+        short_eid: text("short_eid").notNull().default(""),
+        nickname: text("nickname").notNull().default(""),
+        signature: text("signature").notNull().default(""),
+        platform: PostSourceEnum("platform").notNull(),
+        avatar_file_id: uuid("avatar_file_id"),
+        /** Avatar Thumb Path */
+        avatar_thumb_file_id: uuid("avatar_thumb_file_id"),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        update_time: temporal("update_time"),
+        delete_time: temporal("delete_time"),
+        delete_status: DeleteStatusEnum("delete_status").default(DeleteStatus.ACTIVE).notNull(),
+    },
+    (table) => [uniqueIndex("author_platform_eid_active_unique").on(table.platform, table.eid).where(sql`delete_status = 'ACTIVE'`)],
+);
 
 export const Library = pgTable("library", {
     id: uuid("id")
@@ -413,10 +387,7 @@ export interface CoverMetadata {
     seek_seconds?: number;
 }
 
-export type MediaFileMetadata = VideoTrackMetadata &
-    AudioTrackMetadata &
-    SubtitleTrackMetadata &
-    CoverMetadata;
+export type MediaFileMetadata = VideoTrackMetadata & AudioTrackMetadata & SubtitleTrackMetadata & CoverMetadata;
 
 // Track Model
 export const Track = pgTable(
@@ -451,16 +422,8 @@ export const Track = pgTable(
         delete_time: temporal("delete_time"),
         delete_status: DeleteStatusEnum("delete_status").default(DeleteStatus.ACTIVE).notNull(),
     },
-    (table) => [
-        uniqueIndex("track_media_type_purpose_priority_unique").on(
-            table.media_id,
-            table.type,
-            table.purpose,
-            table.priority,
-        ),
-    ],
+    (table) => [uniqueIndex("track_media_type_purpose_priority_unique").on(table.media_id, table.type, table.purpose, table.priority)],
 );
-
 
 // External API Token
 export const ExternalApiToken = pgTable("external_api_token", {
@@ -606,12 +569,7 @@ export enum ModalityType {
     VIDEO_FRAME = "VIDEO_FRAME",
     AUDIO = "AUDIO",
 }
-export const ModalityEnum = pgEnum("modality_type", [
-    ModalityType.TEXT,
-    ModalityType.IMAGE,
-    ModalityType.VIDEO_FRAME,
-    ModalityType.AUDIO,
-]);
+export const ModalityEnum = pgEnum("modality_type", [ModalityType.TEXT, ModalityType.IMAGE, ModalityType.VIDEO_FRAME, ModalityType.AUDIO]);
 
 // NOTE: Reserved for future vector space model migration and upgrade management. Currently unused.
 export enum EmbeddingSpaceStatus {
@@ -639,21 +597,14 @@ export enum VectorSpaceKind {
     TEXT = "TEXT",
     MULTI_MODAL = "MULTI_MODAL",
 }
-export const VectorSpaceKindEnum = pgEnum("space_kind", [
-    VectorSpaceKind.TEXT,
-    VectorSpaceKind.MULTI_MODAL,
-]);
+export const VectorSpaceKindEnum = pgEnum("space_kind", [VectorSpaceKind.TEXT, VectorSpaceKind.MULTI_MODAL]);
 
 export enum MetricType {
     COSINE = "COSINE",
     INNER_PRODUCT = "INNER_PRODUCT",
     L2 = "L2",
 }
-export const MetricTypeEnum = pgEnum("metric_type", [
-    MetricType.COSINE,
-    MetricType.INNER_PRODUCT,
-    MetricType.L2,
-]);
+export const MetricTypeEnum = pgEnum("metric_type", [MetricType.COSINE, MetricType.INNER_PRODUCT, MetricType.L2]);
 
 export enum EmbeddingRole {
     CONTENT_TEXT = "CONTENT_TEXT",
@@ -762,22 +713,14 @@ export const AssetAiMetadata = pgTable(
         ocr_text: text("ocr_text").default("").notNull(),
         model: text("model").notNull(),
         metadata_pipeline_id: text("metadata_pipeline_id").notNull(),
-        processing_status: ProcessingStatusEnum("processing_status")
-            .default(ProcessingStatus.PENDING)
-            .notNull(),
+        processing_status: ProcessingStatusEnum("processing_status").default(ProcessingStatus.PENDING).notNull(),
         last_error: text("last_error"),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),
         update_time: temporal("update_time"),
     },
-    (table) => [
-        uniqueIndex("ai_metadata_entity_pipeline_unique").on(
-            table.entity_type,
-            table.entity_id,
-            table.metadata_pipeline_id,
-        ),
-    ],
+    (table) => [uniqueIndex("ai_metadata_entity_pipeline_unique").on(table.entity_type, table.entity_id, table.metadata_pipeline_id)],
 );
 
 export const AssetEmbedding = pgTable(
@@ -798,9 +741,7 @@ export const AssetEmbedding = pgTable(
         embedding: genericVector("embedding").notNull(),
         content_hash: text("content_hash").notNull(),
         source_file_id: uuid("source_file_id"),
-        embedding_status: EmbeddingStatusEnum("embedding_status")
-            .default(EmbeddingStatus.READY)
-            .notNull(),
+        embedding_status: EmbeddingStatusEnum("embedding_status").default(EmbeddingStatus.READY).notNull(),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),
