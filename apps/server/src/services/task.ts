@@ -1,16 +1,5 @@
 import { db } from "@/global/db";
-import {
-    Post,
-    Media,
-    Track,
-    Author,
-    File,
-    DeleteStatus,
-    SyncStatus,
-    TrackType,
-    TrackPurpose,
-    TrackQuality,
-} from "@/db/schema";
+import { Post, Media, Track, Author, File, DeleteStatus, SyncStatus, TrackType, TrackPurpose, TrackQuality } from "@/db/schema";
 import { eq, and, notInArray, inArray, gte, isNull, isNotNull, or, lt } from "drizzle-orm";
 import { downloadStream, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
 import { VideoCoverService } from "@/services/video_cover";
@@ -91,11 +80,7 @@ async function extractSegmentBase(stream: ReadableStream): Promise<{
     }
 
     offset = 0;
-    const view = new DataView(
-        headerBuffer.buffer,
-        headerBuffer.byteOffset,
-        headerBuffer.byteLength,
-    );
+    const view = new DataView(headerBuffer.buffer, headerBuffer.byteOffset, headerBuffer.byteLength);
     while (offset + 8 <= bytesRead) {
         const size = view.getUint32(offset);
         const type = String.fromCharCode(
@@ -190,17 +175,22 @@ export const TaskService = {
                         .insert(Author)
                         .values({
                             eid: postData.author.external_id,
+                            short_eid: postData.author.short_id || "",
                             nickname: postData.author.name,
                             platform: postData.platform,
                         })
                         .returning();
                     author = results[0];
                 } else {
+                    const updatedFields: Record<string, any> = {};
                     if (author.nickname !== postData.author.name) {
-                        await db
-                            .update(Author)
-                            .set({ nickname: postData.author.name })
-                            .where(eq(Author.id, author.id));
+                        updatedFields.nickname = postData.author.name;
+                    }
+                    if (postData.author.short_id && author.short_eid !== postData.author.short_id) {
+                        updatedFields.short_eid = postData.author.short_id;
+                    }
+                    if (Object.keys(updatedFields).length > 0) {
+                        await db.update(Author).set(updatedFields).where(eq(Author.id, author.id));
                     }
                 }
                 authorId = author.id;
@@ -222,10 +212,7 @@ export const TaskService = {
             });
         }
 
-        if (
-            existingPost &&
-            (existingPost.delete_status === "DELETED" || existingPost.recycle_time !== null)
-        ) {
+        if (existingPost && (existingPost.delete_status === "DELETED" || existingPost.recycle_time !== null)) {
             return {
                 postId: existingPost.id,
                 authorId,
@@ -271,39 +258,26 @@ export const TaskService = {
                 last_error: null,
                 workflow_run_id: workflowRunId,
             };
-            const results = await db
-                .insert(Post)
-                .values(postInsertData)
-                .returning({ id: Post.id, eid: Post.eid });
+            const results = await db.insert(Post).values(postInsertData).returning({ id: Post.id, eid: Post.eid });
             postId = results[0].id;
             if (!postData.external_id) postData.external_id = results[0].eid;
             hasPendingTasks = true;
         }
 
         // 3. Media sync
-        const mediaEids: string[] = postData.media
-            .map((m) => m.external_id)
-            .filter((eid): eid is string => !!eid);
+        const mediaEids: string[] = postData.media.map((m) => m.external_id).filter((eid): eid is string => !!eid);
 
         let mediaToDelete: any[] = [];
         if (postData.media.length === 0) {
             mediaToDelete = await db
                 .select()
                 .from(Media)
-                .where(
-                    and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE)),
-                );
+                .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE)));
         } else if (mediaEids.length > 0) {
             mediaToDelete = await db
                 .select()
                 .from(Media)
-                .where(
-                    and(
-                        eq(Media.post_id, postId),
-                        eq(Media.delete_status, DeleteStatus.ACTIVE),
-                        notInArray(Media.eid, mediaEids),
-                    ),
-                );
+                .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE), notInArray(Media.eid, mediaEids)));
         } else {
             mediaToDelete = await db
                 .select()
@@ -327,25 +301,13 @@ export const TaskService = {
                         delete_status: DeleteStatus.DELETED,
                         delete_time: deleteTime,
                     })
-                    .where(
-                        and(
-                            inArray(Media.id, deletedMediaIds),
-                            eq(Media.delete_status, DeleteStatus.ACTIVE),
-                        ),
-                    );
+                    .where(and(inArray(Media.id, deletedMediaIds), eq(Media.delete_status, DeleteStatus.ACTIVE)));
 
                 const mediaFiles = await tx
                     .select({ file_id: Track.file_id })
                     .from(Track)
-                    .where(
-                        and(
-                            inArray(Track.media_id, deletedMediaIds),
-                            eq(Track.delete_status, DeleteStatus.ACTIVE),
-                        ),
-                    );
-                const fileIds = mediaFiles
-                    .map((mf) => mf.file_id)
-                    .filter((fid): fid is string => !!fid);
+                    .where(and(inArray(Track.media_id, deletedMediaIds), eq(Track.delete_status, DeleteStatus.ACTIVE)));
+                const fileIds = mediaFiles.map((mf) => mf.file_id).filter((fid): fid is string => !!fid);
 
                 await tx
                     .update(Track)
@@ -353,12 +315,7 @@ export const TaskService = {
                         delete_status: DeleteStatus.DELETED,
                         delete_time: deleteTime,
                     })
-                    .where(
-                        and(
-                            inArray(Track.media_id, deletedMediaIds),
-                            eq(Track.delete_status, DeleteStatus.ACTIVE),
-                        ),
-                    );
+                    .where(and(inArray(Track.media_id, deletedMediaIds), eq(Track.delete_status, DeleteStatus.ACTIVE)));
 
                 if (fileIds.length > 0) {
                     await tx
@@ -367,12 +324,7 @@ export const TaskService = {
                             delete_status: DeleteStatus.DELETED,
                             delete_time: deleteTime,
                         })
-                        .where(
-                            and(
-                                inArray(File.id, fileIds),
-                                eq(File.delete_status, DeleteStatus.ACTIVE),
-                            ),
-                        );
+                        .where(and(inArray(File.id, fileIds), eq(File.delete_status, DeleteStatus.ACTIVE)));
                 }
             });
             hasPendingTasks = true;
@@ -388,9 +340,7 @@ export const TaskService = {
                     and(
                         eq(Media.post_id, postId),
                         eq(Media.delete_status, DeleteStatus.ACTIVE),
-                        mediaData.external_id
-                            ? eq(Media.eid, mediaData.external_id)
-                            : eq(Media.sort_order, index),
+                        mediaData.external_id ? eq(Media.eid, mediaData.external_id) : eq(Media.sort_order, index),
                     ),
                 );
 
@@ -403,9 +353,7 @@ export const TaskService = {
                               and(
                                   eq(Media.post_id, postId),
                                   eq(Media.delete_status, DeleteStatus.DELETED),
-                                  mediaData.external_id
-                                      ? eq(Media.eid, mediaData.external_id)
-                                      : eq(Media.sort_order, index),
+                                  mediaData.external_id ? eq(Media.eid, mediaData.external_id) : eq(Media.sort_order, index),
                               ),
                           )
                     : [];
@@ -431,10 +379,7 @@ export const TaskService = {
                     published_time: fallbackPublishedTime,
                     sync_status: SyncStatus.PENDING,
                 };
-                const insertedMedia = await db
-                    .insert(Media)
-                    .values(mediaInsertData)
-                    .returning({ id: Media.id });
+                const insertedMedia = await db.insert(Media).values(mediaInsertData).returning({ id: Media.id });
                 mediaId = insertedMedia[0].id;
                 hasPendingTasks = true;
             } else {
@@ -454,22 +399,14 @@ export const TaskService = {
                 const activeTracks = await db
                     .select()
                     .from(Track)
-                    .where(
-                        and(
-                            eq(Track.media_id, mediaId),
-                            eq(Track.delete_status, DeleteStatus.ACTIVE),
-                        ),
-                    );
+                    .where(and(eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)));
 
                 let mediaNeedsProcessing = false;
 
                 // Check if any incoming track is new, modified, or pending/failed
                 for (const track of mediaData.tracks) {
                     const existing = activeTracks.find(
-                        (t) =>
-                            t.type === track.type &&
-                            t.purpose === track.purpose &&
-                            t.priority === track.priority,
+                        (t) => t.type === track.type && t.purpose === track.purpose && t.priority === track.priority,
                     );
                     if (!existing) {
                         mediaNeedsProcessing = true;
@@ -492,10 +429,7 @@ export const TaskService = {
                 if (!mediaNeedsProcessing) {
                     for (const t of activeTracks) {
                         const stillExists = mediaData.tracks.some(
-                            (track) =>
-                                track.type === t.type &&
-                                track.purpose === t.purpose &&
-                                track.priority === t.priority,
+                            (track) => track.type === t.type && track.purpose === t.purpose && track.priority === t.priority,
                         );
                         if (!stillExists) {
                             mediaNeedsProcessing = true;
@@ -504,11 +438,7 @@ export const TaskService = {
                     }
                 }
 
-                if (
-                    m.sync_status === SyncStatus.FAILED ||
-                    m.sync_status === SyncStatus.PENDING ||
-                    mediaNeedsProcessing
-                ) {
+                if (m.sync_status === SyncStatus.FAILED || m.sync_status === SyncStatus.PENDING || mediaNeedsProcessing) {
                     updateData.sync_status = SyncStatus.PENDING;
                     updateData.last_error = null;
                     hasPendingTasks = true;
@@ -671,9 +601,7 @@ export const TaskService = {
                 and(
                     eq(Media.post_id, postId),
                     eq(Media.delete_status, DeleteStatus.ACTIVE),
-                    mediaData.external_id
-                        ? eq(Media.eid, mediaData.external_id)
-                        : eq(Media.sort_order, index),
+                    mediaData.external_id ? eq(Media.eid, mediaData.external_id) : eq(Media.sort_order, index),
                 ),
             );
         const m = mediaRecords[0];
@@ -685,21 +613,13 @@ export const TaskService = {
             lockKey,
             async () => {
                 try {
-                    await db
-                        .update(Media)
-                        .set({ sync_status: SyncStatus.IN_PROGRESS })
-                        .where(eq(Media.id, m.id));
+                    await db.update(Media).set({ sync_status: SyncStatus.IN_PROGRESS }).where(eq(Media.id, m.id));
 
                     // Fetch again to ensure we get latest active tracks
                     const tracks = await db
                         .select()
                         .from(Track)
-                        .where(
-                            and(
-                                eq(Track.media_id, m.id),
-                                eq(Track.delete_status, DeleteStatus.ACTIVE),
-                            ),
-                        );
+                        .where(and(eq(Track.media_id, m.id), eq(Track.delete_status, DeleteStatus.ACTIVE)));
 
                     let allCompleted = true;
 
@@ -708,10 +628,7 @@ export const TaskService = {
                         if (mf.sync_status === SyncStatus.COMPLETED || !mf.source_url) continue;
 
                         // Mark as IN_PROGRESS
-                        await db
-                            .update(Track)
-                            .set({ sync_status: SyncStatus.IN_PROGRESS })
-                            .where(eq(Track.id, mf.id));
+                        await db.update(Track).set({ sync_status: SyncStatus.IN_PROGRESS }).where(eq(Track.id, mf.id));
 
                         try {
                             const response = await downloadStream(mf.source_url);
@@ -722,10 +639,7 @@ export const TaskService = {
                                 let responseBody: ReadableStream | Uint8Array;
 
                                 // Auto-convert Bilibili JSON subtitle to WebVTT
-                                if (
-                                    mf.type === TrackType.SUBTITLE &&
-                                    mf.metadata.format === "json"
-                                ) {
+                                if (mf.type === TrackType.SUBTITLE && mf.metadata.format === "json") {
                                     const jsonText = await response.text();
                                     try {
                                         const vttText = convertBiliJsonToVtt(jsonText);
@@ -734,10 +648,7 @@ export const TaskService = {
                                         contentLength = responseBody.length.toString();
                                         ext = "vtt";
                                     } catch (err) {
-                                        console.error(
-                                            "Failed to convert Bilibili JSON subtitle:",
-                                            err,
-                                        );
+                                        console.error("Failed to convert Bilibili JSON subtitle:", err);
                                         responseBody = new TextEncoder().encode(jsonText);
                                     }
                                 } else {
@@ -747,9 +658,7 @@ export const TaskService = {
                                     responseBody = response.body;
                                 }
 
-                                let segmentBase:
-                                    | { initialization: string; index_range: string }
-                                    | undefined;
+                                let segmentBase: { initialization: string; index_range: string } | undefined;
                                 if (
                                     (mf.type === TrackType.VIDEO || mf.type === TrackType.AUDIO) &&
                                     responseBody instanceof ReadableStream
@@ -760,28 +669,16 @@ export const TaskService = {
                                 }
 
                                 let prefix = "";
-                                if (
-                                    mf.type === TrackType.VIDEO &&
-                                    mf.purpose === TrackPurpose.CONTENT
-                                ) {
+                                if (mf.type === TrackType.VIDEO && mf.purpose === TrackPurpose.CONTENT) {
                                     prefix = `video_${mf.priority}`;
-                                } else if (
-                                    mf.type === TrackType.AUDIO &&
-                                    mf.purpose === TrackPurpose.CONTENT
-                                ) {
+                                } else if (mf.type === TrackType.AUDIO && mf.purpose === TrackPurpose.CONTENT) {
                                     prefix = `audio_${mf.priority}`;
                                 } else if (mf.purpose === TrackPurpose.COVER) {
                                     prefix = "cover";
-                                } else if (
-                                    mf.type === TrackType.SUBTITLE &&
-                                    mf.purpose === TrackPurpose.CONTENT
-                                ) {
+                                } else if (mf.type === TrackType.SUBTITLE && mf.purpose === TrackPurpose.CONTENT) {
                                     const lang = mf.metadata.language || "unknown";
                                     prefix = `subtitle_${lang}`;
-                                } else if (
-                                    mf.type === TrackType.IMAGE &&
-                                    mf.purpose === TrackPurpose.CONTENT
-                                ) {
+                                } else if (mf.type === TrackType.IMAGE && mf.purpose === TrackPurpose.CONTENT) {
                                     prefix = `image_${mf.priority}`;
                                 } else {
                                     prefix = `track_${mf.priority}`;
@@ -849,30 +746,21 @@ export const TaskService = {
                             }
                         } catch (e) {
                             const errorMsg = e instanceof Error ? e.message : String(e);
-                            await db
-                                .update(Track)
-                                .set({ sync_status: SyncStatus.FAILED, last_error: errorMsg })
-                                .where(eq(Track.id, mf.id));
+                            await db.update(Track).set({ sync_status: SyncStatus.FAILED, last_error: errorMsg }).where(eq(Track.id, mf.id));
                             allCompleted = false;
                             throw e;
                         }
                     }
 
                     if (allCompleted) {
-                        await db
-                            .update(Media)
-                            .set({ sync_status: SyncStatus.COMPLETED, last_error: null })
-                            .where(eq(Media.id, m.id));
+                        await db.update(Media).set({ sync_status: SyncStatus.COMPLETED, last_error: null }).where(eq(Media.id, m.id));
 
                         // Trigger video cover generation asynchronously after main video completed
                         if (m.type === "VIDEO") {
                             try {
                                 await VideoCoverService.requestForMedia(m.id);
                             } catch (coverErr) {
-                                console.error(
-                                    `[VIDEO COVER] Failed to schedule cover extraction for media ${m.id}:`,
-                                    coverErr,
-                                );
+                                console.error(`[VIDEO COVER] Failed to schedule cover extraction for media ${m.id}:`, coverErr);
                             }
                         }
                     } else {
@@ -894,10 +782,7 @@ export const TaskService = {
                     }
                 } catch (e) {
                     const errorMsg = e instanceof Error ? e.message : String(e);
-                    await db
-                        .update(Media)
-                        .set({ sync_status: SyncStatus.FAILED, last_error: errorMsg })
-                        .where(eq(Media.id, m.id));
+                    await db.update(Media).set({ sync_status: SyncStatus.FAILED, last_error: errorMsg }).where(eq(Media.id, m.id));
 
                     await db
                         .update(Post)
@@ -961,10 +846,7 @@ export const TaskService = {
                             })
                             .returning({ id: File.id });
 
-                        await db
-                            .update(Author)
-                            .set({ avatar_file_id: fileResults[0].id })
-                            .where(eq(Author.id, authorId));
+                        await db.update(Author).set({ avatar_file_id: fileResults[0].id }).where(eq(Author.id, authorId));
                     }
                 }
             },
@@ -995,12 +877,7 @@ export const TaskService = {
                 sync_status: SyncStatus.FAILED,
                 last_error: errorMsg,
             })
-            .where(
-                and(
-                    eq(Post.workflow_run_id, workflowRunId),
-                    eq(Post.delete_status, DeleteStatus.ACTIVE),
-                ),
-            );
+            .where(and(eq(Post.workflow_run_id, workflowRunId), eq(Post.delete_status, DeleteStatus.ACTIVE)));
     },
 
     /**
@@ -1015,10 +892,7 @@ export const TaskService = {
 
         // Resolve media ids to post ids
         if (options.mediaIds && options.mediaIds.length > 0) {
-            const mediaList = await db
-                .select({ post_id: Media.post_id })
-                .from(Media)
-                .where(inArray(Media.id, options.mediaIds));
+            const mediaList = await db.select({ post_id: Media.post_id }).from(Media).where(inArray(Media.id, options.mediaIds));
             for (const m of mediaList) {
                 if (m.post_id) {
                     resolvedPostIds.add(m.post_id);
@@ -1050,9 +924,7 @@ export const TaskService = {
             const postMedia = await db
                 .select()
                 .from(Media)
-                .where(
-                    and(eq(Media.post_id, post.id), eq(Media.delete_status, DeleteStatus.ACTIVE)),
-                );
+                .where(and(eq(Media.post_id, post.id), eq(Media.delete_status, DeleteStatus.ACTIVE)));
 
             const mediaIds = postMedia.map((m) => m.id);
 
@@ -1064,12 +936,7 @@ export const TaskService = {
                         sync_status: SyncStatus.PENDING,
                         last_error: null,
                     })
-                    .where(
-                        and(
-                            inArray(Track.media_id, mediaIds),
-                            eq(Track.sync_status, SyncStatus.FAILED),
-                        ),
-                    );
+                    .where(and(inArray(Track.media_id, mediaIds), eq(Track.sync_status, SyncStatus.FAILED)));
 
                 // Reset failed media items to PENDING
                 await db
@@ -1078,9 +945,7 @@ export const TaskService = {
                         sync_status: SyncStatus.PENDING,
                         last_error: null,
                     })
-                    .where(
-                        and(eq(Media.post_id, post.id), eq(Media.sync_status, SyncStatus.FAILED)),
-                    );
+                    .where(and(eq(Media.post_id, post.id), eq(Media.sync_status, SyncStatus.FAILED)));
             }
 
             // Reset post status
@@ -1098,12 +963,7 @@ export const TaskService = {
                     ? await db
                           .select()
                           .from(Track)
-                          .where(
-                              and(
-                                  inArray(Track.media_id, mediaIds),
-                                  eq(Track.delete_status, DeleteStatus.ACTIVE),
-                              ),
-                          )
+                          .where(and(inArray(Track.media_id, mediaIds), eq(Track.delete_status, DeleteStatus.ACTIVE)))
                     : [];
 
             const mappedMedia = postMedia.map((m) => {
@@ -1264,20 +1124,11 @@ export const TaskService = {
                         update_time: Temporal.Now.instant(),
                     })
                     .where(
-                        and(
-                            inArray(Media.post_id, stuckPostIds),
-                            inArray(Media.sync_status, [
-                                SyncStatus.PENDING,
-                                SyncStatus.IN_PROGRESS,
-                            ]),
-                        ),
+                        and(inArray(Media.post_id, stuckPostIds), inArray(Media.sync_status, [SyncStatus.PENDING, SyncStatus.IN_PROGRESS])),
                     );
 
                 // 3. Find and update stuck tracks under these media items
-                const mediaItems = await tx
-                    .select({ id: Media.id })
-                    .from(Media)
-                    .where(inArray(Media.post_id, stuckPostIds));
+                const mediaItems = await tx.select({ id: Media.id }).from(Media).where(inArray(Media.post_id, stuckPostIds));
 
                 const mediaIds = mediaItems.map((m) => m.id);
                 if (mediaIds.length > 0) {
@@ -1291,10 +1142,7 @@ export const TaskService = {
                         .where(
                             and(
                                 inArray(Track.media_id, mediaIds),
-                                inArray(Track.sync_status, [
-                                    SyncStatus.PENDING,
-                                    SyncStatus.IN_PROGRESS,
-                                ]),
+                                inArray(Track.sync_status, [SyncStatus.PENDING, SyncStatus.IN_PROGRESS]),
                             ),
                         );
                 }
