@@ -39,7 +39,7 @@ watch(
 </script>
 
 <template>
-    <div class="w-full h-dvh bg-white flex overflow-hidden font-sans text-gray-900">
+    <div class="w-full min-h-screen md:h-screen bg-white flex md:overflow-hidden font-sans text-gray-900">
         <!-- Left Sidebar (Desktop) -->
         <LeftSidebar
             class="hidden md:flex shrink-0 transition-all duration-300 ease-in-out"

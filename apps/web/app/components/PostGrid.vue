@@ -10,18 +10,21 @@ import {
     Sidebar,
     X,
     MoreHorizontal,
-    SlidersHorizontal,
+    Filter,
     ChevronDown,
 } from "@lucide/vue";
 import { useDebounceFn } from "@vueuse/core";
 import { PaginationRoot, PaginationList, PaginationListItem, PaginationPrev, PaginationNext, PaginationEllipsis } from "reka-ui";
 import { Button } from "@/components/ui/button";
+import { NumberField, NumberFieldInput } from "@/components/ui/number-field";
+import { useVisualViewportBottomOffset } from "@/composables/useVisualViewportBottomOffset";
 import { useLibraryStore } from "@/stores/library";
 
 const { posts, selectedPostId, selectPost, fetchPosts, isLoading, keyword, source, total, page, count } = usePosts();
 const { toggleSidebar } = useLayout();
 const libraryStore = useLibraryStore();
 const { isMultiSelectClick } = useMultiSelectModifier();
+const visualViewportBottomOffsetStyle = useVisualViewportBottomOffset();
 
 const totalPages = computed(() => Math.ceil((total.value || 0) / (count.value || 20)));
 
@@ -83,7 +86,32 @@ watch(page, (val) => {
     jumpPage.value = val;
 });
 
+const isEditingPage = ref(false);
+const mobileJumpPage = ref(page.value);
+const mobileInputRef = ref<any>(null);
+
+const startEditingPage = () => {
+    mobileJumpPage.value = page.value;
+    isEditingPage.value = true;
+    nextTick(() => {
+        const inputEl = mobileInputRef.value?.$el as HTMLInputElement | undefined;
+        if (inputEl) {
+            inputEl.focus();
+            inputEl.select();
+        }
+    });
+};
+
+const finishEditingPage = () => {
+    isEditingPage.value = false;
+    const target = Number(mobileJumpPage.value);
+    if (!isNaN(target) && target >= 1 && target <= totalPages.value) {
+        changePage(target);
+    }
+};
+
 const handleJump = () => {
+    // Jump to the specified page from the desktop input box
     const target = Number(jumpPage.value);
     if (!isNaN(target) && target >= 1 && target <= totalPages.value) {
         changePage(target);
@@ -239,16 +267,16 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="flex-1 min-h-0 flex flex-col bg-white overflow-hidden relative">
+    <div :style="visualViewportBottomOffsetStyle" class="flex-1 min-h-0 flex flex-col bg-white md:overflow-hidden relative">
         <!-- Header -->
         <div
-            class="h-[60px] sm:h-14 border-b border-gray-100/80 flex items-center gap-2 px-3 sm:px-6 shrink-0 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+            class="sticky top-0 z-30 h-15 sm:h-14 border-b border-gray-100/80 flex items-center gap-2 px-3 sm:px-6 shrink-0 bg-white/98 backdrop-blur-md supports-backdrop-filter:bg-white/98 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
         >
             <!-- Left side: Sidebar Toggle & Page Title -->
             <div class="flex items-center gap-3 shrink-0">
                 <button
                     @click="toggleSidebar"
-                    class="h-10 w-10 rounded-xl -ml-1 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-900 active:scale-[0.98] transition-all cursor-pointer"
+                    class="h-9 w-9 rounded-full -ml-1 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-900 active:scale-[0.95] transition-all cursor-pointer"
                     title="Toggle Sidebar"
                 >
                     <Sidebar class="w-5 h-5" />
@@ -264,15 +292,15 @@ onUnmounted(() => {
             <!-- Right side: Filters & Actions Group -->
             <div class="flex min-w-0 items-center gap-2 sm:gap-3 flex-1 justify-end">
                 <!-- Search Input (Unified height and border radius, remove shadow-sm) -->
-                <div class="relative min-w-0 flex-1 sm:max-w-[220px] group transition-all duration-300">
+                <div class="relative min-w-0 flex-1 sm:max-w-55 group transition-all duration-300">
                     <Search
-                        class="absolute left-3.5 top-1/2 -translate-y-1/2 w-[18px] h-[18px] sm:w-4 sm:h-4 text-slate-400 group-focus-within:text-blue-600 transition-colors"
+                        class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-600 transition-colors"
                     />
                     <input
                         v-model="keyword"
                         type="text"
                         :placeholder="$t('common.search', 'Search...')"
-                        class="w-full h-10 rounded-2xl sm:h-9 sm:rounded-lg bg-slate-50/90 border border-slate-200/80 text-slate-900 text-sm font-medium focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 block pl-10 pr-8 hover:bg-white focus:bg-white transition-all placeholder:text-slate-400"
+                        class="w-full h-9 rounded-full bg-slate-50/90 border border-slate-200/80 text-slate-900 text-sm font-medium focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 block pl-9 pr-8 hover:bg-white focus:bg-white transition-all placeholder:text-slate-400"
                     />
                     <button
                         v-if="keyword"
@@ -291,16 +319,16 @@ onUnmounted(() => {
                             ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300'
                             : 'bg-white border-slate-200/80 text-slate-600 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900',
                     ]"
-                    class="flex h-10 w-10 rounded-xl sm:h-9 sm:w-auto sm:rounded-lg items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3.5 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 shadow-[0_1px_2px_rgba(15,23,42,0.04)] active:scale-[0.98]"
+                    class="flex h-9 w-9 rounded-full sm:h-9 sm:w-auto sm:rounded-full items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3.5 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 active:scale-[0.95]"
                     title="Filters"
                 >
-                    <SlidersHorizontal class="w-3.5 h-3.5" />
+                    <Filter class="w-3.5 h-3.5" />
                     <span class="hidden lg:inline">{{ $t("common.filters", "Filters") }}</span>
                     <span v-if="source" class="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
                 </button>
 
                 <!-- Action Toolbar Divider -->
-                <div class="h-5 w-[1px] bg-gray-200 hidden sm:block mx-0.5"></div>
+                <div class="h-5 w-px bg-gray-200 hidden sm:block mx-0.5"></div>
 
                 <!-- Batch Select Button (Unified height, remove shadow-sm) -->
                 <button
@@ -310,7 +338,7 @@ onUnmounted(() => {
                             ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300'
                             : 'bg-white border-slate-200/80 text-slate-600 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900',
                     ]"
-                    class="flex h-10 w-10 rounded-xl sm:h-9 sm:w-auto sm:rounded-lg items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 shadow-[0_1px_2px_rgba(15,23,42,0.04)] active:scale-[0.98]"
+                    class="flex h-9 w-9 rounded-full sm:h-9 sm:w-auto sm:rounded-full items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 active:scale-[0.95]"
                     title="Batch Select"
                 >
                     <CheckSquare class="w-3.5 h-3.5" />
@@ -318,15 +346,15 @@ onUnmounted(() => {
                 </button>
 
                 <!-- Layout Switchers (Unified height and border radius, remove shadow-sm) -->
-                <div class="hidden sm:flex items-center gap-0.5 bg-gray-100/70 p-0.5 rounded-lg border border-gray-200/50 shrink-0 h-9">
+                <div class="hidden sm:flex items-center gap-0.5 bg-gray-100/70 p-0.5 rounded-full border border-gray-200/50 shrink-0 h-9">
                     <button
-                        class="flex items-center justify-center h-7 w-7 bg-white text-gray-900 border border-gray-200/30 rounded-md transition-all cursor-pointer"
+                        class="flex items-center justify-center h-7 w-7 bg-white text-gray-900 border border-gray-200/30 rounded-full transition-all cursor-pointer"
                         title="Grid Layout"
                     >
                         <LayoutGrid class="w-3.5 h-3.5" />
                     </button>
                     <button
-                        class="flex items-center justify-center h-7 w-7 text-gray-500 hover:text-gray-900 hover:bg-white/50 rounded-md transition-all cursor-pointer"
+                        class="flex items-center justify-center h-7 w-7 text-gray-500 hover:text-gray-900 hover:bg-white/50 rounded-full transition-all cursor-pointer"
                         title="List Layout"
                     >
                         <List class="w-3.5 h-3.5" />
@@ -335,10 +363,9 @@ onUnmounted(() => {
             </div>
         </div>
 
-        <!-- Collapsible Filter panel -->
         <div
-            class="transition-all duration-300 ease-in-out border-b border-[#c2c6d6]/30 bg-[#f9f9ff] flex flex-col shrink-0 overflow-hidden"
-            :class="[showFilters ? 'max-h-[240px] p-5 opacity-100' : 'max-h-0 !py-0 opacity-0 border-b-0']"
+            class="sticky top-15 sm:top-14 z-20 transition-all duration-300 ease-in-out border-b border-[#c2c6d6]/30 bg-[#f9f9ff] flex flex-col shrink-0 overflow-hidden"
+            :class="[showFilters ? 'max-h-90 p-5 opacity-100' : 'max-h-0 py-0! opacity-0 border-b-0']"
         >
             <div class="space-y-4">
                 <!-- Platform pill tags (Horizontal Scrollable list matching Stitch, remove shadow-sm) -->
@@ -362,7 +389,7 @@ onUnmounted(() => {
                 </div>
 
                 <!-- Sorting and Dropdowns row -->
-                <div class="flex flex-wrap items-center gap-6 text-xs border-t border-[#c2c6d6]/30 pt-3.5">
+                <div class="flex flex-wrap items-center gap-4 sm:gap-6 text-xs border-t border-[#c2c6d6]/30 pt-3.5">
                     <!-- Sort by Dropdown -->
                     <div class="flex items-center gap-2">
                         <span class="text-[#424754] font-semibold select-none">{{ $t("common.sort_by", "Sort by") }}:</span>
@@ -418,8 +445,12 @@ onUnmounted(() => {
         </div>
 
         <!-- Content -->
-        <div ref="scrollContainer" class="flex-1 overflow-y-auto p-6 pb-20 sm:pb-6">
-            <div v-if="Array.isArray(posts)" ref="gridContainer" class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
+        <div ref="scrollContainer" class="flex-1 overflow-y-auto p-6 pb-0 sm:pb-6">
+            <div
+                v-if="Array.isArray(posts)"
+                ref="gridContainer"
+                class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4 pb-[calc(3.75rem+env(safe-area-inset-bottom)+var(--visual-viewport-bottom-offset,0))] sm:pb-0"
+            >
                 <PostCard
                     v-for="(post, index) in posts"
                     :key="post.id"
@@ -436,7 +467,7 @@ onUnmounted(() => {
 
         <!-- Footer / Pagination -->
         <div
-            class="fixed bottom-4 left-1/2 -translate-x-1/2 z-30 h-10 px-1 bg-white/90 backdrop-blur-md border border-slate-200/60 shadow-[0_8px_24px_rgba(15,23,42,0.08)] rounded-full flex items-center justify-center w-max sm:relative sm:bottom-auto sm:left-auto sm:translate-x-0 sm:z-auto sm:h-14 sm:px-6 sm:border-0 sm:border-t sm:border-slate-100 sm:shadow-[0_-2px_10px_rgba(15,23,42,0.015)] sm:rounded-none sm:bg-white/95 sm:w-full sm:justify-between"
+            class="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom)+var(--visual-viewport-bottom-offset,0))] right-4 z-30 h-10 px-1 bg-white/90 backdrop-blur-md border border-slate-200 rounded-full flex items-center justify-center w-max sm:relative sm:bottom-auto sm:left-auto sm:right-auto sm:translate-x-0 sm:z-auto sm:h-14 sm:px-6 sm:border-0 sm:border-t sm:border-slate-100 sm:rounded-none sm:bg-white/95 sm:w-full sm:justify-between"
         >
             <!-- Left side: Total items count (hidden on mobile, shown on desktop) -->
             <div class="hidden sm:block text-slate-500 text-sm select-none font-medium">
@@ -465,7 +496,19 @@ onUnmounted(() => {
                                     <ChevronLeft class="w-4 h-4" />
                                 </Button>
                             </PaginationPrev>
-                            <span class="text-xs font-semibold text-slate-700 px-3 min-w-[3.5rem] text-center select-none tabular-nums">
+                            <NumberField v-if="isEditingPage" v-model="mobileJumpPage" :min="1" :max="totalPages" class="w-12 h-6">
+                                <NumberFieldInput
+                                    ref="mobileInputRef"
+                                    class="w-12 h-6 text-center p-0 bg-slate-50 border-slate-200 text-xs font-semibold tabular-nums"
+                                    @blur="finishEditingPage"
+                                    @keyup.enter="finishEditingPage"
+                                />
+                            </NumberField>
+                            <span
+                                v-else
+                                @click="startEditingPage"
+                                class="text-xs font-semibold text-slate-700 px-3 min-w-14 text-center cursor-pointer hover:bg-slate-100/80 active:bg-slate-200/50 py-1 rounded-md transition-colors select-none tabular-nums"
+                            >
                                 {{ page }} / {{ totalPages }}
                             </span>
                             <PaginationNext as-child>
@@ -498,7 +541,7 @@ onUnmounted(() => {
                                         class="w-9 h-9 rounded-lg border-slate-200/80 text-slate-700 p-0 tabular-nums transition-all"
                                         :class="
                                             p.value === page
-                                                ? 'bg-slate-900 hover:bg-slate-800 text-white border-transparent shadow-sm'
+                                                ? 'bg-slate-900 hover:bg-slate-800 text-white border-transparent'
                                                 : 'hover:bg-slate-50'
                                         "
                                     >
@@ -528,16 +571,16 @@ onUnmounted(() => {
                         tag="div"
                         keypath="grid.page_info"
                         scope="global"
-                        class="flex items-center gap-1.5 text-gray-500 text-sm hidden sm:flex"
+                        class="hidden sm:flex items-center gap-1.5 text-gray-500 text-sm"
                     >
                         <template #current>
-                            <input
-                                v-model="jumpPage"
-                                type="text"
-                                class="w-10 h-7 text-center bg-gray-50 border border-gray-200 rounded-md text-sm focus:ring-2 focus:ring-blue-500/10 focus:border-transparent outline-none transition-all tabular-nums"
-                                @keyup.enter="handleJump"
-                                @blur="handleJump"
-                            />
+                            <NumberField v-model="jumpPage" :min="1" :max="totalPages" class="w-10 h-7">
+                                <NumberFieldInput
+                                    class="w-10 h-7 text-center p-0 bg-slate-50/50 border-slate-200 text-sm tabular-nums"
+                                    @keyup.enter="handleJump"
+                                    @blur="handleJump"
+                                />
+                            </NumberField>
                         </template>
                         <template #total>
                             <span class="font-medium text-gray-700">{{ totalPages }}</span>
