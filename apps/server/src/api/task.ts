@@ -132,6 +132,7 @@ const MediaItemSchema = z
             .transform((v) => v ?? ""),
         type: z.enum(MediaType),
         tracks: z.array(TrackSchema).default([]),
+        tags: z.array(z.string()).default([]),
         /** Media Duration (in seconds) */
         duration: z.number().nullable().optional(),
         published_time: TimestampSchema.optional(),
@@ -205,10 +206,7 @@ taskApp.post("/create", requireAuth, zValidator("json", CreateTaskSchema), async
     if (apiToken) {
         // If API token is scoped to a specific library, check that target matches scope
         if (apiToken.library_id && apiToken.library_id !== payload.library_id) {
-            return c.json(
-                error(Code.UNAUTHORIZED, "API token is not scoped for this library"),
-                403,
-            );
+            return c.json(error(Code.UNAUTHORIZED, "API token is not scoped for this library"), 403);
         }
 
         // Ensure library belongs to the token owner
@@ -232,9 +230,7 @@ taskApp.post("/create", requireAuth, zValidator("json", CreateTaskSchema), async
     const url = new URL(c.req.url);
     const origin =
         env.UPSTASH_WORKFLOW_URL ||
-        (c.req.header("x-forwarded-proto")
-            ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
-            : url.origin);
+        (c.req.header("x-forwarded-proto") ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}` : url.origin);
     const workflowUrl = `${origin.replace(/\/$/, "")}/api/task/workflow`;
 
     const customWorkflowRunId = crypto.randomUUID();
@@ -246,11 +242,7 @@ taskApp.post("/create", requireAuth, zValidator("json", CreateTaskSchema), async
 
     // Step 1: Save Metadata of Post to DB (Synchronization & Deduplication) synchronously
     for (const postData of payload.posts) {
-        const stepOneResult = await TaskService.saveMetadata(
-            postData,
-            payload.library_id,
-            customWorkflowRunId,
-        );
+        const stepOneResult = await TaskService.saveMetadata(postData, payload.library_id, customWorkflowRunId);
 
         // The result of Step 1 can determine whether the following steps should be executed.
         if (!stepOneResult.skipUpdate) {
@@ -299,10 +291,7 @@ export const workflowHandler = serve(
             // Step 3: Process And Upload Avatar
             if (post.data.author.avatar_file_url && post.authorId) {
                 await context.run(`process-avatar-${post.authorId}`, async () => {
-                    await TaskService.processAvatar(
-                        post.authorId!,
-                        post.data.author.avatar_file_url!,
-                    );
+                    await TaskService.processAvatar(post.authorId!, post.data.author.avatar_file_url!);
                 });
             }
 
@@ -315,10 +304,7 @@ export const workflowHandler = serve(
     {
         failureFunction: async ({ context, failResponse }) => {
             // Mark posts associated with this workflow as FAILED
-            await TaskService.markPostAsFailed(
-                context.workflowRunId,
-                failResponse || "Workflow retries exhausted.",
-            );
+            await TaskService.markPostAsFailed(context.workflowRunId, failResponse || "Workflow retries exhausted.");
         },
     },
 );
@@ -330,12 +316,7 @@ taskApp.post("/purge-expired-files", async (c) => {
     const expiredFiles = await db
         .select()
         .from(DbFile)
-        .where(
-            and(
-                eq(DbFile.delete_status, DeleteStatus.DELETED),
-                lt(DbFile.delete_time, thirtyDaysAgo),
-            ),
-        );
+        .where(and(eq(DbFile.delete_status, DeleteStatus.DELETED), lt(DbFile.delete_time, thirtyDaysAgo)));
 
     let purgedCount = 0;
     let failedCount = 0;
@@ -379,9 +360,7 @@ const CoverWorkflowPayloadSchema = z.object({
 
 export const coverWorkflowHandler = serve(
     async (context) => {
-        const { mediaId, force, replaceExternalCover } = CoverWorkflowPayloadSchema.parse(
-            context.requestPayload,
-        );
+        const { mediaId, force, replaceExternalCover } = CoverWorkflowPayloadSchema.parse(context.requestPayload);
 
         await context.run(`generate-cover-${mediaId}`, async () => {
             await VideoCoverService.generateForMedia(mediaId, { force, replaceExternalCover });
@@ -389,13 +368,10 @@ export const coverWorkflowHandler = serve(
     },
     {
         failureFunction: async ({ context, failResponse }) => {
-            console.error(
-                `[VIDEO COVER WORKFLOW FAILED] Workflow Run: ${context.workflowRunId}. Reason: ${failResponse}`,
-            );
+            console.error(`[VIDEO COVER WORKFLOW FAILED] Workflow Run: ${context.workflowRunId}. Reason: ${failResponse}`);
             const { mediaId } = CoverWorkflowPayloadSchema.parse(context.requestPayload);
             try {
-                const { Track, TrackType, TrackPurpose, TrackQuality } =
-                    await import("@/db/schema");
+                const { Track, TrackType, TrackPurpose, TrackQuality } = await import("@/db/schema");
                 await db
                     .insert(Track)
                     .values({
@@ -415,10 +391,7 @@ export const coverWorkflowHandler = serve(
                         },
                     });
             } catch (dbErr) {
-                console.error(
-                    `[VIDEO COVER WORKFLOW] Failed to write failure status to DB:`,
-                    dbErr,
-                );
+                console.error(`[VIDEO COVER WORKFLOW] Failed to write failure status to DB:`, dbErr);
             }
         },
     },
@@ -445,10 +418,7 @@ taskApp.post("/scan-missing-covers", async (c) => {
     } else {
         // If CRON_SECRET is missing in production, reject for security
         if (process.env.NODE_ENV === "production") {
-            return c.json(
-                error(Code.SERVICE_UNAVAILABLE, "CRON_SECRET is not configured in production"),
-                500,
-            );
+            return c.json(error(Code.SERVICE_UNAVAILABLE, "CRON_SECRET is not configured in production"), 500);
         }
     }
 
@@ -463,9 +433,7 @@ taskApp.post("/scan-missing-covers", async (c) => {
     const url = new URL(c.req.url);
     const origin =
         env.UPSTASH_WORKFLOW_URL ||
-        (c.req.header("x-forwarded-proto")
-            ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
-            : url.origin);
+        (c.req.header("x-forwarded-proto") ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}` : url.origin);
 
     try {
         const result = await VideoCoverService.scanAndQueueMissingCovers({
@@ -497,19 +465,13 @@ taskApp.post("/retry-sync", requireAuth, zValidator("json", RetrySyncSchema), as
 
     const payload = c.req.valid("json");
     if (!payload.post_ids?.length && !payload.media_ids?.length) {
-        return c.json(
-            error(Code.INVALID_PARAMETER, "At least one post_id or media_id is required"),
-            400,
-        );
+        return c.json(error(Code.INVALID_PARAMETER, "At least one post_id or media_id is required"), 400);
     }
 
     // Auth verification: ensure all requested posts/medias belong to libraries owned by the user
     const resolvedPostIds = new Set<string>(payload.post_ids || []);
     if (payload.media_ids?.length) {
-        const mediaList = await db
-            .select({ post_id: Media.post_id })
-            .from(Media)
-            .where(inArray(Media.id, payload.media_ids));
+        const mediaList = await db.select({ post_id: Media.post_id }).from(Media).where(inArray(Media.id, payload.media_ids));
         for (const m of mediaList) {
             if (m.post_id) {
                 resolvedPostIds.add(m.post_id);
@@ -519,24 +481,15 @@ taskApp.post("/retry-sync", requireAuth, zValidator("json", RetrySyncSchema), as
 
     const postIds = Array.from(resolvedPostIds);
     if (postIds.length > 0) {
-        const posts = await db
-            .select({ library_id: Post.library_id })
-            .from(Post)
-            .where(inArray(Post.id, postIds));
+        const posts = await db.select({ library_id: Post.library_id }).from(Post).where(inArray(Post.id, postIds));
 
         const uniqueLibraryIds = Array.from(new Set(posts.map((p) => p.library_id)));
         if (uniqueLibraryIds.length > 0) {
-            const libraries = await db
-                .select({ owner_id: Library.owner_id })
-                .from(Library)
-                .where(inArray(Library.id, uniqueLibraryIds));
+            const libraries = await db.select({ owner_id: Library.owner_id }).from(Library).where(inArray(Library.id, uniqueLibraryIds));
 
             const isAuthorized = libraries.every((lib) => lib.owner_id === user.id);
             if (!isAuthorized) {
-                return c.json(
-                    error(Code.UNAUTHORIZED, "You do not have access to some of the libraries"),
-                    403,
-                );
+                return c.json(error(Code.UNAUTHORIZED, "You do not have access to some of the libraries"), 403);
             }
         }
     }
@@ -544,9 +497,7 @@ taskApp.post("/retry-sync", requireAuth, zValidator("json", RetrySyncSchema), as
     const url = new URL(c.req.url);
     const origin =
         env.UPSTASH_WORKFLOW_URL ||
-        (c.req.header("x-forwarded-proto")
-            ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
-            : url.origin);
+        (c.req.header("x-forwarded-proto") ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}` : url.origin);
 
     try {
         const result = await TaskService.retrySync({
@@ -582,10 +533,7 @@ taskApp.post("/sweep-stuck-tasks", async (c) => {
         }
     } else {
         if (process.env.NODE_ENV === "production") {
-            return c.json(
-                error(Code.SERVICE_UNAVAILABLE, "CRON_SECRET is not configured in production"),
-                500,
-            );
+            return c.json(error(Code.SERVICE_UNAVAILABLE, "CRON_SECRET is not configured in production"), 500);
         }
     }
 
@@ -609,6 +557,40 @@ taskApp.post("/sweep-stuck-tasks", async (c) => {
     }
 });
 
+// Endpoint to sweep orphan tags
+taskApp.post("/sweep-orphan-tags", async (c) => {
+    const cronSecret = env.CRON_SECRET;
+    if (cronSecret) {
+        const authHeader = c.req.header("Authorization");
+        const internalHeader = c.req.header("X-Internal-Token");
+
+        let token = "";
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+            token = authHeader.substring(7);
+        } else if (internalHeader) {
+            token = internalHeader;
+        }
+
+        if (token !== cronSecret) {
+            return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+        }
+    } else {
+        if (process.env.NODE_ENV === "production") {
+            return c.json(error(Code.SERVICE_UNAVAILABLE, "CRON_SECRET is not configured in production"), 500);
+        }
+    }
+
+    try {
+        const { sweepOrphanTags } = await import("@/scripts/sweep_orphans");
+        const result = await sweepOrphanTags();
+        return c.json(success(Code.SUCCESS, result));
+    } catch (e: any) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        console.error(`[task] Failed to sweep orphan tags: ${errorMsg}`);
+        return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
+    }
+});
+
 // Endpoint to queue items for AI enrichment
 const QueueAiSchema = z.object({
     post_ids: z.array(z.string().uuid()).optional(),
@@ -623,10 +605,7 @@ taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async 
 
     const payload = c.req.valid("json");
     if (!payload.post_ids?.length && !payload.media_ids?.length) {
-        return c.json(
-            error(Code.INVALID_PARAMETER, "At least one post_id or media_id is required"),
-            400,
-        );
+        return c.json(error(Code.INVALID_PARAMETER, "At least one post_id or media_id is required"), 400);
     }
 
     // Resolve media IDs from the database
@@ -636,12 +615,7 @@ taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async 
         const mediaList = await db
             .select({ id: Media.id })
             .from(Media)
-            .where(
-                and(
-                    inArray(Media.post_id, payload.post_ids),
-                    eq(Media.delete_status, DeleteStatus.ACTIVE),
-                ),
-            );
+            .where(and(inArray(Media.post_id, payload.post_ids), eq(Media.delete_status, DeleteStatus.ACTIVE)));
         for (const m of mediaList) {
             targetMediaIds.add(m.id);
         }
@@ -655,30 +629,19 @@ taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async 
 
     const finalMediaIds = Array.from(targetMediaIds);
     if (finalMediaIds.length === 0) {
-        return c.json(
-            success(Code.SUCCESS, { count: 0, message: "No active media items found to enrich" }),
-        );
+        return c.json(success(Code.SUCCESS, { count: 0, message: "No active media items found to enrich" }));
     }
 
     // Authorization verification: verify user owns all associated libraries
-    const mediaList = await db
-        .select({ id: Media.id, library_id: Media.library_id })
-        .from(Media)
-        .where(inArray(Media.id, finalMediaIds));
+    const mediaList = await db.select({ id: Media.id, library_id: Media.library_id }).from(Media).where(inArray(Media.id, finalMediaIds));
 
     const uniqueLibraryIds = Array.from(new Set(mediaList.map((m) => m.library_id)));
     if (uniqueLibraryIds.length > 0) {
-        const libraries = await db
-            .select({ owner_id: Library.owner_id })
-            .from(Library)
-            .where(inArray(Library.id, uniqueLibraryIds));
+        const libraries = await db.select({ owner_id: Library.owner_id }).from(Library).where(inArray(Library.id, uniqueLibraryIds));
 
         const isAuthorized = libraries.every((lib) => lib.owner_id === user.id);
         if (!isAuthorized) {
-            return c.json(
-                error(Code.UNAUTHORIZED, "You do not have access to some of the libraries"),
-                403,
-            );
+            return c.json(error(Code.UNAUTHORIZED, "You do not have access to some of the libraries"), 403);
         }
     }
 
@@ -701,11 +664,7 @@ taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async 
                 last_error: null,
             })
             .onConflictDoUpdate({
-                target: [
-                    AssetAiMetadata.entity_type,
-                    AssetAiMetadata.entity_id,
-                    AssetAiMetadata.metadata_pipeline_id,
-                ],
+                target: [AssetAiMetadata.entity_type, AssetAiMetadata.entity_id, AssetAiMetadata.metadata_pipeline_id],
                 set: {
                     processing_status: ProcessingStatus.PENDING,
                     last_error: null,
@@ -718,9 +677,7 @@ taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async 
     const url = new URL(c.req.url);
     const origin =
         env.UPSTASH_WORKFLOW_URL ||
-        (c.req.header("x-forwarded-proto")
-            ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
-            : url.origin);
+        (c.req.header("x-forwarded-proto") ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}` : url.origin);
     const workflowUrl = `${origin.replace(/\/$/, "")}/api/task/workflow-ai`;
 
     const client = new Client({ token: env.QSTASH_TOKEN });
@@ -753,12 +710,7 @@ taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async 
                     last_error: errorMsg,
                     update_time: sql`now()`,
                 })
-                .where(
-                    and(
-                        eq(AssetAiMetadata.entity_id, mediaId),
-                        eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
-                    ),
-                );
+                .where(and(eq(AssetAiMetadata.entity_id, mediaId), eq(AssetAiMetadata.entity_type, EntityType.MEDIA)));
         }
         return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
     }
@@ -788,12 +740,7 @@ export const aiWorkflowHandler = serve(
                     const postList = await db
                         .select()
                         .from(Post)
-                        .where(
-                            and(
-                                eq(Post.id, media.post_id),
-                                eq(Post.delete_status, DeleteStatus.ACTIVE),
-                            ),
-                        )
+                        .where(and(eq(Post.id, media.post_id), eq(Post.delete_status, DeleteStatus.ACTIVE)))
                         .limit(1);
                     post = postList[0] || null;
                 }
@@ -816,21 +763,14 @@ export const aiWorkflowHandler = serve(
     },
     {
         failureFunction: async ({ context, failResponse }) => {
-            console.error(
-                `[AI WORKFLOW FAILED] Workflow Run: ${context.workflowRunId}. Reason: ${failResponse}`,
-            );
+            console.error(`[AI WORKFLOW FAILED] Workflow Run: ${context.workflowRunId}. Reason: ${failResponse}`);
             const { mediaIds } = AiWorkflowPayloadSchema.parse(context.requestPayload);
             const errorMsg = failResponse || "Workflow retries exhausted.";
             for (const mediaId of mediaIds) {
                 const aiMetadataList = await db
                     .select()
                     .from(AssetAiMetadata)
-                    .where(
-                        and(
-                            eq(AssetAiMetadata.entity_id, mediaId),
-                            eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
-                        ),
-                    )
+                    .where(and(eq(AssetAiMetadata.entity_id, mediaId), eq(AssetAiMetadata.entity_type, EntityType.MEDIA)))
                     .limit(1);
                 const aiMetadata = aiMetadataList[0];
                 if (aiMetadata) {

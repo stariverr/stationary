@@ -1,5 +1,21 @@
 import { db } from "@/global/db";
-import { Post, Media, Track, Author, File, DeleteStatus, SyncStatus, TrackType, TrackPurpose, TrackQuality } from "@/db/schema";
+import {
+    Post,
+    Media,
+    Track,
+    Author,
+    File,
+    DeleteStatus,
+    SyncStatus,
+    TrackType,
+    TrackPurpose,
+    TrackQuality,
+    Tag,
+    PostTag,
+    MediaTag,
+    TagStatus,
+    TagSource,
+} from "@/db/schema";
 import { eq, and, notInArray, inArray, gte, isNull, isNotNull, or, lt } from "drizzle-orm";
 import { downloadStream, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
 import { VideoCoverService } from "@/services/video_cover";
@@ -9,6 +25,7 @@ import { Client } from "@upstash/workflow";
 import type { PostItemData, MediaItemData } from "@/api/task";
 import { nowDbTimestamp } from "@/lib/utils/time";
 import { Temporal } from "@js-temporal/polyfill";
+import { sanitizeTags, normalizeTagName } from "@/lib/utils/tag_sanitizer";
 
 function formatVttTime(seconds: number): string {
     const ms = Math.floor((seconds % 1) * 1000)
@@ -154,6 +171,102 @@ async function extractSegmentBase(stream: ReadableStream): Promise<{
     };
 }
 
+async function syncEntityTags(
+    tx: any,
+    libraryId: string,
+    entityType: "post" | "media",
+    entityId: string,
+    rawTags: string[],
+    source: TagSource,
+    sourceField: string,
+) {
+    const sanitized = sanitizeTags(rawTags);
+    if (sanitized.length === 0) {
+        if (entityType === "post") {
+            await tx.delete(PostTag).where(eq(PostTag.post_id, entityId));
+        } else {
+            await tx.delete(MediaTag).where(eq(MediaTag.media_id, entityId));
+        }
+        return;
+    }
+
+    const existingTags = await tx.select().from(Tag).where(eq(Tag.library_id, libraryId));
+
+    // Build unified map of normalized names & aliases pointing to their own tag
+    const normalizedLookup = new Map<string, any>();
+    for (const t of existingTags) {
+        normalizedLookup.set(t.normalized_name, t);
+    }
+
+    const targetTagIds: string[] = [];
+
+    for (const item of sanitized) {
+        if (normalizedLookup.has(item.normalized)) {
+            const matched = normalizedLookup.get(item.normalized);
+            if (matched.status === TagStatus.IGNORED) {
+                continue;
+            }
+            targetTagIds.push(matched.id);
+        } else {
+            const inserted = await tx
+                .insert(Tag)
+                .values({
+                    name: item.name,
+                    normalized_name: item.normalized,
+                    canonical_tag_id: null,
+                    library_id: libraryId,
+                    status: TagStatus.CANDIDATE,
+                    source: source,
+                    source_field: sourceField,
+                })
+                .returning();
+            if (inserted[0]) {
+                targetTagIds.push(inserted[0].id);
+                // Put the newly created candidate into the lookup map to prevent duplicates in the same batch
+                normalizedLookup.set(item.normalized, inserted[0]);
+            }
+        }
+    }
+
+    if (entityType === "post") {
+        const existingLinks = await tx.select().from(PostTag).where(eq(PostTag.post_id, entityId));
+        const existingTagIds = existingLinks.map((l: any) => l.tag_id);
+
+        const toAdd = targetTagIds.filter((id: string) => !existingTagIds.includes(id));
+        const toDelete = existingTagIds.filter((id: string) => !targetTagIds.includes(id));
+
+        if (toAdd.length > 0) {
+            await tx.insert(PostTag).values(
+                toAdd.map((tagId) => ({
+                    post_id: entityId,
+                    tag_id: tagId,
+                })),
+            );
+        }
+        if (toDelete.length > 0) {
+            await tx.delete(PostTag).where(and(eq(PostTag.post_id, entityId), inArray(PostTag.tag_id, toDelete)));
+        }
+    } else {
+        const existingLinks = await tx.select().from(MediaTag).where(eq(MediaTag.media_id, entityId));
+        const existingTagIds = existingLinks.map((l: any) => l.tag_id);
+
+        const toAdd = targetTagIds.filter((id: string) => !existingTagIds.includes(id));
+        const toDelete = existingTagIds.filter((id: string) => !targetTagIds.includes(id));
+
+        if (toAdd.length > 0) {
+            await tx.insert(MediaTag).values(
+                toAdd.map((tagId) => ({
+                    media_id: entityId,
+                    tag_id: tagId,
+                })),
+            );
+        }
+        if (toDelete.length > 0) {
+            await tx.delete(MediaTag).where(and(eq(MediaTag.media_id, entityId), inArray(MediaTag.tag_id, toDelete)));
+        }
+    }
+}
+
 export const TaskService = {
     /**
      * Step 1: Save metadata to DB (Synchronization & Deduplication)
@@ -254,6 +367,9 @@ export const TaskService = {
             if (!postData.external_id) postData.external_id = results[0].eid;
             hasPendingTasks = true;
         }
+
+        // Sync relational tags for post
+        await syncEntityTags(db, targetLibraryId, "post", postId, postData.tags || [], TagSource.SCRAPER, "post.tags");
 
         // 3. Media sync
         const mediaEids: string[] = postData.media.map((m) => m.external_id).filter((eid): eid is string => !!eid);
@@ -439,6 +555,9 @@ export const TaskService = {
                     await db.update(Media).set(updateData).where(eq(Media.id, m.id));
                 }
             }
+
+            // Sync relational tags for media
+            await syncEntityTags(db, targetLibraryId, "media", mediaId, mediaData.tags || [], TagSource.SCRAPER, "media.tags");
 
             // Sync Track records
             const existingTracks = await db.select().from(Track).where(eq(Track.media_id, mediaId));
@@ -919,6 +1038,22 @@ export const TaskService = {
 
             const mediaIds = postMedia.map((m) => m.id);
 
+            const postTagsList = await db
+                .select({ name: Tag.name })
+                .from(PostTag)
+                .innerJoin(Tag, eq(PostTag.tag_id, Tag.id))
+                .where(and(eq(PostTag.post_id, post.id), eq(Tag.status, TagStatus.ACTIVE)));
+            const postTagNames = postTagsList.map((pt) => pt.name);
+
+            const mediaTagsList =
+                mediaIds.length > 0
+                    ? await db
+                          .select({ media_id: MediaTag.media_id, name: Tag.name })
+                          .from(MediaTag)
+                          .innerJoin(Tag, eq(MediaTag.tag_id, Tag.id))
+                          .where(and(inArray(MediaTag.media_id, mediaIds), eq(Tag.status, TagStatus.ACTIVE)))
+                    : [];
+
             if (mediaIds.length > 0) {
                 // Reset failed tracks to PENDING
                 await db
@@ -1023,12 +1158,15 @@ export const TaskService = {
                     }
                 }
 
+                const mediaTagNames = mediaTagsList.filter((mt) => mt.media_id === m.id).map((mt) => mt.name);
+
                 return {
                     external_id: m.eid,
                     title: m.title,
                     description: m.description,
                     type: m.type,
                     tracks,
+                    tags: mediaTagNames,
                     published_time: m.published_time ?? undefined,
                 };
             });
@@ -1041,7 +1179,7 @@ export const TaskService = {
                     url: post.url ?? undefined,
                     description: post.description,
                     external_id: post.eid,
-                    tags: post.tags,
+                    tags: postTagNames,
                     author: {
                         name: post.author_name,
                         external_id: post.author_external_id ?? undefined,

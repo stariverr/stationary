@@ -21,6 +21,9 @@ import {
     Author,
     SyncStatus,
     MediaType,
+    PostTag,
+    Tag,
+    TagStatus,
 } from "@/db/schema";
 import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lte, exists } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -129,7 +132,6 @@ router.get(
                 eid: Post.eid,
                 title: Post.title,
                 source: Post.source,
-                tags: Post.tags,
                 author_name: Post.author_name,
                 create_time: Post.create_time,
                 published_time: Post.published_time,
@@ -260,19 +262,39 @@ router.get(
             }
         }
 
+        const postTagsMap = new Map<string, string[]>();
+        if (postIds.length > 0) {
+            const allTags = await db
+                .select({
+                    post_id: PostTag.post_id,
+                    tag_name: Tag.name,
+                })
+                .from(PostTag)
+                .innerJoin(Tag, eq(PostTag.tag_id, Tag.id))
+                .where(and(inArray(PostTag.post_id, postIds), eq(Tag.status, TagStatus.ACTIVE)));
+
+            for (const row of allTags) {
+                if (!postTagsMap.has(row.post_id)) {
+                    postTagsMap.set(row.post_id, []);
+                }
+                postTagsMap.get(row.post_id)!.push(row.tag_name);
+            }
+        }
+
         const posts = rawPosts.map((post) => {
             const postMedia = mediaByPostId.get(post.id) || [];
             let type: "MULTI_MEDIA" | "TEXT" = "TEXT";
             if (postMedia.length > 0) {
                 type = "MULTI_MEDIA";
             }
+            const postTags = postTagsMap.get(post.id) || [];
             return {
                 id: post.id,
                 eid: post.eid,
                 type: type,
                 title: post.title,
                 source: post.source,
-                tags: post.tags,
+                tags: postTags,
                 author_name: post.author_name,
                 author_avatar_url: buildCdnUrl(post.author_avatar_bucket, post.author_avatar_path),
                 create_time: toIsoTimestamp(post.create_time),
@@ -451,7 +473,6 @@ router.get(
                 eid: Post.eid,
                 title: Post.title,
                 description: Post.description,
-                tags: Post.tags,
                 author_name: Post.author_name,
                 author_external_id: Post.author_external_id,
                 create_time: Post.create_time,
@@ -474,6 +495,13 @@ router.get(
         if (!postData) {
             return c.json(error(Code.NOT_FOUND, "Post not found"));
         }
+
+        const postTagsList = await db
+            .select({ name: Tag.name })
+            .from(PostTag)
+            .innerJoin(Tag, eq(PostTag.tag_id, Tag.id))
+            .where(and(eq(PostTag.post_id, id), eq(Tag.status, TagStatus.ACTIVE)));
+        const postTags = postTagsList.map((pt) => pt.name);
 
         const mediaRows = await db
             .select({
@@ -580,7 +608,7 @@ router.get(
             eid: postData.eid,
             title: postData.title,
             description: postData.description,
-            tags: postData.tags,
+            tags: postTags,
             author_name: postData.author_name,
             author_avatar_url: buildCdnUrl(postData.author_avatar_bucket, postData.author_avatar_path),
             author_external_id: postData.author_external_id,

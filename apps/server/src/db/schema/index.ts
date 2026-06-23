@@ -125,6 +125,21 @@ export enum DeleteStatus {
 }
 export const DeleteStatusEnum = pgEnum("delete_status", [DeleteStatus.ACTIVE, DeleteStatus.DELETED, DeleteStatus.PURGED]);
 
+export enum TagStatus {
+    ACTIVE = "ACTIVE",
+    CANDIDATE = "CANDIDATE",
+    IGNORED = "IGNORED",
+}
+export const TagStatusEnum = pgEnum("tag_status", [TagStatus.ACTIVE, TagStatus.CANDIDATE, TagStatus.IGNORED]);
+
+export enum TagSource {
+    SCRAPER = "SCRAPER",
+    AI = "AI",
+    USER = "USER",
+    IMPORT = "IMPORT",
+}
+export const TagSourceEnum = pgEnum("tag_source", [TagSource.SCRAPER, TagSource.AI, TagSource.USER, TagSource.IMPORT]);
+
 export const Author = pgTable(
     "author",
     {
@@ -289,6 +304,61 @@ export const Post = pgTable(
         uniqueIndex("post_source_eid_unique").on(table.source, table.eid),
         index("post_library_delete_time_idx").on(table.library_id, table.delete_time),
     ],
+);
+
+export const Tag = pgTable(
+    "tag",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        name: text("name").notNull(),
+        normalized_name: text("normalized_name").notNull(),
+        canonical_tag_id: uuid("canonical_tag_id"),
+        color: text("color"),
+        library_id: uuid("library_id").notNull(),
+        status: TagStatusEnum("status").default(TagStatus.CANDIDATE).notNull(),
+        source: TagSourceEnum("source").default(TagSource.SCRAPER).notNull(),
+        source_field: text("source_field"),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        update_time: temporal("update_time"),
+    },
+    (table) => [uniqueIndex("tag_library_norm_name_unique").on(table.library_id, table.normalized_name)],
+);
+
+export const PostTag = pgTable(
+    "post_tag",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        post_id: uuid("post_id").notNull(),
+        tag_id: uuid("tag_id").notNull(),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+    },
+    (table) => [uniqueIndex("post_tag_post_tag_unique").on(table.post_id, table.tag_id)],
+);
+
+export const MediaTag = pgTable(
+    "media_tag",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        media_id: uuid("media_id").notNull(),
+        tag_id: uuid("tag_id").notNull(),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+    },
+    (table) => [uniqueIndex("media_tag_media_tag_unique").on(table.media_id, table.tag_id)],
 );
 
 // Media Model

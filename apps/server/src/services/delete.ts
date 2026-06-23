@@ -1,6 +1,6 @@
 import { and, count, eq, inArray, or } from "drizzle-orm";
 import { db } from "@/global/db";
-import { Post, Media, Track, File, Library, Author, DeleteStatus } from "@/db/schema";
+import { Post, Media, Track, File, Library, Author, DeleteStatus, PostTag, MediaTag } from "@/db/schema";
 import { nowDbTimestamp } from "@/lib/utils/time";
 import { RecycleService } from "./recycle";
 
@@ -21,9 +21,7 @@ export const DeleteService = {
             const medias = await tx
                 .select({ id: Media.id })
                 .from(Media)
-                .where(
-                    and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE)),
-                );
+                .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE)));
             const mediaIds = medias.map((m) => m.id);
 
             let fileIds: string[] = [];
@@ -31,20 +29,13 @@ export const DeleteService = {
                 const tracks = await tx
                     .select({ file_id: Track.file_id })
                     .from(Track)
-                    .where(
-                        and(
-                            inArray(Track.media_id, mediaIds),
-                            eq(Track.delete_status, DeleteStatus.ACTIVE),
-                        ),
-                    );
+                    .where(and(inArray(Track.media_id, mediaIds), eq(Track.delete_status, DeleteStatus.ACTIVE)));
                 fileIds = tracks.map((mf) => mf.file_id).filter((fid): fid is string => !!fid);
             }
 
             // 3. Perform synchronous updates
-            await tx
-                .update(Post)
-                .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
-                .where(eq(Post.id, postId));
+            await tx.delete(PostTag).where(eq(PostTag.post_id, postId));
+            await tx.update(Post).set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime }).where(eq(Post.id, postId));
             if (mediaIds.length > 0) {
                 await tx
                     .update(Media)
@@ -80,19 +71,12 @@ export const DeleteService = {
             const tracks = await tx
                 .select({ file_id: Track.file_id })
                 .from(Track)
-                .where(
-                    and(eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)),
-                );
+                .where(and(eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)));
             const fileIds = tracks.map((mf) => mf.file_id).filter((fid): fid is string => !!fid);
 
-            await tx
-                .update(Media)
-                .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
-                .where(eq(Media.id, mediaId));
-            await tx
-                .update(Track)
-                .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
-                .where(eq(Track.media_id, mediaId));
+            await tx.delete(MediaTag).where(eq(MediaTag.media_id, mediaId));
+            await tx.update(Media).set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime }).where(eq(Media.id, mediaId));
+            await tx.update(Track).set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime }).where(eq(Track.media_id, mediaId));
             if (fileIds.length > 0) {
                 await tx
                     .update(File)
@@ -120,17 +104,12 @@ export const DeleteService = {
             const libs = await tx
                 .select({ id: Library.id, cover_file_id: Library.cover_file_id })
                 .from(Library)
-                .where(
-                    and(eq(Library.id, libraryId), eq(Library.delete_status, DeleteStatus.ACTIVE)),
-                )
+                .where(and(eq(Library.id, libraryId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
                 .limit(1);
             const library = libs[0];
             if (!library) return { libraryUpdated: 0 };
 
-            await tx
-                .update(Library)
-                .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
-                .where(eq(Library.id, libraryId));
+            await tx.update(Library).set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime }).where(eq(Library.id, libraryId));
             if (library.cover_file_id) {
                 await tx
                     .update(File)
@@ -158,14 +137,9 @@ export const DeleteService = {
             if (!author) return { authorUpdated: 0 };
 
             // Soft Delete Author
-            await tx
-                .update(Author)
-                .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
-                .where(eq(Author.id, authorId));
+            await tx.update(Author).set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime }).where(eq(Author.id, authorId));
 
-            const fileIds = [author.avatar_file_id, author.avatar_thumb_file_id].filter(
-                (fid): fid is string => !!fid,
-            );
+            const fileIds = [author.avatar_file_id, author.avatar_thumb_file_id].filter((fid): fid is string => !!fid);
             // Soft Delete Author Avatar File
             if (fileIds.length > 0) {
                 await tx
@@ -190,28 +164,18 @@ export const DeleteService = {
                 .from(Author)
                 .where(
                     and(
-                        or(
-                            eq(Author.avatar_file_id, fileId),
-                            eq(Author.avatar_thumb_file_id, fileId),
-                        ),
+                        or(eq(Author.avatar_file_id, fileId), eq(Author.avatar_thumb_file_id, fileId)),
                         eq(Author.delete_status, DeleteStatus.ACTIVE),
                     ),
                 ),
             db
                 .select({ count: count() })
                 .from(Library)
-                .where(
-                    and(
-                        eq(Library.cover_file_id, fileId),
-                        eq(Library.delete_status, DeleteStatus.ACTIVE),
-                    ),
-                ),
+                .where(and(eq(Library.cover_file_id, fileId), eq(Library.delete_status, DeleteStatus.ACTIVE))),
             db
                 .select({ count: count() })
                 .from(Track)
-                .where(
-                    and(eq(Track.file_id, fileId), eq(Track.delete_status, DeleteStatus.ACTIVE)),
-                ),
+                .where(and(eq(Track.file_id, fileId), eq(Track.delete_status, DeleteStatus.ACTIVE))),
         ]);
 
         const authors = authorCount[0]?.count ?? 0;

@@ -8,6 +8,7 @@ import { env } from "@/global/env";
 import user from "@/api/user";
 import library from "@/api/library";
 import search from "@/api/search";
+import tag from "@/api/tag";
 
 const app = new Hono();
 
@@ -50,6 +51,7 @@ app.route("/api/task", task);
 app.route("/api/user", user);
 app.route("/api/library", library);
 app.route("/api/search", search);
+app.route("/api/tag", tag);
 
 const port = 9400;
 console.log(`Server is running on port ${port}`);

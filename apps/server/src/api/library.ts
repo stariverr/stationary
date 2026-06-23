@@ -4,7 +4,7 @@ import { z } from "zod";
 import { validator } from "hono/validator";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
-import { DeleteStatus, Library, Media, Post } from "@/db/schema";
+import { DeleteStatus, Library, Media, Post, Tag, PostTag, MediaTag } from "@/db/schema";
 import { and, eq, ilike, SQL, count, inArray, isNull, sql } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { RecycleService } from "@/services/recycle";
@@ -14,10 +14,7 @@ import { Temporal } from "@js-temporal/polyfill";
 const router = new Hono<AuthEnv>();
 
 export const LibraryListQuerySchema = z.object({
-    page: z.preprocess(
-        (val) => (val === "" || val === undefined ? undefined : Number(val)),
-        z.number().int().positive().gte(1).optional(),
-    ),
+    page: z.preprocess((val) => (val === "" || val === undefined ? undefined : Number(val)), z.number().int().positive().gte(1).optional()),
     count: z.preprocess(
         (val) => (val === "" || val === undefined ? undefined : Number(val)),
         z.number().int().positive().gte(10).lte(100).optional(),
@@ -47,10 +44,7 @@ export const LibraryMoveItemsBodySchema = z
         target_library_id: z.uuid(),
     })
     .strict()
-    .refine(
-        (body) => body.post_ids.length > 0 || body.media_ids.length > 0,
-        "At least one post or media id is required",
-    );
+    .refine((body) => body.post_ids.length > 0 || body.media_ids.length > 0, "At least one post or media id is required");
 
 export const uniqueIds = (ids: string[]) => Array.from(new Set(ids));
 
@@ -135,11 +129,7 @@ router.post(
     async (c) => {
         const body = c.req.valid("json");
         const { id, ...updateData } = body;
-        const updated = await db
-            .update(Library)
-            .set(updateData)
-            .where(eq(Library.id, id))
-            .returning();
+        const updated = await db.update(Library).set(updateData).where(eq(Library.id, id)).returning();
 
         if (updated.length === 0) return c.json(error(Code.NOT_FOUND, "Library not found"));
         return c.json(success(Code.SUCCESS, updated[0]));
@@ -168,12 +158,7 @@ router.post("/delete/:id", requireAuth, async (c) => {
         return c.json(success(Code.SUCCESS, result));
     } catch (e: any) {
         if (e.message === "Library is not empty") {
-            return c.json(
-                error(
-                    Code.LIBRARY_NOT_EMPTY,
-                    "Please empty posts and media in this library before deleting it.",
-                ),
-            );
+            return c.json(error(Code.LIBRARY_NOT_EMPTY, "Please empty posts and media in this library before deleting it."));
         }
         throw e;
     }
@@ -197,12 +182,7 @@ router.post(
         const targetLibraries = await db
             .select({ id: Library.id })
             .from(Library)
-            .where(
-                and(
-                    eq(Library.id, body.target_library_id),
-                    eq(Library.delete_status, DeleteStatus.ACTIVE),
-                ),
-            )
+            .where(and(eq(Library.id, body.target_library_id), eq(Library.delete_status, DeleteStatus.ACTIVE)))
             .limit(1);
 
         if (targetLibraries.length === 0) {
@@ -214,12 +194,7 @@ router.post(
                 ? await db
                       .select({ id: Post.id })
                       .from(Post)
-                      .where(
-                          and(
-                              inArray(Post.id, body.post_ids),
-                              eq(Post.delete_status, DeleteStatus.ACTIVE),
-                          ),
-                      )
+                      .where(and(inArray(Post.id, body.post_ids), eq(Post.delete_status, DeleteStatus.ACTIVE)))
                 : [];
 
         if (selectedPosts.length !== body.post_ids.length) {
@@ -231,12 +206,7 @@ router.post(
                 ? await db
                       .select({ id: Media.id, post_id: Media.post_id })
                       .from(Media)
-                      .where(
-                          and(
-                              inArray(Media.id, body.media_ids),
-                              eq(Media.delete_status, DeleteStatus.ACTIVE),
-                          ),
-                      )
+                      .where(and(inArray(Media.id, body.media_ids), eq(Media.delete_status, DeleteStatus.ACTIVE)))
                 : [];
 
         if (selectedMedia.length !== body.media_ids.length) {
@@ -245,12 +215,117 @@ router.post(
 
         const attachedMediaIds = getAttachedMediaIds(selectedMedia);
         if (attachedMediaIds.length > 0) {
-            return c.json(
-                error(Code.INVALID_PARAMETER, "Only independent media can be moved directly"),
-            );
+            return c.json(error(Code.INVALID_PARAMETER, "Only independent media can be moved directly"));
         }
 
         const moved = await db.transaction(async (tx) => {
+            // 1. Gather all tags associated with the posts and media
+            const postTags =
+                body.post_ids.length > 0
+                    ? await tx
+                          .select({
+                              post_id: PostTag.post_id,
+                              tag_name: Tag.name,
+                              tag_normalized: Tag.normalized_name,
+                              tag_color: Tag.color,
+                              tag_status: Tag.status,
+                              tag_source: Tag.source,
+                              tag_source_field: Tag.source_field,
+                          })
+                          .from(PostTag)
+                          .innerJoin(Tag, eq(PostTag.tag_id, Tag.id))
+                          .where(inArray(PostTag.post_id, body.post_ids))
+                    : [];
+
+            // Resolve all media items being moved (both direct and post-attached)
+            const postMediaRows =
+                body.post_ids.length > 0 ? await tx.select({ id: Media.id }).from(Media).where(inArray(Media.post_id, body.post_ids)) : [];
+            const postMediaIds = postMediaRows.map((m) => m.id);
+            const allMovedMediaIds = uniqueIds([...body.media_ids, ...postMediaIds]);
+
+            const mediaTags =
+                allMovedMediaIds.length > 0
+                    ? await tx
+                          .select({
+                              media_id: MediaTag.media_id,
+                              tag_name: Tag.name,
+                              tag_normalized: Tag.normalized_name,
+                              tag_color: Tag.color,
+                              tag_status: Tag.status,
+                              tag_source: Tag.source,
+                              tag_source_field: Tag.source_field,
+                          })
+                          .from(MediaTag)
+                          .innerJoin(Tag, eq(MediaTag.tag_id, Tag.id))
+                          .where(inArray(MediaTag.media_id, allMovedMediaIds))
+                    : [];
+
+            // 2. Determine target tags that need to be queried/upserted in the target library
+            const uniqueTagsMap = new Map<
+                string,
+                {
+                    name: string;
+                    color: string | null;
+                    status: any;
+                    source: any;
+                    sourceField: string | null;
+                }
+            >();
+
+            for (const pt of postTags) {
+                if (!uniqueTagsMap.has(pt.tag_normalized)) {
+                    uniqueTagsMap.set(pt.tag_normalized, {
+                        name: pt.tag_name,
+                        color: pt.tag_color,
+                        status: pt.tag_status,
+                        source: pt.tag_source,
+                        sourceField: pt.tag_source_field,
+                    });
+                }
+            }
+            for (const mt of mediaTags) {
+                if (!uniqueTagsMap.has(mt.tag_normalized)) {
+                    uniqueTagsMap.set(mt.tag_normalized, {
+                        name: mt.tag_name,
+                        color: mt.tag_color,
+                        status: mt.tag_status,
+                        source: mt.tag_source,
+                        sourceField: mt.tag_source_field,
+                    });
+                }
+            }
+
+            const targetTagMap = new Map<string, string>(); // normalized_name -> targetTagId
+            if (uniqueTagsMap.size > 0) {
+                // Fetch target library existing tags
+                const existingTargetTags = await tx.select().from(Tag).where(eq(Tag.library_id, body.target_library_id));
+
+                for (const [normName, info] of uniqueTagsMap.entries()) {
+                    const matched = existingTargetTags.find((t) => t.normalized_name === normName);
+                    if (matched) {
+                        targetTagMap.set(normName, matched.id);
+                    } else {
+                        // Create in target library
+                        const inserted = await tx
+                            .insert(Tag)
+                            .values({
+                                name: info.name,
+                                normalized_name: normName,
+                                color: info.color,
+                                library_id: body.target_library_id,
+                                status: info.status,
+                                source: info.source,
+                                source_field: info.sourceField,
+                            })
+                            .returning({ id: Tag.id });
+                        if (inserted[0]) {
+                            targetTagMap.set(normName, inserted[0].id);
+                        }
+                    }
+                }
+            }
+
+            // 3. Move posts and media items
             let posts = 0;
             let media = 0;
             let postMedia = 0;
@@ -278,6 +353,33 @@ router.post(
                     .where(and(inArray(Media.id, body.media_ids), isNull(Media.post_id)))
                     .returning({ id: Media.id });
                 media = updatedMedia.length;
+            }
+
+            // 4. Re-link tag relations
+            if (postTags.length > 0) {
+                await tx.delete(PostTag).where(inArray(PostTag.post_id, body.post_ids));
+                const newPostTags = postTags
+                    .map((pt) => {
+                        const targetId = targetTagMap.get(pt.tag_normalized);
+                        return targetId ? { post_id: pt.post_id, tag_id: targetId } : null;
+                    })
+                    .filter((pt): pt is { post_id: string; tag_id: string } => !!pt);
+                if (newPostTags.length > 0) {
+                    await tx.insert(PostTag).values(newPostTags);
+                }
+            }
+
+            if (mediaTags.length > 0) {
+                await tx.delete(MediaTag).where(inArray(MediaTag.media_id, allMovedMediaIds));
+                const newMediaTags = mediaTags
+                    .map((mt) => {
+                        const targetId = targetTagMap.get(mt.tag_normalized);
+                        return targetId ? { media_id: mt.media_id, tag_id: targetId } : null;
+                    })
+                    .filter((mt): mt is { media_id: string; tag_id: string } => !!mt);
+                if (newMediaTags.length > 0) {
+                    await tx.insert(MediaTag).values(newMediaTags);
+                }
             }
 
             return { posts, media, post_media: postMedia };
@@ -345,10 +447,7 @@ router.post(
     validator("json", (value, c) => {
         const parsed = LibraryAiConfigSchema.safeParse(value);
         if (!parsed.success) {
-            return c.json(
-                error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid payload"),
-                400,
-            );
+            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid payload"), 400);
         }
         return parsed.data;
     }),
