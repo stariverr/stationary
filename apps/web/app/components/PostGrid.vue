@@ -14,6 +14,7 @@ import {
     Filter,
     ChevronDown,
     User,
+    Tag as TagIcon,
 } from "@lucide/vue";
 import { useDebounceFn, onClickOutside } from "@vueuse/core";
 import { PaginationRoot, PaginationList, PaginationListItem, PaginationPrev, PaginationNext, PaginationEllipsis } from "reka-ui";
@@ -21,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { NumberField, NumberFieldInput } from "@/components/ui/number-field";
 import { useVisualViewportBottomOffset } from "@/composables/useVisualViewportBottomOffset";
 import { useLibraryStore } from "@/stores/library";
+import { useTagStore } from "@/stores/tag";
 
 const {
     posts,
@@ -36,6 +38,7 @@ const {
     sortBy,
     sortOrder,
     authorIds,
+    tagIds,
     mediaType,
     authors,
     authorSearchKeyword,
@@ -43,6 +46,7 @@ const {
 } = usePosts();
 const { toggleSidebar } = useLayout();
 const libraryStore = useLibraryStore();
+const tagStore = useTagStore();
 const { isMultiSelectClick } = useMultiSelectModifier();
 const visualViewportBottomOffsetStyle = useVisualViewportBottomOffset();
 
@@ -136,12 +140,87 @@ const getPlatformStyle = (platform: string) => {
     }
 };
 
+// Tag Dropdown States and Handlers
+const showTagDropdown = ref(false);
+const tagDropdownRef = ref<HTMLElement | null>(null);
+const localTagSearch = ref("");
+
+const filteredTags = computed(() => {
+    const search = localTagSearch.value.trim().toLowerCase();
+    if (!search) return tagStore.activeTags;
+    return tagStore.activeTags.filter((t) => t.name.toLowerCase().includes(search));
+});
+
+onClickOutside(tagDropdownRef, () => {
+    showTagDropdown.value = false;
+});
+
+const toggleTag = (id: string) => {
+    const index = tagIds.value.indexOf(id);
+    if (index > -1) {
+        tagIds.value = tagIds.value.filter((tid) => tid !== id);
+    } else {
+        tagIds.value = [...tagIds.value, id];
+    }
+};
+
+const removeTag = (id: string) => {
+    tagIds.value = tagIds.value.filter((tid) => tid !== id);
+};
+
+const getTagName = (id: string) => {
+    const tag = tagStore.tags.find((t) => t.id === id);
+    return tag ? tag.name : "Loading...";
+};
+
+const getTagColor = (id: string) => {
+    const tag = tagStore.tags.find((t) => t.id === id);
+    return tag ? tag.color : null;
+};
+
+const normalizeColor = (color: string | null): string => {
+    if (!color) return "";
+    const trimmed = color.trim();
+    if (trimmed.startsWith("#") || /^(oklch|rgb|hsl)/i.test(trimmed)) {
+        return trimmed;
+    }
+    if (/^[0-9a-fA-F]{3,8}$/.test(trimmed)) {
+        return `#${trimmed}`;
+    }
+    return trimmed;
+};
+
+const getTagStyle = (color: string | null) => {
+    if (!color) {
+        return {
+            color: "#52525b",
+            backgroundColor: "#f4f4f5",
+            borderColor: "#d4d4d8",
+        };
+    }
+    const normalized = normalizeColor(color);
+    return {
+        color: normalized,
+        backgroundColor: `color-mix(in srgb, ${normalized} 12%, transparent)`,
+        borderColor: `color-mix(in srgb, ${normalized} 27%, transparent)`,
+    };
+};
+
 const hasActiveFilters = computed(() => {
-    return !!source.value || authorIds.value.length > 0 || !!mediaType.value;
+    return !!source.value || authorIds.value.length > 0 || tagIds.value.length > 0 || !!mediaType.value;
 });
 
 watch(
-    () => [keyword.value, source.value, sortBy.value, sortOrder.value, [...authorIds.value], mediaType.value, libraryStore.activeLibraryId],
+    () => [
+        keyword.value,
+        source.value,
+        sortBy.value,
+        sortOrder.value,
+        [...authorIds.value],
+        [...tagIds.value],
+        mediaType.value,
+        libraryStore.activeLibraryId,
+    ],
     () => {
         exitSelectionMode();
     },
@@ -630,6 +709,128 @@ onUnmounted(() => {
                                     </span>
                                     <button
                                         @click="authorIds = []"
+                                        type="button"
+                                        class="text-[10px] font-bold text-rose-500 hover:text-rose-600 hover:bg-rose-50/50 px-2 py-0.5 rounded transition-colors cursor-pointer"
+                                    >
+                                        {{ $t("common.clear_all", "Clear") }}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tag Dropdown -->
+                    <div ref="tagDropdownRef" class="flex items-center gap-2 relative">
+                        <span class="text-[#424754] font-semibold select-none">{{ $t("common.tags", "Tags") }}:</span>
+                        <div class="relative">
+                            <button
+                                @click="showTagDropdown = !showTagDropdown"
+                                type="button"
+                                class="flex items-center flex-wrap gap-1.5 bg-white hover:bg-slate-50/10 border border-slate-200 hover:border-slate-300 text-[#151c27] rounded-lg py-2 px-2.5 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#0058be]/10 cursor-pointer transition-all select-none min-h-9 min-w-48 max-w-md w-auto shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                            >
+                                <div class="flex items-center gap-1.5 pl-1 pr-1 py-0.5 text-slate-500 shrink-0 select-none">
+                                    <TagIcon class="w-3.5 h-3.5 text-slate-400" />
+                                    <span v-if="tagIds.length === 0" class="text-slate-700 font-semibold">{{
+                                        $t("common.all_tags", "All Tags")
+                                    }}</span>
+                                </div>
+                                <div v-if="tagIds.length > 0" class="flex flex-wrap gap-1.5 items-center">
+                                    <template v-if="tagIds.length <= 2">
+                                        <span
+                                            v-for="id in tagIds"
+                                            :key="id"
+                                            class="inline-flex items-center gap-1.5 border px-2 py-1 rounded text-xs font-semibold transition-all hover:opacity-85"
+                                            :style="getTagStyle(getTagColor(id))"
+                                            @click.stop
+                                        >
+                                            <span class="truncate max-w-16 text-slate-800">{{ getTagName(id) }}</span>
+                                            <span
+                                                @click.stop="removeTag(id)"
+                                                class="text-slate-400 hover:text-slate-600 transition-all hover:bg-slate-200/80 p-0.5 rounded cursor-pointer shrink-0"
+                                            >
+                                                <X class="w-3 h-3 stroke-[2.5]" />
+                                            </span>
+                                        </span>
+                                    </template>
+                                    <template v-else>
+                                        <span
+                                            class="bg-blue-50 border border-blue-100 text-blue-600 px-2 py-0.5 rounded text-[11px] font-bold shrink-0 animate-in fade-in"
+                                        >
+                                            {{ $t("common.n_tags_selected", { count: tagIds.length }, `${tagIds.length} Selected`) }}
+                                        </span>
+                                    </template>
+                                </div>
+                                <ChevronDown class="w-3.5 h-3.5 text-slate-400 shrink-0 ml-auto mr-1" />
+                            </button>
+
+                            <!-- Combobox Dropdown Card -->
+                            <div
+                                v-if="showTagDropdown"
+                                class="absolute right-0 mt-1.5 w-64 bg-white/95 backdrop-blur-md border border-slate-200/80 rounded-xl shadow-[0_12px_30px_-4px_rgba(15,23,42,0.08),0_4px_12px_-2px_rgba(15,23,42,0.03)] z-40 p-1.5 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200"
+                            >
+                                <div
+                                    class="flex items-center border border-slate-200/60 rounded-md bg-slate-50/50 px-2 h-8 gap-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/5 transition-all"
+                                >
+                                    <Search class="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                    <input
+                                        v-model="localTagSearch"
+                                        type="text"
+                                        :placeholder="$t('common.search_tags_placeholder', 'Search tags...')"
+                                        class="w-full text-xs font-semibold bg-transparent border-0 outline-none text-slate-700 placeholder:text-slate-400"
+                                    />
+                                    <button
+                                        v-if="localTagSearch"
+                                        @click="localTagSearch = ''"
+                                        type="button"
+                                        class="text-slate-400 hover:text-slate-650 cursor-pointer p-0.5 rounded-full hover:bg-slate-100"
+                                    >
+                                        <X class="w-3 h-3" />
+                                    </button>
+                                </div>
+                                <div class="max-h-48 overflow-y-auto flex flex-col gap-0.5 pr-0.5 scrollbar-thin">
+                                    <div
+                                        v-for="tag in filteredTags"
+                                        :key="tag.id"
+                                        @click="toggleTag(tag.id)"
+                                        class="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer select-none transition-colors group"
+                                    >
+                                        <div class="flex items-center gap-2 min-w-0">
+                                            <div
+                                                class="w-3.5 h-3.5 rounded flex items-center justify-center border shrink-0 transition-all duration-150"
+                                                :class="[
+                                                    tagIds.includes(tag.id)
+                                                        ? 'border-blue-600 bg-blue-600 text-white'
+                                                        : 'border-slate-300 bg-white group-hover:border-slate-400/80',
+                                                ]"
+                                            >
+                                                <Check v-if="tagIds.includes(tag.id)" class="w-2.5 h-2.5 stroke-3" />
+                                            </div>
+                                            <span class="text-xs font-semibold text-slate-700 truncate">
+                                                {{ tag.name }}
+                                            </span>
+                                        </div>
+                                        <span
+                                            v-if="tag.color"
+                                            class="w-2 h-2 rounded-full shrink-0 ml-2 shadow-[0_1px_1px_rgba(0,0,0,0.01)]"
+                                            :style="{ backgroundColor: normalizeColor(tag.color) }"
+                                        ></span>
+                                    </div>
+                                    <div
+                                        v-if="filteredTags.length === 0"
+                                        class="text-center py-4 text-xs text-slate-400 font-medium select-none"
+                                    >
+                                        {{ $t("common.no_tags_found", "No tags found") }}
+                                    </div>
+                                </div>
+                                <div
+                                    v-if="tagIds.length > 0"
+                                    class="border-t border-slate-100 pt-1.5 px-1 pb-0.5 shrink-0 flex items-center justify-between"
+                                >
+                                    <span class="text-[9px] text-slate-400 font-semibold pl-1 select-none">
+                                        已选 {{ tagIds.length }} 个
+                                    </span>
+                                    <button
+                                        @click="tagIds = []"
                                         type="button"
                                         class="text-[10px] font-bold text-rose-500 hover:text-rose-600 hover:bg-rose-50/50 px-2 py-0.5 rounded transition-colors cursor-pointer"
                                     >

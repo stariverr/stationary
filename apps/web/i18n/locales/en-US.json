@@ -49,6 +49,10 @@
         "search_authors_placeholder": "Search authors...",
         "n_authors_selected": "{count} authors selected",
         "no_authors_found": "No authors found",
+        "search_tags_placeholder": "Search tags...",
+        "n_tags_selected": "{count} tags selected",
+        "no_tags_found": "No tags found",
+        "all_tags": "All Tags",
         "clear_all": "Clear Selection"
     },
     "grid": {

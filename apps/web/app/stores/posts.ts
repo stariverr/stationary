@@ -36,6 +36,7 @@ export const usePostStore = defineStore("posts", () => {
               : [],
     );
     const mediaType = ref<string | undefined>((route.query.media_type as string) || undefined);
+    const tagIds = ref<string[]>((route.query.tag_ids as string) ? (route.query.tag_ids as string).split(",").filter(Boolean) : []);
     const authorSearchKeyword = ref("");
     const authorCache = ref<Record<string, { id: string; nickname: string; platform: string; avatar_url: string | null }>>({});
 
@@ -56,7 +57,7 @@ export const usePostStore = defineStore("posts", () => {
 
     // Reset page to 1 when search filters change
     watch(
-        () => [source.value, sortBy.value, sortOrder.value, [...authorIds.value], mediaType.value],
+        () => [source.value, sortBy.value, sortOrder.value, [...authorIds.value], [...tagIds.value], mediaType.value],
         () => {
             page.value = 1;
         },
@@ -120,6 +121,7 @@ export const usePostStore = defineStore("posts", () => {
             sort_by: sortBy.value,
             sort_order: sortOrder.value,
             author_ids: authorIds.value.length ? authorIds.value.join(",") : undefined,
+            tag_ids: tagIds.value.length ? tagIds.value.join(",") : undefined,
             media_type: mediaType.value,
         }),
         ({
@@ -130,6 +132,7 @@ export const usePostStore = defineStore("posts", () => {
             sort_by: newSortBy,
             sort_order: newSortOrder,
             author_ids: newAuthorIds,
+            tag_ids: newTagIds,
             media_type: newMediaType,
         }) => {
             const query = { ...route.query };
@@ -161,6 +164,7 @@ export const usePostStore = defineStore("posts", () => {
             updateParam("sort_by", newSortBy === "import_time" ? undefined : newSortBy);
             updateParam("sort_order", newSortOrder === "desc" ? undefined : newSortOrder);
             updateParam("author_ids", newAuthorIds);
+            updateParam("tag_ids", newTagIds);
             updateParam("media_type", newMediaType);
 
             if (query.author_id !== undefined) {
@@ -214,6 +218,11 @@ export const usePostStore = defineStore("posts", () => {
             const queryMediaType = (newQuery.media_type as string) || undefined;
             if (queryMediaType !== mediaType.value) {
                 mediaType.value = queryMediaType;
+            }
+            const queryTagIds = (newQuery.tag_ids as string) || "";
+            const parsedTagIds = queryTagIds ? queryTagIds.split(",").filter(Boolean) : [];
+            if (JSON.stringify(parsedTagIds) !== JSON.stringify(tagIds.value)) {
+                tagIds.value = parsedTagIds;
             }
         },
         { deep: true },
@@ -300,6 +309,7 @@ export const usePostStore = defineStore("posts", () => {
                 sort_by: sortBy.value,
                 sort_order: sortOrder.value,
                 author_ids: authorIds.value.join(","),
+                tag_ids: tagIds.value.join(","),
                 media_type: mediaType.value,
             },
         ]),
@@ -319,6 +329,7 @@ export const usePostStore = defineStore("posts", () => {
                     sort_by: sortBy.value,
                     sort_order: sortOrder.value,
                     author_ids: authorIds.value.join(","),
+                    tag_ids: tagIds.value.join(","),
                     media_type: mediaType.value,
                 },
             });
@@ -485,6 +496,7 @@ export const usePostStore = defineStore("posts", () => {
         sortBy,
         sortOrder,
         authorIds,
+        tagIds,
         mediaType,
         authorSearchKeyword,
         authorCache,

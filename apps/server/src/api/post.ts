@@ -25,7 +25,7 @@ import {
     Tag,
     TagStatus,
 } from "@/db/schema";
-import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lte, exists } from "drizzle-orm";
+import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lte, exists, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Temporal } from "@js-temporal/polyfill";
 import { RecycleService } from "@/services/recycle";
@@ -54,6 +54,7 @@ export const PostListRequestBodySchema = z.object({
     sort_order: z.enum(["asc", "desc"]).optional(),
     author_ids: z.string().optional(),
     media_type: z.nativeEnum(MediaType).optional(),
+    tag_ids: z.string().optional(),
 });
 
 // Post List
@@ -81,6 +82,7 @@ router.get(
         const sortOrder = c.req.valid("query").sort_order ?? "desc";
         const authorIdsStr = c.req.valid("query").author_ids;
         const mediaType = c.req.valid("query").media_type;
+        const tagIdsStr = c.req.valid("query").tag_ids;
 
         const where: SQL[] = [];
 
@@ -96,6 +98,20 @@ router.get(
             const authorIds = authorIdsStr.split(",").filter((id) => id.trim().length > 0);
             if (authorIds.length > 0) {
                 where.push(inArray(Post.author_id, authorIds));
+            }
+        }
+        if (tagIdsStr) {
+            const tagIds = tagIdsStr.split(",").filter((id) => id.trim().length > 0);
+            if (tagIds.length > 0) {
+                where.push(
+                    exists(
+                        db
+                            .select()
+                            .from(PostTag)
+                            .innerJoin(Tag, eq(PostTag.tag_id, Tag.id))
+                            .where(and(eq(PostTag.post_id, Post.id), or(inArray(Tag.id, tagIds), inArray(Tag.canonical_tag_id, tagIds)))),
+                    ),
+                );
             }
         }
         if (mediaType) {

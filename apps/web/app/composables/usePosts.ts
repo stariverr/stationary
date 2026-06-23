@@ -37,6 +37,10 @@ export const usePosts = () => {
             get: () => store.authorIds,
             set: (val) => (store.authorIds = val),
         }),
+        tagIds: computed({
+            get: () => store.tagIds,
+            set: (val) => (store.tagIds = val),
+        }),
         authorSearchKeyword: computed({
             get: () => store.authorSearchKeyword,
             set: (val) => (store.authorSearchKeyword = val),
@@ -57,6 +61,7 @@ export const usePosts = () => {
                 sort_by?: string;
                 sort_order?: string;
                 author_ids?: string[];
+                tag_ids?: string[];
                 media_type?: string;
             } = {},
         ) => {
@@ -67,6 +72,7 @@ export const usePosts = () => {
             if (params.sort_by !== undefined) store.sortBy = params.sort_by;
             if (params.sort_order !== undefined) store.sortOrder = params.sort_order;
             if (params.author_ids !== undefined) store.authorIds = params.author_ids;
+            if (params.tag_ids !== undefined) store.tagIds = params.tag_ids;
             if (params.media_type !== undefined) store.mediaType = params.media_type;
             await store.refetchPosts();
         },
