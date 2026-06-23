@@ -4,12 +4,14 @@ import { z } from "zod";
 import { validator } from "hono/validator";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
-import { DeleteStatus, Library, Media, Post, Tag, PostTag, MediaTag } from "@/db/schema";
+import { DeleteStatus, Library, Media, Post, Tag, PostTag, MediaTag, Author } from "@/db/schema";
 import { and, eq, ilike, SQL, count, inArray, isNull, sql } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { RecycleService } from "@/services/recycle";
 import { DeleteService } from "@/services/delete";
 import { Temporal } from "@js-temporal/polyfill";
+import { Client } from "@upstash/workflow";
+import { env } from "@/global/env";
 
 const router = new Hono<AuthEnv>();
 
@@ -192,7 +194,7 @@ router.post(
         const selectedPosts =
             body.post_ids.length > 0
                 ? await db
-                      .select({ id: Post.id })
+                      .select({ id: Post.id, author_id: Post.author_id })
                       .from(Post)
                       .where(and(inArray(Post.id, body.post_ids), eq(Post.delete_status, DeleteStatus.ACTIVE)))
                 : [];
@@ -218,7 +220,56 @@ router.post(
             return c.json(error(Code.INVALID_PARAMETER, "Only independent media can be moved directly"));
         }
 
+        const sourceAuthorIds = uniqueIds(selectedPosts.map((p) => p.author_id).filter((id): id is string => !!id));
+
+        const sourceAuthors =
+            sourceAuthorIds.length > 0
+                ? await db
+                      .select()
+                      .from(Author)
+                      .where(and(inArray(Author.id, sourceAuthorIds), eq(Author.delete_status, DeleteStatus.ACTIVE)))
+                : [];
+
         const moved = await db.transaction(async (tx) => {
+            // Match or clone authors in target library
+            const authorMap = new Map<string, string>();
+            const avatarCopyJobs: Array<{ sourceAuthorId: string; targetAuthorId: string }> = [];
+
+            if (sourceAuthors.length > 0) {
+                const targetAuthors = await tx
+                    .select()
+                    .from(Author)
+                    .where(and(eq(Author.library_id, body.target_library_id), eq(Author.delete_status, DeleteStatus.ACTIVE)));
+
+                for (const sa of sourceAuthors) {
+                    const matched = targetAuthors.find((ta) => ta.platform === sa.platform && ta.eid === sa.eid);
+                    if (matched) {
+                        authorMap.set(sa.id, matched.id);
+                    } else {
+                        const newAuthorId = crypto.randomUUID();
+                        await tx.insert(Author).values({
+                            id: newAuthorId,
+                            library_id: body.target_library_id,
+                            eid: sa.eid,
+                            short_eid: sa.short_eid,
+                            nickname: sa.nickname,
+                            signature: sa.signature,
+                            platform: sa.platform,
+                            avatar_file_id: null,
+                            avatar_thumb_file_id: null,
+                            delete_status: DeleteStatus.ACTIVE,
+                        });
+                        authorMap.set(sa.id, newAuthorId);
+                        if (sa.avatar_file_id || sa.avatar_thumb_file_id) {
+                            avatarCopyJobs.push({
+                                sourceAuthorId: sa.id,
+                                targetAuthorId: newAuthorId,
+                            });
+                        }
+                    }
+                }
+            }
+
             // 1. Gather all tags associated with the posts and media
             const postTags =
                 body.post_ids.length > 0
@@ -331,12 +382,17 @@ router.post(
             let postMedia = 0;
 
             if (body.post_ids.length > 0) {
-                const updatedPosts = await tx
-                    .update(Post)
-                    .set({ library_id: body.target_library_id })
-                    .where(inArray(Post.id, body.post_ids))
-                    .returning({ id: Post.id });
-                posts = updatedPosts.length;
+                for (const post of selectedPosts) {
+                    const targetAuthorId = post.author_id ? authorMap.get(post.author_id) : null;
+                    await tx
+                        .update(Post)
+                        .set({
+                            library_id: body.target_library_id,
+                            author_id: targetAuthorId || null,
+                        })
+                        .where(eq(Post.id, post.id));
+                }
+                posts = selectedPosts.length;
 
                 const updatedPostMedia = await tx
                     .update(Media)
@@ -382,10 +438,43 @@ router.post(
                 }
             }
 
-            return { posts, media, post_media: postMedia };
+            return { posts, media, post_media: postMedia, avatarCopyJobs };
         });
 
-        return c.json(success(Code.SUCCESS, moved));
+        // Trigger background workflow to copy avatars asynchronously outside of the long DB transaction
+        if (moved.avatarCopyJobs.length > 0 && env.QSTASH_TOKEN) {
+            const client = new Client({ token: env.QSTASH_TOKEN });
+            const url = new URL(c.req.url);
+            const origin =
+                env.UPSTASH_WORKFLOW_URL ||
+                (c.req.header("x-forwarded-proto") ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}` : url.origin);
+            const workflowUrl = `${origin.replace(/\/$/, "")}/api/task/workflow-copy-avatar`;
+
+            for (const job of moved.avatarCopyJobs) {
+                try {
+                    await client.trigger({
+                        url: workflowUrl,
+                        body: {
+                            sourceAuthorId: job.sourceAuthorId,
+                            targetAuthorId: job.targetAuthorId,
+                        },
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                    });
+                } catch (err) {
+                    console.error(`Failed to trigger copy avatar workflow for target author ${job.targetAuthorId}:`, err);
+                }
+            }
+        }
+
+        return c.json(
+            success(Code.SUCCESS, {
+                posts: moved.posts,
+                media: moved.media,
+                post_media: moved.post_media,
+            }),
+        );
     },
 );
 

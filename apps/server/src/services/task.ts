@@ -279,13 +279,14 @@ export const TaskService = {
                 const results = await db
                     .insert(Author)
                     .values({
+                        library_id: targetLibraryId,
                         eid: postData.author.external_id,
                         short_eid: postData.author.short_id || "",
                         nickname: postData.author.name,
                         platform: postData.platform,
                     })
                     .onConflictDoUpdate({
-                        target: [Author.platform, Author.eid],
+                        target: [Author.library_id, Author.platform, Author.eid],
                         set: {
                             nickname: postData.author.name,
                             short_eid: postData.author.short_id || "",
@@ -1281,5 +1282,110 @@ export const TaskService = {
         }
 
         return { sweptCount };
+    },
+
+    /**
+     * Copy author avatar and thumb files asynchronously
+     */
+    async copyAuthorAvatar(sourceAuthorId: string, targetAuthorId: string) {
+        const lockKey = `lock:avatar-copy:${targetAuthorId}`;
+
+        await withLock(
+            lockKey,
+            async () => {
+                // 1. Fetch target author and check if avatar is already set
+                const targetAuthors = await db.select().from(Author).where(eq(Author.id, targetAuthorId)).limit(1);
+                const targetAuthor = targetAuthors[0];
+                if (!targetAuthor) {
+                    throw new Error(`Target author ${targetAuthorId} not found`);
+                }
+
+                // If target author already has an avatar_file_id, skip to prevent overwriting
+                if (targetAuthor.avatar_file_id) {
+                    return;
+                }
+
+                // 2. Fetch source author and its avatar files
+                const sourceAuthors = await db.select().from(Author).where(eq(Author.id, sourceAuthorId)).limit(1);
+                const sourceAuthor = sourceAuthors[0];
+                if (!sourceAuthor) {
+                    throw new Error(`Source author ${sourceAuthorId} not found`);
+                }
+
+                const fileIds = [sourceAuthor.avatar_file_id, sourceAuthor.avatar_thumb_file_id].filter((id): id is string => !!id);
+                if (fileIds.length === 0) {
+                    return;
+                }
+
+                const files = await db.select().from(File).where(inArray(File.id, fileIds));
+
+                const copyFile = async (sourceFileId: string, isThumb: boolean) => {
+                    const sourceFile = files.find((f) => f.id === sourceFileId);
+                    if (!sourceFile) return null;
+
+                    // Deterministic target path
+                    const prefix = isThumb ? "thumb" : "original";
+                    const targetPath = `v2/a/${targetAuthorId.slice(-2)}/${targetAuthorId}/${prefix}.${sourceFile.extension}`;
+
+                    // Perform S3 copy
+                    const { s3 } = await import("@/global/s3");
+                    try {
+                        await s3.copy(sourceFile.path, targetPath, { bucket: sourceFile.bucket });
+                    } catch (s3Err: any) {
+                        console.error(`S3 copy error from ${sourceFile.path} to ${targetPath}:`, s3Err);
+                        const exists = await s3.exists(targetPath, { bucket: sourceFile.bucket });
+                        if (!exists) {
+                            throw s3Err;
+                        }
+                    }
+
+                    // Insert or update File record in DB
+                    const fileResults = await db
+                        .insert(File)
+                        .values({
+                            path: targetPath,
+                            mime_type: sourceFile.mime_type,
+                            extension: sourceFile.extension,
+                            bucket: sourceFile.bucket,
+                            width: sourceFile.width,
+                            height: sourceFile.height,
+                            size: sourceFile.size,
+                            hash: sourceFile.hash,
+                        })
+                        .onConflictDoUpdate({
+                            target: File.path,
+                            set: {
+                                mime_type: sourceFile.mime_type,
+                                extension: sourceFile.extension,
+                                delete_status: DeleteStatus.ACTIVE,
+                                delete_time: null,
+                            },
+                        })
+                        .returning({ id: File.id });
+
+                    return fileResults[0]?.id || null;
+                };
+
+                let targetAvatarFileId: string | null = null;
+                let targetThumbFileId: string | null = null;
+
+                if (sourceAuthor.avatar_file_id) {
+                    targetAvatarFileId = await copyFile(sourceAuthor.avatar_file_id, false);
+                }
+                if (sourceAuthor.avatar_thumb_file_id) {
+                    targetThumbFileId = await copyFile(sourceAuthor.avatar_thumb_file_id, true);
+                }
+
+                // Update target author in database
+                await db
+                    .update(Author)
+                    .set({
+                        avatar_file_id: targetAvatarFileId || undefined,
+                        avatar_thumb_file_id: targetThumbFileId || undefined,
+                    })
+                    .where(eq(Author.id, targetAuthorId));
+            },
+            { ttl: 120 },
+        );
     },
 };

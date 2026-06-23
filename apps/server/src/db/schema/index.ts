@@ -147,6 +147,7 @@ export const Author = pgTable(
             .primaryKey()
             .notNull()
             .$defaultFn(() => uuidv7.generate()),
+        library_id: uuid("library_id").notNull(),
         eid: text("eid").notNull().default(""),
         short_eid: text("short_eid").notNull().default(""),
         nickname: text("nickname").notNull().default(""),
@@ -162,7 +163,7 @@ export const Author = pgTable(
         delete_time: temporal("delete_time"),
         delete_status: DeleteStatusEnum("delete_status").default(DeleteStatus.ACTIVE).notNull(),
     },
-    (table) => [uniqueIndex("author_platform_eid_unique").on(table.platform, table.eid)],
+    (table) => [uniqueIndex("author_library_platform_eid_unique").on(table.library_id, table.platform, table.eid)],
 );
 
 export const Library = pgTable("library", {

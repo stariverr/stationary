@@ -358,6 +358,7 @@ router.get(
         const { library_id, keyword, author_ids, platform } = c.req.valid("query");
 
         const whereClause: SQL[] = [
+            eq(Author.library_id, library_id),
             eq(Post.library_id, library_id),
             eq(Post.delete_status, DeleteStatus.ACTIVE),
             isNull(Post.recycle_time),

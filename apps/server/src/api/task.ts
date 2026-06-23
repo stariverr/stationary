@@ -788,6 +788,19 @@ export const aiWorkflowHandler = serve(
     },
 );
 
+const CopyAvatarWorkflowPayloadSchema = z.object({
+    sourceAuthorId: z.uuid(),
+    targetAuthorId: z.uuid(),
+});
+
+export const copyAvatarWorkflowHandler = serve(async (context) => {
+    const { sourceAuthorId, targetAuthorId } = CopyAvatarWorkflowPayloadSchema.parse(context.requestPayload);
+
+    await context.run(`copy-avatar-${sourceAuthorId}-to-${targetAuthorId}`, async () => {
+        await TaskService.copyAuthorAvatar(sourceAuthorId, targetAuthorId);
+    });
+});
+
 taskApp.all(
     "/workflow",
     async (c, next) => {
@@ -813,6 +826,15 @@ taskApp.all(
         return next();
     },
     aiWorkflowHandler,
+);
+
+taskApp.all(
+    "/workflow-copy-avatar",
+    async (c, next) => {
+        console.log(`[DEBUG] Incoming request to /api/task/workflow-copy-avatar`);
+        return next();
+    },
+    copyAvatarWorkflowHandler,
 );
 
 export default taskApp;

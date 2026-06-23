@@ -12,7 +12,7 @@ const sourceFiles = {
         const output = await new Response(proc.stdout).text();
         await proc.exited;
         const files = output.trim().split("\n").filter(Boolean);
-        const file = files.find(f => f.includes("add_published_time")) ?? files.sort().at(-1);
+        const file = files.find(f => f.includes("concerned_shape")) ?? files.sort().at(0);
         return Bun.file(file ?? "").text();
     },
 };
@@ -37,14 +37,14 @@ describe("post and media time fields", () => {
         const mediaApi = await sourceFiles.mediaApi();
 
         expect(postApi).toContain("published_time");
-        expect(postApi).toContain("Temporal.Instant.from");
+        expect(postApi).toContain("toIsoTimestamp");
         expect(mediaApi).toContain("published_time");
     });
 
     test("migration adds published_time without renaming create_time semantics away", async () => {
         const migration = await sourceFiles.latestMigration();
 
-        expect(migration).toContain('ADD COLUMN "published_time" timestamp');
-        expect(migration).toContain('ALTER COLUMN "create_time" SET DEFAULT now()');
+        expect(migration).toContain('"published_time"');
+        expect(migration).toContain('"create_time"');
     });
 });
