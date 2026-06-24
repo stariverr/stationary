@@ -34,23 +34,27 @@ erDiagram
     Library ||--o{ Media : "contains"
     Author ||--o{ Post : "writes"
     Post ||--o{ Media : "has"
-    Media ||--o{ MediaFile : "references"
-    MediaFile }o--|| File : "points_to"
+    Media ||--o{ Track : "references"
+    Track }o--|| File : "points_to"
 ```
 
 ### 2.1 Content Layer
-- **Author**: Platform-wide unique profile (using the compound index of `eid` + `platform`). Stores name, handles, and a reference to their avatar file (`avatar_file_id`).
-- **Post**: Belongs to a specific `Library`. Functions as the container for posts synced from social sites, keeping records of platform `eid`, titles, tags, and publishing dates.
-- **Media**: Belongs to a specific `Post` or floats as an independent file (where `post_id` is null). Stores titles, description, sorting positions (`sort_order`), and type (IMAGE, VIDEO, LIVE_PHOTO).
+- **Author**: Platform-wide unique profile (using the compound index of `library_id` + `platform` + `eid`). Stores nickname, signature, platform, and a reference to their avatar file (`avatar_file_id`).
+- **Post**: Belongs to a specific `Library`. Functions as the container for posts synced from social sites, keeping records of platform `eid`, titles, description, tags, and original publishing date (`published_time`).
+- **Media**: Belongs to a specific `Post` or floats as an independent file (where `post_id` is null). Stores titles, description, sorting positions (`sort_order`), and type (IMAGE, VIDEO, LIVE_PHOTO, AUDIO, PDF).
 
-### 2.2 Asset & Storage Layer (`MediaFile` & `File`)
-- **File**: Points to physical file locations on S3. Uses `s3_key` as the primary key/unique identifier. Tracks file hashes, size, dimensions, and video durations to prevent duplicate downloads.
-- **MediaFile**: Connects `Media` to physical `File` records, assigning file roles within a media item:
-  - `PRIMARY`: Main asset (the image or video file).
-  - `ALTERNATIVE`: Backup or fallback files.
-  - `LIVE_PHOTO_VIDEO`: The short video track associated with a Live Photo.
-  - `COVER`: The cover frame of a video.
-- [Future] **Reference Counting & Sharing Rule**: When multiple entities reference the same physical `File`, do not use a simple counter column (`ref_count`) on the `File` table. Instead, use a dedicated reference table (e.g., `file_usage`) to track active references dynamically. (Since there are no multi-reference relationships yet, the implementation of the `file_usage` table can be deferred.)
+### 2.2 Asset & Storage Layer (`Track` & `File`)
+- **File**: Points to physical file locations on S3. Uses a UUID as primary key, tracking the file SHA-256 `hash` for deduplication, as well as `size`, `path` (S3 key), `bucket`, dimensions (`width`, `height`), and video `duration`.
+- **Track**: Connects a `Media` item to its physical `File` records, assigning file roles and formats within that media item. A single logical `Media` item can contain multiple `Track` variants:
+  - `type` (TrackType Enum): `IMAGE`, `VIDEO`, `AUDIO`, `SUBTITLE`.
+  - `purpose` (TrackPurpose Enum):
+    - `CONTENT`: Main asset (the image, video, audio track).
+    - `COVER`: The cover frame of a video or static display.
+    - `THUMBNAIL`: Extracted small preview image.
+    - `PREVIEW`: Low-resolution video or web preview.
+  - `quality` (TrackQuality Enum): `ORIGINAL`, `HIGH`, `MEDIUM`, `LOW`.
+  - `priority` & `source_url`: Used to download, match, and choose priority streams during synchronization.
+- **Reference Counting & Sharing Rule**: When multiple entities reference the same physical `File`, do not use a simple counter column (`ref_count`) on the `File` table. Instead, use `DeleteService.canPurgeFile` to run reference queries dynamically across the tables (`Author` avatar, `Library` cover, and `Track` file references).
 
 ---
 
@@ -59,10 +63,13 @@ erDiagram
 When database foreign keys are disabled, the application layer must enforce referential integrity and handle deletes explicitly.
 
 ### 3.1 Recycle Bin Semantics (Soft vs. Hard Delete)
-To prevent accidental data loss, the deletion flow is split into two phases:
-- **Move to Recycle Bin (Soft Delete)**: The initial delete of a `Post` or `Media` marks the record as deleted by setting `delete_time`. Mapping records in `post_tag`, `media_tag`, and `media_file` are preserved, and S3 physical files are kept in place. The item in the Recycle Bin still counts as an active file reference.
-- **Purge Recycle Bin (Hard Delete / Purge)**: Occurs when the user purges the Recycle Bin or executes a permanent delete. This physically deletes the join table records (`post_tag`, `media_tag`, `media_file`) and the database entity rows (`Post` or `Media`).
-  - *Reference Counting Cleanup*: We gather candidate `file_id`s from deleted `media_file` records, check the `file_usage` table to verify if any other active entity references them (Since there are no multi-reference relationships yet, reference counting check is not required for now). **Only if the physical file has no remaining active references** does the backend trigger physical S3 object deletion and remove the file record from the `File` table.
+To prevent accidental data loss and guarantee file consistency, the deletion flow is split into two phases:
+- **Move to Recycle Bin (Soft Delete)**: The initial delete of a `Post` or `Media` marks the record as deleted by setting `delete_status = DeleteStatus.DELETED` and setting `delete_time`. Associated rows (`Track`, `File`) are also updated to the `DELETED` status, but the physical files in S3 are kept in place.
+- **Purge Recycle Bin (Hard Delete / Purge via Cron)**:
+  1. A scheduled cron job `/purge-expired-files` runs every day to fetch `File` records that have been in the `DELETED` status for more than 30 days.
+  2. For each candidate file, the background worker invokes `DeleteService.canPurgeFile(fileId)` to query if there are any remaining active references in `Author` avatars, `Library` covers, or active `Track` records.
+  3. **Only if there are no remaining active references** does the backend trigger physical S3 object deletion (`s3.delete`) and permanently hard delete the `File` row from the database.
+  4. This soft-deletion state machine guarantees S3 and DB consistency, ensuring no active links are broken and orphans are swept cleanly.
 
 ### 3.2 Library Deletion Policy
 To prevent accidental deletion, non-empty libraries (`Library`) do not support direct deletes.
