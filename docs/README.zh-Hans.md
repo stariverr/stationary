@@ -1,5 +1,7 @@
 # Stationary (简体中文)
 
+> [English](../README.md)
+
 Stationary 是一个专为创意工作者与内容管理者打造的 **多平台媒体资产管理与集成平台 (MAM)**。它不仅能够作为社交媒体内容（如 X/Twitter、小红书、Bilibili、抖音、TikTok、Instagram 等）的聚合器，更支持高度可定制的多租户媒体库（Library）与协作机制，实现高质量资产的幂等同步、本地持久化归档与快速检索。
 
 ---

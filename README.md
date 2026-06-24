@@ -1,5 +1,7 @@
 # Stationary
 
+> [简体中文](./docs/README.zh-Hans.md)
+
 Stationary is a multi-platform media asset management and integration platform (MAM) designed for creative professionals and content managers. It functions as a centralized hub and aggregator for social media content (such as X/Twitter, Xiaohongshu, Bilibili, Douyin, TikTok, and Instagram), supporting highly customizable libraries, multi-tenant collaboration, and advanced metadata sync.
 
 ---
