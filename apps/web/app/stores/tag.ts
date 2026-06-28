@@ -82,7 +82,13 @@ export const useTagStore = defineStore("tags", () => {
 
     // Mutation: Update Tag (renaming, color change, promotion, ignore, aliases)
     const updateTagMutation = useMutation({
-        mutationFn: async (payload: { id: string; name?: string; color?: string | null; status?: "ACTIVE" | "CANDIDATE" | "IGNORED"; aliases?: string[] }) => {
+        mutationFn: async (payload: {
+            id: string;
+            name?: string;
+            color?: string | null;
+            status?: "ACTIVE" | "CANDIDATE" | "IGNORED";
+            aliases?: string[];
+        }) => {
             const response = await useApi<{ success: boolean; data: TagItem }>("/tag/update", {
                 method: "POST",
                 body: payload,

@@ -9,14 +9,7 @@ import {
 } from "./capabilities";
 import { IMAGE_METADATA_PIPELINE_VERSION, describeImageWithModel } from "./image-metadata";
 import { resolveAiProvider } from "./resolver";
-import type {
-    AiProvider,
-    AiProviderModelMappings,
-    EmbedImageParams,
-    EmbedTextParams,
-    EmbeddingResult,
-    ImageAiMetadata,
-} from "./types";
+import type { AiProvider, AiProviderModelMappings, EmbedImageParams, EmbedTextParams, EmbeddingResult, ImageAiMetadata } from "./types";
 
 export class AiService {
     constructor(
@@ -55,9 +48,7 @@ export class AiService {
     async embedText(params: EmbedTextParams): Promise<EmbeddingResult> {
         const modelName = this.provider.textEmbeddingModelName;
         if (!modelName) {
-            throw new Error(
-                `The text embedding model is not configured for AI provider "${this.provider.providerName}".`,
-            );
+            throw new Error(`The text embedding model is not configured for AI provider "${this.provider.providerName}".`);
         }
         const mapToId = this.mappings.embeddingTextMapTo;
 
@@ -67,9 +58,7 @@ export class AiService {
 
         const model = this.provider.textEmbeddingModel;
         if (!model) {
-            throw new Error(
-                `The text embedding model is not configured for AI provider "${this.provider.providerName}".`,
-            );
+            throw new Error(`The text embedding model is not configured for AI provider "${this.provider.providerName}".`);
         }
 
         const { embedding } = await embed({
@@ -94,9 +83,7 @@ export class AiService {
 
         const modelName = this.provider.visualEmbeddingModelName;
         if (!modelName) {
-            throw new Error(
-                `The visual embedding model is not configured for AI provider "${this.provider.providerName}".`,
-            );
+            throw new Error(`The visual embedding model is not configured for AI provider "${this.provider.providerName}".`);
         }
         const mapToId = this.mappings.embeddingImageMapTo;
 
@@ -106,9 +93,7 @@ export class AiService {
 
         const model = this.provider.visualEmbeddingModel;
         if (!model) {
-            throw new Error(
-                `The visual embedding model is not configured for AI provider "${this.provider.providerName}".`,
-            );
+            throw new Error(`The visual embedding model is not configured for AI provider "${this.provider.providerName}".`);
         }
 
         const { embedding } = await embed({
@@ -129,9 +114,7 @@ export class AiService {
     async embedImage(params: EmbedImageParams): Promise<EmbeddingResult> {
         const modelName = this.provider.visualEmbeddingModelName;
         if (!modelName) {
-            throw new Error(
-                `The visual embedding model is not configured for AI provider "${this.provider.providerName}".`,
-            );
+            throw new Error(`The visual embedding model is not configured for AI provider "${this.provider.providerName}".`);
         }
         const mapToId = this.mappings.embeddingImageMapTo;
 
@@ -141,24 +124,17 @@ export class AiService {
         return this.provider.embedImage(params);
     }
 
-    async describeImage(
-        image: Buffer | Uint8Array | string,
-        _mimeType: string,
-    ): Promise<ImageAiMetadata> {
+    async describeImage(image: Buffer | Uint8Array | string, _mimeType: string): Promise<ImageAiMetadata> {
         const modelName = this.provider.chatModelName;
         if (!modelName) {
-            throw new Error(
-                `The chat model for image description is not configured for AI provider "${this.provider.providerName}".`,
-            );
+            throw new Error(`The chat model for image description is not configured for AI provider "${this.provider.providerName}".`);
         }
         const mapToId = this.mappings.describeImageMapTo;
 
         assertVisionCapability(modelName, mapToId);
         const model = this.provider.chatModel;
         if (!model) {
-            throw new Error(
-                `The chat model for image description is not configured for AI provider "${this.provider.providerName}".`,
-            );
+            throw new Error(`The chat model for image description is not configured for AI provider "${this.provider.providerName}".`);
         }
 
         return describeImageWithModel(model, image);

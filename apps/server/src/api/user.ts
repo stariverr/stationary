@@ -25,12 +25,7 @@ export const TokenCreateBodySchema = z
     .object({
         name: z.string().min(1, "Name is required"),
         library_id: z.string().uuid("Invalid library_id format").nullable().optional(),
-        expires_in_seconds: z
-            .number()
-            .int()
-            .positive("expires_in_seconds must be positive")
-            .nullable()
-            .optional(),
+        expires_in_seconds: z.number().int().positive("expires_in_seconds must be positive").nullable().optional(),
     })
     .strict();
 
@@ -40,10 +35,7 @@ router.post(
     validator("json", (value, c) => {
         const parsed = TokenCreateBodySchema.safeParse(value);
         if (!parsed.success) {
-            return c.json(
-                error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid body"),
-                400,
-            );
+            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid body"), 400);
         }
         return parsed.data;
     }),
@@ -54,12 +46,7 @@ router.post(
         }
         const body = c.req.valid("json");
 
-        const result = await ApiTokenService.generateToken(
-            user.id,
-            body.name,
-            body.library_id,
-            body.expires_in_seconds,
-        );
+        const result = await ApiTokenService.generateToken(user.id, body.name, body.library_id, body.expires_in_seconds);
 
         return c.json(
             success(Code.SUCCESS, {

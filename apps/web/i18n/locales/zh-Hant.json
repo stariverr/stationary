@@ -172,6 +172,13 @@
     },
     "media": {
         "live": "實況",
+        "quality_label": "清晰度/保真度",
+        "quality": {
+            "original": "原始",
+            "high": "高",
+            "medium": "中",
+            "low": "低"
+        },
         "actions": {
             "regenerate_cover": "重新生成封面",
             "regenerate_covers": "批量重新生成影片封面"

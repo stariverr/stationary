@@ -11,6 +11,7 @@ import {
     index,
     customType,
     timestamp,
+    varchar,
 } from "drizzle-orm/pg-core";
 import { v7 as createUuidV7 } from "uuid";
 import { Temporal } from "@js-temporal/polyfill";
@@ -484,6 +485,13 @@ export const Track = pgTable(
         sync_status: SyncStatusEnum("sync_status").default(SyncStatus.PENDING).notNull(),
         last_error: text("last_error"),
         metadata: jsonb("metadata").$type<MediaFileMetadata>().default({}).notNull(),
+        variant_key: varchar("variant_key", { length: 255 }).default("temp-migration").notNull(),
+        is_default: boolean("is_default").default(false).notNull(),
+        display_name: text("display_name"),
+        language: text("language"),
+        codec: text("codec"),
+        is_stale: boolean("is_stale").default(false).notNull(),
+        source_track_id: uuid("source_track_id"),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),
@@ -493,7 +501,14 @@ export const Track = pgTable(
         delete_time: temporal("delete_time"),
         delete_status: DeleteStatusEnum("delete_status").default(DeleteStatus.ACTIVE).notNull(),
     },
-    (table) => [uniqueIndex("track_media_type_purpose_priority_unique").on(table.media_id, table.type, table.purpose, table.priority)],
+    (table) => [
+        uniqueIndex("track_media_type_purpose_variant_key_active_unique")
+            .on(table.media_id, table.type, table.purpose, table.variant_key)
+            .where(sql`delete_status = 'ACTIVE'`),
+        uniqueIndex("track_media_default_active_unique")
+            .on(table.media_id, table.type, table.purpose)
+            .where(sql`is_default = true AND delete_status = 'ACTIVE'`),
+    ],
 );
 
 // External API Token

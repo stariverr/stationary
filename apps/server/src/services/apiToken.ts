@@ -9,12 +9,7 @@ export const ApiTokenService = {
      * Generates a new Stripe/GitHub style structured API key, hashes it,
      * saves it to the database, and returns the raw key to be shown once.
      */
-    async generateToken(
-        ownerId: string,
-        name: string,
-        libraryId?: string | null,
-        expiresInSeconds?: number | null
-    ) {
+    async generateToken(ownerId: string, name: string, libraryId?: string | null, expiresInSeconds?: number | null) {
         const prefix = "st";
         const randomBody = randomBytes(20).toString("hex"); // 40 hex characters
         const checksum = createHash("sha256").update(randomBody).digest("hex").substring(0, 6); // 6 hex characters
@@ -70,12 +65,7 @@ export const ApiTokenService = {
         const tokens = await db
             .select()
             .from(ExternalApiToken)
-            .where(
-                and(
-                    eq(ExternalApiToken.token_hash, tokenHash),
-                    isNull(ExternalApiToken.revoke_time)
-                )
-            )
+            .where(and(eq(ExternalApiToken.token_hash, tokenHash), isNull(ExternalApiToken.revoke_time)))
             .limit(1);
 
         const token = tokens[0];
@@ -113,12 +103,7 @@ export const ApiTokenService = {
                 create_time: ExternalApiToken.create_time,
             })
             .from(ExternalApiToken)
-            .where(
-                and(
-                    eq(ExternalApiToken.owner_id, ownerId),
-                    isNull(ExternalApiToken.revoke_time)
-                )
-            );
+            .where(and(eq(ExternalApiToken.owner_id, ownerId), isNull(ExternalApiToken.revoke_time)));
     },
 
     /**
@@ -128,12 +113,7 @@ export const ApiTokenService = {
         const results = await db
             .update(ExternalApiToken)
             .set({ revoke_time: Temporal.Now.instant() })
-            .where(
-                and(
-                    eq(ExternalApiToken.id, tokenId),
-                    eq(ExternalApiToken.owner_id, ownerId)
-                )
-            )
+            .where(and(eq(ExternalApiToken.id, tokenId), eq(ExternalApiToken.owner_id, ownerId)))
             .returning();
 
         return results.length > 0;

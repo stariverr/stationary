@@ -32,13 +32,7 @@ router.get(
     validator("query", (value, c) => {
         const parsed = SearchQuerySchema.safeParse(value);
         if (!parsed.success) {
-            return c.json(
-                error(
-                    Code.INVALID_PARAMETER,
-                    parsed.error.issues[0]?.message || "Invalid search query parameters",
-                ),
-                400,
-            );
+            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid search query parameters"), 400);
         }
         return parsed.data;
     }),
@@ -66,13 +60,7 @@ router.get(
             return c.json(success(Code.SUCCESS, results));
         } catch (err: any) {
             console.error(`[API SEARCH ERROR]`, err);
-            return c.json(
-                error(
-                    Code.INTERNAL_SERVER_ERROR,
-                    err.message || "An unexpected error occurred during search.",
-                ),
-                500,
-            );
+            return c.json(error(Code.INTERNAL_SERVER_ERROR, err.message || "An unexpected error occurred during search."), 500);
         }
     },
 );

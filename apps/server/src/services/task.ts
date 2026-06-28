@@ -25,7 +25,8 @@ import { Client } from "@upstash/workflow";
 import type { PostItemData, MediaItemData } from "@/api/task";
 import { nowDbTimestamp } from "@/lib/utils/time";
 import { Temporal } from "@js-temporal/polyfill";
-import { sanitizeTags, normalizeTagName } from "@/lib/utils/tag_sanitizer";
+import { sanitizeTags } from "@/lib/utils/tag_sanitizer";
+import { generateDeterministicVariantKey } from "@/lib/utils/track";
 
 function formatVttTime(seconds: number): string {
     const ms = Math.floor((seconds % 1) * 1000)
@@ -473,6 +474,42 @@ export const TaskService = {
             let mediaId: string;
             let m = oldMediaList[0];
 
+            // Pre-calculate variant keys for incoming tracks
+            const adaptedIncomingTracks = mediaData.tracks.map((track, idx) => {
+                const baseKey = generateDeterministicVariantKey(
+                    {
+                        type: track.type,
+                        purpose: track.purpose,
+                        quality: track.quality,
+                        priority: track.priority,
+                        metadata: track.metadata,
+                        language: (track.metadata as any)?.language,
+                        codec: (track.metadata as any)?.codecs,
+                    },
+                    null,
+                );
+                return {
+                    ...track,
+                    baseKey,
+                    index: idx,
+                };
+            });
+
+            const seenKeys = new Set<string>();
+            const tracksWithKeys = adaptedIncomingTracks.map((track) => {
+                let finalKey = track.baseKey;
+                let counter = 1;
+                while (seenKeys.has(`${track.purpose}:${finalKey}`)) {
+                    counter++;
+                    finalKey = `${track.baseKey}-dup-${counter}`;
+                }
+                seenKeys.add(`${track.purpose}:${finalKey}`);
+                return {
+                    ...track,
+                    variant_key: finalKey,
+                };
+            });
+
             if (!m) {
                 // Create new media if not exists
                 const mediaInsertData: typeof Media.$inferInsert = {
@@ -512,9 +549,9 @@ export const TaskService = {
                 let mediaNeedsProcessing = false;
 
                 // Check if any incoming track is new, modified, or pending/failed
-                for (const track of mediaData.tracks) {
+                for (const track of tracksWithKeys) {
                     const existing = activeTracks.find(
-                        (t) => t.type === track.type && t.purpose === track.purpose && t.priority === track.priority,
+                        (t) => t.type === track.type && t.purpose === track.purpose && t.variant_key === track.variant_key,
                     );
                     if (!existing) {
                         mediaNeedsProcessing = true;
@@ -526,6 +563,8 @@ export const TaskService = {
                         existing.quality !== track.quality ||
                         existing.sync_status === SyncStatus.FAILED ||
                         existing.sync_status === SyncStatus.PENDING ||
+                        existing.language !== ((track.metadata as any)?.language || null) ||
+                        existing.codec !== ((track.metadata as any)?.codecs || null) ||
                         JSON.stringify(existing.metadata) !== JSON.stringify(track.metadata || {})
                     ) {
                         mediaNeedsProcessing = true;
@@ -536,8 +575,8 @@ export const TaskService = {
                 // Also check if any existing active tracks are being removed
                 if (!mediaNeedsProcessing) {
                     for (const t of activeTracks) {
-                        const stillExists = mediaData.tracks.some(
-                            (track) => track.type === t.type && track.purpose === t.purpose && track.priority === t.priority,
+                        const stillExists = tracksWithKeys.some(
+                            (track) => track.type === t.type && track.purpose === t.purpose && track.variant_key === t.variant_key,
                         );
                         if (!stillExists) {
                             mediaNeedsProcessing = true;
@@ -571,16 +610,20 @@ export const TaskService = {
                 priority: number;
                 url: string | null | undefined;
                 metadata?: any;
+                variant_key: string;
             }) => {
                 const existing = existingTracks.find(
                     (t) =>
                         t.type === trackInfo.type &&
                         t.purpose === trackInfo.purpose &&
-                        t.priority === trackInfo.priority &&
+                        t.variant_key === trackInfo.variant_key &&
                         t.delete_status === DeleteStatus.ACTIVE,
                 );
                 if (trackInfo.url) {
                     const metadata = trackInfo.metadata || {};
+                    const extractedLang = trackInfo.metadata?.language || null;
+                    const extractedCodec = trackInfo.metadata?.codecs || null;
+
                     if (!existing) {
                         await db.insert(Track).values({
                             media_id: mediaId,
@@ -592,6 +635,11 @@ export const TaskService = {
                             source_url: trackInfo.url,
                             metadata: metadata,
                             sync_status: SyncStatus.PENDING,
+                            variant_key: trackInfo.variant_key,
+                            is_default: trackInfo.priority === 0,
+                            language: extractedLang,
+                            codec: extractedCodec,
+                            is_stale: false,
                         });
                         hasPendingTasks = true;
                     } else if (
@@ -599,6 +647,8 @@ export const TaskService = {
                         existing.is_original !== trackInfo.is_original ||
                         existing.quality !== trackInfo.quality ||
                         existing.sync_status === SyncStatus.FAILED ||
+                        existing.language !== extractedLang ||
+                        existing.codec !== extractedCodec ||
                         JSON.stringify(existing.metadata) !== JSON.stringify(metadata)
                     ) {
                         if (existing.file_id) {
@@ -616,10 +666,13 @@ export const TaskService = {
                                 source_url: trackInfo.url,
                                 is_original: trackInfo.is_original,
                                 quality: trackInfo.quality,
+                                priority: trackInfo.priority,
                                 metadata: metadata,
                                 sync_status: SyncStatus.PENDING,
                                 file_id: null,
                                 last_error: null,
+                                language: extractedLang,
+                                codec: extractedCodec,
                             })
                             .where(eq(Track.id, existing.id));
                         hasPendingTasks = true;
@@ -646,15 +699,14 @@ export const TaskService = {
             const processedTrackKeys = new Set<string>();
 
             // Process all tracks in a unified loop
-            for (const track of mediaData.tracks) {
-                processedTrackKeys.add(`${track.type}:${track.purpose}:${track.priority}`);
+            for (const track of tracksWithKeys) {
+                processedTrackKeys.add(track.variant_key);
                 await processAffiliatedFile(track);
             }
 
             // Clean up obsolete Track records across all partitions
             for (const t of existingTracks) {
-                const key = `${t.type}:${t.purpose}:${t.priority}`;
-                if (!processedTrackKeys.has(key)) {
+                if (t.delete_status === DeleteStatus.ACTIVE && !processedTrackKeys.has(t.variant_key)) {
                     const deleteTime = nowDbTimestamp();
                     if (t.file_id) {
                         await db
@@ -781,18 +833,17 @@ export const TaskService = {
 
                                 let prefix = "";
                                 if (mf.type === TrackType.VIDEO && mf.purpose === TrackPurpose.CONTENT) {
-                                    prefix = `video_${mf.priority}`;
+                                    prefix = `video_${mf.variant_key}`;
                                 } else if (mf.type === TrackType.AUDIO && mf.purpose === TrackPurpose.CONTENT) {
-                                    prefix = `audio_${mf.priority}`;
+                                    prefix = `audio_${mf.variant_key}`;
                                 } else if (mf.purpose === TrackPurpose.COVER) {
                                     prefix = "cover";
                                 } else if (mf.type === TrackType.SUBTITLE && mf.purpose === TrackPurpose.CONTENT) {
-                                    const lang = mf.metadata.language || "unknown";
-                                    prefix = `subtitle_${lang}`;
+                                    prefix = `subtitle_${mf.variant_key}`;
                                 } else if (mf.type === TrackType.IMAGE && mf.purpose === TrackPurpose.CONTENT) {
-                                    prefix = `image_${mf.priority}`;
+                                    prefix = `image_${mf.variant_key}`;
                                 } else {
-                                    prefix = `track_${mf.priority}`;
+                                    prefix = `track_${mf.variant_key}`;
                                 }
 
                                 const path = `v2/p/${postId.slice(-2)}/${postId}/${index}_${prefix}.${ext}`;

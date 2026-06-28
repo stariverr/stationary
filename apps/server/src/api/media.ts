@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Context, Hono } from "hono";
 import { db } from "@/global/db";
 import { z } from "zod";
 import { validator } from "hono/validator";
@@ -18,6 +18,10 @@ import {
     EntityType,
     SyncStatus,
     type MediaFileMetadata,
+    Library,
+    Tag,
+    MediaTag,
+    TagStatus,
 } from "@/db/schema";
 import { s3 } from "@/global/s3";
 import { and, eq, ilike, SQL, count, desc, or, isNull, inArray } from "drizzle-orm";
@@ -25,11 +29,14 @@ import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { Temporal } from "@js-temporal/polyfill";
 import { RecycleService } from "@/services/recycle";
 import { DeleteService } from "@/services/delete";
-import { Library } from "@/db/schema";
+import { MediaService } from "@/services/media";
+import { TrackService } from "@/services/track";
+import { v7 as uuidv7 } from "uuid";
 import { env } from "@/global/env";
 import { VideoCoverService } from "@/services/video_cover";
 import { buildCdnUrl } from "@/lib/utils/cdn";
-import { toIsoTimestamp } from "@/lib/utils/time";
+import { toIsoTimestamp, FormTimestampSchema } from "@/lib/utils/time";
+import { normalizeVariantKey } from "@/lib/utils/track";
 
 function escapeXml(unsafe: string): string {
     return unsafe.replace(/[<>&'"]/g, (c) => {
@@ -68,6 +75,7 @@ export const MediaListRequestBodySchema = z.object({
 });
 
 export interface MappedFileRow {
+    track_id: string;
     media_id: string | null;
     type: TrackType;
     purpose: TrackPurpose;
@@ -75,6 +83,12 @@ export interface MappedFileRow {
     quality: TrackQuality;
     priority: number;
     metadata: MediaFileMetadata;
+    variant_key: string;
+    is_default: boolean;
+    display_name: string | null;
+    language: string | null;
+    codec: string | null;
+    is_stale: boolean;
     file_id: string | null;
     file_path: string | null;
     file_bucket: string | null;
@@ -108,7 +122,8 @@ export function mapMediaToResponse(
     const tracks = sortedFiles
         .filter((f) => f.file_path && f.file_bucket)
         .map((f) => ({
-            id: f.file_id || "",
+            id: f.track_id,
+            file_id: f.file_id || "",
             url: buildCdnUrl(f.file_bucket!, f.file_path!) || "",
             type: f.type,
             purpose: f.purpose,
@@ -116,6 +131,12 @@ export function mapMediaToResponse(
             quality: f.quality,
             priority: f.priority,
             metadata: f.metadata || {},
+            variant_key: f.variant_key,
+            is_default: f.is_default,
+            display_name: f.display_name,
+            language: f.language,
+            codec: f.codec,
+            is_stale: f.is_stale,
         }));
 
     const coverFile = sortedFiles.find((f) => f.purpose === TrackPurpose.COVER);
@@ -123,12 +144,19 @@ export function mapMediaToResponse(
         coverFile && coverFile.file_path && coverFile.file_bucket ? buildCdnUrl(coverFile.file_bucket, coverFile.file_path) : null;
 
     // Live Photo: IMAGE is primary
-    const primaryFile = sortedFiles.find(
-        (f) =>
-            f.purpose === TrackPurpose.CONTENT &&
-            f.priority === 0 &&
-            (media.type === "VIDEO" ? f.type === TrackType.VIDEO : f.type === TrackType.IMAGE),
-    );
+    const primaryFile =
+        sortedFiles.find(
+            (f) =>
+                f.purpose === TrackPurpose.CONTENT &&
+                f.is_default &&
+                (media.type === "VIDEO" ? f.type === TrackType.VIDEO : f.type === TrackType.IMAGE),
+        ) ||
+        sortedFiles.find(
+            (f) =>
+                f.purpose === TrackPurpose.CONTENT &&
+                f.priority === 0 &&
+                (media.type === "VIDEO" ? f.type === TrackType.VIDEO : f.type === TrackType.IMAGE),
+        );
     let primaryFileUrl =
         primaryFile && primaryFile.file_path && primaryFile.file_bucket
             ? buildCdnUrl(primaryFile.file_bucket, primaryFile.file_path)
@@ -263,6 +291,7 @@ router.get(
 
             const allFiles = await db
                 .select({
+                    track_id: Track.id,
                     media_id: Track.media_id,
                     type: Track.type,
                     purpose: Track.purpose,
@@ -270,6 +299,12 @@ router.get(
                     quality: Track.quality,
                     priority: Track.priority,
                     metadata: Track.metadata,
+                    variant_key: Track.variant_key,
+                    is_default: Track.is_default,
+                    display_name: Track.display_name,
+                    language: Track.language,
+                    codec: Track.codec,
+                    is_stale: Track.is_stale,
                     file_id: DbFile.id,
                     file_path: DbFile.path,
                     file_bucket: DbFile.bucket,
@@ -389,6 +424,7 @@ router.get("/detail/:id", requireAuth, async (c) => {
 
     const files = await db
         .select({
+            track_id: Track.id,
             media_id: Track.media_id,
             type: Track.type,
             purpose: Track.purpose,
@@ -396,6 +432,12 @@ router.get("/detail/:id", requireAuth, async (c) => {
             quality: Track.quality,
             priority: Track.priority,
             metadata: Track.metadata,
+            variant_key: Track.variant_key,
+            is_default: Track.is_default,
+            display_name: Track.display_name,
+            language: Track.language,
+            codec: Track.codec,
+            is_stale: Track.is_stale,
             file_id: DbFile.id,
             file_path: DbFile.path,
             file_bucket: DbFile.bucket,
@@ -410,14 +452,24 @@ router.get("/detail/:id", requireAuth, async (c) => {
             and(eq(Track.media_id, media.id), eq(Track.delete_status, DeleteStatus.ACTIVE), eq(Track.sync_status, SyncStatus.COMPLETED)),
         );
 
-    const response = mapMediaToResponse(
-        {
-            ...media,
-            ai_status: aiStatus,
-            ai_error: aiError,
-        },
-        files as any,
-    );
+    const mediaTagsList = await db
+        .select({ name: Tag.name })
+        .from(MediaTag)
+        .innerJoin(Tag, eq(MediaTag.tag_id, Tag.id))
+        .where(and(eq(MediaTag.media_id, media.id), eq(Tag.status, TagStatus.ACTIVE)));
+    const mediaTags = mediaTagsList.map((mt) => mt.name);
+
+    const response = {
+        ...mapMediaToResponse(
+            {
+                ...media,
+                ai_status: aiStatus,
+                ai_error: aiError,
+            },
+            files as any,
+        ),
+        tags: mediaTags,
+    };
     return c.json(success(Code.SUCCESS, response));
 });
 
@@ -759,7 +811,7 @@ router.get(
             }
 
             videoRepresentations.push(`
-      <Representation id="video_${vf.priority}" codecs="${codecs}" bandwidth="${bandwidth}" width="${width}" height="${height}">
+      <Representation id="${escapeXml(normalizeVariantKey(vf.variant_key))}" codecs="${codecs}" bandwidth="${bandwidth}" width="${width}" height="${height}">
         <BaseURL>${escapeXml(url)}</BaseURL>
         <SegmentBase ${segmentBaseAttrs.join(" ")}>
           <Initialization range="${initRange}" />
@@ -796,7 +848,7 @@ router.get(
             }
 
             audioRepresentations.push(`
-      <Representation id="audio_${af.priority}" codecs="${codecs}" bandwidth="${bandwidth}">
+      <Representation id="${escapeXml(normalizeVariantKey(af.variant_key))}" codecs="${codecs}" bandwidth="${bandwidth}">
         <BaseURL>${escapeXml(url)}</BaseURL>
         <SegmentBase ${segmentBaseAttrs.join(" ")}>
           <Initialization range="${initRange}" />
@@ -827,6 +879,364 @@ router.get(
 
         c.header("Content-Type", "application/dash+xml");
         return c.text(mpd);
+    },
+);
+
+async function checkMediaAccess(
+    c: Context,
+    mediaId: string,
+): Promise<{ media: typeof Media.$inferSelect; errorResponse: null } | { media: null; errorResponse: any }> {
+    const user = c.get("user");
+    if (!user) {
+        return { media: null, errorResponse: c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401) };
+    }
+
+    const mediaRows = await db.select().from(Media).where(eq(Media.id, mediaId)).limit(1);
+    const media = mediaRows[0];
+
+    if (!media || media.delete_status !== DeleteStatus.ACTIVE || media.recycle_time !== null) {
+        return { media: null, errorResponse: c.json(error(Code.NOT_FOUND, "Media not found or is in recycle bin"), 404) };
+    }
+
+    const libraryList = await db.select().from(Library).where(eq(Library.id, media.library_id)).limit(1);
+    const library = libraryList[0];
+
+    if (!library || library.owner_id !== user.id) {
+        return { media: null, errorResponse: c.json(error(Code.FORBIDDEN, "You do not have access to this library"), 403) };
+    }
+
+    const apiToken = c.get("apiToken");
+    if (apiToken && apiToken.library_id && apiToken.library_id !== media.library_id) {
+        return { media: null, errorResponse: c.json(error(Code.FORBIDDEN, "API token scope restricted to another library"), 403) };
+    }
+
+    return { media, errorResponse: null };
+}
+
+const MediaUpdateInfoSchema = z
+    .object({
+        title: z.string().min(1, "Title cannot be empty").optional(),
+        description: z.string().optional(),
+        published_time: FormTimestampSchema,
+    })
+    .refine(
+        (data) => {
+            return Object.keys(data).length > 0;
+        },
+        { message: "At least one field must be provided for update" },
+    );
+
+router.post(
+    "/update-info/:id",
+    requireAuth,
+    validator("json", (value, c) => {
+        const parsed = MediaUpdateInfoSchema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid parameters"), 400);
+        }
+        return parsed.data;
+    }),
+    async (c) => {
+        const id = c.req.param("id")!;
+        const body = c.req.valid("json");
+
+        const access = await checkMediaAccess(c, id);
+        if (access.errorResponse) return access.errorResponse;
+
+        const updated = await MediaService.updateInfo(id, body);
+        return c.json(success(Code.SUCCESS, updated));
+    },
+);
+
+const MediaReplaceTagsSchema = z.object({
+    tags: z.array(z.string()),
+});
+
+router.post(
+    "/:id/tags/replace",
+    requireAuth,
+    validator("json", (value, c) => {
+        const parsed = MediaReplaceTagsSchema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(error(Code.INVALID_PARAMETER, "Invalid tags array"), 400);
+        }
+        return parsed.data;
+    }),
+    async (c) => {
+        const id = c.req.param("id")!;
+        const { tags } = c.req.valid("json");
+
+        const access = await checkMediaAccess(c, id);
+        if (access.errorResponse) return access.errorResponse;
+        const media = access.media!;
+
+        const resolvedTagIds = await MediaService.replaceTags(id, media.library_id, tags);
+        return c.json(success(Code.SUCCESS, { tag_ids: resolvedTagIds }));
+    },
+);
+
+function getMimeTypeByExt(ext: string): string {
+    const map: Record<string, string> = {
+        mp4: "video/mp4",
+        mov: "video/quicktime",
+        mkv: "video/x-matroska",
+        webm: "video/webm",
+        m4a: "audio/mp4",
+        mp3: "audio/mpeg",
+        vtt: "text/vtt",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        png: "image/png",
+        webp: "image/webp",
+        avif: "image/avif",
+        heic: "image/heic",
+        heif: "image/heif",
+        gif: "image/gif",
+        jxl: "image/jxl",
+        json: "application/json",
+    };
+    return map[ext.toLowerCase()] || "application/octet-stream";
+}
+
+// 1. List all tracks for a media item
+router.get("/:id/tracks", requireAuth, async (c) => {
+    const id = c.req.param("id")!;
+    const access = await checkMediaAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+
+    const tracks = await TrackService.listTracks(id);
+
+    // Map tracks and construct CDN URLs for the files
+    const result = tracks.map((t) => {
+        return {
+            ...t.track,
+            file: t.file
+                ? {
+                      ...t.file,
+                      url: buildCdnUrl(t.file.bucket, t.file.path),
+                  }
+                : null,
+        };
+    });
+
+    return c.json(success(Code.SUCCESS, result));
+});
+
+const PresignUploadSchema = z.object({
+    type: z.enum(TrackType),
+    purpose: z.enum(TrackPurpose),
+    quality: z.enum(TrackQuality),
+    priority: z.number().int().default(0),
+    fileName: z.string().min(1, "fileName is required"),
+});
+
+// 2. Generate PUT presigned URL for direct upload
+router.post(
+    "/:id/tracks/presign-upload",
+    requireAuth,
+    validator("json", (value, c) => {
+        const parsed = PresignUploadSchema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid parameters"), 400);
+        }
+        return parsed.data;
+    }),
+    async (c) => {
+        const id = c.req.param("id")!;
+        const { type, purpose, priority, fileName } = c.req.valid("json");
+
+        const access = await checkMediaAccess(c, id);
+        if (access.errorResponse) return access.errorResponse;
+        const media = access.media!;
+
+        const ext = fileName.split(".").pop() || "bin";
+        const fileId = uuidv7();
+        const prefix = `${type.toLowerCase()}_${purpose.toLowerCase()}_${priority}`;
+        const postId = media.post_id;
+        const libraryId = media.library_id;
+
+        const path = postId
+            ? `v2/p/${postId.slice(-2)}/${postId}/${media.id}_${prefix}_${fileId}.${ext}`
+            : `v2/l/${libraryId.slice(-2)}/${libraryId}/${media.id}_${prefix}_${fileId}.${ext}`;
+
+        const mimeType = getMimeTypeByExt(ext);
+        const uploadUrl = await s3.getUploadPresignedUrl(path, {
+            bucket: env.S3_BUCKET,
+            contentType: mimeType,
+            expiresInSeconds: 3600, // 1 hour for larger files
+        });
+
+        return c.json(
+            success(Code.SUCCESS, {
+                url: uploadUrl,
+                path: path,
+                bucket: env.S3_BUCKET,
+                mime_type: mimeType,
+                extension: ext,
+            }),
+        );
+    },
+);
+
+const RegisterTrackSchema = z.object({
+    type: z.enum(TrackType),
+    purpose: z.enum(TrackPurpose),
+    quality: z.enum(TrackQuality),
+    priority: z.number().int().default(0),
+    source_url: z.string().optional(),
+    metadata: z.any().optional(),
+    variant_key: z.string().optional(),
+    is_default: z.boolean().optional(),
+    display_name: z.string().optional(),
+    language: z.string().nullable().optional(),
+    codec: z.string().nullable().optional(),
+    is_stale: z.boolean().optional(),
+    source_track_id: z.string().nullable().optional(),
+    file: z.object({
+        path: z.string().min(1),
+        bucket: z.string().min(1),
+        mime_type: z.string().min(1),
+        extension: z.string().min(1),
+        size: z.number().int().nonnegative(),
+        width: z.number().int().positive().nullable().optional(),
+        height: z.number().int().positive().nullable().optional(),
+        duration: z.number().nullable().optional(),
+    }),
+});
+
+// 3. Register or Replace track after successful S3 upload
+router.post(
+    "/:id/tracks/add-or-replace",
+    requireAuth,
+    validator("json", (value, c) => {
+        const parsed = RegisterTrackSchema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid parameters"), 400);
+        }
+        return parsed.data;
+    }),
+    async (c) => {
+        const id = c.req.param("id")!;
+        const body = c.req.valid("json");
+
+        const access = await checkMediaAccess(c, id);
+        if (access.errorResponse) return access.errorResponse;
+
+        const result = await TrackService.addOrReplaceTrack(
+            id,
+            {
+                type: body.type,
+                purpose: body.purpose,
+                quality: body.quality,
+                priority: body.priority,
+                source_url: body.source_url,
+                metadata: body.metadata,
+                variant_key: body.variant_key,
+                is_default: body.is_default,
+                display_name: body.display_name,
+                language: body.language,
+                codec: body.codec,
+                is_stale: body.is_stale,
+                source_track_id: body.source_track_id,
+            },
+            body.file,
+        );
+
+        return c.json(success(Code.SUCCESS, result));
+    },
+);
+
+const ReplaceFileSchema = z.object({
+    file: z.object({
+        path: z.string().min(1),
+        bucket: z.string().min(1),
+        mime_type: z.string().min(1),
+        extension: z.string().min(1),
+        size: z.number().int().nonnegative(),
+        width: z.number().int().positive().nullable().optional(),
+        height: z.number().int().positive().nullable().optional(),
+        duration: z.number().nullable().optional(),
+    }),
+});
+
+// POST /media/:id/tracks/:trackId/replace-file
+router.post(
+    "/:id/tracks/:trackId/replace-file",
+    requireAuth,
+    validator("json", (value, c) => {
+        const parsed = ReplaceFileSchema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid parameters"), 400);
+        }
+        return parsed.data;
+    }),
+    async (c) => {
+        const id = c.req.param("id")!;
+        const trackId = c.req.param("trackId")!;
+        const { file } = c.req.valid("json");
+
+        const access = await checkMediaAccess(c, id);
+        if (access.errorResponse) return access.errorResponse;
+
+        try {
+            const result = await TrackService.replaceFile(id, trackId, file);
+            return c.json(success(Code.SUCCESS, result));
+        } catch (e: any) {
+            return c.json(error(Code.INVALID_PARAMETER, e.message || "File replacement failed"), 400);
+        }
+    },
+);
+
+// 4. Soft-delete a track
+router.post("/:id/tracks/:trackId/delete", requireAuth, async (c) => {
+    const id = c.req.param("id")!;
+    const trackId = c.req.param("trackId")!;
+
+    const access = await checkMediaAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+
+    try {
+        const result = await TrackService.deleteTrack(id, trackId);
+        return c.json(success(Code.SUCCESS, result));
+    } catch (e: any) {
+        return c.json(error(Code.INVALID_PARAMETER, e.message || "Delete failed"), 400);
+    }
+});
+
+const UpdateTrackMetadataSchema = z.object({
+    priority: z.number().int().optional(),
+    quality: z.enum(TrackQuality).optional(),
+    display_name: z.string().nullable().optional(),
+    variant_key: z.string().optional(),
+    is_default: z.boolean().optional(),
+    language: z.string().nullable().optional(),
+    codec: z.string().nullable().optional(),
+    is_stale: z.boolean().optional(),
+    metadata: z.any().optional(),
+    source_track_id: z.string().nullable().optional(),
+});
+
+// 5. Update track properties
+router.post(
+    "/:id/tracks/:trackId/update",
+    requireAuth,
+    validator("json", (value, c) => {
+        const parsed = UpdateTrackMetadataSchema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid parameters"), 400);
+        }
+        return parsed.data;
+    }),
+    async (c) => {
+        const id = c.req.param("id")!;
+        const trackId = c.req.param("trackId")!;
+        const body = c.req.valid("json");
+
+        const access = await checkMediaAccess(c, id);
+        if (access.errorResponse) return access.errorResponse;
+
+        const updated = await TrackService.updateTrackMetadata(id, trackId, body);
+        return c.json(success(Code.SUCCESS, updated));
     },
 );
 

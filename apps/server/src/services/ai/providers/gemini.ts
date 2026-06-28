@@ -85,15 +85,11 @@ export class GeminiProvider implements AiProvider {
         const vector = resJson?.embedding?.values;
 
         if (!Array.isArray(vector)) {
-            throw new Error(
-                `Invalid response format from Gemini embedImage: ${JSON.stringify(resJson)}`,
-            );
+            throw new Error(`Invalid response format from Gemini embedImage: ${JSON.stringify(resJson)}`);
         }
 
         if (vector.length !== dimension) {
-            throw new Error(
-                `Gemini embedImage dimension mismatch. Expected ${dimension}, got ${vector.length}.`,
-            );
+            throw new Error(`Gemini embedImage dimension mismatch. Expected ${dimension}, got ${vector.length}.`);
         }
 
         return {

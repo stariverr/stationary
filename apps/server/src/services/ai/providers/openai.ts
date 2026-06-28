@@ -52,12 +52,8 @@ export class OpenAiProvider implements AiProvider {
         });
 
         this.chatModel = this.chatModelName ? this.openai.chat(this.chatModelName) : null;
-        this.textEmbeddingModel = this.textEmbeddingModelName
-            ? this.openai.embeddingModel(this.textEmbeddingModelName)
-            : null;
-        this.visualEmbeddingModel = this.visualEmbeddingModelName
-            ? this.openai.embeddingModel(this.visualEmbeddingModelName)
-            : null;
+        this.textEmbeddingModel = this.textEmbeddingModelName ? this.openai.embeddingModel(this.textEmbeddingModelName) : null;
+        this.visualEmbeddingModel = this.visualEmbeddingModelName ? this.openai.embeddingModel(this.visualEmbeddingModelName) : null;
     }
 
     protected getHeaders() {
@@ -89,9 +85,7 @@ export class OpenAiProvider implements AiProvider {
         const vector = resJson?.data?.[0]?.embedding;
 
         if (!Array.isArray(vector)) {
-            throw new Error(
-                `Invalid response format from OpenAI embedImage: ${JSON.stringify(resJson)}`,
-            );
+            throw new Error(`Invalid response format from OpenAI embedImage: ${JSON.stringify(resJson)}`);
         }
 
         const dimension = vector.length;

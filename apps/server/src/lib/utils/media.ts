@@ -9,8 +9,7 @@ const uuidv7 = { generate: createUuidV7 };
  */
 function getRefererHeaders(url: string): Record<string, string> {
     const headers: Record<string, string> = {
-        "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     };
     if (url.includes("zjcdn.com") || url.includes("douyin.com")) {
         headers["Referer"] = "https://www.douyin.com/";
@@ -60,10 +59,7 @@ function createResumableStream(
                         let res: Response;
                         if (timeout !== false) {
                             const retryController = new AbortController();
-                            const retryTimeoutId = setTimeout(
-                                () => retryController.abort(),
-                                timeout,
-                            );
+                            const retryTimeoutId = setTimeout(() => retryController.abort(), timeout);
 
                             res = await ky(url, {
                                 headers: retryHeaders,
@@ -81,9 +77,7 @@ function createResumableStream(
                         }
 
                         if (res.status !== 206) {
-                            throw new Error(
-                                `Server did not return 206 Partial Content (Status: ${res.status})`,
-                            );
+                            throw new Error(`Server did not return 206 Partial Content (Status: ${res.status})`);
                         }
 
                         if (!res.body) {
@@ -92,10 +86,7 @@ function createResumableStream(
 
                         reader = res.body.getReader();
                     } catch (err: any) {
-                        console.error(
-                            `[ResumableStream] Failed to resume stream at attempt ${attempt}:`,
-                            err,
-                        );
+                        console.error(`[ResumableStream] Failed to resume stream at attempt ${attempt}:`, err);
                         controller.error(err);
                         return;
                     }
@@ -111,11 +102,7 @@ function createResumableStream(
                     let timeoutId: any;
                     const timeoutPromise = new Promise<never>((_, reject) => {
                         timeoutId = setTimeout(() => {
-                            reject(
-                                new Error(
-                                    `Read timeout: No data received for ${readTimeoutMs / 1000}s`,
-                                ),
-                            );
+                            reject(new Error(`Read timeout: No data received for ${readTimeoutMs / 1000}s`));
                         }, readTimeoutMs);
                     });
 
@@ -132,10 +119,7 @@ function createResumableStream(
                     controller.enqueue(value);
                     return;
                 } catch (err: any) {
-                    console.warn(
-                        `[ResumableStream] Stream read interrupted/timeout at offset ${offset}:`,
-                        err.message || err,
-                    );
+                    console.warn(`[ResumableStream] Stream read interrupted/timeout at offset ${offset}:`, err.message || err);
 
                     if (reader) {
                         try {
@@ -219,12 +203,7 @@ export async function downloadStream(
         }
 
         // 2. Wrap body in custom resumable stream
-        const resumableStream = createResumableStream(
-            targetUrl,
-            initialRes,
-            requestHeaders,
-            handshakeTimeout,
-        );
+        const resumableStream = createResumableStream(targetUrl, initialRes, requestHeaders, handshakeTimeout);
 
         // 3. Return a standard Web Response containing our custom stream
         return new Response(resumableStream, {
@@ -369,12 +348,7 @@ export async function uploadToS3(
 /**
  * Moves an object in S3 to a trash path.
  */
-export async function moveToTrash(
-    sourcePath: string,
-    platform: string,
-    postId: string,
-    bucket: string,
-): Promise<string | null> {
+export async function moveToTrash(sourcePath: string, platform: string, postId: string, bucket: string): Promise<string | null> {
     try {
         const ext = sourcePath.split(".").pop() || "bin";
         const filename = `${uuidv7.generate()}.${ext}`;

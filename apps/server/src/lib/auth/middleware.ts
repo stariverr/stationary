@@ -100,4 +100,3 @@ export const requireAuth = async (c: Context<AuthEnv>, next: Next) => {
     c.set("apiToken", null);
     return next();
 };
-

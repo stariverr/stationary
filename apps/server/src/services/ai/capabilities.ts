@@ -1,15 +1,7 @@
-import {
-    findChatModelMetadata,
-    findEmbeddingModelMetadata,
-    type ChatModelCapabilities,
-    type EmbeddingModelCapabilities,
-} from "./registry";
+import { findChatModelMetadata, findEmbeddingModelMetadata, type ChatModelCapabilities, type EmbeddingModelCapabilities } from "./registry";
 import type { EmbedImageParams, EmbedTextParams } from "./types";
 
-export function resolveChatModelCapabilities(
-    modelId: string,
-    mappedToId?: string | null,
-): ChatModelCapabilities {
+export function resolveChatModelCapabilities(modelId: string, mappedToId?: string | null): ChatModelCapabilities {
     if (mappedToId) {
         const refMeta = findChatModelMetadata(mappedToId);
         if (refMeta) return refMeta.capabilities;
@@ -24,10 +16,7 @@ export function resolveChatModelCapabilities(
     };
 }
 
-export function resolveEmbeddingModelCapabilities(
-    modelId: string,
-    mappedToId?: string | null,
-): EmbeddingModelCapabilities {
+export function resolveEmbeddingModelCapabilities(modelId: string, mappedToId?: string | null): EmbeddingModelCapabilities {
     if (mappedToId) {
         const refMeta = findEmbeddingModelMetadata(mappedToId);
         if (refMeta) return refMeta.capabilities;
@@ -44,48 +33,30 @@ export function resolveEmbeddingModelCapabilities(
     };
 }
 
-export function assertVisionCapability(
-    modelName: string,
-    mappedToId: string | null | undefined,
-): void {
+export function assertVisionCapability(modelName: string, mappedToId: string | null | undefined): void {
     const capabilities = resolveChatModelCapabilities(modelName, mappedToId);
     if (!capabilities.vision) {
-        throw new Error(
-            `Model "${modelName}" (mapped to "${mappedToId || "none"}") does not support vision capability.`,
-        );
+        throw new Error(`Model "${modelName}" (mapped to "${mappedToId || "none"}") does not support vision capability.`);
     }
 }
 
-export function assertTextEmbeddingCapability(
-    modelName: string,
-    mappedToId: string | null | undefined,
-): EmbeddingModelCapabilities {
+export function assertTextEmbeddingCapability(modelName: string, mappedToId: string | null | undefined): EmbeddingModelCapabilities {
     const capabilities = resolveEmbeddingModelCapabilities(modelName, mappedToId);
     if (!capabilities.textEmbedding) {
-        throw new Error(
-            `Model "${modelName}" (mapped to "${mappedToId || "none"}") does not support textEmbedding capability.`,
-        );
+        throw new Error(`Model "${modelName}" (mapped to "${mappedToId || "none"}") does not support textEmbedding capability.`);
     }
     return capabilities;
 }
 
-export function assertImageEmbeddingCapability(
-    modelName: string,
-    mappedToId: string | null | undefined,
-): EmbeddingModelCapabilities {
+export function assertImageEmbeddingCapability(modelName: string, mappedToId: string | null | undefined): EmbeddingModelCapabilities {
     const capabilities = resolveEmbeddingModelCapabilities(modelName, mappedToId);
     if (!capabilities.imageEmbedding) {
-        throw new Error(
-            `Model "${modelName}" (mapped to "${mappedToId || "none"}") does not support imageEmbedding capability.`,
-        );
+        throw new Error(`Model "${modelName}" (mapped to "${mappedToId || "none"}") does not support imageEmbedding capability.`);
     }
     return capabilities;
 }
 
-export function formatEmbeddingText(
-    params: EmbedTextParams,
-    capabilities: EmbeddingModelCapabilities,
-): string {
+export function formatEmbeddingText(params: EmbedTextParams, capabilities: EmbeddingModelCapabilities): string {
     if (capabilities.taskPrefixType !== "gemini-asymmetric") {
         return params.text;
     }
@@ -98,33 +69,23 @@ export function formatEmbeddingText(
     return `title: ${titleStr} | text: ${params.text}`;
 }
 
-export function warnIfTextMayExceedModelLimits(
-    text: string,
-    capabilities: EmbeddingModelCapabilities,
-): void {
+export function warnIfTextMayExceedModelLimits(text: string, capabilities: EmbeddingModelCapabilities): void {
     const limits = capabilities.limits;
     if (!limits?.maxTokens) return;
 
     if (text.length > limits.maxTokens * 6) {
-        console.warn(
-            `[AiService] Warning: Input text length (${text.length} chars) may exceed model limit of ${limits.maxTokens} tokens.`,
-        );
+        console.warn(`[AiService] Warning: Input text length (${text.length} chars) may exceed model limit of ${limits.maxTokens} tokens.`);
     }
 }
 
-export function assertImageWithinModelLimits(
-    params: EmbedImageParams,
-    capabilities: EmbeddingModelCapabilities,
-): void {
+export function assertImageWithinModelLimits(params: EmbedImageParams, capabilities: EmbeddingModelCapabilities): void {
     const limits = capabilities.limits;
     if (!limits) return;
 
     if (limits.maxImageSizeMb) {
         const sizeMb = params.imageBuffer.byteLength / (1024 * 1024);
         if (sizeMb > limits.maxImageSizeMb) {
-            throw new Error(
-                `Image size (${sizeMb.toFixed(2)} MB) exceeds the model limit of ${limits.maxImageSizeMb} MB.`,
-            );
+            throw new Error(`Image size (${sizeMb.toFixed(2)} MB) exceeds the model limit of ${limits.maxImageSizeMb} MB.`);
         }
     }
 

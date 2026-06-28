@@ -1,4 +1,3 @@
-
 /** API Response Code */
 export const enum Code {
     // General Code
@@ -27,7 +26,7 @@ export const enum Code {
     TOO_MANY_REQUESTS = 1009,
     /** Not Implemented */
     NOT_IMPLEMENTED = 1010,
-    
+
     // Business Logic Error
     /** Library Not Empty: cannot be deleted */
     LIBRARY_NOT_EMPTY = 2001,

@@ -11,9 +11,7 @@ async function main() {
 
     for (const f of files) {
         if (!f.path.endsWith(".plain")) {
-            console.log(
-                `Skipping file ID: ${f.id} because path does not end with .plain: ${f.path}`,
-            );
+            console.log(`Skipping file ID: ${f.id} because path does not end with .plain: ${f.path}`);
             continue;
         }
 

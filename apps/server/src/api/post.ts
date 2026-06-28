@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Context, Hono } from "hono";
 import { db } from "@/global/db";
 import { z } from "zod";
 import { mapMediaToResponse } from "./media";
@@ -24,14 +24,18 @@ import {
     PostTag,
     Tag,
     TagStatus,
+    Library,
+    TagSource,
 } from "@/db/schema";
-import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lte, exists, or } from "drizzle-orm";
+import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lte, exists, or, notInArray } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Temporal } from "@js-temporal/polyfill";
 import { RecycleService } from "@/services/recycle";
 import { DeleteService } from "@/services/delete";
+import { PostService } from "@/services/post";
 import { buildCdnUrl } from "@/lib/utils/cdn";
-import { toIsoTimestamp } from "@/lib/utils/time";
+import { toIsoTimestamp, nowDbTimestamp, FormTimestampSchema } from "@/lib/utils/time";
+import { normalizeTagName } from "@/lib/utils/tag_sanitizer";
 
 const router = new Hono();
 const activePostFilter = and(eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time));
@@ -346,7 +350,7 @@ router.get(
             library_id: z.uuid(),
             keyword: z.string().optional(),
             author_ids: z.string().optional(),
-            platform: z.string().optional(),
+            platform: z.enum(PostSource).optional(),
         });
         const parsed = schema.safeParse(value);
         if (!parsed.success) {
@@ -377,7 +381,7 @@ router.get(
         }
 
         if (platform) {
-            whereClause.push(eq(Author.platform, platform as any));
+            whereClause.push(eq(Author.platform, platform));
         }
 
         const authorList = await db
@@ -680,6 +684,179 @@ router.post("/delete/:id", requireAuth, async (c) => {
     const result = await DeleteService.deletePost(id);
     if (result.postUpdated === 0) {
         return c.json(error(Code.NOT_FOUND, "Post not found"), 404);
+    }
+
+    return c.json(success(Code.SUCCESS, result));
+});
+
+async function checkPostAccess(
+    c: Context,
+    postId: string,
+): Promise<{ post: typeof Post.$inferSelect; errorResponse: null } | { post: null; errorResponse: any }> {
+    const user = c.get("user");
+    if (!user) {
+        return { post: null, errorResponse: c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401) };
+    }
+
+    const postRows = await db.select().from(Post).where(eq(Post.id, postId)).limit(1);
+    const post = postRows[0];
+
+    if (!post || post.delete_status !== DeleteStatus.ACTIVE || post.recycle_time !== null) {
+        return { post: null, errorResponse: c.json(error(Code.NOT_FOUND, "Post not found or is in recycle bin"), 404) };
+    }
+
+    const libraryList = await db.select().from(Library).where(eq(Library.id, post.library_id)).limit(1);
+    const library = libraryList[0];
+
+    if (!library || library.owner_id !== user.id) {
+        return { post: null, errorResponse: c.json(error(Code.FORBIDDEN, "You do not have access to this library"), 403) };
+    }
+
+    const apiToken = c.get("apiToken");
+    if (apiToken && apiToken.library_id && apiToken.library_id !== post.library_id) {
+        return { post: null, errorResponse: c.json(error(Code.FORBIDDEN, "API token scope restricted to another library"), 403) };
+    }
+
+    return { post, errorResponse: null };
+}
+
+const PostUpdateInfoSchema = z
+    .object({
+        title: z.string().min(1, "Title cannot be empty").optional(),
+        description: z.string().optional(),
+        published_time: FormTimestampSchema,
+        url: z.url().or(z.literal("")).nullable().optional(),
+    })
+    .refine(
+        (data) => {
+            return Object.keys(data).length > 0;
+        },
+        { message: "At least one field must be provided for update" },
+    );
+
+router.post(
+    "/update-info/:id",
+    requireAuth,
+    validator("json", (value, c) => {
+        const parsed = PostUpdateInfoSchema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid parameters"), 400);
+        }
+        return parsed.data;
+    }),
+    async (c) => {
+        const id = c.req.param("id")!;
+        const body = c.req.valid("json");
+
+        const access = await checkPostAccess(c, id);
+        if (access.errorResponse) return access.errorResponse;
+
+        const updated = await PostService.updateInfo(id, body);
+        return c.json(success(Code.SUCCESS, updated));
+    },
+);
+
+const PostReplaceTagsSchema = z.object({
+    tags: z.array(z.string()),
+});
+
+router.post(
+    "/:id/tags/replace",
+    requireAuth,
+    validator("json", (value, c) => {
+        const parsed = PostReplaceTagsSchema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(error(Code.INVALID_PARAMETER, "Invalid tags array"), 400);
+        }
+        return parsed.data;
+    }),
+    async (c) => {
+        const id = c.req.param("id")!;
+        const { tags } = c.req.valid("json");
+
+        const access = await checkPostAccess(c, id);
+        if (access.errorResponse) return access.errorResponse;
+        const post = access.post!;
+
+        const resolvedTagIds = await PostService.replaceTags(id, post.library_id, tags);
+        return c.json(success(Code.SUCCESS, { tag_ids: resolvedTagIds }));
+    },
+);
+
+const PostAttachMediaSchema = z.object({
+    media_ids: z.array(z.string().uuid()).min(1, "media_ids must contain at least one ID"),
+});
+
+router.post(
+    "/:id/media/attach",
+    requireAuth,
+    validator("json", (value, c) => {
+        const parsed = PostAttachMediaSchema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid media_ids"), 400);
+        }
+        return parsed.data;
+    }),
+    async (c) => {
+        const id = c.req.param("id")!;
+        const { media_ids } = c.req.valid("json");
+
+        const access = await checkPostAccess(c, id);
+        if (access.errorResponse) return access.errorResponse;
+        const post = access.post!;
+
+        const result = await PostService.attachMedia(id, post.library_id, media_ids);
+
+        if ("error" in result) {
+            return c.json(error(Code.INVALID_PARAMETER, result.error || "Attach failed"), 400);
+        }
+
+        return c.json(success(Code.SUCCESS, result));
+    },
+);
+
+const PostReorderMediaSchema = z.object({
+    media_ids: z.array(z.uuid()).min(1, "media_ids must contain at least one ID"),
+});
+
+router.post(
+    "/:id/media/reorder",
+    requireAuth,
+    validator("json", (value, c) => {
+        const parsed = PostReorderMediaSchema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid media_ids"), 400);
+        }
+        return parsed.data;
+    }),
+    async (c) => {
+        const id = c.req.param("id")!;
+        const { media_ids } = c.req.valid("json");
+
+        const access = await checkPostAccess(c, id);
+        if (access.errorResponse) return access.errorResponse;
+
+        const result = await PostService.reorderMedia(id, media_ids);
+
+        if ("error" in result) {
+            return c.json(error(Code.INVALID_PARAMETER, result.error || "Reorder failed"), 400);
+        }
+
+        return c.json(success(Code.SUCCESS, result));
+    },
+);
+
+router.post("/:id/media/:mediaId/remove", requireAuth, async (c) => {
+    const id = c.req.param("id")!;
+    const mediaId = c.req.param("mediaId")!;
+
+    const access = await checkPostAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+
+    const result = await PostService.removeMedia(id, mediaId);
+
+    if ("error" in result) {
+        return c.json(error(Code.INVALID_PARAMETER, result.error || "Remove failed"), 400);
     }
 
     return c.json(success(Code.SUCCESS, result));

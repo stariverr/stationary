@@ -53,7 +53,10 @@
         "n_tags_selected": "{count} tags selected",
         "no_tags_found": "No tags found",
         "all_tags": "All Tags",
-        "clear_all": "Clear Selection"
+        "clear_all": "Clear Selection",
+        "edit": "Edit",
+        "save": "Save",
+        "cancel": "Cancel"
     },
     "grid": {
         "showing_items": "Showing {count} items",
@@ -179,6 +182,13 @@
     },
     "media": {
         "live": "Live",
+        "quality_label": "Fidelity/Quality",
+        "quality": {
+            "original": "Original",
+            "high": "High",
+            "medium": "Medium",
+            "low": "Low"
+        },
         "actions": {
             "regenerate_cover": "Regenerate cover",
             "regenerate_covers": "Regenerate video covers"

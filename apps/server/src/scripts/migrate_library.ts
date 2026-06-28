@@ -14,7 +14,11 @@ async function migrate() {
 
     if (!defaultLib) {
         console.log("- Creating Default Library...");
-        const defaultUser = await db.select().from(User).limit(1).then((rows) => rows[0]);
+        const defaultUser = await db
+            .select()
+            .from(User)
+            .limit(1)
+            .then((rows) => rows[0]);
         if (!defaultUser) {
             console.error("Migration Failed: No user found to own the default library.");
             process.exit(1);
@@ -37,19 +41,11 @@ async function migrate() {
     console.log("[Default Library ID] " + defaultLib.id);
 
     console.log("- Migrating Posts...");
-    const updatedPosts = await db
-        .update(Post)
-        .set({ library_id: defaultLib.id })
-        .where(isNull(Post.library_id))
-        .returning();
+    const updatedPosts = await db.update(Post).set({ library_id: defaultLib.id }).where(isNull(Post.library_id)).returning();
     console.log("Migrated " + updatedPosts.length + " posts.");
 
     console.log("- Migrating Media...");
-    const updatedMedia = await db
-        .update(Media)
-        .set({ library_id: defaultLib.id })
-        .where(isNull(Media.library_id))
-        .returning();
+    const updatedMedia = await db.update(Media).set({ library_id: defaultLib.id }).where(isNull(Media.library_id)).returning();
     console.log("Migrated " + updatedMedia.length + " media assets.");
 
     console.log("Migration Complete!");

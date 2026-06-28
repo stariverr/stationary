@@ -1,4 +1,5 @@
 import { Temporal } from "@js-temporal/polyfill";
+import { z } from "zod";
 
 export const nowDbTimestamp = () => Temporal.Now.instant();
 
@@ -16,3 +17,20 @@ export const toIsoTimestamp = (value: Temporal.Instant | string | null | undefin
         return normalized;
     }
 };
+
+export const FormTimestampSchema = z
+    .union([z.string(), z.null()])
+    .optional()
+    .transform((val, ctx) => {
+        if (val === undefined) return undefined;
+        if (val === null) return null;
+        try {
+            return Temporal.Instant.from(val);
+        } catch {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "Invalid ISO 8601 timestamp string",
+            });
+            return z.NEVER;
+        }
+    });

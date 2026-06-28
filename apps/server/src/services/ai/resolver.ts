@@ -22,8 +22,7 @@ function buildResolvedProvider(config: AiConfigFields): ResolvedAiProvider {
     if (config.aiProvider === "openai") {
         const isDashScope =
             config.openaiBaseUrl &&
-            (config.openaiBaseUrl.includes("dashscope.aliyuncs.com") ||
-                config.openaiBaseUrl.includes("dashscope-intl.aliyuncs.com"));
+            (config.openaiBaseUrl.includes("dashscope.aliyuncs.com") || config.openaiBaseUrl.includes("dashscope-intl.aliyuncs.com"));
 
         const options = {
             apiKey: config.openaiApiKey,
@@ -54,14 +53,8 @@ function buildResolvedProvider(config: AiConfigFields): ResolvedAiProvider {
     };
 }
 
-export async function resolveAiProvider(target: {
-    libraryId: string;
-}): Promise<ResolvedAiProvider | null> {
-    const libraryRows = await db
-        .select()
-        .from(Library)
-        .where(eq(Library.id, target.libraryId))
-        .limit(1);
+export async function resolveAiProvider(target: { libraryId: string }): Promise<ResolvedAiProvider | null> {
+    const libraryRows = await db.select().from(Library).where(eq(Library.id, target.libraryId)).limit(1);
     const library = libraryRows[0];
 
     if (library && library.ai_provider) {

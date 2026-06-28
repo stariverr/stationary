@@ -23,12 +23,7 @@ function isValidAvifSignature(bytes: Uint8Array): boolean {
 
     // Search for "avif" (0x61, 0x76, 0x69, 0x66) in the first 16 bytes
     for (let i = 0; i <= 12; i++) {
-        if (
-            bytes[i] === 0x61 &&
-            bytes[i + 1] === 0x76 &&
-            bytes[i + 2] === 0x69 &&
-            bytes[i + 3] === 0x66
-        ) {
+        if (bytes[i] === 0x61 && bytes[i + 1] === 0x76 && bytes[i + 2] === 0x69 && bytes[i + 3] === 0x66) {
             return true;
         }
     }
@@ -42,10 +37,7 @@ function isValidAvifSignature(bytes: Uint8Array): boolean {
  * @param timeoutMs Maximum duration in milliseconds to allow the extraction to run. Defaults to 30 seconds.
  * @returns Promise resolving to a Uint8Array of the resulting AVIF image bytes.
  */
-export async function extractVideoFrame(
-    videoUrl: string,
-    timeoutMs: number = 30000,
-): Promise<Uint8Array> {
+export async function extractVideoFrame(videoUrl: string, timeoutMs: number = 30000): Promise<Uint8Array> {
     const tempFilePath = join(tmpdir(), `cover-${crypto.randomUUID()}.avif`);
 
     // Explicitly configure Bun.spawn with standard streams and native timeout option.
@@ -92,9 +84,7 @@ export async function extractVideoFrame(
 
         // Check if the process timed out or was terminated via signal.
         if (process.signalCode !== null) {
-            throw new Error(
-                `FFmpeg extraction timed out after ${timeoutMs}ms for URL: ${redactUrl(videoUrl)}`,
-            );
+            throw new Error(`FFmpeg extraction timed out after ${timeoutMs}ms for URL: ${redactUrl(videoUrl)}`);
         }
 
         if (exitCode !== 0) {
@@ -108,9 +98,7 @@ export async function extractVideoFrame(
         const file = Bun.file(tempFilePath);
         const exists = await file.exists();
         if (!exists) {
-            throw new Error(
-                "FFmpeg execution completed successfully but the output AVIF file was not created.",
-            );
+            throw new Error("FFmpeg execution completed successfully but the output AVIF file was not created.");
         }
 
         const bytes = new Uint8Array(await file.arrayBuffer());
@@ -131,10 +119,7 @@ export async function extractVideoFrame(
                 await file.delete();
             }
         } catch (cleanupErr) {
-            console.error(
-                `[FFMPEG AVIF] Failed to clean up temp file ${tempFilePath}:`,
-                cleanupErr,
-            );
+            console.error(`[FFMPEG AVIF] Failed to clean up temp file ${tempFilePath}:`, cleanupErr);
         }
     }
 }

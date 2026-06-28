@@ -49,10 +49,7 @@ function normalizeImageAiMetadata(output: Partial<ImageAiMetadata>): ImageAiMeta
     };
 }
 
-export async function describeImageWithModel(
-    model: LanguageModel,
-    image: Buffer | Uint8Array | string,
-): Promise<ImageAiMetadata> {
+export async function describeImageWithModel(model: LanguageModel, image: Buffer | Uint8Array | string): Promise<ImageAiMetadata> {
     const { output } = await generateText({
         model,
         output: ImageMetadataOutput,

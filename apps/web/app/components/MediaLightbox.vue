@@ -1,6 +1,25 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from "vue";
-import { X, ChevronLeft, ChevronRight, Info, Layers, Link as LinkIcon, FileImage, Loader2, Sparkles } from "@lucide/vue";
+import {
+    X,
+    ChevronLeft,
+    ChevronRight,
+    Info,
+    Layers,
+    Link as LinkIcon,
+    FileImage,
+    Loader2,
+    Sparkles,
+    Tag,
+    Trash2,
+    Plus,
+    Upload,
+    Play,
+    Music,
+    FileText,
+    Image as ImageIcon,
+    Video as VideoIcon,
+} from "@lucide/vue";
 import { useMediaStore, type MediaListItem, type MappedMediaItem, type MatchedDetails } from "@/stores/media";
 import { type ApiPostDetail, type Track } from "@/types/post";
 import { toast } from "@/components/ui/sonner";
@@ -227,12 +246,38 @@ const handleKeydown = (e: KeyboardEvent) => {
     if (e.key === "ArrowRight") scrollNext();
 };
 
+const sidebarWidth = ref(380);
+const isResizing = ref(false);
+
+const startResize = (e: MouseEvent) => {
+    isResizing.value = true;
+    window.addEventListener("mousemove", handleResize);
+    window.addEventListener("mouseup", stopResize);
+    e.preventDefault();
+};
+
+const handleResize = (e: MouseEvent) => {
+    if (!isResizing.value) return;
+    const newWidth = window.innerWidth - e.clientX;
+    if (newWidth >= 300 && newWidth <= window.innerWidth * 0.6) {
+        sidebarWidth.value = newWidth;
+    }
+};
+
+const stopResize = () => {
+    isResizing.value = false;
+    window.removeEventListener("mousemove", handleResize);
+    window.removeEventListener("mouseup", stopResize);
+};
+
 onMounted(() => {
     window.addEventListener("keydown", handleKeydown);
 });
 
 onUnmounted(() => {
     window.removeEventListener("keydown", handleKeydown);
+    window.removeEventListener("mousemove", handleResize);
+    window.removeEventListener("mouseup", stopResize);
 });
 
 const currentMediaItem = computed(() => {
@@ -258,6 +303,204 @@ const formatDate = (dateStr: string) => {
     } catch {
         return dateStr;
     }
+};
+
+const isEditingMedia = ref(false);
+const isSavingMedia = ref(false);
+const editMediaTitle = ref("");
+const editMediaPublishedTime = ref("");
+
+const toLocalDatetimeString = (displayTime: string | null | undefined) => {
+    if (!displayTime) return "";
+    try {
+        const inst = Temporal.Instant.from(displayTime);
+        const zdt = inst.toZonedDateTimeISO(Temporal.Now.timeZoneId());
+        const y = String(zdt.year).padStart(4, "0");
+        const m = String(zdt.month).padStart(2, "0");
+        const d = String(zdt.day).padStart(2, "0");
+        const hh = String(zdt.hour).padStart(2, "0");
+        const mm = String(zdt.minute).padStart(2, "0");
+        return `${y}-${m}-${d}T${hh}:${mm}`;
+    } catch {
+        return "";
+    }
+};
+
+const fromLocalDatetimeString = (localStr: string) => {
+    if (!localStr) return null;
+    try {
+        const pdt = Temporal.PlainDateTime.from(localStr);
+        const zdt = pdt.toZonedDateTime(Temporal.Now.timeZoneId());
+        return zdt.toInstant().toString();
+    } catch {
+        return null;
+    }
+};
+
+const startEditingMedia = () => {
+    editMediaTitle.value = currentMediaItem.value?.title || "";
+    editMediaPublishedTime.value = toLocalDatetimeString(currentPublishedTime.value);
+    isEditingMedia.value = true;
+};
+
+const cancelEditingMedia = () => {
+    isEditingMedia.value = false;
+};
+
+const saveEditingMedia = async () => {
+    if (!currentMediaItem.value) return;
+    isSavingMedia.value = true;
+    try {
+        const publishedTimeInstant = fromLocalDatetimeString(editMediaPublishedTime.value);
+
+        const response = await store.updateMediaInfo(currentMediaItem.value.id, {
+            title: editMediaTitle.value.trim(),
+            published_time: publishedTimeInstant,
+        });
+
+        if (!response || !response.success) {
+            throw new Error("Failed to update media info");
+        }
+
+        toast.success("Media updated successfully!");
+        isEditingMedia.value = false;
+
+        // If in stacked mode and siblings exist, we should refresh postDetail
+        if (displayMode.value === "stacked" && selectedMedia.value?.post_id) {
+            const detailRes = await useApi<{ success: boolean; data: ApiPostDetail }>(`/post/detail/${selectedMedia.value.post_id}`);
+            if (detailRes && detailRes.success && detailRes.data) {
+                postDetail.value = detailRes.data;
+                postSiblings.value = (detailRes.data.media || []).map(mapMediaWithSubtitles).filter((m): m is MappedSiblingMedia => !!m);
+            }
+        } else {
+            // Otherwise refetch media list
+            store.refetchMedia();
+        }
+    } catch (err: any) {
+        console.error("Save media error:", err);
+        toast.error(err.message || "Failed to save changes");
+    } finally {
+        isSavingMedia.value = false;
+    }
+};
+
+watch(currentIndex, () => {
+    isEditingMedia.value = false;
+});
+
+watch(selectedMediaId, () => {
+    isEditingMedia.value = false;
+});
+
+const mediaDetails = ref<any>(null);
+const isLoadingMediaDetails = ref(false);
+
+const fetchMediaDetails = async (mediaId: string) => {
+    if (!mediaId) return;
+    isLoadingMediaDetails.value = true;
+    try {
+        const response = await useApi<{ success: boolean; data: any }>(`/media/detail/${mediaId}`);
+        if (response && response.success && response.data) {
+            mediaDetails.value = response.data;
+        }
+    } catch (e) {
+        console.error("Failed to fetch media details:", e);
+    } finally {
+        isLoadingMediaDetails.value = false;
+    }
+};
+
+const activeTab = ref<"details" | "variants">("details");
+watch(
+    () => currentMediaItem.value?.id,
+    (newId) => {
+        mediaDetails.value = null;
+        activeTab.value = "details";
+        if (newId) {
+            fetchMediaDetails(newId);
+        }
+    },
+    { immediate: true },
+);
+
+// Tag input state for Media
+const isAddingTag = ref(false);
+const newTagValue = ref("");
+const newTagInput = ref<HTMLInputElement | null>(null);
+
+const handleRemoveTag = async (tagToRemove: string) => {
+    if (!currentMediaItem.value) return;
+    const currentTags = mediaDetails.value?.tags || [];
+    const newTags = currentTags.filter((t: string) => t !== tagToRemove);
+
+    // Optimistically update local state
+    if (mediaDetails.value) {
+        mediaDetails.value.tags = newTags;
+    }
+
+    try {
+        const res = await store.replaceMediaTags(currentMediaItem.value.id, newTags);
+        if (res && res.success) {
+            toast.success("Tag removed");
+        } else {
+            throw new Error("Failed to remove tag");
+        }
+    } catch (err) {
+        console.error("Failed to remove tag:", err);
+        toast.error("Failed to remove tag");
+        // Revert local state
+        if (mediaDetails.value) {
+            mediaDetails.value.tags = currentTags;
+        }
+    }
+};
+
+const startAddTag = () => {
+    isAddingTag.value = true;
+    nextTick(() => {
+        newTagInput.value?.focus();
+    });
+};
+
+const confirmAddTag = async () => {
+    const value = newTagValue.value.trim();
+    if (!currentMediaItem.value) {
+        isAddingTag.value = false;
+        newTagValue.value = "";
+        return;
+    }
+    const currentTags = mediaDetails.value?.tags || [];
+    if (value) {
+        if (currentTags.includes(value)) {
+            isAddingTag.value = false;
+            newTagValue.value = "";
+            return;
+        }
+        const newTags = [...currentTags, value];
+
+        // Optimistically update local state
+        if (mediaDetails.value) {
+            mediaDetails.value.tags = newTags;
+        }
+
+        try {
+            const res = await store.replaceMediaTags(currentMediaItem.value.id, newTags);
+            if (res && res.success) {
+                toast.success("Tag added");
+            } else {
+                throw new Error("Failed to add tag");
+            }
+        } catch (err) {
+            console.error("Failed to add tag:", err);
+            toast.error("Failed to add tag");
+            // Revert local state
+            if (mediaDetails.value) {
+                mediaDetails.value.tags = currentTags;
+            }
+        }
+    }
+    isAddingTag.value = false;
+    newTagValue.value = "";
 };
 </script>
 
@@ -377,21 +620,70 @@ const formatDate = (dateStr: string) => {
                     </div>
                 </div>
 
+                <!-- Resizing Overlay to prevent iframe/video event stealing -->
+                <div v-if="isResizing" class="fixed inset-0 z-[300] cursor-col-resize select-none"></div>
+
+                <!-- Resize Drag Handle -->
+                <div
+                    @mousedown="startResize"
+                    class="w-1 hover:w-1.5 bg-zinc-200/50 hover:bg-indigo-500/50 cursor-col-resize h-full shrink-0 relative z-[220] transition-all hidden md:block"
+                    :class="isResizing ? 'bg-indigo-500/70 w-1.5' : ''"
+                ></div>
+
                 <!-- Right Sidebar (Info & Provenance) -->
-                <div class="w-[320px] bg-white h-full shrink-0 flex flex-col shadow-2xl relative z-[210] overflow-y-auto hidden md:flex">
-                    <div class="p-5 border-b border-gray-100 bg-gray-50/50">
+                <div
+                    :style="{ width: `${sidebarWidth}px` }"
+                    class="bg-white h-full shrink-0 flex flex-col shadow-2xl relative z-[210] overflow-hidden hidden md:flex"
+                >
+                    <div class="p-5 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between shrink-0">
                         <h3 class="font-semibold text-gray-900 flex items-center gap-2">
                             <Info class="w-4 h-4 text-blue-500" />
                             {{ $t("common.details", "Asset Details") }}
                         </h3>
+                        <button
+                            v-if="!isEditingMedia && activeTab === 'details'"
+                            @click="startEditingMedia"
+                            class="px-2 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 rounded-md transition-colors cursor-pointer"
+                        >
+                            {{ $t("common.edit") }}
+                        </button>
                     </div>
 
-                    <div class="p-5 space-y-6 flex-1">
+                    <!-- Tab Bar -->
+                    <div class="flex border-b border-gray-100 bg-gray-50/50 px-5 gap-6 h-12 items-center text-xs shrink-0 select-none">
+                        <button
+                            @click="activeTab = 'details'"
+                            class="font-semibold uppercase tracking-wider transition-colors relative h-full flex items-center cursor-pointer"
+                            :class="
+                                activeTab === 'details' ? 'text-zinc-900 border-b-2 border-zinc-800' : 'text-zinc-400 hover:text-zinc-700'
+                            "
+                        >
+                            {{ $t("common.details", "Details") }}
+                        </button>
+                        <button
+                            @click="activeTab = 'variants'"
+                            class="font-semibold uppercase tracking-wider transition-colors relative h-full flex items-center cursor-pointer"
+                            :class="
+                                activeTab === 'variants' ? 'text-zinc-900 border-b-2 border-zinc-800' : 'text-zinc-400 hover:text-zinc-700'
+                            "
+                        >
+                            Variants
+                        </button>
+                    </div>
+
+                    <div v-if="activeTab === 'details'" key="tab-details" class="p-5 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
                         <!-- Basic Info -->
                         <div class="space-y-4">
                             <div>
                                 <label class="text-[10px] uppercase text-gray-400 font-bold tracking-wider mb-1 block">Title</label>
-                                <div class="text-sm font-medium text-gray-900 break-words">
+                                <input
+                                    v-if="isEditingMedia"
+                                    type="text"
+                                    v-model="editMediaTitle"
+                                    class="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-md focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white text-gray-900"
+                                    placeholder="Enter title"
+                                />
+                                <div v-else class="text-sm font-medium text-gray-900 break-words">
                                     {{ currentMediaItem?.title || "Untitled Asset" }}
                                 </div>
                             </div>
@@ -416,9 +708,92 @@ const formatDate = (dateStr: string) => {
                                 <label class="text-[10px] uppercase text-gray-400 font-bold tracking-wider mb-1 block"
                                     >Published Time</label
                                 >
-                                <div class="text-sm text-gray-700">
+                                <input
+                                    v-if="isEditingMedia"
+                                    type="datetime-local"
+                                    v-model="editMediaPublishedTime"
+                                    class="w-full px-2 py-1 text-xs border border-gray-200 rounded-md focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white text-gray-900"
+                                />
+                                <div v-else class="text-sm text-gray-700">
                                     {{ formatDate(currentPublishedTime || "") }}
                                 </div>
+                            </div>
+
+                            <!-- Save / Cancel Buttons -->
+                            <div v-if="isEditingMedia" class="flex items-center gap-2 justify-end pt-2">
+                                <button
+                                    @click="cancelEditingMedia"
+                                    class="px-2.5 py-1 text-xs font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded transition-colors cursor-pointer"
+                                    :disabled="isSavingMedia"
+                                >
+                                    {{ $t("common.cancel") }}
+                                </button>
+                                <button
+                                    @click="saveEditingMedia"
+                                    class="px-2.5 py-1 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded shadow-sm transition-colors cursor-pointer flex items-center gap-1"
+                                    :disabled="isSavingMedia"
+                                >
+                                    <Loader2 v-if="isSavingMedia" class="w-3 animate-spin" />
+                                    {{ $t("common.save") }}
+                                </button>
+                            </div>
+                        </div>
+
+                        <hr class="border-gray-100" />
+
+                        <!-- Tags -->
+                        <div class="space-y-3">
+                            <label class="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1">
+                                <Tag class="w-3 h-3 text-gray-400" /> {{ $t("common.tags", "Tags") }}
+                            </label>
+                            <div class="flex flex-wrap gap-2">
+                                <span
+                                    v-for="tag in mediaDetails?.tags || []"
+                                    :key="tag"
+                                    class="group/tag flex items-center gap-1 px-2.5 py-1 bg-gray-50 border border-gray-200 hover:border-red-200 hover:bg-red-50 hover:text-red-700 rounded-md text-xs text-gray-700 font-medium transition-all"
+                                >
+                                    #{{ tag }}
+                                    <button
+                                        type="button"
+                                        @click="handleRemoveTag(tag)"
+                                        class="opacity-0 group-hover/tag:opacity-100 text-gray-400 hover:text-red-600 transition-all cursor-pointer"
+                                    >
+                                        <X class="w-3 h-3" />
+                                    </button>
+                                </span>
+                                <span
+                                    v-if="(!mediaDetails?.tags || mediaDetails.tags.length === 0) && !isLoadingMediaDetails"
+                                    class="text-xs text-gray-400 italic"
+                                >
+                                    No tags
+                                </span>
+                                <span v-if="isLoadingMediaDetails" class="text-xs text-gray-400 flex items-center gap-1.5">
+                                    <Loader2 class="w-3 h-3 animate-spin" />
+                                    Loading tags...
+                                </span>
+
+                                <div
+                                    v-if="isAddingTag"
+                                    class="flex items-center gap-1 border border-indigo-200 rounded-md px-2 py-0.5 bg-white"
+                                >
+                                    <input
+                                        ref="newTagInput"
+                                        v-model="newTagValue"
+                                        type="text"
+                                        placeholder="Tag name"
+                                        class="outline-none border-none text-xs text-gray-700 w-16"
+                                        @keyup.enter="confirmAddTag"
+                                        @blur="confirmAddTag"
+                                    />
+                                </div>
+                                <button
+                                    v-else-if="!isLoadingMediaDetails"
+                                    type="button"
+                                    @click="startAddTag"
+                                    class="px-3 py-1 border border-dashed border-gray-300 rounded-md text-xs text-gray-400 hover:text-gray-600 hover:border-gray-400 transition-colors cursor-pointer"
+                                >
+                                    + {{ $t("common.add_tag", "Add Tag") }}
+                                </button>
                             </div>
                         </div>
 
@@ -581,6 +956,11 @@ const formatDate = (dateStr: string) => {
                                 </div>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- Variants panel -->
+                    <div v-if="activeTab === 'variants'" key="tab-variants" class="flex-1 flex flex-col overflow-hidden min-h-0 bg-white">
+                        <MediaVariantsManager v-if="currentMediaItem" :media-id="currentMediaItem.id" />
                     </div>
                 </div>
             </div>

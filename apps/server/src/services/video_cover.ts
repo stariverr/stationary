@@ -1,17 +1,7 @@
 import { db } from "@/global/db";
 import { and, eq, lt, isNull, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import {
-    Media,
-    Track,
-    File,
-    DeleteStatus,
-    SyncStatus,
-    TrackType,
-    TrackPurpose,
-    TrackQuality,
-    MediaType,
-} from "@/db/schema";
+import { Media, Track, File, DeleteStatus, SyncStatus, TrackType, TrackPurpose, TrackQuality, MediaType } from "@/db/schema";
 import { env } from "@/global/env";
 import { Client } from "@upstash/workflow";
 import { s3 } from "@/global/s3";
@@ -70,10 +60,7 @@ export const VideoCoverService = {
      * Entrypoint to request a generated video cover.
      * Evaluates state, checks cache/re-generation requirements, and enqueues QStash background job.
      */
-    async requestForMedia(
-        mediaId: string,
-        options?: RequestVideoCoverOptions,
-    ): Promise<VideoCoverRequestResult> {
+    async requestForMedia(mediaId: string, options?: RequestVideoCoverOptions): Promise<VideoCoverRequestResult> {
         // 1. Fetch media
         const mediaResults = await db
             .select()
@@ -93,21 +80,12 @@ export const VideoCoverService = {
         const tracks = await db
             .select()
             .from(Track)
-            .where(
-                and(
-                    eq(Track.media_id, mediaId),
-                    eq(Track.delete_status, DeleteStatus.ACTIVE),
-                ),
-            );
-        const primary = tracks.find(
-            (t) => t.type === TrackType.VIDEO && t.purpose === TrackPurpose.CONTENT && t.priority === 0
-        );
+            .where(and(eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)));
+        const primary = tracks.find((t) => t.type === TrackType.VIDEO && t.purpose === TrackPurpose.CONTENT && t.priority === 0);
         const cover = tracks.find((t) => t.purpose === TrackPurpose.COVER);
 
         if (!primary || primary.sync_status !== "COMPLETED" || !primary.file_id) {
-            console.log(
-                `[VideoCoverService] Primary file is not fully synced yet for media ${mediaId}.`,
-            );
+            console.log(`[VideoCoverService] Primary file is not fully synced yet for media ${mediaId}.`);
             return {
                 status: "skipped",
                 mediaId,
@@ -118,9 +96,7 @@ export const VideoCoverService = {
         // Check if there is a valid active cover
         const hasExternalCover = cover && !!cover.source_url;
         if (hasExternalCover && options?.replaceExternalCover !== true) {
-            console.log(
-                `[VideoCoverService] Media ${mediaId} has an external cover and replaceExternalCover is not set. Skipping.`,
-            );
+            console.log(`[VideoCoverService] Media ${mediaId} has an external cover and replaceExternalCover is not set. Skipping.`);
             return {
                 status: "skipped",
                 mediaId,
@@ -132,14 +108,11 @@ export const VideoCoverService = {
         const isStaleTime = Temporal.Now.instant().subtract({ minutes: 15 });
         if (
             cover &&
-            (cover.sync_status === SyncStatus.PENDING ||
-                cover.sync_status === SyncStatus.IN_PROGRESS) &&
+            (cover.sync_status === SyncStatus.PENDING || cover.sync_status === SyncStatus.IN_PROGRESS) &&
             cover.update_time &&
             Temporal.Instant.compare(cover.update_time, isStaleTime) >= 0
         ) {
-            console.log(
-                `[VideoCoverService] Media ${mediaId} cover generation task is already pending. Skipping.`,
-            );
+            console.log(`[VideoCoverService] Media ${mediaId} cover generation task is already pending. Skipping.`);
             return {
                 status: "already_pending",
                 mediaId,
@@ -150,9 +123,7 @@ export const VideoCoverService = {
         if (!options?.force) {
             const hasExternalCover = !!cover?.source_url;
             if (hasExternalCover || isPhysicalCoverValid(cover, primary.file_id)) {
-                console.log(
-                    `[VideoCoverService] Media ${mediaId} already has a valid cover. Skipping.`,
-                );
+                console.log(`[VideoCoverService] Media ${mediaId} already has a valid cover. Skipping.`);
                 return {
                     status: "skipped",
                     mediaId,
@@ -176,6 +147,7 @@ export const VideoCoverService = {
                     last_error: null,
                     metadata,
                     is_generated: true,
+                    source_track_id: primary.id,
                     update_time: now,
                 })
                 .where(eq(Track.id, cover.id));
@@ -192,6 +164,7 @@ export const VideoCoverService = {
                     last_error: null,
                     metadata,
                     is_generated: true,
+                    source_track_id: primary.id,
                     create_time: now,
                     update_time: now,
                 })
@@ -202,6 +175,7 @@ export const VideoCoverService = {
                         last_error: null,
                         metadata,
                         is_generated: true,
+                        source_track_id: primary.id,
                         delete_status: DeleteStatus.ACTIVE,
                         delete_time: null,
                         update_time: now,
@@ -216,9 +190,7 @@ export const VideoCoverService = {
 
         // Use stable workflowRunId to prevent duplicate runs
         const workflowRunId = `video-cover-${mediaId}-${primary.file_id}-${options?.force ? "force" : "auto"}`;
-        console.log(
-            `[VideoCoverService] Triggering QStash workflow for media ${mediaId} cover generation with run ID ${workflowRunId}.`,
-        );
+        console.log(`[VideoCoverService] Triggering QStash workflow for media ${mediaId} cover generation with run ID ${workflowRunId}.`);
 
         try {
             await client.trigger({
@@ -234,10 +206,7 @@ export const VideoCoverService = {
                 workflowRunId,
             });
         } catch (err: any) {
-            console.error(
-                `[VideoCoverService] Failed to trigger QStash workflow for media ${mediaId}:`,
-                err,
-            );
+            console.error(`[VideoCoverService] Failed to trigger QStash workflow for media ${mediaId}:`, err);
             const failNow = nowDbTimestamp();
             await db
                 .update(Track)
@@ -246,9 +215,7 @@ export const VideoCoverService = {
                     last_error: err.message || String(err),
                     update_time: failNow,
                 })
-                .where(
-                    and(eq(Track.media_id, mediaId), eq(Track.purpose, TrackPurpose.COVER)),
-                );
+                .where(and(eq(Track.media_id, mediaId), eq(Track.purpose, TrackPurpose.COVER)));
             throw err;
         }
 
@@ -261,10 +228,7 @@ export const VideoCoverService = {
     /**
      * The actual frame extraction and file-saving worker logic.
      */
-    async generateForMedia(
-        mediaId: string,
-        options?: { force?: boolean; replaceExternalCover?: boolean },
-    ): Promise<void> {
+    async generateForMedia(mediaId: string, options?: { force?: boolean; replaceExternalCover?: boolean }): Promise<void> {
         console.log(`[VideoCoverService] Starting cover generation for media ${mediaId}`);
         const mediaResults = await db
             .select()
@@ -279,21 +243,12 @@ export const VideoCoverService = {
         const tracks = await db
             .select()
             .from(Track)
-            .where(
-                and(
-                    eq(Track.media_id, mediaId),
-                    eq(Track.delete_status, DeleteStatus.ACTIVE),
-                ),
-            );
-        const primary = tracks.find(
-            (t) => t.type === TrackType.VIDEO && t.purpose === TrackPurpose.CONTENT && t.priority === 0
-        );
+            .where(and(eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)));
+        const primary = tracks.find((t) => t.type === TrackType.VIDEO && t.purpose === TrackPurpose.CONTENT && t.priority === 0);
         const cover = tracks.find((t) => t.purpose === TrackPurpose.COVER);
 
         if (!primary || primary.sync_status !== "COMPLETED" || !primary.file_id) {
-            throw new Error(
-                `Primary file for media ${mediaId} is not completed or missing file_id.`,
-            );
+            throw new Error(`Primary file for media ${mediaId} is not completed or missing file_id.`);
         }
 
         // Set state to IN_PROGRESS
@@ -319,9 +274,7 @@ export const VideoCoverService = {
         }
 
         if (!options?.force && isPhysicalCoverValid(cover, primary.file_id)) {
-            console.log(
-                `[VideoCoverService] Valid cover already exists for media ${mediaId}. Skipping cover generation.`,
-            );
+            console.log(`[VideoCoverService] Valid cover already exists for media ${mediaId}. Skipping cover generation.`);
             return;
         }
 
@@ -329,9 +282,7 @@ export const VideoCoverService = {
             const physicalFiles = await db
                 .select()
                 .from(File)
-                .where(
-                    and(eq(File.id, primary.file_id), eq(File.delete_status, DeleteStatus.ACTIVE)),
-                )
+                .where(and(eq(File.id, primary.file_id), eq(File.delete_status, DeleteStatus.ACTIVE)))
                 .limit(1);
             const physicalFile = physicalFiles[0];
             if (!physicalFile) {
@@ -342,9 +293,7 @@ export const VideoCoverService = {
 
             try {
                 // Generate a secure, temporary S3 pre-signed URL for direct streaming by FFmpeg
-                console.log(
-                    `[VideoCoverService] Generating secure pre-signed URL for S3 key: ${physicalFile.path}`,
-                );
+                console.log(`[VideoCoverService] Generating secure pre-signed URL for S3 key: ${physicalFile.path}`);
                 const presignedUrl = await s3.getPresignedUrl(physicalFile.path, {
                     bucket: physicalFile.bucket,
                     expiresInSeconds: 900, // 15 mins
@@ -362,9 +311,7 @@ export const VideoCoverService = {
                     if (!cdnUrl) {
                         throw new Error("CDN URL could not be constructed.");
                     }
-                    console.log(
-                        `[VideoCoverService] Extracting video frame from CDN URL: ${cdnUrl}`,
-                    );
+                    console.log(`[VideoCoverService] Extracting video frame from CDN URL: ${cdnUrl}`);
                     coverBytes = await extractVideoFrame(cdnUrl);
                 } catch (cdnErr: any) {
                     console.warn(
@@ -387,13 +334,7 @@ export const VideoCoverService = {
             const ext = "avif";
 
             console.log(`[VideoCoverService] Uploading cover frame to S3 key: ${coverFilePath}`);
-            await uploadToS3(
-                coverFilePath,
-                coverBytes,
-                contentType,
-                env.S3_BUCKET,
-                coverBytes.length,
-            );
+            await uploadToS3(coverFilePath, coverBytes, contentType, env.S3_BUCKET, coverBytes.length);
 
             // Save File
             const coverFileResults = await db
@@ -422,7 +363,7 @@ export const VideoCoverService = {
                 primary_file_id: primary.file_id,
                 seek_seconds: 1,
             };
- 
+
             const completedNow = nowDbTimestamp();
             if (cover) {
                 await db
@@ -433,6 +374,7 @@ export const VideoCoverService = {
                         last_error: null,
                         metadata,
                         is_generated: true,
+                        source_track_id: primary.id,
                         update_time: completedNow,
                     })
                     .where(eq(Track.id, cover.id));
@@ -450,6 +392,7 @@ export const VideoCoverService = {
                         last_error: null,
                         metadata,
                         is_generated: true,
+                        source_track_id: primary.id,
                         create_time: completedNow,
                         update_time: completedNow,
                     })
@@ -461,21 +404,18 @@ export const VideoCoverService = {
                             last_error: null,
                             metadata,
                             is_generated: true,
+                            source_track_id: primary.id,
                             delete_status: DeleteStatus.ACTIVE,
                             delete_time: null,
                             update_time: completedNow,
                         },
                     });
             }
- 
-            console.log(
-                `[VideoCoverService] Generated cover successfully completed for media ${mediaId}.`,
-            );
+
+            console.log(`[VideoCoverService] Generated cover successfully completed for media ${mediaId}.`);
         } catch (err: any) {
             const errorMsg = err.message || String(err);
-            console.error(
-                `[VideoCoverService] Error during cover generation for media ${mediaId}: ${errorMsg}`,
-            );
+            console.error(`[VideoCoverService] Error during cover generation for media ${mediaId}: ${errorMsg}`);
             const failNow = nowDbTimestamp();
             await db
                 .update(Track)
@@ -484,9 +424,7 @@ export const VideoCoverService = {
                     last_error: errorMsg,
                     update_time: failNow,
                 })
-                .where(
-                    and(eq(Track.media_id, mediaId), eq(Track.purpose, TrackPurpose.COVER)),
-                );
+                .where(and(eq(Track.media_id, mediaId), eq(Track.purpose, TrackPurpose.COVER)));
             throw err;
         }
     },
@@ -495,17 +433,13 @@ export const VideoCoverService = {
      * Scan the database for videos that are missing covers (either no cover record, failed cover,
      * or stuck pending/in-progress cover) and trigger cover generation for them.
      */
-    async scanAndQueueMissingCovers(
-        options: ScanMissingCoversOptions,
-    ): Promise<ScanMissingCoversResult> {
+    async scanAndQueueMissingCovers(options: ScanMissingCoversOptions): Promise<ScanMissingCoversResult> {
         const libraryId = options.libraryId;
         const limit = Math.min(options.limit ?? 100, 500);
         const staleMinutes = options.staleMinutes ?? 15;
         const originUrl = options.originUrl;
 
-        const lockKey = libraryId
-            ? `lock:video-cover-scan:library:${libraryId}`
-            : `lock:video-cover-scan:global`;
+        const lockKey = libraryId ? `lock:video-cover-scan:library:${libraryId}` : `lock:video-cover-scan:global`;
 
         try {
             return await withLock(
@@ -513,11 +447,11 @@ export const VideoCoverService = {
                 async () => {
                     const primaryTrack = alias(Track, "primary_track");
                     const coverTrack = alias(Track, "cover_track");
- 
+
                     const staleThreshold = Temporal.Now.instant().subtract({
                         minutes: staleMinutes,
                     });
- 
+
                     // Query criteria
                     const whereConditions = [
                         eq(Media.type, MediaType.VIDEO),
@@ -529,14 +463,14 @@ export const VideoCoverService = {
                         eq(primaryTrack.sync_status, SyncStatus.COMPLETED),
                         eq(primaryTrack.delete_status, DeleteStatus.ACTIVE),
                     ];
- 
+
                     if (libraryId) {
                         whereConditions.push(eq(Media.library_id, libraryId));
                     }
- 
+
                     // Query one more row than limit to check hasMore
                     const queryLimit = limit + 1;
- 
+
                     const results = await db
                         .select({
                             mediaId: Media.id,
@@ -599,18 +533,14 @@ export const VideoCoverService = {
                         if (!coverId) {
                             // 1. No COVER row exists
                             isMatched = true;
-                        } else if (
-                            !coverFileId &&
-                            (!coverSourceUrl || coverSourceUrl.trim() === "")
-                        ) {
+                        } else if (!coverFileId && (!coverSourceUrl || coverSourceUrl.trim() === "")) {
                             // 2. COVER.file_id IS NULL and COVER.source_url is empty
                             isMatched = true;
                         } else if (coverSyncStatus === SyncStatus.FAILED) {
                             // 3. COVER.sync_status = FAILED
                             isMatched = true;
                         } else if (
-                            (coverSyncStatus === SyncStatus.PENDING ||
-                                coverSyncStatus === SyncStatus.IN_PROGRESS) &&
+                            (coverSyncStatus === SyncStatus.PENDING || coverSyncStatus === SyncStatus.IN_PROGRESS) &&
                             coverUpdateTime &&
                             Temporal.Instant.compare(coverUpdateTime, staleThreshold) < 0
                         ) {
@@ -619,11 +549,7 @@ export const VideoCoverService = {
                         } else {
                             // 5. COVER.is_generated = true and COVER.metadata.primary_file_id != PRIMARY.file_id
                             const metadata = coverMetadata;
-                            if (
-                                coverIsGenerated === true &&
-                                metadata &&
-                                metadata.primary_file_id !== primaryFileId
-                            ) {
+                            if (coverIsGenerated === true && metadata && metadata.primary_file_id !== primaryFileId) {
                                 isMatched = true;
                             }
                         }
@@ -677,9 +603,7 @@ export const VideoCoverService = {
             );
         } catch (err: any) {
             if (err?.message === "LOCKED_CONCURRENT_EXECUTION") {
-                console.log(
-                    `[VideoCoverService] Scan lock is already held. Returning locked: true.`,
-                );
+                console.log(`[VideoCoverService] Scan lock is already held. Returning locked: true.`);
                 return {
                     scanned: 0,
                     matched: 0,
@@ -697,10 +621,7 @@ export const VideoCoverService = {
     },
 };
 
-function isPhysicalCoverValid(
-    cover: typeof Track.$inferSelect | undefined,
-    primaryFileId: string | null,
-): boolean {
+function isPhysicalCoverValid(cover: typeof Track.$inferSelect | undefined, primaryFileId: string | null): boolean {
     if (!cover || !cover.file_id) return false;
     if (cover.sync_status !== SyncStatus.COMPLETED) return false;
     if (cover.is_generated) {

@@ -84,4 +84,3 @@ export function sanitizeTagAliases(tagName: string, aliases: string[]): string[]
 
     return result;
 }
-

@@ -28,6 +28,12 @@ export const TrackSchema = v.object({
     priority: v.number(),
     metadata: v.record(v.string(), v.unknown()),
     mime_type: v.optional(v.nullable(v.string())),
+    variant_key: v.optional(v.string()),
+    is_default: v.optional(v.boolean()),
+    display_name: v.optional(v.nullable(v.string())),
+    language: v.optional(v.nullable(v.string())),
+    codec: v.optional(v.nullable(v.string())),
+    is_stale: v.optional(v.boolean()),
 });
 export type Track = v.InferOutput<typeof TrackSchema>;
 

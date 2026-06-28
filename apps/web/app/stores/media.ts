@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { Temporal } from "@js-temporal/polyfill";
-import { useQuery, keepPreviousData } from "@tanstack/vue-query";
+import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/vue-query";
 import { useLibraryStore } from "@/stores/library";
 
 import * as v from "valibot";
@@ -72,6 +72,7 @@ export interface MappedMediaItem {
 export const useMediaStore = defineStore("media", () => {
     const route = useRoute();
     const router = useRouter();
+    const queryClient = useQueryClient();
 
     const libraryStore = useLibraryStore();
 
@@ -386,6 +387,30 @@ export const useMediaStore = defineStore("media", () => {
         return response;
     };
 
+    const updateMediaInfo = async (id: string, fields: { title?: string; description?: string; published_time?: string | null }) => {
+        const response = await useApi<any>(`/media/update-info/${id}`, {
+            method: "POST",
+            body: fields,
+        });
+        if (response && response.success) {
+            queryClient.invalidateQueries({ queryKey: ["media", id] });
+            queryClient.invalidateQueries({ queryKey: ["posts"] });
+        }
+        return response;
+    };
+
+    const replaceMediaTags = async (id: string, tags: string[]) => {
+        const response = await useApi<any>(`/media/${id}/tags/replace`, {
+            method: "POST",
+            body: { tags },
+        });
+        if (response && response.success) {
+            queryClient.invalidateQueries({ queryKey: ["media", id] });
+            queryClient.invalidateQueries({ queryKey: ["posts"] });
+        }
+        return response;
+    };
+
     return {
         keyword,
         source,
@@ -402,5 +427,7 @@ export const useMediaStore = defineStore("media", () => {
         selectMedia,
         retrySync,
         queueAi,
+        updateMediaInfo,
+        replaceMediaTags,
     };
 });

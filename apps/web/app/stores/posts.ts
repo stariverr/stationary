@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { Temporal } from "@js-temporal/polyfill";
-import { useQuery, keepPreviousData } from "@tanstack/vue-query";
+import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/vue-query";
 import {
     type Post,
     Platform,
@@ -16,6 +16,7 @@ import { useLibraryStore } from "@/stores/library";
 export const usePostStore = defineStore("posts", () => {
     const route = useRoute();
     const router = useRouter();
+    const queryClient = useQueryClient();
 
     const libraryStore = useLibraryStore();
 
@@ -486,6 +487,33 @@ export const usePostStore = defineStore("posts", () => {
         return response;
     };
 
+    const updatePostInfo = async (
+        id: string | number,
+        fields: { title?: string; description?: string; published_time?: string | null; url?: string | null },
+    ) => {
+        const response = await useApi<any>(`/post/update-info/${id}`, {
+            method: "POST",
+            body: fields,
+        });
+        if (response && response.success) {
+            queryClient.invalidateQueries({ queryKey: ["post", String(id)] });
+            queryClient.invalidateQueries({ queryKey: ["posts"] });
+        }
+        return response;
+    };
+
+    const replacePostTags = async (id: string | number, tags: string[]) => {
+        const response = await useApi<any>(`/post/${id}/tags/replace`, {
+            method: "POST",
+            body: { tags },
+        });
+        if (response && response.success) {
+            queryClient.invalidateQueries({ queryKey: ["post", String(id)] });
+            queryClient.invalidateQueries({ queryKey: ["posts"] });
+        }
+        return response;
+    };
+
     return {
         // State
         selectedPostId,
@@ -512,5 +540,7 @@ export const usePostStore = defineStore("posts", () => {
         refetchPosts,
         retrySync,
         queueAi,
+        updatePostInfo,
+        replacePostTags,
     };
 });

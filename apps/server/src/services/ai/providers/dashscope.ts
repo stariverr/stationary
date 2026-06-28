@@ -38,9 +38,7 @@ export class DashScopeProvider extends OpenAiProvider {
         const vector = resJson?.output?.embeddings?.[0]?.embedding;
 
         if (!Array.isArray(vector)) {
-            throw new Error(
-                `Invalid response format from DashScope embedTextWithVisualModel: unable to extract embedding vector.`,
-            );
+            throw new Error(`Invalid response format from DashScope embedTextWithVisualModel: unable to extract embedding vector.`);
         }
 
         const dimension = vector.length;
@@ -88,9 +86,7 @@ export class DashScopeProvider extends OpenAiProvider {
         const vector = resJson?.output?.embeddings?.[0]?.embedding;
 
         if (!Array.isArray(vector)) {
-            throw new Error(
-                `Invalid response format from DashScope embedImage: unable to extract embedding vector.`,
-            );
+            throw new Error(`Invalid response format from DashScope embedImage: unable to extract embedding vector.`);
         }
 
         const dimension = vector.length;

@@ -254,17 +254,7 @@ export const MODEL_REGISTRY: Record<string, ProviderMetadata> = {
                         totalItemsLimit: 20,
                         maxImageCount: 5,
                         maxVideoCount: 1,
-                        supportedImageFormats: [
-                            "jpeg",
-                            "png",
-                            "webp",
-                            "bmp",
-                            "tiff",
-                            "ico",
-                            "dib",
-                            "icns",
-                            "sgi",
-                        ],
+                        supportedImageFormats: ["jpeg", "png", "webp", "bmp", "tiff", "ico", "dib", "icns", "sgi"],
                         supportedVideoFormats: ["mp4", "avi", "mov"],
                     },
                     fusion: {

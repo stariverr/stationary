@@ -10,17 +10,13 @@ interface LockOptions {
 /**
  * Executes a callback within a distributed lock, automatically renewing the lock's expiration
  * while the callback is running to prevent timeouts on long-running tasks.
- * 
+ *
  * @param lockKey The unique key for the lock
  * @param action The async function to execute while the lock is held
  * @param options Lock configuration (ttl and renewal interval)
  * @returns The result of the action
  */
-export async function withLock<T>(
-    lockKey: string,
-    action: () => Promise<T>,
-    options: LockOptions = {}
-): Promise<T> {
+export async function withLock<T>(lockKey: string, action: () => Promise<T>, options: LockOptions = {}): Promise<T> {
     const { ttl = 300 } = options;
     const renewalInterval = options.renewalInterval || Math.floor(ttl / 2);
 
@@ -46,6 +42,6 @@ export async function withLock<T>(
         return await action();
     } finally {
         clearInterval(intervalId);
-        await kv.delete(lockKey).catch(e => console.error(`[Lock] Failed to release lock ${lockKey}:`, e));
+        await kv.delete(lockKey).catch((e) => console.error(`[Lock] Failed to release lock ${lockKey}:`, e));
     }
 }
