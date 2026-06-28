@@ -181,6 +181,7 @@
         }
     },
     "media": {
+        "manage_tracks": "管理轨道",
         "live": "实况",
         "quality_label": "清晰度/保真度",
         "quality": {

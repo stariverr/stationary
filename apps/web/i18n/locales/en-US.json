@@ -181,6 +181,7 @@
         }
     },
     "media": {
+        "manage_tracks": "Manage Tracks",
         "live": "Live",
         "quality_label": "Fidelity/Quality",
         "quality": {
