@@ -98,7 +98,11 @@ const scrollNext = () => swiperInstance.value?.slideNext();
                 @slideChange="onSlideChange"
                 class="w-full h-full"
             >
-                <swiper-slide v-for="(media, index) in mappedMedia" :key="index" class="flex items-center justify-center bg-transparent">
+                <swiper-slide
+                    v-for="(media, index) in mappedMedia"
+                    :key="media.id || index"
+                    class="flex items-center justify-center bg-transparent"
+                >
                     <div class="w-full h-full flex items-center justify-center relative cursor-pointer" @click="handleMediaClick">
                         <VideoPlayer
                             v-if="media.type === 'VIDEO'"
@@ -167,7 +171,11 @@ const scrollNext = () => swiperInstance.value?.slideNext();
             @slideChange="onSlideChange"
             class="h-full"
         >
-            <swiper-slide v-for="(media, index) in mappedMedia" :key="index" class="bg-transparent flex items-center justify-center">
+            <swiper-slide
+                v-for="(media, index) in mappedMedia"
+                :key="media.id || index"
+                class="bg-transparent flex items-center justify-center"
+            >
                 <div class="w-full h-full flex items-center justify-center relative cursor-pointer" @click="handleMediaClick">
                     <VideoPlayer
                         v-if="media.type === 'VIDEO'"

@@ -67,6 +67,7 @@ export interface MappedMediaItem {
     matched_details?: MatchedDetails;
     score?: number | null;
     date: string;
+    tags?: string[];
 }
 
 export const useMediaStore = defineStore("media", () => {

@@ -108,6 +108,8 @@ interface MappedSiblingMedia {
     date?: string;
     create_time?: string;
     published_time?: string | null;
+    tags?: string[];
+    isPlaceholder?: boolean;
 }
 
 interface MediaInputForSubtitles {
@@ -179,13 +181,43 @@ watch(selectedMediaId, async (newId) => {
 
     // In Stacked mode, if there is a post_id, fetch its siblings
     if (displayMode.value === "stacked" && selectedMedia.value?.post_id) {
+        // Count of media items in the post
+        const totalMediaCount = selectedMedia.value.media_count || 1;
+
+        // Optimistically set postSiblings with placeholders, so we can display the first slide immediately
+        // and keep the Swiper slides count stable.
+        const initialSibling = selectedMedia.value ? mapMediaWithSubtitles(selectedMedia.value) : null;
+        const siblings: MappedSiblingMedia[] = [];
+        if (initialSibling) {
+            siblings.push(initialSibling);
+            for (let i = 1; i < totalMediaCount; i++) {
+                siblings.push({
+                    id: `placeholder-${i}`,
+                    type: "IMAGE",
+                    url: null,
+                    isPlaceholder: true,
+                } as any);
+            }
+        }
+        postSiblings.value = siblings;
+        currentIndex.value = 0;
+        nextTick(() => {
+            if (swiperInstance.value) swiperInstance.value.slideTo(0, 0);
+        });
+
         isLoadingPost.value = true;
         try {
             const response = await useApi<{ success: boolean; data: ApiPostDetail }>(`/post/detail/${selectedMedia.value.post_id}`);
             if (response && response.success && response.data) {
                 postDetail.value = response.data;
                 // Map the post's media list to include valid URLs
-                postSiblings.value = (response.data.media || []).map(mapMediaWithSubtitles).filter((m): m is MappedSiblingMedia => !!m);
+                const mapped = (response.data.media || []).map(mapMediaWithSubtitles).filter((m): m is MappedSiblingMedia => !!m);
+                postSiblings.value = mapped;
+                const index = mapped.findIndex((m) => m.id === newId);
+                currentIndex.value = Math.max(0, index);
+                nextTick(() => {
+                    if (swiperInstance.value) swiperInstance.value.slideTo(currentIndex.value, 0);
+                });
             } else {
                 const sibling = selectedMedia.value ? mapMediaWithSubtitles(selectedMedia.value) : null;
                 postSiblings.value = sibling ? [sibling] : [];
@@ -196,13 +228,6 @@ watch(selectedMediaId, async (newId) => {
         } finally {
             isLoadingPost.value = false;
         }
-
-        // Find current index
-        const index = postSiblings.value.findIndex((m) => m.id === newId);
-        currentIndex.value = Math.max(0, index);
-        nextTick(() => {
-            if (swiperInstance.value) swiperInstance.value.slideTo(currentIndex.value, 0);
-        });
     } else {
         // Flat mode or independent media
         postSiblings.value = medias.value.map(mapMediaWithSubtitles).filter((m): m is MappedSiblingMedia => !!m);
@@ -423,8 +448,6 @@ watch(
     { immediate: true },
 );
 
-
-
 const handleRemoveTag = async (tagToRemove: string) => {
     if (!currentMediaItem.value) return;
     const currentTags = mediaDetails.value?.tags || [];
@@ -527,8 +550,11 @@ const handleAddTag = async (tagToAdd: string) => {
                                 class="flex items-center justify-center"
                             >
                                 <div class="w-full h-full flex items-center justify-center p-4 md:p-12">
+                                    <div v-if="media.isPlaceholder" class="flex flex-col items-center justify-center gap-2 text-zinc-500">
+                                        <Loader2 class="w-8 h-8 animate-spin text-zinc-400" />
+                                    </div>
                                     <VideoPlayer
-                                        v-if="media.type?.toLowerCase() === 'video'"
+                                        v-else-if="media.type?.toLowerCase() === 'video'"
                                         :src="media.url || media.media_url || ''"
                                         :subtitles="media.subtitles"
                                         :width="media.width"
@@ -552,6 +578,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                     <HeicImage
                                         v-else
                                         :src="media.url || media.media_url || ''"
+                                        :mime-type="media.mime_type || media.mimeType || undefined"
                                         class="max-h-full max-w-full object-contain drop-shadow-2xl rounded-sm"
                                     />
                                 </div>
@@ -587,8 +614,11 @@ const handleAddTag = async (tagToAdd: string) => {
                             class="w-12 h-12 shrink-0 rounded-md overflow-hidden border-2 cursor-pointer transition-all hover:opacity-100"
                             :class="index === currentIndex ? 'border-white opacity-100' : 'border-transparent opacity-50'"
                         >
+                            <div v-if="media.isPlaceholder" class="w-full h-full bg-zinc-900 flex items-center justify-center">
+                                <Loader2 class="w-3 h-3 animate-spin text-zinc-500" />
+                            </div>
                             <HeicImage
-                                v-if="media.type?.toLowerCase() !== 'video'"
+                                v-else-if="media.type?.toLowerCase() !== 'video'"
                                 :src="
                                     getOptimizedImageUrl(media.url || media.media_url || '', {
                                         width: 320,
@@ -735,12 +765,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                 <Loader2 class="w-3 h-3 animate-spin text-indigo-500" />
                                 <span>Loading tags...</span>
                             </div>
-                            <TagEditor
-                                v-else
-                                :tags="mediaDetails?.tags || []"
-                                @add-tag="handleAddTag"
-                                @remove-tag="handleRemoveTag"
-                            />
+                            <TagEditor v-else :tags="mediaDetails?.tags || []" @add-tag="handleAddTag" @remove-tag="handleRemoveTag" />
                         </div>
 
                         <hr class="border-gray-100" />
@@ -866,12 +891,23 @@ const handleAddTag = async (tagToAdd: string) => {
                         <hr v-if="isVideo" class="border-gray-100" />
 
                         <!-- Provenance / Part of Post (The Wormhole) -->
-                        <div v-if="postDetail" class="space-y-3">
+                        <div v-if="postDetail || isLoadingPost" class="space-y-3">
                             <label class="text-xs uppercase text-gray-500 font-bold tracking-wider flex items-center gap-1.5">
                                 <Layers class="w-3.5 h-3.5" /> Part of Post
                             </label>
 
+                            <div v-if="isLoadingPost" class="border border-zinc-100 rounded-xl p-4 space-y-3 animate-pulse">
+                                <div class="flex items-center gap-2">
+                                    <div class="w-6 h-6 rounded-full bg-zinc-200"></div>
+                                    <div class="h-4 bg-zinc-200 rounded w-1/3"></div>
+                                </div>
+                                <div class="space-y-2">
+                                    <div class="h-3 bg-zinc-200 rounded w-full"></div>
+                                    <div class="h-3 bg-zinc-200 rounded w-5/6"></div>
+                                </div>
+                            </div>
                             <div
+                                v-else-if="postDetail"
                                 class="bg-blue-50/50 border border-blue-100 rounded-xl p-4 transition-all hover:bg-blue-50 cursor-pointer"
                                 @click="navigateTo(`/posts/${postDetail.id}`)"
                             >

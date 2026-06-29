@@ -40,8 +40,6 @@ const editDescription = ref("");
 const editPublishedTime = ref("");
 const editUrl = ref("");
 
-
-
 const toLocalDatetimeString = (displayTime: string | null | undefined) => {
     if (!displayTime) return "";
     try {
@@ -246,7 +244,12 @@ watch(
                     <label v-if="isEditing" class="text-[10px] uppercase text-gray-400 font-bold tracking-wider block">{{
                         $t("common.description")
                     }}</label>
-                    <p v-if="!isEditing" class="text-sm text-gray-600 leading-relaxed whitespace-pre-line">
+                    <div v-if="postStore.isLoadingDetail" class="space-y-2 py-1">
+                        <div class="h-4 bg-gray-200 rounded animate-pulse w-full"></div>
+                        <div class="h-4 bg-gray-200 rounded animate-pulse w-5/6"></div>
+                        <div class="h-4 bg-gray-200 rounded animate-pulse w-2/3"></div>
+                    </div>
+                    <p v-else-if="!isEditing" class="text-sm text-gray-600 leading-relaxed whitespace-pre-line">
                         {{ post.description || $t("common.no_description") }}
                     </p>
                     <textarea
@@ -343,31 +346,40 @@ watch(
                 </div>
             </div>
 
-            <div v-if="post.eid || post.originalUrl || isEditing" class="space-y-3 pt-2">
-                <div v-if="post.eid" class="flex items-center justify-between text-sm py-2 px-3 bg-white border border-gray-200 rounded-lg">
-                    <span class="text-gray-500">EID</span>
-                    <span class="font-mono text-gray-900">{{ post.eid }}</span>
-                </div>
-                <div class="flex items-center justify-between text-sm py-2 px-3 bg-white border border-gray-200 rounded-lg">
-                    <span class="text-gray-500">Source</span>
-                    <input
-                        v-if="isEditing"
-                        type="text"
-                        v-model="editUrl"
-                        class="text-xs font-mono text-gray-900 border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white flex-1 ml-4"
-                        placeholder="Original URL"
-                    />
-                    <a
-                        v-else-if="post.originalUrl"
-                        :href="post.originalUrl"
-                        target="_blank"
-                        class="text-blue-600 hover:underline truncate max-w-[200px] flex items-center gap-1"
+            <div v-if="post.eid || post.originalUrl || isEditing || postStore.isLoadingDetail" class="space-y-3 pt-2">
+                <template v-if="postStore.isLoadingDetail">
+                    <div class="h-9 bg-gray-100 rounded-lg animate-pulse w-full"></div>
+                    <div class="h-9 bg-gray-100 rounded-lg animate-pulse w-full"></div>
+                </template>
+                <template v-else>
+                    <div
+                        v-if="post.eid"
+                        class="flex items-center justify-between text-sm py-2 px-3 bg-white border border-gray-200 rounded-lg"
                     >
-                        Link
-                        <LinkIcon class="w-3 h-3" />
-                    </a>
-                    <span v-else class="text-gray-400 italic">None</span>
-                </div>
+                        <span class="text-gray-500">EID</span>
+                        <span class="font-mono text-gray-900">{{ post.eid }}</span>
+                    </div>
+                    <div class="flex items-center justify-between text-sm py-2 px-3 bg-white border border-gray-200 rounded-lg">
+                        <span class="text-gray-500">Source</span>
+                        <input
+                            v-if="isEditing"
+                            type="text"
+                            v-model="editUrl"
+                            class="text-xs font-mono text-gray-900 border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white flex-1 ml-4"
+                            placeholder="Original URL"
+                        />
+                        <a
+                            v-else-if="post.originalUrl"
+                            :href="post.originalUrl"
+                            target="_blank"
+                            class="text-blue-600 hover:underline truncate max-w-[200px] flex items-center gap-1"
+                        >
+                            Link
+                            <LinkIcon class="w-3 h-3" />
+                        </a>
+                        <span v-else class="text-gray-400 italic">None</span>
+                    </div>
+                </template>
             </div>
 
             <hr class="border-gray-200" />
@@ -377,11 +389,7 @@ watch(
                 <label class="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1">
                     <Tag class="w-3 h-3" /> {{ $t("common.tags") }}
                 </label>
-                <TagEditor
-                    :tags="post.tags || []"
-                    @add-tag="handleAddTag"
-                    @remove-tag="handleRemoveTag"
-                />
+                <TagEditor :tags="post.tags || []" @add-tag="handleAddTag" @remove-tag="handleRemoveTag" />
             </div>
         </div>
     </div>

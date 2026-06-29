@@ -142,8 +142,36 @@ const initPlyr = async () => {
     return plyrInitializingPromise;
 };
 
+const areSubtitlesEqual = (a: Subtitle[], b: Subtitle[]) => {
+    if (!a && !b) return true;
+    if (!a || !b) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (a[i].url !== b[i].url || a[i].language !== b[i].language || a[i].label !== b[i].label || a[i].format !== b[i].format) {
+            return false;
+        }
+    }
+    return true;
+};
+
+let activeSrc = "";
+let activePoster = "";
+let activeSubtitles: Subtitle[] = [];
+
 const updateSource = async () => {
     if (!videoRef.value) return;
+
+    const srcChanged = absoluteSrc.value !== activeSrc;
+    const posterChanged = props.poster !== activePoster;
+    const subtitlesChanged = !areSubtitlesEqual(props.subtitles, activeSubtitles);
+
+    if (!srcChanged && !posterChanged && !subtitlesChanged && player.value) {
+        return; // No change, do not reload
+    }
+
+    activeSrc = absoluteSrc.value;
+    activePoster = props.poster;
+    activeSubtitles = [...props.subtitles];
 
     // 1. Load subtitles first
     await loadSubtitles();
