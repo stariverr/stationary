@@ -66,7 +66,7 @@ export const MediaService = {
             }
 
             if (tagIds.length > 0) {
-                await tx.delete(MediaTag).where(and(eq(MediaTag.media_id, id), notInArray(MediaTag.tag_id, tagIds)));
+                await tx.delete(MediaTag).where(eq(MediaTag.media_id, id));
 
                 for (const tagId of tagIds) {
                     await tx
@@ -74,8 +74,7 @@ export const MediaService = {
                         .values({
                             media_id: id,
                             tag_id: tagId,
-                        })
-                        .onConflictDoNothing();
+                        });
                 }
             } else {
                 await tx.delete(MediaTag).where(eq(MediaTag.media_id, id));

@@ -5,6 +5,7 @@ import { type Post } from "@/types/post";
 import { usePostStore } from "@/stores/posts";
 import { toast } from "@/components/ui/sonner";
 import { Temporal } from "@js-temporal/polyfill";
+import { useQueryClient } from "@tanstack/vue-query";
 
 const props = withDefaults(
     defineProps<{
@@ -23,6 +24,7 @@ const emit = defineEmits<{
 }>();
 
 const postStore = usePostStore();
+const queryClient = useQueryClient();
 
 const currentMedia = computed(() => {
     if (!props.post?.media || props.post.media.length === 0) return null;
@@ -38,10 +40,7 @@ const editDescription = ref("");
 const editPublishedTime = ref("");
 const editUrl = ref("");
 
-// Tag input state
-const isAddingTag = ref(false);
-const newTagValue = ref("");
-const newTagInput = ref<HTMLInputElement | null>(null);
+
 
 const toLocalDatetimeString = (displayTime: string | null | undefined) => {
     if (!displayTime) return "";
@@ -85,50 +84,76 @@ const cancelEditing = () => {
 const handleRemoveTag = async (tagToRemove: string) => {
     const currentTags = props.post.tags || [];
     const newTags = currentTags.filter((t) => t !== tagToRemove);
+
+    // Optimistic update 1: local prop object
+    if (props.post) {
+        props.post.tags = newTags;
+    }
+
+    // Optimistic update 2: react-query cache
+    const postKey = ["post", String(props.post.id)];
+    const cachedPost = queryClient.getQueryData<any>(postKey);
+    if (cachedPost) {
+        queryClient.setQueryData(postKey, {
+            ...cachedPost,
+            tags: newTags,
+        });
+    }
+
     try {
         const res = await postStore.replacePostTags(props.post.id, newTags);
-        if (res && res.success) {
-            toast.success("Tag removed");
-        } else {
+        if (!res || !res.success) {
             throw new Error("Failed to remove tag");
         }
     } catch (err) {
         console.error("Failed to remove tag:", err);
         toast.error("Failed to remove tag");
+        // Revert on error
+        if (props.post) {
+            props.post.tags = currentTags;
+        }
+        if (cachedPost) {
+            queryClient.setQueryData(postKey, cachedPost);
+        }
     }
 };
 
-const startAddTag = () => {
-    isAddingTag.value = true;
-    nextTick(() => {
-        newTagInput.value?.focus();
-    });
-};
-
-const confirmAddTag = async () => {
-    const value = newTagValue.value.trim();
+const handleAddTag = async (tagToAdd: string) => {
     const currentTags = props.post.tags || [];
-    if (value) {
-        if (currentTags.includes(value)) {
-            isAddingTag.value = false;
-            newTagValue.value = "";
-            return;
+    if (currentTags.includes(tagToAdd)) return;
+    const newTags = [...currentTags, tagToAdd];
+
+    // Optimistic update 1: local prop object
+    if (props.post) {
+        props.post.tags = newTags;
+    }
+
+    // Optimistic update 2: react-query cache
+    const postKey = ["post", String(props.post.id)];
+    const cachedPost = queryClient.getQueryData<any>(postKey);
+    if (cachedPost) {
+        queryClient.setQueryData(postKey, {
+            ...cachedPost,
+            tags: newTags,
+        });
+    }
+
+    try {
+        const res = await postStore.replacePostTags(props.post.id, newTags);
+        if (!res || !res.success) {
+            throw new Error("Failed to add tag");
         }
-        const newTags = [...currentTags, value];
-        try {
-            const res = await postStore.replacePostTags(props.post.id, newTags);
-            if (res && res.success) {
-                toast.success("Tag added");
-            } else {
-                throw new Error("Failed to add tag");
-            }
-        } catch (err) {
-            console.error("Failed to add tag:", err);
-            toast.error("Failed to add tag");
+    } catch (err) {
+        console.error("Failed to add tag:", err);
+        toast.error("Failed to add tag");
+        // Revert on error
+        if (props.post) {
+            props.post.tags = currentTags;
+        }
+        if (cachedPost) {
+            queryClient.setQueryData(postKey, cachedPost);
         }
     }
-    isAddingTag.value = false;
-    newTagValue.value = "";
 };
 
 const saveEditing = async () => {
@@ -352,43 +377,11 @@ watch(
                 <label class="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1">
                     <Tag class="w-3 h-3" /> {{ $t("common.tags") }}
                 </label>
-                <div class="flex flex-wrap gap-2">
-                    <span
-                        v-for="tag in post.tags"
-                        :key="tag"
-                        class="group/tag flex items-center gap-1 px-2.5 py-1 bg-gray-50 border border-gray-200 hover:border-red-200 hover:bg-red-50 hover:text-red-700 rounded-md text-xs text-gray-700 font-medium transition-all"
-                    >
-                        #{{ tag }}
-                        <button
-                            type="button"
-                            @click="handleRemoveTag(tag)"
-                            class="opacity-0 group-hover/tag:opacity-100 text-gray-400 hover:text-red-600 transition-all cursor-pointer"
-                        >
-                            <X class="w-3 h-3" />
-                        </button>
-                    </span>
-                    <span v-if="!post.tags || post.tags.length === 0" class="text-xs text-gray-400 italic"> No tags </span>
-
-                    <div v-if="isAddingTag" class="flex items-center gap-1 border border-indigo-200 rounded-md px-2 py-0.5 bg-white">
-                        <input
-                            ref="newTagInput"
-                            v-model="newTagValue"
-                            type="text"
-                            placeholder="Tag name"
-                            class="outline-none border-none text-xs text-gray-700 w-16"
-                            @keyup.enter="confirmAddTag"
-                            @blur="confirmAddTag"
-                        />
-                    </div>
-                    <button
-                        v-else
-                        type="button"
-                        @click="startAddTag"
-                        class="px-3 py-1 border border-dashed border-gray-300 rounded-md text-xs text-gray-400 hover:text-gray-600 hover:border-gray-400 transition-colors cursor-pointer"
-                    >
-                        + {{ $t("common.add_tag") }}
-                    </button>
-                </div>
+                <TagEditor
+                    :tags="post.tags || []"
+                    @add-tag="handleAddTag"
+                    @remove-tag="handleRemoveTag"
+                />
             </div>
         </div>
     </div>

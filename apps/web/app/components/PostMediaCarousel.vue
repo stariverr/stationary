@@ -13,22 +13,30 @@ const props = defineProps<{
 }>();
 
 const currentIndex = defineModel<number>("currentIndex", { default: 0 });
+const mappedMedia = ref<any[]>([]);
 
-const mappedMedia = computed(() => {
-    if (!props.post?.media) return [];
-    return props.post.media.map((m) => {
-        const subtitleTracks = (m.tracks || []).filter((t: Track) => t.type === "SUBTITLE");
-        return {
-            ...m,
-            subtitles: subtitleTracks.map((sub: Track) => ({
-                url: sub.url,
-                language: (sub.metadata?.language as string) || "unknown",
-                label: (sub.metadata?.label as string) || (sub.metadata?.language as string) || "unknown",
-                format: sub.metadata?.format === "json" ? "vtt" : (sub.metadata?.format as string) || "vtt",
-            })),
-        };
-    });
-});
+watch(
+    () => props.post?.media,
+    (newMedia) => {
+        if (!newMedia) {
+            mappedMedia.value = [];
+            return;
+        }
+        mappedMedia.value = newMedia.map((m) => {
+            const subtitleTracks = (m.tracks || []).filter((t: Track) => t.type === "SUBTITLE");
+            return {
+                ...m,
+                subtitles: subtitleTracks.map((sub: Track) => ({
+                    url: sub.url,
+                    language: (sub.metadata?.language as string) || "unknown",
+                    label: (sub.metadata?.label as string) || (sub.metadata?.language as string) || "unknown",
+                    format: sub.metadata?.format === "json" ? "vtt" : (sub.metadata?.format as string) || "vtt",
+                })),
+            };
+        });
+    },
+    { immediate: true },
+);
 
 const swiperInstance = ref<SwiperClass | null>(null);
 

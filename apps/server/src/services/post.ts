@@ -68,7 +68,7 @@ export const PostService = {
             }
 
             if (tagIds.length > 0) {
-                await tx.delete(PostTag).where(and(eq(PostTag.post_id, id), notInArray(PostTag.tag_id, tagIds)));
+                await tx.delete(PostTag).where(eq(PostTag.post_id, id));
 
                 for (const tagId of tagIds) {
                     await tx
@@ -76,8 +76,7 @@ export const PostService = {
                         .values({
                             post_id: id,
                             tag_id: tagId,
-                        })
-                        .onConflictDoNothing();
+                        });
                 }
             } else {
                 await tx.delete(PostTag).where(eq(PostTag.post_id, id));

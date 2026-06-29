@@ -423,10 +423,7 @@ watch(
     { immediate: true },
 );
 
-// Tag input state for Media
-const isAddingTag = ref(false);
-const newTagValue = ref("");
-const newTagInput = ref<HTMLInputElement | null>(null);
+
 
 const handleRemoveTag = async (tagToRemove: string) => {
     if (!currentMediaItem.value) return;
@@ -437,12 +434,13 @@ const handleRemoveTag = async (tagToRemove: string) => {
     if (mediaDetails.value) {
         mediaDetails.value.tags = newTags;
     }
+    if (currentMediaItem.value) {
+        currentMediaItem.value.tags = newTags;
+    }
 
     try {
         const res = await store.replaceMediaTags(currentMediaItem.value.id, newTags);
-        if (res && res.success) {
-            toast.success("Tag removed");
-        } else {
+        if (!res || !res.success) {
             throw new Error("Failed to remove tag");
         }
     } catch (err) {
@@ -452,55 +450,42 @@ const handleRemoveTag = async (tagToRemove: string) => {
         if (mediaDetails.value) {
             mediaDetails.value.tags = currentTags;
         }
+        if (currentMediaItem.value) {
+            currentMediaItem.value.tags = currentTags;
+        }
     }
 };
 
-const startAddTag = () => {
-    isAddingTag.value = true;
-    nextTick(() => {
-        newTagInput.value?.focus();
-    });
-};
-
-const confirmAddTag = async () => {
-    const value = newTagValue.value.trim();
-    if (!currentMediaItem.value) {
-        isAddingTag.value = false;
-        newTagValue.value = "";
-        return;
-    }
+const handleAddTag = async (tagToAdd: string) => {
+    if (!currentMediaItem.value) return;
     const currentTags = mediaDetails.value?.tags || [];
-    if (value) {
-        if (currentTags.includes(value)) {
-            isAddingTag.value = false;
-            newTagValue.value = "";
-            return;
-        }
-        const newTags = [...currentTags, value];
+    if (currentTags.includes(tagToAdd)) return;
+    const newTags = [...currentTags, tagToAdd];
 
-        // Optimistically update local state
+    // Optimistically update local state
+    if (mediaDetails.value) {
+        mediaDetails.value.tags = newTags;
+    }
+    if (currentMediaItem.value) {
+        currentMediaItem.value.tags = newTags;
+    }
+
+    try {
+        const res = await store.replaceMediaTags(currentMediaItem.value.id, newTags);
+        if (!res || !res.success) {
+            throw new Error("Failed to add tag");
+        }
+    } catch (err) {
+        console.error("Failed to add tag:", err);
+        toast.error("Failed to add tag");
+        // Revert local state
         if (mediaDetails.value) {
-            mediaDetails.value.tags = newTags;
+            mediaDetails.value.tags = currentTags;
         }
-
-        try {
-            const res = await store.replaceMediaTags(currentMediaItem.value.id, newTags);
-            if (res && res.success) {
-                toast.success("Tag added");
-            } else {
-                throw new Error("Failed to add tag");
-            }
-        } catch (err) {
-            console.error("Failed to add tag:", err);
-            toast.error("Failed to add tag");
-            // Revert local state
-            if (mediaDetails.value) {
-                mediaDetails.value.tags = currentTags;
-            }
+        if (currentMediaItem.value) {
+            currentMediaItem.value.tags = currentTags;
         }
     }
-    isAddingTag.value = false;
-    newTagValue.value = "";
 };
 </script>
 
@@ -746,55 +731,16 @@ const confirmAddTag = async () => {
                             <label class="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1">
                                 <Tag class="w-3 h-3 text-gray-400" /> {{ $t("common.tags", "Tags") }}
                             </label>
-                            <div class="flex flex-wrap gap-2">
-                                <span
-                                    v-for="tag in mediaDetails?.tags || []"
-                                    :key="tag"
-                                    class="group/tag flex items-center gap-1 px-2.5 py-1 bg-gray-50 border border-gray-200 hover:border-red-200 hover:bg-red-50 hover:text-red-700 rounded-md text-xs text-gray-700 font-medium transition-all"
-                                >
-                                    #{{ tag }}
-                                    <button
-                                        type="button"
-                                        @click="handleRemoveTag(tag)"
-                                        class="opacity-0 group-hover/tag:opacity-100 text-gray-400 hover:text-red-600 transition-all cursor-pointer"
-                                    >
-                                        <X class="w-3 h-3" />
-                                    </button>
-                                </span>
-                                <span
-                                    v-if="(!mediaDetails?.tags || mediaDetails.tags.length === 0) && !isLoadingMediaDetails"
-                                    class="text-xs text-gray-400 italic"
-                                >
-                                    No tags
-                                </span>
-                                <span v-if="isLoadingMediaDetails" class="text-xs text-gray-400 flex items-center gap-1.5">
-                                    <Loader2 class="w-3 h-3 animate-spin" />
-                                    Loading tags...
-                                </span>
-
-                                <div
-                                    v-if="isAddingTag"
-                                    class="flex items-center gap-1 border border-indigo-200 rounded-md px-2 py-0.5 bg-white"
-                                >
-                                    <input
-                                        ref="newTagInput"
-                                        v-model="newTagValue"
-                                        type="text"
-                                        placeholder="Tag name"
-                                        class="outline-none border-none text-xs text-gray-700 w-16"
-                                        @keyup.enter="confirmAddTag"
-                                        @blur="confirmAddTag"
-                                    />
-                                </div>
-                                <button
-                                    v-else-if="!isLoadingMediaDetails"
-                                    type="button"
-                                    @click="startAddTag"
-                                    class="px-3 py-1 border border-dashed border-gray-300 rounded-md text-xs text-gray-400 hover:text-gray-600 hover:border-gray-400 transition-colors cursor-pointer"
-                                >
-                                    + {{ $t("common.add_tag", "Add Tag") }}
-                                </button>
+                            <div v-if="isLoadingMediaDetails" class="text-xs text-zinc-400 flex items-center gap-1.5 py-1">
+                                <Loader2 class="w-3 h-3 animate-spin text-indigo-500" />
+                                <span>Loading tags...</span>
                             </div>
+                            <TagEditor
+                                v-else
+                                :tags="mediaDetails?.tags || []"
+                                @add-tag="handleAddTag"
+                                @remove-tag="handleRemoveTag"
+                            />
                         </div>
 
                         <hr class="border-gray-100" />

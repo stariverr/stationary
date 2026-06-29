@@ -508,7 +508,8 @@ export const usePostStore = defineStore("posts", () => {
             body: { tags },
         });
         if (response && response.success) {
-            queryClient.invalidateQueries({ queryKey: ["post", String(id)] });
+            // Do not invalidate the single post detail query to avoid resetting component states (e.g. carousel slide position).
+            // The tags are updated optimistically in the components.
             queryClient.invalidateQueries({ queryKey: ["posts"] });
         }
         return response;

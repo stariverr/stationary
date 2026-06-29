@@ -405,7 +405,8 @@ export const useMediaStore = defineStore("media", () => {
             body: { tags },
         });
         if (response && response.success) {
-            queryClient.invalidateQueries({ queryKey: ["media", id] });
+            // Do not invalidate the single media detail query to avoid resetting component states.
+            // The tags are updated optimistically in the components.
             queryClient.invalidateQueries({ queryKey: ["posts"] });
         }
         return response;

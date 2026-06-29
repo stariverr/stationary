@@ -291,7 +291,8 @@ router.get(
                 })
                 .from(PostTag)
                 .innerJoin(Tag, eq(PostTag.tag_id, Tag.id))
-                .where(and(inArray(PostTag.post_id, postIds), eq(Tag.status, TagStatus.ACTIVE)));
+                .where(and(inArray(PostTag.post_id, postIds), eq(Tag.status, TagStatus.ACTIVE)))
+                .orderBy(asc(PostTag.id));
 
             for (const row of allTags) {
                 if (!postTagsMap.has(row.post_id)) {
@@ -521,7 +522,8 @@ router.get(
             .select({ name: Tag.name })
             .from(PostTag)
             .innerJoin(Tag, eq(PostTag.tag_id, Tag.id))
-            .where(and(eq(PostTag.post_id, id), eq(Tag.status, TagStatus.ACTIVE)));
+            .where(and(eq(PostTag.post_id, id), eq(Tag.status, TagStatus.ACTIVE)))
+            .orderBy(asc(PostTag.id));
         const postTags = postTagsList.map((pt) => pt.name);
 
         const mediaRows = await db

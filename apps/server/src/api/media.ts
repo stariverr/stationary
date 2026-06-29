@@ -24,7 +24,7 @@ import {
     TagStatus,
 } from "@/db/schema";
 import { s3 } from "@/global/s3";
-import { and, eq, ilike, SQL, count, desc, or, isNull, inArray } from "drizzle-orm";
+import { and, eq, ilike, SQL, count, asc, desc, or, isNull, inArray } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { Temporal } from "@js-temporal/polyfill";
 import { RecycleService } from "@/services/recycle";
@@ -456,7 +456,8 @@ router.get("/detail/:id", requireAuth, async (c) => {
         .select({ name: Tag.name })
         .from(MediaTag)
         .innerJoin(Tag, eq(MediaTag.tag_id, Tag.id))
-        .where(and(eq(MediaTag.media_id, media.id), eq(Tag.status, TagStatus.ACTIVE)));
+        .where(and(eq(MediaTag.media_id, media.id), eq(Tag.status, TagStatus.ACTIVE)))
+        .orderBy(asc(MediaTag.id));
     const mediaTags = mediaTagsList.map((mt) => mt.name);
 
     const response = {
