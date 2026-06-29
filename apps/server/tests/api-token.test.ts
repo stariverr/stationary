@@ -62,7 +62,7 @@ describe("API Token Format and Checksum", () => {
 describe("Token Route Validation", () => {
     test("validates token creation payloads correctly", async () => {
         const userApi = await import("../src/api/user");
-        const schema = (userApi as any).TokenCreateBodySchema;
+        const schema = userApi.TokenCreateBodySchema;
 
         // Valid payload
         const valid = schema.safeParse({

@@ -329,7 +329,7 @@ router.get(
                 if (!filesByMediaId.has(file.media_id)) {
                     filesByMediaId.set(file.media_id, []);
                 }
-                filesByMediaId.get(file.media_id)!.push(file as any);
+                filesByMediaId.get(file.media_id)!.push(file);
             }
         }
 
@@ -1117,7 +1117,7 @@ router.post(
         return parsed.data;
     }),
     async (c) => {
-        const id = c.req.param("id")!;
+        const id = c.req.param("id");
         const body = c.req.valid("json");
 
         const access = await checkMediaAccess(c, id);

@@ -1,6 +1,6 @@
 import { and, eq, not } from "drizzle-orm";
 import { db } from "@/global/db";
-import { DeleteStatus, File, Track } from "@/db/schema";
+import { DeleteStatus, File, Track, TrackPurpose, TrackQuality, TrackType } from "@/db/schema";
 import { nowDbTimestamp } from "@/lib/utils/time";
 import { generateDeterministicVariantKey } from "@/lib/utils/track";
 
@@ -30,9 +30,9 @@ export const TrackService = {
     async addOrReplaceTrack(
         mediaId: string,
         trackInfo: {
-            type: any;
-            purpose: any;
-            quality: any;
+            type: TrackType;
+            purpose: TrackPurpose;
+            quality: TrackQuality;
             priority: number;
             source_url?: string;
             metadata?: any;
