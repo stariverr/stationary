@@ -169,14 +169,17 @@ export const useMediaStore = defineStore("media", () => {
                 router.replace({ query });
                 return;
             }
-            if (newQuery.keyword !== undefined && newQuery.keyword !== keyword.value) {
-                keyword.value = (newQuery.keyword as string) || "";
+            const queryKeyword = (newQuery.keyword as string) || "";
+            if (queryKeyword !== keyword.value) {
+                keyword.value = queryKeyword;
             }
-            if (newQuery.source !== undefined && newQuery.source !== source.value) {
-                source.value = (newQuery.source as string) || undefined;
+            const querySource = (newQuery.source as string) || undefined;
+            if (querySource !== source.value) {
+                source.value = querySource;
             }
-            if (newQuery.display_mode !== undefined && newQuery.display_mode !== displayMode.value) {
-                displayMode.value = (newQuery.display_mode as "flat" | "stacked") || "flat";
+            const queryDisplayMode = (newQuery.display_mode as "flat" | "stacked") || "flat";
+            if (queryDisplayMode !== displayMode.value) {
+                displayMode.value = queryDisplayMode;
             }
             const queryPage = parseInt(newQuery.page as string) || 1;
             if (queryPage !== page.value) {

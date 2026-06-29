@@ -189,11 +189,13 @@ export const usePostStore = defineStore("posts", () => {
                 router.replace({ query });
                 return;
             }
-            if (newQuery.keyword !== undefined && newQuery.keyword !== keyword.value) {
-                keyword.value = (newQuery.keyword as string) || "";
+            const queryKeyword = (newQuery.keyword as string) || "";
+            if (queryKeyword !== keyword.value) {
+                keyword.value = queryKeyword;
             }
-            if (newQuery.source !== undefined && newQuery.source !== source.value) {
-                source.value = (newQuery.source as string) || undefined;
+            const querySource = (newQuery.source as string) || undefined;
+            if (querySource !== source.value) {
+                source.value = querySource;
             }
             const queryPage = parseInt(newQuery.page as string) || 1;
             if (queryPage !== page.value) {
