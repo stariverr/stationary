@@ -282,7 +282,8 @@ export const TaskService = {
                     .values({
                         library_id: targetLibraryId,
                         eid: postData.author.external_id,
-                        short_eid: postData.author.short_id || "",
+                        short_eid: postData.author.short_id ?? "",
+                        signature: postData.author.signature ?? "",
                         nickname: postData.author.name,
                         platform: postData.platform,
                     })
@@ -290,7 +291,8 @@ export const TaskService = {
                         target: [Author.library_id, Author.platform, Author.eid],
                         set: {
                             nickname: postData.author.name,
-                            short_eid: postData.author.short_id || "",
+                            short_eid: postData.author.short_id ?? undefined,
+                            signature: postData.author.signature ?? undefined,
                             delete_status: DeleteStatus.ACTIVE,
                             delete_time: null,
                         },

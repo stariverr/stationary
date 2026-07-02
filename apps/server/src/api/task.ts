@@ -40,6 +40,7 @@ const AuthorSchema = z.object({
     /** Author can have no external_id */
     external_id: z.string().optional(),
     avatar_file_url: z.string().nullable().optional(),
+    signature: z.string().nullable().optional(),
 });
 
 const TimestampSchema = z
