@@ -35,7 +35,7 @@
         "vue": "^3.5.35",
         "vue-router": "^5.1.0",
         "vue-sonner": "^2.0.9",
-        "wrangler": "^4.96.0"
+        "wrangler": "^4.106.0"
     },
     "devDependencies": {
         "@types/node": "^25.9.1",

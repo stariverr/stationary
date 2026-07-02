@@ -5,8 +5,8 @@
         "dev": "bun run --hot src/index.ts",
         "typecheck": "bun run tsgo --noEmit",
         "build": "bun build src/index.ts --outdir ./dist --target bun",
-        "deploy": "wrangler deploy",
-        "worker:dev": "wrangler dev",
+        "deploy": "bunx wrangler deploy",
+        "worker:dev": "bunx wrangler dev",
         "db:migrate": "bunx drizzle-kit generate && bunx drizzle-kit push",
         "docker:build": "docker build --platform linux/amd64 -f Dockerfile -t stationary:latest ../.."
     },
