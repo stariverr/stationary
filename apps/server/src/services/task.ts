@@ -16,7 +16,7 @@ import {
     TagStatus,
     TagSource,
 } from "@/db/schema";
-import { eq, and, notInArray, inArray, gte, isNull, isNotNull, or, lt } from "drizzle-orm";
+import { eq, and, not, notInArray, inArray, gte, isNull, isNotNull, or, lt } from "drizzle-orm";
 import { downloadStream, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
 import { VideoCoverService } from "@/services/video_cover";
 import { withLock } from "@/lib/utils/lock";
@@ -604,6 +604,77 @@ export const TaskService = {
             // Sync Track records
             const existingTracks = await db.select().from(Track).where(eq(Track.media_id, mediaId));
 
+            const processedTrackKeys = new Set<string>(tracksWithKeys.map((t) => t.variant_key));
+
+            // Clean up obsolete Track records across all partitions first
+            for (const t of existingTracks) {
+                if (t.delete_status === DeleteStatus.ACTIVE && !processedTrackKeys.has(t.variant_key)) {
+                    const deleteTime = nowDbTimestamp();
+                    if (t.file_id) {
+                        await db
+                            .update(File)
+                            .set({
+                                delete_status: DeleteStatus.DELETED,
+                                delete_time: deleteTime,
+                            })
+                            .where(eq(File.id, t.file_id));
+                    }
+                    await db
+                        .update(Track)
+                        .set({
+                            delete_status: DeleteStatus.DELETED,
+                            delete_time: deleteTime,
+                        })
+                        .where(eq(Track.id, t.id));
+                }
+            }
+
+            // Group by type and purpose to determine defaults
+            const defaultTrackMap = new Map<string, string>(); // `type:purpose` -> variant_key
+            for (const track of tracksWithKeys) {
+                const groupKey = `${track.type}:${track.purpose}`;
+                if (track.priority === 0) {
+                    if (!defaultTrackMap.has(groupKey)) {
+                        defaultTrackMap.set(groupKey, track.variant_key);
+                    }
+                }
+            }
+
+            const tracksWithDefaultFlag = tracksWithKeys.map((track) => {
+                const groupKey = `${track.type}:${track.purpose}`;
+                const is_default = defaultTrackMap.get(groupKey) === track.variant_key;
+                return {
+                    ...track,
+                    is_default,
+                };
+            });
+
+            // Unset is_default for other active tracks in the DB for each unique group
+            const uniqueGroups = new Set<string>();
+            for (const track of tracksWithDefaultFlag) {
+                uniqueGroups.add(`${track.type}:${track.purpose}`);
+            }
+
+            for (const groupKey of uniqueGroups) {
+                const [groupType, groupPurpose] = groupKey.split(":") as [TrackType, TrackPurpose];
+                const defaultKey = defaultTrackMap.get(groupKey);
+
+                const unsetCondition = [
+                    eq(Track.media_id, mediaId),
+                    eq(Track.type, groupType),
+                    eq(Track.purpose, groupPurpose),
+                    eq(Track.delete_status, DeleteStatus.ACTIVE),
+                ];
+                if (defaultKey) {
+                    unsetCondition.push(not(eq(Track.variant_key, defaultKey)));
+                }
+
+                await db
+                    .update(Track)
+                    .set({ is_default: false })
+                    .where(and(...unsetCondition));
+            }
+
             const processAffiliatedFile = async (trackInfo: {
                 type: TrackType;
                 purpose: TrackPurpose;
@@ -613,6 +684,7 @@ export const TaskService = {
                 url: string | null | undefined;
                 metadata?: any;
                 variant_key: string;
+                is_default: boolean;
             }) => {
                 const existing = existingTracks.find(
                     (t) =>
@@ -638,48 +710,62 @@ export const TaskService = {
                             metadata: metadata,
                             sync_status: SyncStatus.PENDING,
                             variant_key: trackInfo.variant_key,
-                            is_default: trackInfo.priority === 0,
+                            is_default: trackInfo.is_default,
                             language: extractedLang,
                             codec: extractedCodec,
                             is_stale: false,
                         });
                         hasPendingTasks = true;
-                    } else if (
-                        existing.source_url !== trackInfo.url ||
-                        existing.is_original !== trackInfo.is_original ||
-                        existing.quality !== trackInfo.quality ||
-                        existing.sync_status === SyncStatus.FAILED ||
-                        existing.language !== extractedLang ||
-                        existing.codec !== extractedCodec ||
-                        JSON.stringify(existing.metadata) !== JSON.stringify(metadata)
-                    ) {
-                        if (existing.file_id) {
+                    } else {
+                        // Update is_default if changed
+                        if (existing.is_default !== trackInfo.is_default) {
                             await db
-                                .update(File)
+                                .update(Track)
                                 .set({
-                                    delete_status: DeleteStatus.DELETED,
-                                    delete_time: nowDbTimestamp(),
+                                    is_default: trackInfo.is_default,
                                 })
-                                .where(eq(File.id, existing.file_id));
+                                .where(eq(Track.id, existing.id));
+                            existing.is_default = trackInfo.is_default;
                         }
-                        await db
-                            .update(Track)
-                            .set({
-                                source_url: trackInfo.url,
-                                is_original: trackInfo.is_original,
-                                quality: trackInfo.quality,
-                                priority: trackInfo.priority,
-                                metadata: metadata,
-                                sync_status: SyncStatus.PENDING,
-                                file_id: null,
-                                last_error: null,
-                                language: extractedLang,
-                                codec: extractedCodec,
-                            })
-                            .where(eq(Track.id, existing.id));
-                        hasPendingTasks = true;
-                    } else if (existing.sync_status === "PENDING") {
-                        hasPendingTasks = true;
+
+                        // Check if contents/URLs changed and need sync
+                        if (
+                            existing.source_url !== trackInfo.url ||
+                            existing.is_original !== trackInfo.is_original ||
+                            existing.quality !== trackInfo.quality ||
+                            existing.sync_status === SyncStatus.FAILED ||
+                            existing.language !== extractedLang ||
+                            existing.codec !== extractedCodec ||
+                            JSON.stringify(existing.metadata) !== JSON.stringify(metadata)
+                        ) {
+                            if (existing.file_id) {
+                                await db
+                                    .update(File)
+                                    .set({
+                                        delete_status: DeleteStatus.DELETED,
+                                        delete_time: nowDbTimestamp(),
+                                    })
+                                    .where(eq(File.id, existing.file_id));
+                            }
+                            await db
+                                .update(Track)
+                                .set({
+                                    source_url: trackInfo.url,
+                                    is_original: trackInfo.is_original,
+                                    quality: trackInfo.quality,
+                                    priority: trackInfo.priority,
+                                    metadata: metadata,
+                                    sync_status: SyncStatus.PENDING,
+                                    file_id: null,
+                                    last_error: null,
+                                    language: extractedLang,
+                                    codec: extractedCodec,
+                                })
+                                .where(eq(Track.id, existing.id));
+                            hasPendingTasks = true;
+                        } else if (existing.sync_status === "PENDING") {
+                            hasPendingTasks = true;
+                        }
                     }
                 } else if (existing) {
                     // Do not erase existing cover files if url is null/undefined
@@ -698,35 +784,9 @@ export const TaskService = {
                 }
             };
 
-            const processedTrackKeys = new Set<string>();
-
             // Process all tracks in a unified loop
-            for (const track of tracksWithKeys) {
-                processedTrackKeys.add(track.variant_key);
+            for (const track of tracksWithDefaultFlag) {
                 await processAffiliatedFile(track);
-            }
-
-            // Clean up obsolete Track records across all partitions
-            for (const t of existingTracks) {
-                if (t.delete_status === DeleteStatus.ACTIVE && !processedTrackKeys.has(t.variant_key)) {
-                    const deleteTime = nowDbTimestamp();
-                    if (t.file_id) {
-                        await db
-                            .update(File)
-                            .set({
-                                delete_status: DeleteStatus.DELETED,
-                                delete_time: deleteTime,
-                            })
-                            .where(eq(File.id, t.file_id));
-                    }
-                    await db
-                        .update(Track)
-                        .set({
-                            delete_status: DeleteStatus.DELETED,
-                            delete_time: deleteTime,
-                        })
-                        .where(eq(Track.id, t.id));
-                }
             }
         }
 
