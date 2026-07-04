@@ -1,5 +1,5 @@
 import { db } from "@/global/db";
-import { and, eq, lt, isNull, or } from "drizzle-orm";
+import { and, eq, lt, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Media, Track, File, DeleteStatus, SyncStatus, TrackType, TrackPurpose, TrackQuality, MediaType } from "@/db/schema";
 import { env } from "@/global/env";
@@ -169,7 +169,8 @@ export const VideoCoverService = {
                     update_time: now,
                 })
                 .onConflictDoUpdate({
-                    target: [Track.media_id, Track.type, Track.purpose, Track.priority],
+                    target: [Track.media_id, Track.type, Track.purpose, Track.variant_key],
+                    targetWhere: sql`delete_status = 'ACTIVE'`,
                     set: {
                         sync_status: SyncStatus.PENDING,
                         last_error: null,
@@ -397,7 +398,8 @@ export const VideoCoverService = {
                         update_time: completedNow,
                     })
                     .onConflictDoUpdate({
-                        target: [Track.media_id, Track.type, Track.purpose, Track.priority],
+                        target: [Track.media_id, Track.type, Track.purpose, Track.variant_key],
+                        targetWhere: sql`delete_status = 'ACTIVE'`,
                         set: {
                             file_id: coverFileId,
                             sync_status: SyncStatus.COMPLETED,

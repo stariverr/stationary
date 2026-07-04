@@ -385,10 +385,13 @@ export const coverWorkflowHandler = serve(
                         last_error: failResponse || "Workflow retries exhausted.",
                     })
                     .onConflictDoUpdate({
-                        target: [Track.media_id, Track.type, Track.purpose, Track.priority],
+                        target: [Track.media_id, Track.type, Track.purpose, Track.variant_key],
+                        targetWhere: sql`delete_status = 'ACTIVE'`,
                         set: {
                             sync_status: SyncStatus.FAILED,
                             last_error: failResponse || "Workflow retries exhausted.",
+                            delete_status: DeleteStatus.ACTIVE,
+                            delete_time: null,
                         },
                     });
             } catch (dbErr) {
