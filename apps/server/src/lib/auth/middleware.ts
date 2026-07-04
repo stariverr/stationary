@@ -16,87 +16,77 @@ export type AuthEnv = {
     };
 };
 
-export const authMiddleware = async (c: Context<AuthEnv>, next: Next) => {
+/**
+ * Common helper to resolve authentication from either:
+ * 1. Developer API Tokens (Authorization: Bearer st_...)
+ * 2. Better-Auth Sessions (via Cookie or Authorization: Bearer <session_token>)
+ */
+async function resolveAuth(c: Context<AuthEnv>) {
+    let user: typeof User.$inferSelect | null = null;
+    let authUser: typeof auth.$Infer.Session.user | null = null;
+    let session: typeof auth.$Infer.Session.session | null = null;
+    let apiToken: typeof ExternalApiToken.$inferSelect | null = null;
+
     const authHeader = c.req.header("Authorization");
+
+    // 1. Try resolving via Developer API Token first
     if (authHeader && authHeader.startsWith("Bearer ")) {
         const rawToken = authHeader.substring(7);
         const tokenRecord = await ApiTokenService.verifyToken(rawToken);
         if (tokenRecord) {
             const businessUsers = await db.select().from(User).where(eq(User.id, tokenRecord.owner_id)).limit(1);
-            const user = businessUsers[0] || null;
-            c.set("user", user);
-            c.set("apiToken", tokenRecord);
-            c.set("authUser", null);
-            c.set("session", null);
-            return next();
+            user = businessUsers[0] || null;
+            apiToken = tokenRecord;
         }
     }
 
-    const session = await auth.api.getSession({
-        headers: c.req.raw.headers,
-    });
-
-    if (!session) {
-        c.set("authUser", null);
-        c.set("user", null);
-        c.set("session", null);
-        c.set("apiToken", null);
-        return next();
+    // 2. If not a developer token, retrieve session via better-auth
+    // (better-auth's bearer plugin automatically handles Bearer tokens in addition to Cookies)
+    if (!apiToken) {
+        const sessionResult = await auth.api.getSession({
+            headers: c.req.raw.headers,
+        });
+        if (sessionResult) {
+            const businessUsers = await db.select().from(User).where(eq(User.auth_id, sessionResult.user.id)).limit(1);
+            user = businessUsers[0] || null;
+            authUser = sessionResult.user;
+            session = sessionResult.session;
+        }
     }
 
-    const businessUsers = await db.select().from(User).where(eq(User.auth_id, session.user.id)).limit(1);
-    const user = businessUsers[0] || null;
+    return { user, authUser, session, apiToken };
+}
 
-    c.set("authUser", session.user);
-    c.set("user", user);
-    c.set("session", session.session);
-    c.set("apiToken", null);
+export const authMiddleware = async (c: Context<AuthEnv>, next: Next) => {
+    const authData = await resolveAuth(c);
+    c.set("user", authData.user);
+    c.set("authUser", authData.authUser);
+    c.set("session", authData.session);
+    c.set("apiToken", authData.apiToken);
     return next();
 };
 
 export const requireAuth = async (c: Context<AuthEnv>, next: Next) => {
     const authHeader = c.req.header("Authorization");
-    if (authHeader) {
-        if (!authHeader.startsWith("Bearer ")) {
-            return c.json(error(Code.UNAUTHORIZED, "Invalid authorization format"), 401);
-        }
-        const rawToken = authHeader.substring(7);
-        const tokenRecord = await ApiTokenService.verifyToken(rawToken);
-        if (!tokenRecord) {
-            return c.json(error(Code.UNAUTHORIZED, "Invalid or expired API token"), 401);
-        }
-
-        const businessUsers = await db.select().from(User).where(eq(User.id, tokenRecord.owner_id)).limit(1);
-        const user = businessUsers[0];
-        if (!user) {
-            return c.json(error(Code.UNAUTHORIZED, "User profile not found"), 401);
-        }
-
-        c.set("user", user);
-        c.set("apiToken", tokenRecord);
-        c.set("authUser", null);
-        c.set("session", null);
-        return next();
+    if (authHeader && !authHeader.startsWith("Bearer ")) {
+        return c.json(error(Code.UNAUTHORIZED, "Invalid authorization format"), 401);
     }
 
-    const session = await auth.api.getSession({
-        headers: c.req.raw.headers,
-    });
+    const { user, authUser, session, apiToken } = await resolveAuth(c);
 
-    if (!session) {
+    // If neither session nor apiToken was resolved
+    if (!session && !apiToken) {
         return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
     }
 
-    const businessUsers = await db.select().from(User).where(eq(User.auth_id, session.user.id)).limit(1);
-    const user = businessUsers[0];
-
+    // If authenticated but profile creation is not completed
     if (!user) {
         return c.json(error(Code.UNAUTHORIZED, "User profile not found"), 401);
     }
 
-    c.set("authUser", session.user);
     c.set("user", user);
-    c.set("session", session.session);
-    c.set("apiToken", null);
+    c.set("authUser", authUser);
+    c.set("session", session);
+    c.set("apiToken", apiToken);
     return next();
 };

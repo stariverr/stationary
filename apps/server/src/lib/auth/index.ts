@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { bearer } from "better-auth/plugins";
 import { db } from "@/global/db";
 import * as schema from "@/db/schema";
 import { env } from "@/global/env";
@@ -14,6 +15,9 @@ export const auth = betterAuth({
             verification: schema.BetterVerification,
         },
     }),
+    plugins: [
+        bearer(),
+    ],
     trustedOrigins: env.TRUSTED_ORIGINS,
     emailAndPassword: {
         enabled: true,

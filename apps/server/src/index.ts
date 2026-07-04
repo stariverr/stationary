@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { auth } from "@/lib/auth/index";
 import post from "@/api/post";
 import media from "@/api/media";
 import task from "@/api/task";
@@ -9,6 +8,7 @@ import user from "@/api/user";
 import library from "@/api/library";
 import search from "@/api/search";
 import tag from "@/api/tag";
+import authRouter from "@/api/auth";
 
 const app = new Hono();
 
@@ -44,7 +44,7 @@ app.use("*", async (c, next) => {
 });
 
 // Mount all routes to the app
-app.all("/api/auth/*", (c) => auth.handler(c.req.raw));
+app.route("/api/auth", authRouter);
 app.route("/api/post", post);
 app.route("/api/media", media);
 app.route("/api/task", task);
