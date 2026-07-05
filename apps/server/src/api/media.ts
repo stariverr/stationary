@@ -732,8 +732,24 @@ router.get(
                 ),
             );
 
-        const videoFiles = tracks.filter((t) => t.type === TrackType.VIDEO && t.purpose === TrackPurpose.CONTENT);
-        const audioFiles = tracks.filter((t) => t.type === TrackType.AUDIO && t.purpose === TrackPurpose.CONTENT);
+        const selectVideoTrackId = c.req.query("video_track_id");
+        const selectAudioTrackId = c.req.query("audio_track_id");
+
+        let videoFiles = tracks.filter((t) => t.type === TrackType.VIDEO && t.purpose === TrackPurpose.CONTENT);
+        let audioFiles = tracks.filter((t) => t.type === TrackType.AUDIO && t.purpose === TrackPurpose.CONTENT);
+
+        if (selectVideoTrackId) {
+            const filtered = videoFiles.filter((t) => t.id === selectVideoTrackId);
+            if (filtered.length > 0) {
+                videoFiles = filtered;
+            }
+        }
+        if (selectAudioTrackId) {
+            const filtered = audioFiles.filter((t) => t.id === selectAudioTrackId);
+            if (filtered.length > 0) {
+                audioFiles = filtered;
+            }
+        }
 
         if (videoFiles.length === 0) {
             return c.json(error(Code.NOT_FOUND, "No video tracks found for this media"), 404);

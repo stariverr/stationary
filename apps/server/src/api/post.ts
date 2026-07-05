@@ -229,19 +229,11 @@ router.get(
                 const allFiles = await db
                     .select({
                         media_id: Track.media_id,
-                        type: Track.type,
                         purpose: Track.purpose,
                         is_original: Track.is_original,
-                        quality: Track.quality,
                         priority: Track.priority,
-                        metadata: Track.metadata,
-                        file_id: DbFile.id,
                         file_path: DbFile.path,
                         file_bucket: DbFile.bucket,
-                        mime_type: DbFile.mime_type,
-                        extension: DbFile.extension,
-                        width: DbFile.width,
-                        height: DbFile.height,
                     })
                     .from(Track)
                     .leftJoin(DbFile, eq(Track.file_id, DbFile.id))
@@ -278,7 +270,8 @@ router.get(
                     },
                     files as any,
                 );
-                mediaByPostId.get(row.post_id)!.push(response);
+                const { tracks, ...simplifiedMedia } = response;
+                mediaByPostId.get(row.post_id)!.push(simplifiedMedia);
             }
         }
 
@@ -575,6 +568,7 @@ router.get(
 
             const allFiles = await db
                 .select({
+                    track_id: Track.id,
                     media_id: Track.media_id,
                     type: Track.type,
                     purpose: Track.purpose,
@@ -582,6 +576,12 @@ router.get(
                     quality: Track.quality,
                     priority: Track.priority,
                     metadata: Track.metadata,
+                    variant_key: Track.variant_key,
+                    is_default: Track.is_default,
+                    display_name: Track.display_name,
+                    language: Track.language,
+                    codec: Track.codec,
+                    is_stale: Track.is_stale,
                     file_id: DbFile.id,
                     file_path: DbFile.path,
                     file_bucket: DbFile.bucket,
