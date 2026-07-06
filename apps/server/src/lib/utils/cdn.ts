@@ -23,7 +23,7 @@ const QUALITY_MAP: Record<
     [Quality.LOW]: {
         width: 360,
         height: 360,
-        quality: 40,
+        quality: 50,
         fit: "scale-down",
         format: "avif",
     },
@@ -44,7 +44,7 @@ const QUALITY_MAP: Record<
     [Quality.ORIGINAL]: {
         width: 3840,
         height: 3840,
-        quality: 90,
+        quality: 85,
         fit: "scale-down",
         format: "avif",
     },
