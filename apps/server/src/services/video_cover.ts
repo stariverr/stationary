@@ -1,7 +1,7 @@
 import { db } from "@/global/db";
 import { and, eq, lt, isNull, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { Media, Track, File, DeleteStatus, SyncStatus, TrackType, TrackPurpose, TrackQuality, MediaType } from "@/db/schema";
+import { Media, Track, File, DeleteStatus, SyncStatus, TrackType, TrackPurpose, MediaType } from "@/db/schema";
 import { env } from "@/global/env";
 import { Client } from "@upstash/workflow";
 import { s3 } from "@/global/s3";
@@ -11,6 +11,7 @@ import { Temporal } from "@js-temporal/polyfill";
 import { nowDbTimestamp } from "@/lib/utils/time";
 import { withLock } from "@/lib/utils/lock";
 import { buildCdnUrl } from "@/lib/utils/cdn";
+import { Quality } from "@/lib/types";
 
 export type RequestVideoCoverOptions = {
     originUrl?: string;
@@ -158,7 +159,7 @@ export const VideoCoverService = {
                     media_id: mediaId,
                     type: TrackType.IMAGE,
                     purpose: TrackPurpose.COVER,
-                    quality: TrackQuality.ORIGINAL,
+                    quality: Quality.ORIGINAL,
                     priority: 0,
                     sync_status: SyncStatus.PENDING,
                     last_error: null,
@@ -386,7 +387,7 @@ export const VideoCoverService = {
                         media_id: media.id,
                         type: TrackType.IMAGE,
                         purpose: TrackPurpose.COVER,
-                        quality: TrackQuality.ORIGINAL,
+                        quality: Quality.ORIGINAL,
                         priority: 0,
                         file_id: coverFileId,
                         sync_status: SyncStatus.COMPLETED,

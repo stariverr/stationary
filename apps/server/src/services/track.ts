@@ -1,8 +1,9 @@
 import { and, eq, not } from "drizzle-orm";
 import { db } from "@/global/db";
-import { DeleteStatus, File, Track, TrackPurpose, TrackQuality, TrackType } from "@/db/schema";
+import { DeleteStatus, File, Track, TrackPurpose, TrackType } from "@/db/schema";
 import { nowDbTimestamp } from "@/lib/utils/time";
 import { generateDeterministicVariantKey } from "@/lib/utils/track";
+import { Quality } from "@/lib/types";
 
 export interface FileData {
     path: string;
@@ -32,7 +33,7 @@ export const TrackService = {
         trackInfo: {
             type: TrackType;
             purpose: TrackPurpose;
-            quality: TrackQuality;
+            quality: Quality;
             priority: number;
             source_url?: string;
             metadata?: any;

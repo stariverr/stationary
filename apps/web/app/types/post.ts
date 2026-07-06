@@ -57,6 +57,34 @@ export const ApiPostMediaSchema = v.object({
 });
 export type ApiPostMedia = v.InferOutput<typeof ApiPostMediaSchema>;
 
+export const PreviewItemSchema = v.object({
+    url: v.nullable(v.string()),
+    type: v.picklist(["VIDEO", "IMAGE", "AUDIO"]),
+    quality: TrackQualitySchema,
+    codec: v.nullable(v.string()),
+});
+export type PreviewItem = v.InferOutput<typeof PreviewItemSchema>;
+
+export const ApiPostListItemMediaSchema = v.object({
+    id: v.pipe(v.string(), v.uuid()),
+    eid: v.optional(v.string()),
+    source: v.optional(v.string()),
+    title: v.nullish(v.string()),
+    description: v.nullish(v.string()),
+    type: v.picklist(["IMAGE", "VIDEO", "LIVE_PHOTO", "AUDIO", "PDF"]),
+    sort_order: v.number(),
+    create_time: v.optional(v.string()),
+    published_time: v.optional(v.nullable(v.string())),
+    sync_status: v.optional(v.nullable(v.string())),
+    last_error: v.optional(v.nullable(v.string())),
+    ai_status: v.optional(v.nullable(v.string())),
+    ai_error: v.optional(v.nullable(v.string())),
+    covers: v.nullish(v.array(PreviewItemSchema)),
+    videos: v.nullish(v.array(PreviewItemSchema)),
+    audios: v.nullish(v.array(PreviewItemSchema)),
+});
+export type ApiPostListItemMedia = v.InferOutput<typeof ApiPostListItemMediaSchema>;
+
 export const PostListItemSchema = v.object({
     id: v.string(),
     eid: v.string(),
@@ -68,7 +96,7 @@ export const PostListItemSchema = v.object({
     url: v.string(),
     create_time: v.nullish(v.string()),
     published_time: v.nullish(v.string()),
-    media: v.array(ApiPostMediaSchema),
+    media: v.array(ApiPostListItemMediaSchema),
     type: v.picklist(["TEXT", "MULTI_MEDIA"]),
     sync_status: v.optional(v.nullable(v.string())),
     last_error: v.optional(v.nullable(v.string())),
@@ -113,7 +141,7 @@ export const PostMediaSchema = v.object({
     ai_status: v.optional(v.nullable(v.string())),
     ai_error: v.optional(v.nullable(v.string())),
     cover_url: v.optional(v.nullable(v.string())),
-    tracks: v.array(TrackSchema),
+    tracks: v.optional(v.array(TrackSchema)),
 
     // Mapped fields for UI
     url: v.nullable(v.string()),
@@ -124,6 +152,7 @@ export const PostMediaSchema = v.object({
     width: v.optional(v.number()),
     height: v.optional(v.number()),
     index: v.optional(v.number()),
+    srcset: v.optional(v.nullable(v.string())),
 });
 export type PostMedia = v.InferOutput<typeof PostMediaSchema>;
 

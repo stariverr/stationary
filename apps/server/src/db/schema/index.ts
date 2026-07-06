@@ -16,6 +16,7 @@ import {
 import { v7 as createUuidV7 } from "uuid";
 import { Temporal } from "@js-temporal/polyfill";
 import { sql } from "drizzle-orm";
+import { Quality } from "@/lib/types";
 
 const uuidv7 = { generate: createUuidV7 };
 
@@ -99,13 +100,7 @@ export const TrackPurposeEnum = pgEnum("track_purpose", [
     TrackPurpose.PREVIEW,
 ]);
 
-export enum TrackQuality {
-    ORIGINAL = "ORIGINAL",
-    HIGH = "HIGH",
-    MEDIUM = "MEDIUM",
-    LOW = "LOW",
-}
-export const TrackQualityEnum = pgEnum("track_quality", [TrackQuality.ORIGINAL, TrackQuality.HIGH, TrackQuality.MEDIUM, TrackQuality.LOW]);
+export const TrackQualityEnum = pgEnum("track_quality", [Quality.ORIGINAL, Quality.HIGH, Quality.MEDIUM, Quality.LOW]);
 
 export enum AccessRole {
     VIEWER = "VIEWER",

@@ -18,7 +18,6 @@ import {
     SyncStatus,
     TrackType,
     TrackPurpose,
-    TrackQuality,
     PostSource,
     MediaType,
     EntityType,
@@ -26,10 +25,12 @@ import {
     AssetAiMetadata,
     Media,
     Post,
+    Track,
 } from "@/db/schema";
 import { eq, and, lt, inArray, sql } from "drizzle-orm";
 import { DeleteService } from "@/services/delete";
 import { s3 } from "@/global/s3";
+import { Quality } from "@/lib/types";
 
 const taskApp = new Hono<AuthEnv>();
 
@@ -115,7 +116,7 @@ const TrackSchema = z.object({
     type: z.enum(TrackType),
     purpose: z.enum(TrackPurpose).default(TrackPurpose.CONTENT),
     is_original: z.boolean().default(true),
-    quality: z.enum(TrackQuality).default(TrackQuality.ORIGINAL),
+    quality: z.enum(Quality).default(Quality.ORIGINAL),
     priority: z.number().default(0),
     metadata: TrackMetadataSchema.nullish().transform((v) => v ?? {}),
 });
@@ -372,14 +373,13 @@ export const coverWorkflowHandler = serve(
             console.error(`[VIDEO COVER WORKFLOW FAILED] Workflow Run: ${context.workflowRunId}. Reason: ${failResponse}`);
             const { mediaId } = CoverWorkflowPayloadSchema.parse(context.requestPayload);
             try {
-                const { Track, TrackType, TrackPurpose, TrackQuality } = await import("@/db/schema");
                 await db
                     .insert(Track)
                     .values({
                         media_id: mediaId,
                         type: TrackType.IMAGE,
                         purpose: TrackPurpose.COVER,
-                        quality: TrackQuality.ORIGINAL,
+                        quality: Quality.ORIGINAL,
                         priority: 0,
                         sync_status: SyncStatus.FAILED,
                         last_error: failResponse || "Workflow retries exhausted.",

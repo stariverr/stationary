@@ -12,7 +12,6 @@ import {
     EmbeddingStatus,
     TrackType,
     TrackPurpose,
-    TrackQuality,
     MediaType,
     EntityType,
     ModalityType,

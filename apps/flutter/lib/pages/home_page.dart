@@ -2123,143 +2123,147 @@ class _PostCardItemState extends State<PostCardItem> {
     final isDark = theme.brightness == Brightness.dark;
     final post = widget.post;
 
-    String? coverUrl;
-    if (post.media.isNotEmpty) {
-      coverUrl = post.media.first.coverUrl ?? post.media.first.url;
-    }
-
     Color cardBg = Colors.transparent;
     if (_isHovered) {
       cardBg = isDark ? const Color(0xFF1F1F23) : const Color(0xFFF4F4F5);
     }
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: GestureDetector(
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => PostDetailPage(postId: post.id),
-            ),
-          );
-        },
-        child: Container(
-          decoration: BoxDecoration(
-            color: cardBg,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          padding: const EdgeInsets.all(8.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              AspectRatio(
-                aspectRatio: 4 / 3,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF1F1F23)
-                        : const Color(0xFFF9FAFB),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: isDark
-                          ? const Color(0xFF27272A)
-                          : const Color(0xFFF3F4F6),
-                    ),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: coverUrl != null
-                        ? Image.network(
-                            coverUrl,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) =>
-                                Center(
-                                  child: Icon(
-                                    LucideIcons.image,
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                    size: 24,
-                                  ),
-                                ),
-                          )
-                        : Center(
-                            child: Icon(
-                              LucideIcons.fileText,
-                              color: theme.colorScheme.onSurfaceVariant,
-                              size: 24,
-                            ),
-                          ),
-                  ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        String? coverUrl;
+        if (post.media.isNotEmpty) {
+          coverUrl = post.media.first.getImageUrlForWidth(constraints.maxWidth);
+        }
+
+        return MouseRegion(
+          onEnter: (_) => setState(() => _isHovered = true),
+          onExit: (_) => setState(() => _isHovered = false),
+          child: GestureDetector(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => PostDetailPage(postId: post.id),
                 ),
+              );
+            },
+            child: Container(
+              decoration: BoxDecoration(
+                color: cardBg,
+                borderRadius: BorderRadius.circular(12),
               ),
-              const SizedBox(height: 8),
-              Row(
+              padding: const EdgeInsets.all(8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  CircleAvatar(
-                    radius: 10,
-                    backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                    backgroundImage: post.authorAvatarUrl != null
-                        ? NetworkImage(post.authorAvatarUrl!)
-                        : null,
-                    child: post.authorAvatarUrl == null
-                        ? Text(
-                            (post.authorName ?? 'U')
-                                .substring(0, 1)
-                                .toUpperCase(),
-                            style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          )
-                        : null,
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      post.authorName ?? 'Unknown',
-                      style: TextStyle(
-                        fontSize: 12,
+                  AspectRatio(
+                    aspectRatio: 4 / 3,
+                    child: Container(
+                      decoration: BoxDecoration(
                         color: isDark
-                            ? const Color(0xFFA1A1AA)
-                            : const Color(0xFF4B5563),
-                        fontWeight: FontWeight.w500,
+                            ? const Color(0xFF1F1F23)
+                            : const Color(0xFFF9FAFB),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isDark
+                              ? const Color(0xFF27272A)
+                              : const Color(0xFFF3F4F6),
+                        ),
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: coverUrl != null
+                            ? Image.network(
+                                coverUrl,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) =>
+                                    Center(
+                                      child: Icon(
+                                        LucideIcons.image,
+                                        color: theme.colorScheme.onSurfaceVariant,
+                                        size: 24,
+                                      ),
+                                    ),
+                              )
+                            : Center(
+                                child: Icon(
+                                  LucideIcons.fileText,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                  size: 24,
+                                ),
+                              ),
+                      ),
                     ),
                   ),
-                  if (post.source != null)
-                    _buildPlatformBadge(isDark, post.source!),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 10,
+                        backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                        backgroundImage: post.authorAvatarUrl != null
+                            ? NetworkImage(post.authorAvatarUrl!)
+                            : null,
+                        child: post.authorAvatarUrl == null
+                            ? Text(
+                                (post.authorName ?? 'U')
+                                    .substring(0, 1)
+                                    .toUpperCase(),
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              )
+                            : null,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          post.authorName ?? 'Unknown',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark
+                                ? const Color(0xFFA1A1AA)
+                                : const Color(0xFF4B5563),
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (post.source != null)
+                        _buildPlatformBadge(isDark, post.source!),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    post.title,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: isDark
+                          ? const Color(0xFFFAFAFA)
+                          : const Color(0xFF111827),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    post.publishedTime != null
+                        ? post.publishedTime!.substring(0, 10)
+                        : (post.media.isNotEmpty && post.media.first.width != null
+                              ? '${post.media.first.width}x${post.media.first.height}'
+                              : ''),
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+                  ),
                 ],
               ),
-              const SizedBox(height: 4),
-              Text(
-                post.title,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: isDark
-                      ? const Color(0xFFFAFAFA)
-                      : const Color(0xFF111827),
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                post.publishedTime != null
-                    ? post.publishedTime!.substring(0, 10)
-                    : (post.media.isNotEmpty && post.media.first.width != null
-                          ? '${post.media.first.width}x${post.media.first.height}'
-                          : ''),
-                style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-              ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

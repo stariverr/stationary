@@ -9,7 +9,6 @@ import {
     SyncStatus,
     TrackType,
     TrackPurpose,
-    TrackQuality,
     Tag,
     PostTag,
     MediaTag,
@@ -27,6 +26,7 @@ import { nowDbTimestamp } from "@/lib/utils/time";
 import { Temporal } from "@js-temporal/polyfill";
 import { sanitizeTags } from "@/lib/utils/tag_sanitizer";
 import { generateDeterministicVariantKey } from "@/lib/utils/track";
+import { Quality } from "@/lib/types";
 
 function formatVttTime(seconds: number): string {
     const ms = Math.floor((seconds % 1) * 1000)
@@ -679,7 +679,7 @@ export const TaskService = {
                 type: TrackType;
                 purpose: TrackPurpose;
                 is_original: boolean;
-                quality: TrackQuality;
+                quality: Quality;
                 priority: number;
                 url: string | null | undefined;
                 metadata?: any;
@@ -1229,7 +1229,7 @@ export const TaskService = {
                             type: primaryType,
                             purpose: TrackPurpose.CONTENT,
                             is_original: true,
-                            quality: TrackQuality.ORIGINAL,
+                            quality: Quality.ORIGINAL,
                             priority: 0,
                             metadata: {},
                         });
@@ -1240,7 +1240,7 @@ export const TaskService = {
                             type: TrackType.IMAGE,
                             purpose: TrackPurpose.COVER,
                             is_original: false,
-                            quality: TrackQuality.ORIGINAL,
+                            quality: Quality.ORIGINAL,
                             priority: 0,
                             metadata: {},
                         });
@@ -1254,7 +1254,7 @@ export const TaskService = {
                             type: altType,
                             purpose: TrackPurpose.CONTENT,
                             is_original: true,
-                            quality: TrackQuality.MEDIUM,
+                            quality: Quality.MEDIUM,
                             priority: 1,
                             metadata: {},
                         });
@@ -1265,7 +1265,7 @@ export const TaskService = {
                             type: TrackType.VIDEO,
                             purpose: TrackPurpose.CONTENT,
                             is_original: true,
-                            quality: TrackQuality.ORIGINAL,
+                            quality: Quality.ORIGINAL,
                             priority: 0,
                             metadata: {},
                         });

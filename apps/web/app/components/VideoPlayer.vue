@@ -147,7 +147,14 @@ const areSubtitlesEqual = (a: Subtitle[], b: Subtitle[]) => {
     if (!a || !b) return false;
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
-        if (a[i].url !== b[i].url || a[i].language !== b[i].language || a[i].label !== b[i].label || a[i].format !== b[i].format) {
+        const itemA = a[i];
+        const itemB = b[i];
+        if (
+            itemA?.url !== itemB?.url ||
+            itemA?.language !== itemB?.language ||
+            itemA?.label !== itemB?.label ||
+            itemA?.format !== itemB?.format
+        ) {
             return false;
         }
     }

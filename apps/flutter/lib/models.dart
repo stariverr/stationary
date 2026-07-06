@@ -228,6 +228,29 @@ class Post {
     );
   }
 }
+class MediaPreviewItem {
+  final String? url;
+  final String type; // e.g., "VIDEO", "IMAGE", "AUDIO"
+  final String quality; // e.g., "LOW", "MEDIUM", "HIGH", "ORIGINAL"
+  final String? codec;
+
+  MediaPreviewItem({
+    this.url,
+    required this.type,
+    required this.quality,
+    this.codec,
+  });
+
+  factory MediaPreviewItem.fromJson(Map<String, dynamic> json) {
+    return MediaPreviewItem(
+      url: json['url'] as String?,
+      type: (json['type'] as String?) ?? 'IMAGE',
+      quality: (json['quality'] as String?) ?? 'ORIGINAL',
+      codec: json['codec'] as String?,
+    );
+  }
+}
+
 class MediaPreview {
   final String id;
   final String? eid;
@@ -242,6 +265,9 @@ class MediaPreview {
   final String? coverUrl;
   final int? width;
   final int? height;
+  final List<MediaPreviewItem> covers;
+  final List<MediaPreviewItem> videos;
+  final List<MediaPreviewItem> audios;
 
   MediaPreview({
     required this.id,
@@ -257,9 +283,81 @@ class MediaPreview {
     this.coverUrl,
     this.width,
     this.height,
+    required this.covers,
+    required this.videos,
+    required this.audios,
   });
 
   factory MediaPreview.fromJson(Map<String, dynamic> json) {
+    var coversList = <MediaPreviewItem>[];
+    if (json['covers'] is List) {
+      coversList = (json['covers'] as List)
+          .map((c) => MediaPreviewItem.fromJson(Map<String, dynamic>.from(c as Map)))
+          .toList();
+    }
+
+    var videosList = <MediaPreviewItem>[];
+    if (json['videos'] is List) {
+      videosList = (json['videos'] as List)
+          .map((v) => MediaPreviewItem.fromJson(Map<String, dynamic>.from(v as Map)))
+          .toList();
+    }
+
+    var audiosList = <MediaPreviewItem>[];
+    if (json['audios'] is List) {
+      audiosList = (json['audios'] as List)
+          .map((a) => MediaPreviewItem.fromJson(Map<String, dynamic>.from(a as Map)))
+          .toList();
+    }
+
+    // Resolve coverUrl
+    String? resolvedCoverUrl;
+    final mediumCover = coversList.firstWhere(
+      (c) => c.quality.toUpperCase() == 'MEDIUM',
+      orElse: () => MediaPreviewItem(type: 'IMAGE', quality: ''),
+    );
+    if (mediumCover.url != null) {
+      resolvedCoverUrl = mediumCover.url;
+    } else {
+      final lowCover = coversList.firstWhere(
+        (c) => c.quality.toUpperCase() == 'LOW',
+        orElse: () => MediaPreviewItem(type: 'IMAGE', quality: ''),
+      );
+      if (lowCover.url != null) {
+        resolvedCoverUrl = lowCover.url;
+      } else {
+        final highCover = coversList.firstWhere(
+          (c) => c.quality.toUpperCase() == 'HIGH',
+          orElse: () => MediaPreviewItem(type: 'IMAGE', quality: ''),
+        );
+        if (highCover.url != null) {
+          resolvedCoverUrl = highCover.url;
+        } else {
+          final originalCover = coversList.firstWhere(
+            (c) => c.quality.toUpperCase() == 'ORIGINAL',
+            orElse: () => MediaPreviewItem(type: 'IMAGE', quality: ''),
+          );
+          resolvedCoverUrl = originalCover.url ?? json['cover_url'] as String? ?? json['url'] as String?;
+        }
+      }
+    }
+
+    // Resolve url
+    String? resolvedUrl;
+    if (json['type'] == 'VIDEO') {
+      final originalVideo = videosList.firstWhere(
+        (v) => v.quality.toUpperCase() == 'ORIGINAL',
+        orElse: () => MediaPreviewItem(type: 'VIDEO', quality: ''),
+      );
+      resolvedUrl = originalVideo.url ?? (videosList.isNotEmpty ? videosList.first.url : null) ?? json['url'] as String?;
+    } else {
+      final originalCover = coversList.firstWhere(
+        (c) => c.quality.toUpperCase() == 'ORIGINAL',
+        orElse: () => MediaPreviewItem(type: 'IMAGE', quality: ''),
+      );
+      resolvedUrl = originalCover.url ?? resolvedCoverUrl ?? json['url'] as String?;
+    }
+
     return MediaPreview(
       id: json['id'] as String,
       eid: json['eid'] as String?,
@@ -270,11 +368,48 @@ class MediaPreview {
       sortOrder: (json['sort_order'] as int?) ?? 0,
       createTime: json['create_time'] as String?,
       publishedTime: json['published_time'] as String?,
-      url: json['url'] as String?,
-      coverUrl: json['cover_url'] as String?,
+      url: resolvedUrl,
+      coverUrl: resolvedCoverUrl,
       width: json['width'] as int?,
       height: json['height'] as int?,
+      covers: coversList,
+      videos: videosList,
+      audios: audiosList,
     );
+  }
+
+  /// Helper to dynamically pick the closest image quality URL to the requested width.
+  String getImageUrlForWidth(double width) {
+    if (covers.isEmpty) return coverUrl ?? url ?? '';
+
+    // Low: 360, Medium: 720, High: 1440, Original: 3840.
+    // Use target width multiplied by 1.5 to account for device pixel ratio.
+    double targetWidth = width * 1.5;
+
+    int getWidthOfQuality(String q) {
+      switch (q.toUpperCase()) {
+        case 'LOW':
+          return 360;
+        case 'MEDIUM':
+          return 720;
+        case 'HIGH':
+          return 1440;
+        case 'ORIGINAL':
+          return 3840;
+        default:
+          return 0;
+      }
+    }
+
+    final sortedCovers = List<MediaPreviewItem>.from(covers)
+      ..sort((a, b) => getWidthOfQuality(a.quality).compareTo(getWidthOfQuality(b.quality)));
+
+    for (var c in sortedCovers) {
+      if (getWidthOfQuality(c.quality) >= targetWidth) {
+        return c.url ?? '';
+      }
+    }
+    return sortedCovers.isNotEmpty ? (sortedCovers.last.url ?? '') : (coverUrl ?? url ?? '');
   }
 }
 

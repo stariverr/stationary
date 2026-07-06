@@ -235,34 +235,53 @@ export const usePostStore = defineStore("posts", () => {
         const displayTime = apiPost.published_time ?? apiPost.create_time;
 
         const uiMedia = apiPost.media.map((m) => {
-            const primaryTrack = m.tracks.find(
-                (t) => t.purpose === "CONTENT" && t.priority === 0 && (m.type === "VIDEO" ? t.type === "VIDEO" : t.type === "IMAGE"),
-            );
-            const coverTrack = m.tracks.find((t) => t.purpose === "COVER");
-            const liveTrack =
-                m.type === "LIVE_PHOTO" ? m.tracks.find((t) => t.type === "VIDEO" && t.purpose === "CONTENT" && t.priority === 0) : null;
-            const subtitleTracks = m.tracks.filter((t) => t.type === "SUBTITLE");
+            const coversList = m.covers || [];
+            const videosList = m.videos || [];
 
-            let url = m.url || primaryTrack?.url || null;
+            const lowCover = coversList.find((c) => c.quality === "LOW")?.url || null;
+            const mediumCover = coversList.find((c) => c.quality === "MEDIUM")?.url || null;
+            const highCover = coversList.find((c) => c.quality === "HIGH")?.url || null;
+            const originalCover = coversList.find((c) => c.quality === "ORIGINAL")?.url || null;
+
+            const originalVideo = videosList.find((v) => v.quality === "ORIGINAL")?.url || null;
+            const fallbackVideo = videosList[0]?.url || null;
+
+            const srcsetParts: string[] = [];
+            for (const c of coversList) {
+                if (c.url) {
+                    if (c.quality === "LOW") srcsetParts.push(`${c.url} 360w`);
+                    else if (c.quality === "MEDIUM") srcsetParts.push(`${c.url} 720w`);
+                    else if (c.quality === "HIGH") srcsetParts.push(`${c.url} 1440w`);
+                    else if (c.quality === "ORIGINAL") srcsetParts.push(`${c.url} 3840w`);
+                }
+            }
+            const srcset = srcsetParts.length > 0 ? srcsetParts.join(", ") : null;
+
+            let url: string | null = null;
+            if (m.type === "VIDEO") {
+                url = originalVideo || fallbackVideo;
+            } else {
+                url = originalCover || highCover || mediumCover || lowCover;
+            }
+
+            const thumbnail = lowCover || mediumCover || originalCover;
+            const poster = mediumCover || highCover || lowCover || originalCover;
+            const live_url = m.type === "LIVE_PHOTO" ? originalVideo || fallbackVideo : null;
 
             return {
                 ...m,
                 type: m.type,
                 url: url,
-                mime_type: primaryTrack?.mime_type || null,
-                thumbnail: coverTrack?.url || m.cover_url || null,
-                live_url: liveTrack?.url || null,
-                poster: coverTrack?.url || m.cover_url || null,
+                mime_type: null,
+                thumbnail: thumbnail,
+                live_url: live_url,
+                poster: poster,
                 sync_status: m.sync_status || "PENDING",
                 last_error: m.last_error || null,
                 ai_status: m.ai_status || "PENDING",
                 ai_error: m.ai_error || null,
-                subtitles: subtitleTracks.map((sub) => ({
-                    url: sub.url,
-                    language: sub.metadata?.language || "unknown",
-                    label: sub.metadata?.label || sub.metadata?.language || "unknown",
-                    format: sub.metadata?.format === "json" ? "vtt" : sub.metadata?.format || "vtt",
-                })),
+                subtitles: [],
+                srcset: srcset,
             };
         });
 

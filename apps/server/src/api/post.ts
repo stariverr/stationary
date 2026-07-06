@@ -15,7 +15,6 @@ import {
     PostSource,
     TrackType,
     TrackPurpose,
-    TrackQuality,
     AssetAiMetadata,
     EntityType,
     Author,
@@ -25,17 +24,15 @@ import {
     Tag,
     TagStatus,
     Library,
-    TagSource,
 } from "@/db/schema";
-import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lte, exists, or, notInArray } from "drizzle-orm";
+import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lte, exists, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { Temporal } from "@js-temporal/polyfill";
 import { RecycleService } from "@/services/recycle";
 import { DeleteService } from "@/services/delete";
 import { PostService } from "@/services/post";
-import { buildCdnUrl } from "@/lib/utils/cdn";
-import { toIsoTimestamp, nowDbTimestamp, FormTimestampSchema } from "@/lib/utils/time";
-import { normalizeTagName } from "@/lib/utils/tag_sanitizer";
+import { buildCdnUrl, buildImagePreviewCdnUrl } from "@/lib/utils/cdn";
+import { toIsoTimestamp, FormTimestampSchema } from "@/lib/utils/time";
+import { Codec, Quality } from "@/lib/types";
 
 const router = new Hono();
 const activePostFilter = and(eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time));
@@ -57,7 +54,7 @@ export const PostListRequestBodySchema = z.object({
     sort_by: z.enum(["import_time", "published_time"]).optional(),
     sort_order: z.enum(["asc", "desc"]).optional(),
     author_ids: z.string().optional(),
-    media_type: z.nativeEnum(MediaType).optional(),
+    media_type: z.enum(MediaType).optional(),
     tag_ids: z.string().optional(),
 });
 
@@ -136,8 +133,6 @@ router.get(
             );
         }
 
-        const authorAvatarFile = alias(DbFile, "author_avatar_file");
-
         let orderColumn: any;
         if (sortBy === "import_time") {
             orderColumn = Post.create_time;
@@ -155,38 +150,41 @@ router.get(
                 author_name: Post.author_name,
                 create_time: Post.create_time,
                 published_time: Post.published_time,
-                url: Post.url,
                 sync_status: Post.sync_status,
                 last_error: Post.last_error,
-                author_avatar_bucket: authorAvatarFile.bucket,
-                author_avatar_path: authorAvatarFile.path,
+                author_avatar_bucket: DbFile.bucket,
+                author_avatar_path: DbFile.path,
             })
             .from(Post)
             .leftJoin(Author, eq(Post.author_id, Author.id))
-            .leftJoin(authorAvatarFile, eq(Author.avatar_file_id, authorAvatarFile.id))
+            .leftJoin(DbFile, eq(Author.avatar_file_id, DbFile.id))
             .where(and(activePostFilter, ...where))
             .orderBy(orderByExpr)
             .limit(pageSize)
             .offset(offset);
 
         const postIds = rawPosts.map((p) => p.id);
-        const mediaByPostId = new Map<string, any[]>();
 
+        type Preview = {
+            url: string | null;
+            type: "VIDEO" | "IMAGE" | "AUDIO";
+            quality: Quality;
+            codec: string | null;
+        };
+
+        type MediaItem = Pick<typeof Media.$inferSelect, "id" | "post_id" | "type" | "sort_order"> & {
+            covers: Preview[] | null;
+            videos: Preview[] | null;
+            audios: Preview[] | null;
+        };
+        const mediaByPostId = new Map<string, MediaItem[]>();
         if (postIds.length > 0) {
             const mediaRows = await db
                 .select({
                     id: Media.id,
-                    eid: Media.eid,
                     post_id: Media.post_id,
-                    source: Media.source,
-                    title: Media.title,
-                    description: Media.description,
                     type: Media.type,
                     sort_order: Media.sort_order,
-                    create_time: Media.create_time,
-                    published_time: Media.published_time,
-                    sync_status: Media.sync_status,
-                    last_error: Media.last_error,
                 })
                 .from(Media)
                 .where(
@@ -199,79 +197,131 @@ router.get(
                 .orderBy(asc(Media.sort_order));
 
             const allMediaIds = mediaRows.map((mr) => mr.id);
-            const filesByMediaId = new Map<string, any[]>();
-            const aiMetadataMap = new Map<string, { ai_status: string; ai_error: string | null }>();
+            type SelectedFile = Awaited<typeof fileQuery>[number];
+            const filesByMediaId = new Map<string, SelectedFile[]>();
 
+            const fileQuery = db
+                .select({
+                    media_id: Track.media_id,
+                    purpose: Track.purpose,
+                    is_original: Track.is_original,
+                    priority: Track.priority,
+                    quality: Track.quality,
+                    type: Track.type,
+                    codec: Track.codec,
+                    file_path: DbFile.path,
+                    file_bucket: DbFile.bucket,
+                })
+                .from(Track)
+                .innerJoin(DbFile, eq(Track.file_id, DbFile.id));
             if (allMediaIds.length > 0) {
-                const aiMetadatas = await db
-                    .select({
-                        entity_id: AssetAiMetadata.entity_id,
-                        processing_status: AssetAiMetadata.processing_status,
-                        last_error: AssetAiMetadata.last_error,
-                    })
-                    .from(AssetAiMetadata)
-                    .where(and(inArray(AssetAiMetadata.entity_id, allMediaIds), eq(AssetAiMetadata.entity_type, EntityType.MEDIA)));
-
-                for (const meta of aiMetadatas) {
-                    const existing = aiMetadataMap.get(meta.entity_id);
-                    if (
-                        !existing ||
-                        meta.processing_status === "COMPLETED" ||
-                        (existing.ai_status !== "COMPLETED" && meta.processing_status === "FAILED")
-                    ) {
-                        aiMetadataMap.set(meta.entity_id, {
-                            ai_status: meta.processing_status,
-                            ai_error: meta.last_error,
-                        });
-                    }
-                }
-
-                const allFiles = await db
-                    .select({
-                        media_id: Track.media_id,
-                        purpose: Track.purpose,
-                        is_original: Track.is_original,
-                        priority: Track.priority,
-                        file_path: DbFile.path,
-                        file_bucket: DbFile.bucket,
-                    })
-                    .from(Track)
-                    .leftJoin(DbFile, eq(Track.file_id, DbFile.id))
-                    .where(
-                        and(
-                            inArray(Track.media_id, allMediaIds),
-                            eq(Track.delete_status, DeleteStatus.ACTIVE),
-                            eq(Track.sync_status, SyncStatus.COMPLETED),
-                            inArray(Track.purpose, [TrackPurpose.CONTENT, TrackPurpose.COVER]),
-                        ),
-                    );
-
+                const allFiles = await fileQuery.where(
+                    and(
+                        inArray(Track.media_id, allMediaIds),
+                        eq(Track.delete_status, DeleteStatus.ACTIVE),
+                        eq(Track.sync_status, SyncStatus.COMPLETED),
+                        inArray(Track.purpose, [TrackPurpose.CONTENT, TrackPurpose.COVER]),
+                        inArray(Track.type, [TrackType.IMAGE, TrackType.VIDEO, TrackType.AUDIO]),
+                    ),
+                );
                 for (const file of allFiles) {
-                    if (!file.media_id) continue;
-                    if (!filesByMediaId.has(file.media_id)) {
-                        filesByMediaId.set(file.media_id, []);
+                    let files = filesByMediaId.get(file.media_id);
+                    if (!files) {
+                        files = [];
+                        filesByMediaId.set(file.media_id, files);
                     }
-                    filesByMediaId.get(file.media_id)!.push(file);
+                    files.push(file);
                 }
             }
 
             for (const row of mediaRows) {
                 if (!row.post_id) continue;
-                if (!mediaByPostId.has(row.post_id)) {
-                    mediaByPostId.set(row.post_id, []);
-                }
+
                 const files = filesByMediaId.get(row.id) || [];
-                const aiMeta = aiMetadataMap.get(row.id);
-                const response = mapMediaToResponse(
-                    {
-                        ...row,
-                        ai_status: aiMeta?.ai_status,
-                        ai_error: aiMeta?.ai_error,
-                    },
-                    files as any,
-                );
-                const { tracks, ...simplifiedMedia } = response;
-                mediaByPostId.get(row.post_id)!.push(simplifiedMedia);
+                const sortedFiles = files.sort((a, b) => a.priority - b.priority);
+
+                const covers: Preview[] = [];
+                const coverFiles = sortedFiles.filter((f) => f.purpose === TrackPurpose.COVER);
+                if (coverFiles.length) {
+                    for (const coverFile of coverFiles) {
+                        const coverUrl = coverFile ? buildCdnUrl(coverFile.file_bucket, coverFile.file_path) : null;
+                        covers.push({
+                            url: coverUrl,
+                            type: "IMAGE",
+                            quality: coverFile.quality,
+                            codec: coverFile.codec,
+                        });
+                    }
+                }
+                // If no cover files, use original url of image
+                else if (row.type === MediaType.IMAGE) {
+                    const imageFiles = sortedFiles.filter((f) => f.purpose === TrackPurpose.CONTENT);
+                    if (imageFiles.length) {
+                        for (const imageFile of imageFiles) {
+                            // CF currently does not support processing these format, so do nothing
+                            if (imageFile.codec && [Codec.HEIC, Codec.AVIF, Codec.JXL].includes(imageFile.codec as Codec)) {
+                                const coverUrl = imageFile ? buildCdnUrl(imageFile.file_bucket, imageFile.file_path) : null;
+                                covers.push({
+                                    url: coverUrl,
+                                    type: "IMAGE",
+                                    quality: Quality.ORIGINAL,
+                                    codec: imageFile.codec,
+                                });
+                            } else {
+                                // Only compress other formats
+                                for (const quality of [Quality.LOW, Quality.MEDIUM, Quality.HIGH]) {
+                                    const coverUrl = imageFile
+                                        ? buildImagePreviewCdnUrl(imageFile.file_bucket, imageFile.file_path, quality)
+                                        : null;
+                                    covers.push({
+                                        url: coverUrl,
+                                        type: "IMAGE",
+                                        quality: quality,
+                                        codec: imageFile.codec,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let videos: Preview[] | null = null;
+                if ([MediaType.LIVE_PHOTO, MediaType.VIDEO].includes(row.type)) {
+                    const videoFiles = sortedFiles.filter((f) => f.purpose === TrackPurpose.CONTENT);
+                    if (videoFiles.length) {
+                        videos = [];
+                        for (const videoFile of videoFiles) {
+                            const videoUrl = videoFile ? buildCdnUrl(videoFile.file_bucket, videoFile.file_path) : null;
+                            videos.push({
+                                url: videoUrl,
+                                type: "VIDEO",
+                                quality: videoFile.quality,
+                                codec: videoFile.codec,
+                            });
+                        }
+                    }
+                }
+
+                let audios: Preview[] | null = null;
+                if ([MediaType.AUDIO].includes(row.type)) {
+                    // TODO
+                }
+
+                let mediaList = mediaByPostId.get(row.post_id);
+                if (!mediaList) {
+                    mediaList = [];
+                    mediaByPostId.set(row.post_id, mediaList);
+                }
+
+                mediaList.push({
+                    id: row.id,
+                    post_id: row.post_id,
+                    type: row.type,
+                    sort_order: row.sort_order,
+                    covers,
+                    videos,
+                    audios,
+                });
             }
         }
 
@@ -288,10 +338,12 @@ router.get(
                 .orderBy(asc(PostTag.id));
 
             for (const row of allTags) {
-                if (!postTagsMap.has(row.post_id)) {
-                    postTagsMap.set(row.post_id, []);
+                let tags = postTagsMap.get(row.post_id);
+                if (!tags) {
+                    tags = [];
+                    postTagsMap.set(row.post_id, tags);
                 }
-                postTagsMap.get(row.post_id)!.push(row.tag_name);
+                tags.push(row.tag_name);
             }
         }
 
@@ -304,16 +356,14 @@ router.get(
             const postTags = postTagsMap.get(post.id) || [];
             return {
                 id: post.id,
-                eid: post.eid,
                 type: type,
                 title: post.title,
                 source: post.source,
                 tags: postTags,
                 author_name: post.author_name,
-                author_avatar_url: buildCdnUrl(post.author_avatar_bucket, post.author_avatar_path),
+                author_avatar_url: buildImagePreviewCdnUrl(post.author_avatar_bucket, post.author_avatar_path, Quality.LOW),
                 create_time: toIsoTimestamp(post.create_time),
                 published_time: toIsoTimestamp(post.published_time),
-                url: post.url,
                 sync_status: post.sync_status,
                 last_error: post.last_error,
                 media: postMedia,
@@ -399,7 +449,7 @@ router.get(
             id: auth.id,
             nickname: auth.nickname,
             platform: auth.platform,
-            avatar_url: auth.avatar_path ? buildCdnUrl(auth.avatar_bucket, auth.avatar_path) : null,
+            avatar_url: auth.avatar_path ? buildImagePreviewCdnUrl(auth.avatar_bucket, auth.avatar_path, Quality.LOW) : null,
         }));
 
         return c.json(success(Code.SUCCESS, result));
@@ -633,7 +683,7 @@ router.get(
             description: postData.description,
             tags: postTags,
             author_name: postData.author_name,
-            author_avatar_url: buildCdnUrl(postData.author_avatar_bucket, postData.author_avatar_path),
+            author_avatar_url: buildImagePreviewCdnUrl(postData.author_avatar_bucket, postData.author_avatar_path, Quality.LOW),
             author_external_id: postData.author_external_id,
             create_time: toIsoTimestamp(postData.create_time) ?? undefined,
             published_time: toIsoTimestamp(postData.published_time),

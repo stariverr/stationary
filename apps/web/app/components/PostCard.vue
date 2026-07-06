@@ -191,14 +191,14 @@ const getPlatformBadgeClass = (platform: string) => {
                     <img
                         v-else-if="post.type === 'MULTI_MEDIA' && post.media?.[0]?.type !== 'VIDEO'"
                         :src="
-                            getOptimizedImageUrl(post.media?.[0]?.url, {
+                            post.media?.[0]?.thumbnail || getOptimizedImageUrl(post.media?.[0]?.url, {
                                 width: 480,
                                 height: 360,
                                 fit: 'cover',
                                 gravity: 'auto',
                             })
                         "
-                        :srcset="getOptimizedSrcset(post.media?.[0]?.url, 'list')"
+                        :srcset="post.media?.[0]?.srcset || getOptimizedSrcset(post.media?.[0]?.url, 'list')"
                         sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                         :alt="post.title"
                         class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
@@ -225,14 +225,14 @@ const getPlatformBadgeClass = (platform: string) => {
                         <img
                             v-if="post.media?.[0]?.poster && !isHovered"
                             :src="
-                                getOptimizedImageUrl(post.media?.[0]?.poster, {
+                                post.media?.[0]?.poster || getOptimizedImageUrl(post.media?.[0]?.poster, {
                                     width: 480,
                                     height: 360,
                                     fit: 'cover',
                                     gravity: 'auto',
                                 })
                             "
-                            :srcset="getOptimizedSrcset(post.media?.[0]?.poster, 'list')"
+                            :srcset="post.media?.[0]?.srcset || getOptimizedSrcset(post.media?.[0]?.poster, 'list')"
                             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                             :alt="post.title"
                             class="absolute inset-0 w-full h-full object-cover transition-all duration-300 group-hover:scale-105 pointer-events-none"

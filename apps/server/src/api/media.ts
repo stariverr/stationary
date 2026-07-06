@@ -13,7 +13,6 @@ import {
     DeleteStatus,
     TrackType,
     TrackPurpose,
-    TrackQuality,
     AssetAiMetadata,
     EntityType,
     SyncStatus,
@@ -37,6 +36,7 @@ import { VideoCoverService } from "@/services/video_cover";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { toIsoTimestamp, FormTimestampSchema } from "@/lib/utils/time";
 import { normalizeVariantKey } from "@/lib/utils/track";
+import { Quality } from "@/lib/types";
 
 function escapeXml(unsafe: string): string {
     return unsafe.replace(/[<>&'"]/g, (c) => {
@@ -80,7 +80,7 @@ export interface MappedFileRow {
     type: TrackType;
     purpose: TrackPurpose;
     is_original: boolean;
-    quality: TrackQuality;
+    quality: Quality;
     priority: number;
     metadata: MediaFileMetadata;
     variant_key: string;
@@ -1042,7 +1042,7 @@ router.get("/:id/tracks", requireAuth, async (c) => {
 const PresignUploadSchema = z.object({
     type: z.enum(TrackType),
     purpose: z.enum(TrackPurpose),
-    quality: z.enum(TrackQuality),
+    quality: z.enum(Quality),
     priority: z.number().int().default(0),
     fileName: z.string().min(1, "fileName is required"),
 });
@@ -1098,7 +1098,7 @@ router.post(
 const RegisterTrackSchema = z.object({
     type: z.enum(TrackType),
     purpose: z.enum(TrackPurpose),
-    quality: z.enum(TrackQuality),
+    quality: z.enum(Quality),
     priority: z.number().int().default(0),
     source_url: z.string().optional(),
     metadata: z.any().optional(),
@@ -1222,7 +1222,7 @@ router.post("/:id/tracks/:trackId/delete", requireAuth, async (c) => {
 
 const UpdateTrackMetadataSchema = z.object({
     priority: z.number().int().optional(),
-    quality: z.enum(TrackQuality).optional(),
+    quality: z.enum(Quality).optional(),
     display_name: z.string().nullable().optional(),
     variant_key: z.string().optional(),
     is_default: z.boolean().optional(),
