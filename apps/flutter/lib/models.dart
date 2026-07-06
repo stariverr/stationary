@@ -91,9 +91,11 @@ class MediaTrack {
       isOriginal: (json['is_original'] as bool?) ?? false,
       quality: json['quality'] as String?,
       priority: (json['priority'] as int?) ?? 0,
-      metadata: (json['metadata'] as Map?)?.map(
+      metadata:
+          (json['metadata'] as Map?)?.map(
             (k, v) => MapEntry(k.toString(), v),
-          ) ?? {},
+          ) ??
+          {},
       variantKey: json['variant_key'] as String?,
       isDefault: (json['is_default'] as bool?) ?? false,
       displayName: json['display_name'] as String?,
@@ -228,6 +230,7 @@ class Post {
     );
   }
 }
+
 class MediaPreviewItem {
   final String? url;
   final String type; // e.g., "VIDEO", "IMAGE", "AUDIO"
@@ -292,21 +295,30 @@ class MediaPreview {
     var coversList = <MediaPreviewItem>[];
     if (json['covers'] is List) {
       coversList = (json['covers'] as List)
-          .map((c) => MediaPreviewItem.fromJson(Map<String, dynamic>.from(c as Map)))
+          .map(
+            (c) =>
+                MediaPreviewItem.fromJson(Map<String, dynamic>.from(c as Map)),
+          )
           .toList();
     }
 
     var videosList = <MediaPreviewItem>[];
     if (json['videos'] is List) {
       videosList = (json['videos'] as List)
-          .map((v) => MediaPreviewItem.fromJson(Map<String, dynamic>.from(v as Map)))
+          .map(
+            (v) =>
+                MediaPreviewItem.fromJson(Map<String, dynamic>.from(v as Map)),
+          )
           .toList();
     }
 
     var audiosList = <MediaPreviewItem>[];
     if (json['audios'] is List) {
       audiosList = (json['audios'] as List)
-          .map((a) => MediaPreviewItem.fromJson(Map<String, dynamic>.from(a as Map)))
+          .map(
+            (a) =>
+                MediaPreviewItem.fromJson(Map<String, dynamic>.from(a as Map)),
+          )
           .toList();
     }
 
@@ -337,7 +349,10 @@ class MediaPreview {
             (c) => c.quality.toUpperCase() == 'ORIGINAL',
             orElse: () => MediaPreviewItem(type: 'IMAGE', quality: ''),
           );
-          resolvedCoverUrl = originalCover.url ?? json['cover_url'] as String? ?? json['url'] as String?;
+          resolvedCoverUrl =
+              originalCover.url ??
+              json['cover_url'] as String? ??
+              json['url'] as String?;
         }
       }
     }
@@ -349,13 +364,17 @@ class MediaPreview {
         (v) => v.quality.toUpperCase() == 'ORIGINAL',
         orElse: () => MediaPreviewItem(type: 'VIDEO', quality: ''),
       );
-      resolvedUrl = originalVideo.url ?? (videosList.isNotEmpty ? videosList.first.url : null) ?? json['url'] as String?;
+      resolvedUrl =
+          originalVideo.url ??
+          (videosList.isNotEmpty ? videosList.first.url : null) ??
+          json['url'] as String?;
     } else {
       final originalCover = coversList.firstWhere(
         (c) => c.quality.toUpperCase() == 'ORIGINAL',
         orElse: () => MediaPreviewItem(type: 'IMAGE', quality: ''),
       );
-      resolvedUrl = originalCover.url ?? resolvedCoverUrl ?? json['url'] as String?;
+      resolvedUrl =
+          originalCover.url ?? resolvedCoverUrl ?? json['url'] as String?;
     }
 
     return MediaPreview(
@@ -388,8 +407,8 @@ class MediaPreview {
     // Cloudflare uses "scale-down" fit mode with square bounding boxes (360x360, 720x720, etc.).
     // For vertical (portrait) images, this scale-down reduces the actual physical width of the image.
     // We adjust targetWidth upwards to compensate for the aspect ratio.
-    if (this.width != null && this.height != null && this.height! > this.width!) {
-      final double aspectRatio = this.width! / this.height!;
+    if (this.width != null && height != null && height! > this.width!) {
+      final double aspectRatio = this.width! / height!;
       if (aspectRatio > 0) {
         targetWidth = targetWidth / aspectRatio;
       }
@@ -411,14 +430,20 @@ class MediaPreview {
     }
 
     final sortedCovers = List<MediaPreviewItem>.from(covers)
-      ..sort((a, b) => getWidthOfQuality(a.quality).compareTo(getWidthOfQuality(b.quality)));
+      ..sort(
+        (a, b) => getWidthOfQuality(
+          a.quality,
+        ).compareTo(getWidthOfQuality(b.quality)),
+      );
 
     for (var c in sortedCovers) {
       if (getWidthOfQuality(c.quality) >= targetWidth) {
         return c.url ?? '';
       }
     }
-    return sortedCovers.isNotEmpty ? (sortedCovers.last.url ?? '') : (coverUrl ?? url ?? '');
+    return sortedCovers.isNotEmpty
+        ? (sortedCovers.last.url ?? '')
+        : (coverUrl ?? url ?? '');
   }
 }
 
@@ -464,7 +489,9 @@ class PostListItem {
     var mediaList = <MediaPreview>[];
     if (json['media'] is List) {
       mediaList = (json['media'] as List)
-          .map((m) => MediaPreview.fromJson(Map<String, dynamic>.from(m as Map)))
+          .map(
+            (m) => MediaPreview.fromJson(Map<String, dynamic>.from(m as Map)),
+          )
           .toList();
     }
 
@@ -539,4 +566,3 @@ class TagItem {
     );
   }
 }
-
