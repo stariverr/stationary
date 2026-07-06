@@ -379,12 +379,21 @@ class MediaPreview {
   }
 
   /// Helper to dynamically pick the closest image quality URL to the requested width.
-  String getImageUrlForWidth(double width) {
+  String getImageUrlForWidth(double width, {double devicePixelRatio = 2.0}) {
     if (covers.isEmpty) return coverUrl ?? url ?? '';
 
-    // Low: 360, Medium: 720, High: 1440, Original: 3840.
-    // Use target width multiplied by 1.5 to account for device pixel ratio.
-    double targetWidth = width * 1.5;
+    // Use target width multiplied by the actual device pixel ratio to get required physical pixels.
+    double targetWidth = width * devicePixelRatio;
+
+    // Cloudflare uses "scale-down" fit mode with square bounding boxes (360x360, 720x720, etc.).
+    // For vertical (portrait) images, this scale-down reduces the actual physical width of the image.
+    // We adjust targetWidth upwards to compensate for the aspect ratio.
+    if (this.width != null && this.height != null && this.height! > this.width!) {
+      final double aspectRatio = this.width! / this.height!;
+      if (aspectRatio > 0) {
+        targetWidth = targetWidth / aspectRatio;
+      }
+    }
 
     int getWidthOfQuality(String q) {
       switch (q.toUpperCase()) {

@@ -2132,7 +2132,8 @@ class _PostCardItemState extends State<PostCardItem> {
       builder: (context, constraints) {
         String? coverUrl;
         if (post.media.isNotEmpty) {
-          coverUrl = post.media.first.getImageUrlForWidth(constraints.maxWidth);
+          final dpr = MediaQuery.of(context).devicePixelRatio;
+          coverUrl = post.media.first.getImageUrlForWidth(constraints.maxWidth, devicePixelRatio: dpr);
         }
 
         return MouseRegion(
