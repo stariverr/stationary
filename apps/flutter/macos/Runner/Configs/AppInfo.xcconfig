@@ -12,3 +12,6 @@ PRODUCT_BUNDLE_IDENTIFIER = com.stariverr.stationary.stationary
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.stariverr.stationary. All rights reserved.
+
+MACOSX_DEPLOYMENT_TARGET = 15.0
+EXCLUDED_ARCHS = x86_64
