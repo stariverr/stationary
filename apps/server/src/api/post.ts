@@ -253,9 +253,9 @@ router.get(
                         });
                     }
                 }
-                // If no cover files, use original url of image
-                else if (row.type === MediaType.IMAGE) {
-                    const imageFiles = sortedFiles.filter((f) => f.purpose === TrackPurpose.CONTENT);
+                // If no cover files, use original/cdn compressed version of image
+                else if ([MediaType.IMAGE, MediaType.LIVE_PHOTO].includes(row.type)) {
+                    const imageFiles = sortedFiles.filter((f) => f.purpose === TrackPurpose.CONTENT && f.type == TrackType.IMAGE);
                     if (imageFiles.length) {
                         for (const imageFile of imageFiles) {
                             // CF currently does not support processing these format, so do nothing
