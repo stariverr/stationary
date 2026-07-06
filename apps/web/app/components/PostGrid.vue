@@ -249,7 +249,6 @@ const changePage = async (newPage: number) => {
     if (scrollContainer.value) {
         scrollContainer.value.scrollTop = 0;
     }
-    await fetchPosts({ page: newPage, count: count.value });
 };
 
 const isPrevDisabled = computed(() => page.value <= 1 || isLoading.value);
@@ -431,7 +430,6 @@ const handleKeydown = (e: KeyboardEvent) => {
 };
 
 onMounted(() => {
-    fetchPosts({ count: count.value }); // Initial fetch
     window.addEventListener("keydown", handleKeydown);
 });
 

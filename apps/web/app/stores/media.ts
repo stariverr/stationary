@@ -237,6 +237,8 @@ export const useMediaStore = defineStore("media", () => {
         score?: number | null;
     }
 
+    const isListEnabled = computed(() => route.path.startsWith("/media") || route.path === "/");
+
     const {
         data: mediaData,
         isLoading: isLoadingMediaQuery,
@@ -254,6 +256,7 @@ export const useMediaStore = defineStore("media", () => {
                 ai: useAiSearch.value,
             },
         ]),
+        enabled: isListEnabled,
         placeholderData: keepPreviousData,
         queryFn: async (): Promise<{ list: MappedMediaItem[]; total: number }> => {
             const hasKeyword = !!searchKeyword.value?.trim();

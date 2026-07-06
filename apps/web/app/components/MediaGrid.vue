@@ -34,10 +34,9 @@ const totalPages = computed(() => Math.ceil((total.value || 0) / (count.value ||
 
 const pageSize = computed({
     get: () => count.value,
-    set: async (val) => {
+    set: (val) => {
         page.value = 1;
         count.value = val;
-        await refetchMedia();
     },
 });
 const selectedMediaIds = ref<Set<string>>(new Set());
@@ -80,7 +79,6 @@ const changePage = async (newPage: number) => {
     if (scrollContainer.value) {
         scrollContainer.value.scrollTop = 0;
     }
-    await refetchMedia();
 };
 
 const isPrevDisabled = computed(() => page.value <= 1 || isLoadingMedia.value);
