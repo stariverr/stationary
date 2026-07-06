@@ -4,6 +4,7 @@ import '../services/api_service.dart';
 import '../models.dart';
 import '../widgets/premium_image.dart';
 import '../widgets/premium_video_player.dart';
+import '../widgets/premium_live_photo_player.dart';
 import 'media_lightbox.dart';
 
 class PostDetailPage extends StatefulWidget {
@@ -513,6 +514,15 @@ class _PostDetailPageState extends State<PostDetailPage> {
             },
             itemBuilder: (context, idx) {
               final item = post.media[idx];
+              MediaTrack? liveTrack;
+              if (item.type == 'LIVE_PHOTO') {
+                for (final t in item.tracks) {
+                  if (t.type == 'VIDEO' && t.purpose == 'CONTENT') {
+                    liveTrack = t;
+                    break;
+                  }
+                }
+              }
               
               if (item.type == 'VIDEO' && _playingInlineIndex == idx && item.url != null) {
                 return PremiumVideoPlayer(
@@ -591,6 +601,12 @@ class _PostDetailPageState extends State<PostDetailPage> {
                             ),
                           ),
                         ],
+                      )
+                    else if (item.type == 'LIVE_PHOTO' && item.url != null && liveTrack != null)
+                      PremiumLivePhotoPlayer(
+                        imageUrl: item.url!,
+                        videoUrl: liveTrack.url,
+                        fit: BoxFit.contain,
                       )
                     else if (item.url != null)
                       PremiumImage(

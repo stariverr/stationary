@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../models.dart';
 import '../services/media_decoder.dart';
 import '../widgets/premium_video_player.dart';
+import '../widgets/premium_live_photo_player.dart';
 
 class MediaLightbox extends StatefulWidget {
   final List<Media> mediaList;
@@ -129,6 +130,16 @@ class _MediaLightboxState extends State<MediaLightbox> {
                 },
                 itemBuilder: (context, index) {
                   final item = widget.mediaList[index];
+                  MediaTrack? liveTrack;
+                  if (item.type == 'LIVE_PHOTO') {
+                    for (final t in item.tracks) {
+                      if (t.type == 'VIDEO' && t.purpose == 'CONTENT') {
+                        liveTrack = t;
+                        break;
+                      }
+                    }
+                  }
+
                   if (item.type == 'VIDEO' && item.url != null) {
                     return Center(
                       child: PremiumVideoPlayer(
@@ -142,6 +153,14 @@ class _MediaLightboxState extends State<MediaLightbox> {
                           });
                           _updateSystemUI();
                         },
+                      ),
+                    );
+                  } else if (item.type == 'LIVE_PHOTO' && item.url != null && liveTrack != null) {
+                    return Center(
+                      child: PremiumLivePhotoPlayer(
+                        imageUrl: item.url!,
+                        videoUrl: liveTrack.url,
+                        fit: BoxFit.contain,
                       ),
                     );
                   } else if (item.url != null) {

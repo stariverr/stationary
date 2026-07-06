@@ -923,131 +923,152 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                             ),
                             const SizedBox(height: 6),
                             // Button controls
-                            Row(
-                              children: [
-                                IconButton(
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                  icon: Icon(
-                                    controller.value.isPlaying ? LucideIcons.pause : LucideIcons.play,
-                                    color: Colors.white,
-                                    size: 18,
-                                  ),
-                                  onPressed: _togglePlay,
-                                ),
-                                const SizedBox(width: 12),
-                                // Time counter
-                                Text(
-                                  '${_formatDuration(controller.value.position)} / ${_formatDuration(controller.value.duration)}',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 11,
-                                    fontFamily: 'monospace',
-                                  ),
-                                ),
-                                const Spacer(),
-                                // Volume Controller
-                                GestureDetector(
-                                  onTap: _toggleMute,
-                                  behavior: HitTestBehavior.opaque,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
-                                    child: Icon(
-                                      _isMuted || controller.value.volume == 0
-                                          ? LucideIcons.volumeX
-                                          : controller.value.volume < 0.5
-                                              ? LucideIcons.volume1
-                                              : LucideIcons.volume2,
-                                      color: Colors.white,
-                                      size: 16,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                SizedBox(
-                                  width: 50,
-                                  child: SliderTheme(
-                                    data: SliderTheme.of(context).copyWith(
-                                      trackHeight: 2.0,
-                                      activeTrackColor: Colors.white,
-                                      inactiveTrackColor: Colors.white24,
-                                      thumbColor: Colors.white,
-                                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 4.0),
-                                      overlayShape: const RoundSliderOverlayShape(overlayRadius: 8.0),
-                                    ),
-                                    child: Slider(
-                                      value: _isMuted ? 0.0 : controller.value.volume,
-                                      onChanged: _setVolume,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                // Speed selector trigger
-                                InkWell(
-                                  onTap: () {
-                                    setState(() {
-                                      _showSpeedMenu = !_showSpeedMenu;
-                                    });
-                                  },
-                                  borderRadius: BorderRadius.circular(4),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    child: Text(
-                                      '${_playbackSpeed}x',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                final theme = Theme.of(context);
+                                final isMobile = theme.platform == TargetPlatform.iOS || theme.platform == TargetPlatform.android;
+                                final isNarrow = constraints.maxWidth < 450;
+                                final isVeryNarrow = constraints.maxWidth < 280;
+                                final double spacing = isVeryNarrow ? 6.0 : (isNarrow ? 8.0 : 12.0);
+                                final bool showVolumeSlider = !isMobile && !isNarrow;
+
+                                return Row(
+                                  children: [
+                                    InkWell(
+                                      onTap: _togglePlay,
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(6.0),
+                                        child: Icon(
+                                          controller.value.isPlaying ? LucideIcons.pause : LucideIcons.play,
+                                          color: Colors.white,
+                                          size: 18,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                IconButton(
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                  icon: const Icon(
-                                    LucideIcons.info,
-                                    color: Colors.white,
-                                    size: 18,
-                                  ),
-                                  onPressed: () {
-                                    setState(() {
-                                      _showInfoMenu = !_showInfoMenu;
-                                      _showSettingsMenu = false;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(width: 12),
-                                IconButton(
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                  icon: const Icon(
-                                    LucideIcons.settings,
-                                    color: Colors.white,
-                                    size: 18,
-                                  ),
-                                  onPressed: () {
-                                    setState(() {
-                                      _showSettingsMenu = !_showSettingsMenu;
-                                      _showInfoMenu = false;
-                                    });
-                                  },
-                                ),
-                                if (widget.onFullscreen != null) ...[
-                                  const SizedBox(width: 12),
-                                  IconButton(
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                    icon: const Icon(
-                                      LucideIcons.maximize,
-                                      color: Colors.white,
-                                      size: 18,
+                                    SizedBox(width: spacing),
+                                    // Time counter
+                                    Text(
+                                      '${_formatDuration(controller.value.position)} / ${_formatDuration(controller.value.duration)}',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: isNarrow ? 10 : 11,
+                                        fontFamily: 'monospace',
+                                      ),
                                     ),
-                                    onPressed: widget.onFullscreen,
-                                  ),
-                                ],
-                              ],
+                                    const Spacer(),
+                                    // Volume Controller
+                                    GestureDetector(
+                                      onTap: _toggleMute,
+                                      behavior: HitTestBehavior.opaque,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
+                                        child: Icon(
+                                          _isMuted || controller.value.volume == 0
+                                              ? LucideIcons.volumeX
+                                              : controller.value.volume < 0.5
+                                                  ? LucideIcons.volume1
+                                                  : LucideIcons.volume2,
+                                          color: Colors.white,
+                                          size: 16,
+                                        ),
+                                      ),
+                                    ),
+                                    if (showVolumeSlider) ...[
+                                      const SizedBox(width: 4),
+                                      SizedBox(
+                                        width: 50,
+                                        child: SliderTheme(
+                                          data: SliderTheme.of(context).copyWith(
+                                            trackHeight: 2.0,
+                                            activeTrackColor: Colors.white,
+                                            inactiveTrackColor: Colors.white24,
+                                            thumbColor: Colors.white,
+                                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 4.0),
+                                            overlayShape: const RoundSliderOverlayShape(overlayRadius: 8.0),
+                                          ),
+                                          child: Slider(
+                                            value: _isMuted ? 0.0 : controller.value.volume,
+                                            onChanged: _setVolume,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                    SizedBox(width: spacing),
+                                    // Speed selector trigger
+                                    InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          _showSpeedMenu = !_showSpeedMenu;
+                                        });
+                                      },
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        child: Text(
+                                          '${_playbackSpeed}x',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: isNarrow ? 10 : 11,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(width: spacing),
+                                    InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          _showInfoMenu = !_showInfoMenu;
+                                          _showSettingsMenu = false;
+                                        });
+                                      },
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(6.0),
+                                        child: Icon(
+                                          LucideIcons.info,
+                                          color: Colors.white,
+                                          size: 18,
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(width: spacing),
+                                    InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          _showSettingsMenu = !_showSettingsMenu;
+                                          _showInfoMenu = false;
+                                        });
+                                      },
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(6.0),
+                                        child: Icon(
+                                          LucideIcons.settings,
+                                          color: Colors.white,
+                                          size: 18,
+                                        ),
+                                      ),
+                                    ),
+                                    if (widget.onFullscreen != null) ...[
+                                      SizedBox(width: spacing),
+                                      InkWell(
+                                        onTap: widget.onFullscreen,
+                                        borderRadius: BorderRadius.circular(4),
+                                        child: const Padding(
+                                          padding: EdgeInsets.all(6.0),
+                                          child: Icon(
+                                            LucideIcons.maximize,
+                                            color: Colors.white,
+                                            size: 18,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                );
+                              },
                             ),
                           ],
                         ),
