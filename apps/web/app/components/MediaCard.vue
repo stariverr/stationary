@@ -5,7 +5,7 @@ import { Play, Layers, Loader2, FileImage, Trash, Clock, CheckCircle2, AlertCirc
 import { Checkbox } from "@/components/ui/checkbox";
 import { getOptimizedImageUrl, getOptimizedSrcset } from "@/utils/image";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
-import { toast } from "@/components/ui/sonner";
+import { toast } from "vue-sonner";
 import { useApi } from "@/composables/useApi";
 import { useMediaStore } from "@/stores/media";
 

@@ -5,7 +5,7 @@ import { Play, Loader2, FileImage, Link as LinkIcon, Trash, Clock, CheckCircle2,
 import { Checkbox } from "@/components/ui/checkbox";
 import { getOptimizedImageUrl, getOptimizedSrcset } from "@/utils/image";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
-import { toast } from "@/components/ui/sonner";
+import { toast } from "vue-sonner";
 import { useApi } from "@/composables/useApi";
 import { usePostStore } from "@/stores/posts";
 
@@ -191,7 +191,8 @@ const getPlatformBadgeClass = (platform: string) => {
                     <img
                         v-else-if="post.type === 'MULTI_MEDIA' && post.media?.[0]?.type !== 'VIDEO'"
                         :src="
-                            post.media?.[0]?.thumbnail || getOptimizedImageUrl(post.media?.[0]?.url, {
+                            post.media?.[0]?.thumbnail ||
+                            getOptimizedImageUrl(post.media?.[0]?.url, {
                                 width: 480,
                                 height: 360,
                                 fit: 'cover',
@@ -225,7 +226,8 @@ const getPlatformBadgeClass = (platform: string) => {
                         <img
                             v-if="post.media?.[0]?.poster && !isHovered"
                             :src="
-                                post.media?.[0]?.poster || getOptimizedImageUrl(post.media?.[0]?.poster, {
+                                post.media?.[0]?.poster ||
+                                getOptimizedImageUrl(post.media?.[0]?.poster, {
                                     width: 480,
                                     height: 360,
                                     fit: 'cover',

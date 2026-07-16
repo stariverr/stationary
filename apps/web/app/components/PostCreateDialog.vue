@@ -9,7 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useLibraryStore } from "@/stores/library";
 import { useImportStore } from "@/stores/import";
 import { useApi } from "@/composables/useApi";
-import { toast } from "@/components/ui/sonner";
+import { toast } from "vue-sonner";
 import {
     Loader2,
     Plus,
@@ -778,7 +778,7 @@ async function handleSubmit() {
                                 <Loader2 class="w-8 h-8 animate-spin text-slate-400" />
                             </div>
                             <div v-else-if="filteredOrphanMediaList.length === 0" class="text-center text-slate-400 text-xs py-12">
-                                {{ $t('media.no_orphan_found') }}
+                                {{ $t("media.no_orphan_found") }}
                             </div>
                             <div
                                 v-else

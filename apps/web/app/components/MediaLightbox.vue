@@ -22,7 +22,7 @@ import {
 } from "@lucide/vue";
 import { useMediaStore, type MediaListItem, type MappedMediaItem, type MatchedDetails } from "@/stores/media";
 import { type ApiPostDetail, type Track } from "@/types/post";
-import { toast } from "@/components/ui/sonner";
+import { toast } from "vue-sonner";
 import { storeToRefs } from "pinia";
 import { Swiper, SwiperSlide } from "swiper/vue";
 import "swiper/css";

@@ -16,7 +16,7 @@ import {
     Pencil,
 } from "@lucide/vue";
 import { useMediaStore } from "@/stores/media";
-import { toast } from "@/components/ui/sonner";
+import { toast } from "vue-sonner";
 import { useApi } from "@/composables/useApi";
 import { getOptimizedImageUrl } from "@/utils/image";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";

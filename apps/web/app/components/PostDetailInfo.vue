@@ -26,7 +26,7 @@ import {
 } from "@lucide/vue";
 import { type Post } from "@/types/post";
 import { usePostStore } from "@/stores/posts";
-import { toast } from "@/components/ui/sonner";
+import { toast } from "vue-sonner";
 import { Temporal } from "@js-temporal/polyfill";
 import { useQueryClient } from "@tanstack/vue-query";
 import CreateMediaDialog from "./CreateMediaDialog.vue";

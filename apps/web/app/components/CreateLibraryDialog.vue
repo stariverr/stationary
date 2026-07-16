@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useLibraryStore } from "@/stores/library";
 import { Loader2 } from "@lucide/vue";
-import { toast } from "@/components/ui/sonner";
+import { toast } from "vue-sonner";
 
 const props = defineProps<{
     open: boolean;
