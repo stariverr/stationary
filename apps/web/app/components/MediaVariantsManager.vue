@@ -365,7 +365,7 @@ const handleUploadTrack = async (
                       },
                   },
               })
-            : await useApi<{ success: boolean }>(`/media/${props.mediaId}/tracks/add-or-replace`, {
+            : await useApi<{ success: boolean }>(`/media/${props.mediaId}/tracks/upsert`, {
                   method: "POST",
                   body: {
                       type: params.type,
@@ -690,7 +690,7 @@ const handleVideoMouseLeave = (e: Event) => {
                                                 <SelectTrigger class="h-8 border-zinc-200 rounded-lg bg-white text-xs text-zinc-800">
                                                     <SelectValue placeholder="Select purpose" />
                                                 </SelectTrigger>
-                                                <SelectContent class="z-[300] bg-white border border-zinc-200 text-zinc-800">
+                                                <SelectContent class="bg-white border border-zinc-200 text-zinc-800">
                                                     <SelectItem value="CONTENT">Content</SelectItem>
                                                     <SelectItem value="COVER">Cover</SelectItem>
                                                     <SelectItem value="THUMBNAIL">Thumbnail</SelectItem>
@@ -704,7 +704,7 @@ const handleVideoMouseLeave = (e: Event) => {
                                                 <SelectTrigger class="h-8 border-zinc-200 rounded-lg bg-white text-xs text-zinc-800">
                                                     <SelectValue placeholder="Select quality" />
                                                 </SelectTrigger>
-                                                <SelectContent class="z-[300] bg-white border border-zinc-200 text-zinc-800">
+                                                <SelectContent class="bg-white border border-zinc-200 text-zinc-800">
                                                     <SelectItem value="ORIGINAL">Original</SelectItem>
                                                     <SelectItem value="HIGH">High</SelectItem>
                                                     <SelectItem value="MEDIUM">Medium</SelectItem>
@@ -718,7 +718,7 @@ const handleVideoMouseLeave = (e: Event) => {
                                                 <SelectTrigger class="h-8 border-zinc-200 rounded-lg bg-white text-xs text-zinc-800">
                                                     <SelectValue placeholder="Select language" />
                                                 </SelectTrigger>
-                                                <SelectContent class="z-[300] bg-white border border-zinc-200 text-zinc-800">
+                                                <SelectContent class="bg-white border border-zinc-200 text-zinc-800">
                                                     <SelectItem value="zh-CN">简体中文 (zh-CN)</SelectItem>
                                                     <SelectItem value="zh-TW">繁體中文 (zh-TW)</SelectItem>
                                                     <SelectItem value="en">English (en)</SelectItem>
@@ -850,7 +850,7 @@ const handleVideoMouseLeave = (e: Event) => {
                         >
                             <SelectValue placeholder="Select purpose" />
                         </SelectTrigger>
-                        <SelectContent class="z-[300] bg-white border border-zinc-200 text-zinc-800">
+                        <SelectContent class="bg-white border border-zinc-200 text-zinc-800">
                             <SelectItem value="CONTENT">Content</SelectItem>
                             <SelectItem value="COVER">Cover</SelectItem>
                             <SelectItem value="THUMBNAIL">Thumbnail</SelectItem>
@@ -868,7 +868,7 @@ const handleVideoMouseLeave = (e: Event) => {
                         >
                             <SelectValue placeholder="Select type" />
                         </SelectTrigger>
-                        <SelectContent class="z-[300] bg-white border border-zinc-200 text-zinc-800">
+                        <SelectContent class="bg-white border border-zinc-200 text-zinc-800">
                             <SelectItem value="IMAGE">Image</SelectItem>
                             <SelectItem v-if="newTrackParams.purpose !== 'COVER' && newTrackParams.purpose !== 'THUMBNAIL'" value="VIDEO"
                                 >Video</SelectItem
@@ -894,7 +894,7 @@ const handleVideoMouseLeave = (e: Event) => {
                         >
                             <SelectValue placeholder="Select quality" />
                         </SelectTrigger>
-                        <SelectContent class="z-[300] bg-white border border-zinc-200 text-zinc-800">
+                        <SelectContent class="bg-white border border-zinc-200 text-zinc-800">
                             <SelectItem value="ORIGINAL">{{ $t("media.quality.original", "Original") }}</SelectItem>
                             <SelectItem value="HIGH">{{ $t("media.quality.high", "High") }}</SelectItem>
                             <SelectItem value="MEDIUM">{{ $t("media.quality.medium", "Medium") }}</SelectItem>
@@ -930,7 +930,7 @@ const handleVideoMouseLeave = (e: Event) => {
                         >
                             <SelectValue placeholder="Select format" />
                         </SelectTrigger>
-                        <SelectContent class="z-[300] bg-white border border-zinc-200 text-zinc-800">
+                        <SelectContent class="bg-white border border-zinc-200 text-zinc-800">
                             <SelectItem value="vtt">WebVTT (.vtt)</SelectItem>
                             <SelectItem value="srt">SubRip (.srt)</SelectItem>
                             <SelectItem value="lrc">Lrc Lyrics (.lrc)</SelectItem>
@@ -947,7 +947,7 @@ const handleVideoMouseLeave = (e: Event) => {
                         >
                             <SelectValue placeholder="Select language" />
                         </SelectTrigger>
-                        <SelectContent class="z-[300] bg-white border border-zinc-200 text-zinc-800">
+                        <SelectContent class="bg-white border border-zinc-200 text-zinc-800">
                             <SelectItem value="zh-CN">简体中文 (zh-CN)</SelectItem>
                             <SelectItem value="zh-TW">繁體中文 (zh-TW)</SelectItem>
                             <SelectItem value="en">English (en)</SelectItem>

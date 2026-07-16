@@ -63,6 +63,9 @@ watch(
                 <!-- Sliding Detail Panel -->
                 <PostDetail />
             </div>
+
+            <!-- Global Upload & Draft Tray Box -->
+            <GlobalDraftTray />
         </div>
     </div>
 </template>

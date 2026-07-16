@@ -15,6 +15,7 @@ import {
     ChevronDown,
     User,
     Tag as TagIcon,
+    Plus,
 } from "@lucide/vue";
 import { useDebounceFn, onClickOutside } from "@vueuse/core";
 import { PaginationRoot, PaginationList, PaginationListItem, PaginationPrev, PaginationNext, PaginationEllipsis } from "reka-ui";
@@ -44,7 +45,7 @@ const {
     authorSearchKeyword,
     authorCache,
 } = usePosts();
-const { toggleSidebar } = useLayout();
+const { toggleSidebar, isCreatePostOpen } = useLayout();
 const libraryStore = useLibraryStore();
 const tagStore = useTagStore();
 const { isMultiSelectClick } = useMultiSelectModifier();
@@ -498,6 +499,8 @@ onUnmounted(() => {
                     <span class="hidden lg:inline">{{ $t("common.filters", "Filters") }}</span>
                     <span v-if="hasActiveFilters" class="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
                 </button>
+
+                <!-- Create Post Button moved to Left Sidebar -->
 
                 <!-- Action Toolbar Divider -->
                 <div class="h-5 w-px bg-gray-200 hidden sm:block mx-0.5"></div>
@@ -1037,5 +1040,7 @@ onUnmounted(() => {
             @moved="handleMoved"
             @cancel="exitSelectionMode"
         />
+
+        <PostCreateDialog v-model:open="isCreatePostOpen" @created="fetchPosts" />
     </div>
 </template>

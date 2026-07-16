@@ -13,6 +13,14 @@ export const useLayout = () => {
             get: () => store.isSidebarCollapsed,
             set: (val) => (store.isSidebarCollapsed = val),
         }),
+        isCreatePostOpen: computed({
+            get: () => store.isCreatePostOpen,
+            set: (val) => (store.isCreatePostOpen = val),
+        }),
+        isCreateMediaOpen: computed({
+            get: () => store.isCreateMediaOpen,
+            set: (val) => (store.isCreateMediaOpen = val),
+        }),
         toggleSidebar: store.toggleSidebar,
         closeSidebar: store.closeSidebar,
     };

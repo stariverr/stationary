@@ -21,6 +21,9 @@ import {
     Tag,
     MediaTag,
     TagStatus,
+    DraftFile,
+    DraftFileStatus,
+    MediaType,
 } from "@/db/schema";
 import { s3 } from "@/global/s3";
 import { and, eq, ilike, SQL, count, asc, desc, or, isNull, inArray } from "drizzle-orm";
@@ -34,9 +37,17 @@ import { v7 as uuidv7 } from "uuid";
 import { env } from "@/global/env";
 import { VideoCoverService } from "@/services/video_cover";
 import { buildCdnUrl } from "@/lib/utils/cdn";
-import { toIsoTimestamp, FormTimestampSchema } from "@/lib/utils/time";
+import { toIsoTimestamp, FormTimestampSchema, nowDbTimestamp } from "@/lib/utils/time";
 import { normalizeVariantKey } from "@/lib/utils/track";
 import { Quality } from "@/lib/types";
+import { consumeDraftFile, DraftFileUnavailableError } from "@/services/draft-file";
+import {
+    assignTrackPriorities,
+    validateNoDuplicateDraftFileIds,
+    validateDraftTrackFileTypes,
+    validateMediaComposition,
+} from "@/lib/validation/media-composition";
+import { getAllowedTrackTypesForFile, getFileExtension, getMimeTypeByExt } from "@/lib/utils/file";
 
 function escapeXml(unsafe: string): string {
     return unsafe.replace(/[<>&'"]/g, (c) => {
@@ -72,6 +83,7 @@ export const MediaListRequestBodySchema = z.object({
     source: z.enum(PostSource).optional(),
     display_mode: z.enum(["flat", "stacked"]).default("flat"),
     library_id: z.uuid().optional(),
+    has_no_post: z.string().optional(),
 });
 
 export interface MappedFileRow {
@@ -143,20 +155,19 @@ export function mapMediaToResponse(
     const coverUrl =
         coverFile && coverFile.file_path && coverFile.file_bucket ? buildCdnUrl(coverFile.file_bucket, coverFile.file_path) : null;
 
-    // Live Photo: IMAGE is primary
+    const primaryTrackType =
+        media.type === MediaType.VIDEO
+            ? TrackType.VIDEO
+            : media.type === MediaType.AUDIO
+              ? TrackType.AUDIO
+              : media.type === MediaType.PDF
+                ? TrackType.PDF
+                : TrackType.IMAGE;
+
+    // Live Photo and image media use IMAGE as their primary track.
     const primaryFile =
-        sortedFiles.find(
-            (f) =>
-                f.purpose === TrackPurpose.CONTENT &&
-                f.is_default &&
-                (media.type === "VIDEO" ? f.type === TrackType.VIDEO : f.type === TrackType.IMAGE),
-        ) ||
-        sortedFiles.find(
-            (f) =>
-                f.purpose === TrackPurpose.CONTENT &&
-                f.priority === 0 &&
-                (media.type === "VIDEO" ? f.type === TrackType.VIDEO : f.type === TrackType.IMAGE),
-        );
+        sortedFiles.find((f) => f.purpose === TrackPurpose.CONTENT && f.is_default && f.type === primaryTrackType) ||
+        sortedFiles.find((f) => f.purpose === TrackPurpose.CONTENT && f.priority === 0 && f.type === primaryTrackType);
     let primaryFileUrl =
         primaryFile && primaryFile.file_path && primaryFile.file_bucket
             ? buildCdnUrl(primaryFile.file_bucket, primaryFile.file_path)
@@ -208,9 +219,13 @@ router.get(
         }
         const offset = (page - 1) * pageSize;
 
-        const { keyword, source, display_mode, library_id } = c.req.valid("query");
+        const { keyword, source, display_mode, library_id, has_no_post } = c.req.valid("query");
 
         const where: SQL[] = [];
+
+        if (has_no_post === "true") {
+            where.push(isNull(Media.post_id));
+        }
 
         if (keyword) {
             where.push(or(ilike(Media.title, `%${keyword}%`), ilike(Media.description, `%${keyword}%`))!);
@@ -480,6 +495,10 @@ router.post("/trash/:id", requireAuth, async (c) => {
         return c.json(error(Code.INVALID_PARAMETER, "media id is required"), 400);
     }
 
+    // Verify access to the media. The media must be active (not already in the recycle bin) to be trashed.
+    const access = await checkMediaAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+
     const result = await RecycleService.recycleMedia(id);
     if (result.mediaUpdated === 0) {
         return c.json(error(Code.NOT_FOUND, "Media not found"), 404);
@@ -494,6 +513,11 @@ router.post("/restore/:id", requireAuth, async (c) => {
         return c.json(error(Code.INVALID_PARAMETER, "media id is required"), 400);
     }
 
+    // Verify ownership of the media. Since the media is in the recycle bin (recycle_time !== null),
+    // we must allow accessing recycled media using checkMediaOwnership with allowRecycled = true.
+    const access = await checkMediaOwnership(c, id, true);
+    if (access.errorResponse) return access.errorResponse;
+
     const result = await RecycleService.restoreMedia(id);
     if (result.mediaUpdated === 0) {
         return c.json(error(Code.NOT_FOUND, "Media not found"), 404);
@@ -507,6 +531,10 @@ router.post("/delete/:id", requireAuth, async (c) => {
     if (!id) {
         return c.json(error(Code.INVALID_PARAMETER, "media id is required"));
     }
+
+    // Verify ownership of the media. We allow hard-deleting the media even if it is currently in the recycle bin.
+    const access = await checkMediaOwnership(c, id, true);
+    if (access.errorResponse) return access.errorResponse;
 
     const result = await DeleteService.deleteMedia(id);
     if (result.mediaUpdated === 0) {
@@ -899,9 +927,27 @@ router.get(
     },
 );
 
+/**
+ * Checks if the current user has access to the specified active media.
+ * Recycled/trashed media will be treated as not found.
+ */
 async function checkMediaAccess(
     c: Context,
     mediaId: string,
+): Promise<{ media: typeof Media.$inferSelect; errorResponse: null } | { media: null; errorResponse: any }> {
+    return checkMediaOwnership(c, mediaId, false);
+}
+
+/**
+ * Checks if the current user owns and has access to the specified media.
+ *
+ * @param allowRecycled If true, allows accessing the media record even if it is currently in the recycle bin (recycle_time !== null).
+ *                      Should be set to true for actions like restore or permanent delete.
+ */
+async function checkMediaOwnership(
+    c: Context,
+    mediaId: string,
+    allowRecycled: boolean,
 ): Promise<{ media: typeof Media.$inferSelect; errorResponse: null } | { media: null; errorResponse: any }> {
     const user = c.get("user");
     if (!user) {
@@ -911,7 +957,7 @@ async function checkMediaAccess(
     const mediaRows = await db.select().from(Media).where(eq(Media.id, mediaId)).limit(1);
     const media = mediaRows[0];
 
-    if (!media || media.delete_status !== DeleteStatus.ACTIVE || media.recycle_time !== null) {
+    if (!media || media.delete_status !== DeleteStatus.ACTIVE || (!allowRecycled && media.recycle_time !== null)) {
         return { media: null, errorResponse: c.json(error(Code.NOT_FOUND, "Media not found or is in recycle bin"), 404) };
     }
 
@@ -992,29 +1038,6 @@ router.post(
     },
 );
 
-function getMimeTypeByExt(ext: string): string {
-    const map: Record<string, string> = {
-        mp4: "video/mp4",
-        mov: "video/quicktime",
-        mkv: "video/x-matroska",
-        webm: "video/webm",
-        m4a: "audio/mp4",
-        mp3: "audio/mpeg",
-        vtt: "text/vtt",
-        jpg: "image/jpeg",
-        jpeg: "image/jpeg",
-        png: "image/png",
-        webp: "image/webp",
-        avif: "image/avif",
-        heic: "image/heic",
-        heif: "image/heif",
-        gif: "image/gif",
-        jxl: "image/jxl",
-        json: "application/json",
-    };
-    return map[ext.toLowerCase()] || "application/octet-stream";
-}
-
 // 1. List all tracks for a media item
 router.get("/:id/tracks", requireAuth, async (c) => {
     const id = c.req.param("id")!;
@@ -1066,7 +1089,13 @@ router.post(
         if (access.errorResponse) return access.errorResponse;
         const media = access.media!;
 
-        const ext = fileName.split(".").pop() || "bin";
+        const allowedTrackTypes = getAllowedTrackTypesForFile(fileName);
+        if (!allowedTrackTypes.includes(type)) {
+            const expected = allowedTrackTypes.length > 0 ? allowedTrackTypes.join(" or ") : "a supported media";
+            return c.json(error(Code.INVALID_PARAMETER, `${fileName} must be uploaded as ${expected} track`), 400);
+        }
+
+        const ext = getFileExtension(fileName) || "bin";
         const fileId = uuidv7();
         const prefix = `${type.toLowerCase()}_${purpose.toLowerCase()}_${priority}`;
         const postId = media.post_id;
@@ -1123,7 +1152,7 @@ const RegisterTrackSchema = z.object({
 
 // 3. Register or Replace track after successful S3 upload
 router.post(
-    "/:id/tracks/add-or-replace",
+    "/:id/tracks/upsert",
     requireAuth,
     validator("json", (value, c) => {
         const parsed = RegisterTrackSchema.safeParse(value);
@@ -1139,25 +1168,28 @@ router.post(
         const access = await checkMediaAccess(c, id);
         if (access.errorResponse) return access.errorResponse;
 
-        const result = await TrackService.addOrReplaceTrack(
-            id,
-            {
-                type: body.type,
-                purpose: body.purpose,
-                quality: body.quality,
-                priority: body.priority,
-                source_url: body.source_url,
-                metadata: body.metadata,
-                variant_key: body.variant_key,
-                is_default: body.is_default,
-                display_name: body.display_name,
-                language: body.language,
-                codec: body.codec,
-                is_stale: body.is_stale,
-                source_track_id: body.source_track_id,
-            },
-            body.file,
-        );
+        const result = await db.transaction(async (tx) => {
+            return TrackService.upsertTrack(
+                id,
+                {
+                    type: body.type,
+                    purpose: body.purpose,
+                    quality: body.quality,
+                    priority: body.priority,
+                    source_url: body.source_url,
+                    metadata: body.metadata,
+                    variant_key: body.variant_key,
+                    is_default: body.is_default,
+                    display_name: body.display_name,
+                    language: body.language,
+                    codec: body.codec,
+                    is_stale: body.is_stale,
+                    source_track_id: body.source_track_id,
+                },
+                body.file,
+                tx,
+            );
+        });
 
         return c.json(success(Code.SUCCESS, result));
     },
@@ -1206,8 +1238,14 @@ router.post(
 
 // 4. Soft-delete a track
 router.post("/:id/tracks/:trackId/delete", requireAuth, async (c) => {
-    const id = c.req.param("id")!;
-    const trackId = c.req.param("trackId")!;
+    const id = c.req.param("id");
+    const trackId = c.req.param("trackId");
+    if (!id) {
+        return c.json(error(Code.INVALID_PARAMETER, "media id is required"), 400);
+    }
+    if (!trackId) {
+        return c.json(error(Code.INVALID_PARAMETER, "track id is required"), 400);
+    }
 
     const access = await checkMediaAccess(c, id);
     if (access.errorResponse) return access.errorResponse;
@@ -1245,8 +1283,8 @@ router.post(
         return parsed.data;
     }),
     async (c) => {
-        const id = c.req.param("id")!;
-        const trackId = c.req.param("trackId")!;
+        const id = c.req.param("id");
+        const trackId = c.req.param("trackId");
         const body = c.req.valid("json");
 
         const access = await checkMediaAccess(c, id);
@@ -1254,6 +1292,134 @@ router.post(
 
         const updated = await TrackService.updateTrackMetadata(id, trackId, body);
         return c.json(success(Code.SUCCESS, updated));
+    },
+);
+
+const AddTracksFromDraftSchema = z.object({
+    tracks: z
+        .array(
+            z.object({
+                draft_file_id: z.uuid(),
+                type: z.enum(TrackType),
+                purpose: z.enum(TrackPurpose),
+                quality: z.enum(Quality),
+                is_default: z.boolean().default(false),
+                language: z.string().nullable().optional(),
+            }),
+        )
+        .min(1),
+});
+
+// 6. Add tracks from draft files to media
+router.post(
+    "/:id/tracks/from-draft",
+    requireAuth,
+    validator("json", (value, c) => {
+        const parsed = AddTracksFromDraftSchema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid parameters"), 400);
+        }
+        return parsed.data;
+    }),
+    async (c) => {
+        const id = c.req.param("id");
+        const { tracks } = c.req.valid("json");
+
+        const access = await checkMediaAccess(c, id);
+        if (!access.media || access.errorResponse) return access.errorResponse;
+        const media = access.media;
+
+        const draftIdError = validateNoDuplicateDraftFileIds(tracks);
+        if (draftIdError) {
+            return c.json(error(Code.INVALID_PARAMETER, draftIdError), 400);
+        }
+
+        const incomingDefaultGroups = new Set(tracks.filter((track) => track.is_default).map((track) => `${track.type}:${track.purpose}`));
+        const existingTracks = await db
+            .select({
+                type: Track.type,
+                purpose: Track.purpose,
+                is_default: Track.is_default,
+                priority: Track.priority,
+            })
+            .from(Track)
+            .where(and(eq(Track.media_id, id), eq(Track.delete_status, DeleteStatus.ACTIVE)));
+        const prioritizedTracks = assignTrackPriorities(tracks, existingTracks);
+        const effectiveTracks = [
+            ...existingTracks.map((track) => ({
+                ...track,
+                is_default: incomingDefaultGroups.has(`${track.type}:${track.purpose}`) ? false : track.is_default,
+            })),
+            ...prioritizedTracks,
+        ];
+        const compositionError = validateMediaComposition(media.type, effectiveTracks);
+        if (compositionError) {
+            return c.json(error(Code.INVALID_PARAMETER, compositionError), 400);
+        }
+
+        // Validate draft files exist in library and status is DRAFT
+        const draftIds = tracks.map((t) => t.draft_file_id);
+        const draftRows = await db
+            .select({ draft: DraftFile, file: DbFile })
+            .from(DraftFile)
+            .innerJoin(DbFile, eq(DraftFile.file_id, DbFile.id))
+            .where(and(eq(DraftFile.library_id, media.library_id), eq(DraftFile.status, DraftFileStatus.DRAFT)));
+
+        const activeDraftMap = new Map(
+            draftRows.map(({ draft, file }) => [
+                draft.id,
+                {
+                    name: draft.original_name,
+                    mime_type: file.mime_type,
+                },
+            ]),
+        );
+        for (const draftId of draftIds) {
+            if (!activeDraftMap.has(draftId)) {
+                return c.json(error(Code.INVALID_PARAMETER, `Draft file ${draftId} is invalid or already consumed`), 400);
+            }
+        }
+        const fileTypeError = validateDraftTrackFileTypes(
+            [
+                {
+                    type: media.type,
+                    tracks,
+                },
+            ],
+            activeDraftMap,
+        );
+        if (fileTypeError) {
+            return c.json(error(Code.INVALID_PARAMETER, fileTypeError), 400);
+        }
+
+        try {
+            await db.transaction(async (tx) => {
+                for (const track of prioritizedTracks) {
+                    const fileId = await consumeDraftFile(tx, track.draft_file_id, media.library_id);
+
+                    await TrackService.upsertTrack(
+                        id,
+                        {
+                            type: track.type,
+                            purpose: track.purpose,
+                            quality: track.quality,
+                            priority: track.priority,
+                            is_default: track.is_default,
+                            language: track.language || null,
+                        },
+                        fileId,
+                        tx,
+                    );
+                }
+            });
+        } catch (e) {
+            if (e instanceof DraftFileUnavailableError) {
+                return c.json(error(Code.ALREADY_EXISTS, e.message), 409);
+            }
+            throw e;
+        }
+
+        return c.json(success(Code.SUCCESS, { success: true }));
     },
 );
 

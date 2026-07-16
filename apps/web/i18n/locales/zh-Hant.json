@@ -47,7 +47,11 @@
         "search_authors_placeholder": "搜尋作者...",
         "n_authors_selected": "已選中 {count} 位作者",
         "no_authors_found": "未找到作者",
-        "clear_all": "清除已選"
+        "clear_all": "清除已選",
+        "edit": "編輯",
+        "save": "儲存",
+        "cancel": "取消",
+        "variants": "變體"
     },
     "grid": {
         "showing_items": "顯示 {count} 項",
@@ -171,6 +175,7 @@
         }
     },
     "media": {
+        "manage_tracks": "管理軌道",
         "live": "實況",
         "quality_label": "清晰度/保真度",
         "quality": {
@@ -181,7 +186,11 @@
         },
         "actions": {
             "regenerate_cover": "重新生成封面",
-            "regenerate_covers": "批量重新生成影片封面"
+            "regenerate_covers": "批次重新生成影片封面",
+            "cancel": "取消",
+            "discard": "捨棄",
+            "create": "建立媒體",
+            "add": "加入媒體"
         },
         "cover": {
             "queued": "影片封面重新生成任務已加入隊列。",
@@ -191,7 +200,68 @@
             "select_video_required": "請至少選擇一個影片。",
             "failed": "封面重新生成任務加入隊列失敗。",
             "loading": "正在請求..."
-        }
+        },
+        "create_title": "建立媒體",
+        "create_btn": "建立媒體",
+        "search_placeholder": "搜尋媒體庫素材...",
+        "no_orphan_found": "未找到匹配的媒體素材。",
+        "create_desc": "上傳檔案並將其配置為單個媒體素材的軌道。",
+        "add_tracks_title": "向媒體加入軌道",
+        "add_tracks_desc": "拖放檔案到此處，從您的裝置上傳，或從草稿箱中選擇已有檔案。",
+        "upload_files": "上傳檔案",
+        "add_files": "加入檔案",
+        "uploaded_count": "已上傳 {count} 個檔案",
+        "uploading": "正在上傳...",
+        "title_label": "標題",
+        "title_placeholder": "我的媒體素材",
+        "type_label": "媒體類型",
+        "configure_tracks": "配置每個檔案的軌道屬性",
+        "unsupported_track": "不支援",
+        "not_applicable": "不適用",
+        "untitled": "未命名媒體",
+        "tracks_count": "{count} 個軌道",
+        "headers": {
+            "file": "檔案",
+            "track_type": "軌道類型",
+            "purpose": "用途",
+            "quality": "清晰度",
+            "default": "預設",
+            "language": "語言"
+        },
+        "types": {
+            "IMAGE": "圖片集",
+            "VIDEO": "影片素材",
+            "LIVE_PHOTO": "實況相片",
+            "AUDIO": "音訊素材",
+            "PDF": "PDF 文件"
+        },
+        "track_types": {
+            "VIDEO": "影片",
+            "AUDIO": "音訊",
+            "IMAGE": "圖片",
+            "SUBTITLE": "字幕",
+            "PDF": "PDF"
+        },
+        "purposes": {
+            "CONTENT": "內容",
+            "COVER": "封面",
+            "THUMBNAIL": "縮圖",
+            "PREVIEW": "預覽"
+        },
+        "errors": {
+            "select_at_least_one": "請選擇至少一個草稿檔案。",
+            "not_supported_track": "{name} 不是支援的媒體軌道。",
+            "cannot_be_used_as_type": "{name} 不能用作 {type} 軌道。",
+            "cannot_use_purpose_in_media": "{type} 軌道不能在 {mediaType} 媒體中使用 {purpose} 用途。",
+            "only_one_default_allowed": "只允許有一個預設的 {type} {purpose} 軌道。",
+            "requires_default_content_track": "{mediaType} 媒體需要一個預設的 {requiredType} CONTENT 軌道。"
+        },
+        "toast_create_success": "媒體已建立",
+        "toast_create_success_desc": "「{name}」已成功建立。",
+        "toast_create_failed": "建立媒體失敗",
+        "toast_upload_failed": "上傳失敗",
+        "toast_remove_failed": "刪除檔案失敗",
+        "toast_invalid_composition": "無效的軌道組合"
     },
     "search": {
         "matched_reason": "匹配原因",
@@ -295,5 +365,112 @@
         "batch_edit_color": "批次修改強調色",
         "batch_apply_color_btn": "套用顏色到已選標籤",
         "batch_actions": "批次操作"
+    },
+    "post": {
+        "create_title": "創建帖子",
+        "title_label": "標題",
+        "title_placeholder": "輸入帖子標題",
+        "description_label": "描述",
+        "description_placeholder": "寫點關於帖子的內容...",
+        "tags_label": "標籤",
+        "media_label": "媒體",
+        "add_media": "添加媒體",
+        "choose_library": "從媒體庫選擇",
+        "drag_or_choose": "拖拽文件到此處，或選擇下方選項：",
+        "upload_media": "上傳新媒體",
+        "no_media": "尚未附加媒體素材。",
+        "select_source": "從媒體庫選擇或上傳新文件。",
+        "create_btn": "創建帖子",
+        "cancel_btn": "取消",
+        "back_btn": "返回",
+        "edit_media": "編輯媒體",
+        "new_media": "新建媒體",
+        "move_up": "上移",
+        "move_down": "下移",
+        "remove": "移除",
+        "creating": "正在創建...",
+        "toast_create_success": "帖子創建成功",
+        "toast_create_failed": "創建帖子失敗",
+        "add_n_media": "添加 {count} 個媒體",
+        "tabs": {
+            "basic_info": "基本資訊",
+            "manage_media": "媒體管理"
+        },
+        "manage": {
+            "link_orphan": "關聯孤立素材",
+            "upload_create": "上傳 / 新增",
+            "no_media_attached": "未附加媒體素材",
+            "no_media_hint": "點擊上方的「上傳 / 新增」或「關聯孤立素材」以添加媒體。",
+            "link_orphan_title": "關聯孤立媒體素材",
+            "link_orphan_desc": "從媒體庫中選擇不屬於任何帖子的媒體素材。",
+            "no_orphan_found": "此媒體庫中未找到孤立的媒體素材。",
+            "attach_selection": "關聯所選素材",
+            "toast_unlink_success": "媒體已移至孤立素材",
+            "toast_unlink_failed": "解除媒體關聯失敗",
+            "toast_trash_success": "媒體已移至回收站",
+            "toast_trash_failed": "移動媒體到回收站失敗",
+            "toast_reorder_success": "媒體排序成功",
+            "toast_reorder_failed": "媒體排序失敗"
+        }
+    },
+    "draft_box": {
+        "title": "草稿箱",
+        "drop_title": "拖放到草稿箱",
+        "drop_desc": "將檔案拖放到任意位置即可將其上傳到媒體庫草稿集合中。稍後您可以再進行音影片等軌道整理。",
+        "select_btn": "從草稿箱選擇",
+        "add_btn": "從草稿箱添加",
+        "dialog_title": "從草稿箱選擇",
+        "dialog_description": "從媒體庫的草稿箱中選擇檔案作為軌道。",
+        "search_placeholder": "搜尋草稿名稱...",
+        "available_count": "有 {count} 個可用草稿檔案",
+        "loading": "正在載入草稿箱...",
+        "empty": "草稿箱為空",
+        "empty_desc": "將圖片、影片、音訊或字幕檔案拖放到此處，或點擊上傳按鈕匯入檔案到草稿箱中暫存。",
+        "choose_files_btn": "選擇檔案",
+        "selected_count": "已選擇 {count} 個檔案",
+        "selected_items_count": "已選擇 {count} 項",
+        "confirm_btn": "確認",
+        "cancel_btn": "取消",
+        "import_separately_btn": "分別匯入",
+        "import_separately_tooltip": "將每個選中的檔案作為獨立的媒體資產分別匯入",
+        "merge_tracks_btn": "合併軌道",
+        "merge_tracks_tooltip": "將選中的檔案合併為單個媒體資产（例如影片+音訊軌道）",
+        "delete_btn": "刪除",
+        "delete_tooltip": "永久刪除選中的草稿檔案",
+        "uploading_background_tasks": "後台任務正在上傳...",
+        "uploading_and_registering": "正在上傳檔案到草稿箱並註冊軌道...",
+        "unselect_all_btn": "取消全選",
+        "select_all_btn": "全選",
+        "add_files_btn": "加入檔案",
+        "merge_dialog_title": "合併軌道",
+        "merge_dialog_desc": "將您選擇的已暫存檔案組合為單個媒體資產的多種清晰度解析度、封面圖或字幕軌道。",
+        "merge_dialog": {
+            "title_label": "媒體資產標題",
+            "title_placeholder": "我的度假影片",
+            "type_label": "資產類型",
+            "configure_tracks": "配置軌道",
+            "commit_btn": "提交媒體"
+        },
+        "toasts": {
+            "delete_file_failed": "刪除草稿檔案失敗",
+            "deleting_files": "正在刪除 {count} 個草稿檔案...",
+            "delete_files_success": "草稿檔案已成功刪除",
+            "delete_files_failed": "刪除草稿檔案失敗",
+            "unsupported_file": "不支援的草稿檔案",
+            "unsupported_file_desc": "{name} 無法作為媒體提交。",
+            "choose_media_type": "請先選擇媒體類型",
+            "choose_media_type_desc": "使用「合併軌道」功能來選擇 {name} 包含的是音訊還是影片軌道。",
+            "subtitle_cannot_standalone": "字幕檔案不能單獨作為獨立媒體",
+            "subtitle_cannot_standalone_desc": "請把它們合併進影片、音訊或實況相片資產作為輔助軌道。",
+            "import_success": "成功匯入 {count} 個媒體素材",
+            "import_success_desc": "它們現在可以在您的媒體庫中作為無主素材使用。",
+            "commit_failed": "提交媒體失敗",
+            "merge_success": "合併媒體已建立",
+            "merge_success_desc": "成功將 「{title}」 匯入到您的媒體庫中。",
+            "merge_failed": "提交合併媒體失敗",
+            "unsupported_files_kept": "有 {count} 個檔案被保留在草稿箱中",
+            "unsupported_files_kept_desc": "字幕和其他輔助檔案必須作為軌道添加到相容的媒體中。"
+        }
     }
 }
+

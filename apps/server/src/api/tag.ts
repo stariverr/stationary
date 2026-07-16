@@ -6,33 +6,33 @@ import { error, success } from "@/lib/response";
 import { Code } from "@/lib/code";
 import { requireAuth } from "@/lib/auth/middleware";
 import { Tag, PostTag, MediaTag, TagStatus, TagSource } from "@/db/schema";
-import { and, eq, asc, sql, inArray } from "drizzle-orm";
+import { and, eq, sql, inArray } from "drizzle-orm";
 import { normalizeTagName } from "@/lib/utils/tag_sanitizer";
 
 const router = new Hono();
 
 const TagListQuerySchema = z.object({
-    library_id: z.string().uuid(),
-    status: z.enum(["ACTIVE", "CANDIDATE", "IGNORED"]).optional(),
+    library_id: z.uuid(),
+    status: z.enum(TagStatus).optional(),
 });
 
 export const TagCreateBodySchema = z.object({
-    library_id: z.string().uuid(),
+    library_id: z.uuid(),
     name: z.string().min(1),
     color: z.string().optional(),
 });
 
 export const TagUpdateBodySchema = z.object({
-    id: z.string().uuid(),
+    id: z.uuid(),
     name: z.string().min(1).optional(),
     color: z.string().nullable().optional(),
-    status: z.enum(["ACTIVE", "CANDIDATE", "IGNORED"]).optional(),
+    status: z.enum(TagStatus).optional(),
 });
 
 const TagMergeBodySchema = z.object({
-    library_id: z.string().uuid(),
-    source_tag_id: z.string().uuid(),
-    target_tag_id: z.string().uuid(),
+    library_id: z.uuid(),
+    source_tag_id: z.uuid(),
+    target_tag_id: z.uuid(),
     retain_as_alias: z.boolean().default(true),
 });
 

@@ -4,10 +4,11 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
 import { useLibraryStore } from "@/stores/library";
-import { CheckSquare, Loader2, MoveRight, X, FileImage, RefreshCw, Sparkles } from "@lucide/vue";
+import { CheckSquare, Loader2, MoveRight, X, FileImage, RefreshCw, Sparkles, Link } from "@lucide/vue";
 import { useMediaStore, type MappedMediaItem } from "@/stores/media";
 import { usePostStore } from "@/stores/posts";
 import type { Post, PostMedia } from "@/types/post";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const props = withDefaults(
     defineProps<{
@@ -40,6 +41,60 @@ const isMoving = ref(false);
 const isRegenerating = ref(false);
 const isRetryingSync = ref(false);
 const isQueueingAi = ref(false);
+
+// Link to Post dialog state
+const isPostPickerOpen = ref(false);
+const postsList = ref<Post[]>([]);
+const selectedPostIdForLink = ref("");
+const isLoadingPosts = ref(false);
+const isLinking = ref(false);
+
+async function openPostPicker() {
+    isPostPickerOpen.value = true;
+    isLoadingPosts.value = true;
+    try {
+        const res = await useApi<{ success: boolean; data: { list: Post[] } }>(
+            `/post/list?library_id=${libraryStore.activeLibraryId}&count=100`,
+        );
+        if (res && res.success) {
+            postsList.value = res.data.list;
+            if (postsList.value.length > 0) {
+                const firstPost = postsList.value[0];
+                if (firstPost) {
+                    selectedPostIdForLink.value = firstPost.id;
+                }
+            }
+        }
+    } catch (e) {
+        console.error("Failed to fetch posts:", e);
+    } finally {
+        isLoadingPosts.value = false;
+    }
+}
+
+async function handleLinkToPost() {
+    if (!selectedPostIdForLink.value || props.mediaIds.length === 0) return;
+    isLinking.value = true;
+    try {
+        const res = await useApi<{ success: boolean }>(`/post/${selectedPostIdForLink.value}/bind_media`, {
+            method: "POST",
+            body: {
+                media_ids: props.mediaIds,
+            },
+        });
+        if (res && res.success) {
+            toast.success("Media successfully linked to post");
+            isPostPickerOpen.value = false;
+            emit("moved");
+        }
+    } catch (e: any) {
+        toast.error("Failed to link media to post", {
+            description: e.message || String(e),
+        });
+    } finally {
+        isLinking.value = false;
+    }
+}
 
 const hasSelectedFailedSync = computed(() => {
     const directFailedMedia = mediaStore.medias.some(
@@ -276,6 +331,18 @@ const handleMove = async () => {
                     {{ allVisibleSelected ? "Deselect visible" : "Select visible" }}
                 </Button>
                 <Button
+                    v-if="mediaIds.length > 0 && postIds.length === 0"
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    :disabled="isMoving || isLinking"
+                    @click="openPostPicker"
+                >
+                    <Loader2 v-if="isLinking" class="animate-spin text-slate-400" />
+                    <Link v-else class="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    Link to Post
+                </Button>
+                <Button
                     v-if="hasSelectedVideos"
                     type="button"
                     variant="outline"
@@ -340,4 +407,41 @@ const handleMove = async () => {
             </div>
         </div>
     </div>
+
+    <!-- Picker Dialog to select Post -->
+    <Dialog v-model:open="isPostPickerOpen">
+        <DialogContent class="max-w-md p-6">
+            <DialogHeader>
+                <DialogTitle>Link Media to Post</DialogTitle>
+                <DialogDescription> Select a post to attach the {{ mediaIds.length }} selected media assets. </DialogDescription>
+            </DialogHeader>
+
+            <div class="py-4">
+                <div v-if="isLoadingPosts" class="flex justify-center p-6">
+                    <Loader2 class="w-8 h-8 animate-spin text-slate-400" />
+                </div>
+                <div v-else-if="postsList.length === 0" class="text-center p-6 text-slate-400 text-sm">
+                    No posts available in this library.
+                </div>
+                <div v-else class="space-y-2">
+                    <Label for="target-post-select">Select Target Post</Label>
+                    <Select v-model="selectedPostIdForLink">
+                        <SelectTrigger id="target-post-select">
+                            <SelectValue placeholder="Select a post" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem v-for="post in postsList" :key="post.id" :value="post.id">
+                                {{ post.title || "Untitled Post" }}
+                            </SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+            </div>
+
+            <DialogFooter>
+                <Button variant="outline" @click="isPostPickerOpen = false">Cancel</Button>
+                <Button :disabled="!selectedPostIdForLink || isLinking" @click="handleLinkToPost">Link Media</Button>
+            </DialogFooter>
+        </DialogContent>
+    </Dialog>
 </template>

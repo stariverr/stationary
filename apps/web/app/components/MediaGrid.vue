@@ -12,6 +12,7 @@ import {
     Sparkles,
     Filter,
     ChevronDown,
+    Upload,
 } from "@lucide/vue";
 import { useDebounceFn } from "@vueuse/core";
 import { PaginationRoot, PaginationList, PaginationListItem, PaginationPrev, PaginationNext, PaginationEllipsis } from "reka-ui";
@@ -25,7 +26,7 @@ import { storeToRefs } from "pinia";
 const store = useMediaStore();
 const { medias, isLoadingMedia, keyword, source, displayMode, total, page, count, selectedMediaId, useAiSearch } = storeToRefs(store);
 const { refetchMedia, selectMedia } = store;
-const { toggleSidebar } = useLayout();
+const { toggleSidebar, isCreateMediaOpen } = useLayout();
 const libraryStore = useLibraryStore();
 const { isMultiSelectClick } = useMultiSelectModifier();
 const visualViewportBottomOffsetStyle = useVisualViewportBottomOffset();
@@ -48,6 +49,8 @@ const movableVisibleMediaIds = computed(() => (medias.value || []).filter((media
 const areAllMovableVisibleMediaSelected = computed(
     () => movableVisibleMediaIds.value.length > 0 && movableVisibleMediaIds.value.every((id) => selectedMediaIds.value.has(id)),
 );
+
+const showCreateDialog = isCreateMediaOpen;
 
 watch(
     () => [keyword.value, source.value, displayMode.value, libraryStore.activeLibraryId],
@@ -283,6 +286,8 @@ onMounted(() => {
                     <span class="hidden lg:inline">{{ $t("common.filters", "Filters") }}</span>
                     <span v-if="source" class="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
                 </button>
+
+                <!-- Create Media Button moved to Left Sidebar -->
 
                 <!-- Action Toolbar Divider -->
                 <div class="h-5 w-px bg-gray-200 hidden sm:block mx-0.5"></div>
@@ -575,5 +580,7 @@ onMounted(() => {
             @moved="handleMoved"
             @cancel="exitSelectionMode"
         />
+
+        <CreateMediaDialog v-model:open="showCreateDialog" />
     </div>
 </template>

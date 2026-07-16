@@ -682,7 +682,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                 activeTab === 'variants' ? 'text-zinc-900 border-b-2 border-zinc-800' : 'text-zinc-400 hover:text-zinc-700'
                             "
                         >
-                            Variants
+                            {{ $t("common.variants", "Variants") }}
                         </button>
                     </div>
 

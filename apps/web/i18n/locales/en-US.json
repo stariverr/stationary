@@ -56,7 +56,8 @@
         "clear_all": "Clear Selection",
         "edit": "Edit",
         "save": "Save",
-        "cancel": "Cancel"
+        "cancel": "Cancel",
+        "variants": "Variants"
     },
     "grid": {
         "showing_items": "Showing {count} items",
@@ -192,7 +193,11 @@
         },
         "actions": {
             "regenerate_cover": "Regenerate cover",
-            "regenerate_covers": "Regenerate video covers"
+            "regenerate_covers": "Regenerate video covers",
+            "cancel": "Cancel",
+            "discard": "Discard",
+            "create": "Create Media",
+            "add": "Add Media"
         },
         "cover": {
             "queued": "Video cover regeneration has been queued.",
@@ -202,7 +207,68 @@
             "select_video_required": "Please select at least one video.",
             "failed": "Failed to queue cover regeneration.",
             "loading": "Requesting..."
-        }
+        },
+        "create_title": "Create Media",
+        "create_btn": "Create Media",
+        "search_placeholder": "Search library media...",
+        "no_orphan_found": "No orphan media assets found matching the search.",
+        "create_desc": "Upload files and configure them as tracks of a single media asset.",
+        "add_tracks_title": "Add tracks to your media",
+        "add_tracks_desc": "Drag and drop files here, upload from your device, or select existing files from your Draft Box.",
+        "upload_files": "Upload Files",
+        "add_files": "Add Files",
+        "uploaded_count": "{count} file(s) uploaded",
+        "uploading": "Uploading...",
+        "title_label": "Title",
+        "title_placeholder": "My Media Asset",
+        "type_label": "Media Type",
+        "configure_tracks": "Configure each file as a track",
+        "unsupported_track": "Unsupported",
+        "not_applicable": "Not applicable",
+        "untitled": "Untitled Media",
+        "tracks_count": "{count} tracks",
+        "headers": {
+            "file": "File",
+            "track_type": "Track Type",
+            "purpose": "Purpose",
+            "quality": "Quality",
+            "default": "Default",
+            "language": "Language"
+        },
+        "types": {
+            "IMAGE": "Image Gallery",
+            "VIDEO": "Video Asset",
+            "LIVE_PHOTO": "Live Photo",
+            "AUDIO": "Audio Asset",
+            "PDF": "PDF Document"
+        },
+        "track_types": {
+            "VIDEO": "Video",
+            "AUDIO": "Audio",
+            "IMAGE": "Image",
+            "SUBTITLE": "Subtitle",
+            "PDF": "PDF"
+        },
+        "purposes": {
+            "CONTENT": "Content",
+            "COVER": "Cover",
+            "THUMBNAIL": "Thumbnail",
+            "PREVIEW": "Preview"
+        },
+        "errors": {
+            "select_at_least_one": "Select at least one draft file.",
+            "not_supported_track": "{name} is not a supported media track.",
+            "cannot_be_used_as_type": "{name} cannot be used as a {type} track.",
+            "cannot_use_purpose_in_media": "{type} tracks cannot use the {purpose} purpose in {mediaType} media.",
+            "only_one_default_allowed": "Only one default {type} {purpose} track is allowed.",
+            "requires_default_content_track": "{mediaType} media requires a default {requiredType} CONTENT track."
+        },
+        "toast_create_success": "Media created",
+        "toast_create_success_desc": "\"{name}\" has been created successfully.",
+        "toast_create_failed": "Failed to create media",
+        "toast_upload_failed": "Upload failed",
+        "toast_remove_failed": "Failed to remove file",
+        "toast_invalid_composition": "Invalid track composition"
     },
     "search": {
         "matched_reason": "Match Details",
@@ -306,5 +372,112 @@
         "batch_edit_color": "Batch Edit Accent Color",
         "batch_apply_color_btn": "Apply Color to Selected",
         "batch_actions": "Batch Actions"
+    },
+    "post": {
+        "create_title": "Create Post",
+        "title_label": "Title",
+        "title_placeholder": "Enter post title",
+        "description_label": "Description",
+        "description_placeholder": "Write something about this post...",
+        "tags_label": "Tags",
+        "media_label": "Media",
+        "add_media": "Add Media",
+        "choose_library": "Choose from Library",
+        "drag_or_choose": "Drag files here or choose an option below:",
+        "upload_media": "Upload New Media",
+        "no_media": "No media assets attached yet.",
+        "select_source": "Select from library or upload new files.",
+        "create_btn": "Create Post",
+        "cancel_btn": "Cancel",
+        "back_btn": "Back",
+        "edit_media": "Edit Media",
+        "new_media": "New Media",
+        "move_up": "Move Up",
+        "move_down": "Move Down",
+        "remove": "Remove",
+        "creating": "Creating...",
+        "toast_create_success": "Post created successfully",
+        "toast_create_failed": "Failed to create post",
+        "add_n_media": "Add {count} Media",
+        "tabs": {
+            "basic_info": "Basic Info",
+            "manage_media": "Manage Media"
+        },
+        "manage": {
+            "link_orphan": "Link Orphan",
+            "upload_create": "Upload / Create",
+            "no_media_attached": "No media assets attached",
+            "no_media_hint": "Click \"Upload / Create\" or \"Link Orphan\" above to add media.",
+            "link_orphan_title": "Link Orphan Media",
+            "link_orphan_desc": "Select media assets from your library that do not belong to any post.",
+            "no_orphan_found": "No orphan media assets found in this library.",
+            "attach_selection": "Attach Selection",
+            "toast_unlink_success": "Media moved to orphan assets",
+            "toast_unlink_failed": "Failed to unlink media",
+            "toast_trash_success": "Media moved to trash",
+            "toast_trash_failed": "Failed to move media to trash",
+            "toast_reorder_success": "Media reordered successfully",
+            "toast_reorder_failed": "Failed to reorder media"
+        }
+    },
+    "draft_box": {
+        "title": "Draft Box",
+        "drop_title": "Drop to Draft Box",
+        "drop_desc": "Release your files anywhere to upload them to the library draft collection. You can organize tracks later.",
+        "select_btn": "Select from Draft Box",
+        "add_btn": "Add from Draft Box",
+        "dialog_title": "Select from Draft Box",
+        "dialog_description": "Choose files from your library's draft box to add as tracks.",
+        "search_placeholder": "Search drafts by name...",
+        "available_count": "{count} draft files available",
+        "loading": "Loading draft box...",
+        "empty": "Draft Box is Empty",
+        "empty_desc": "Drag & drop images, video, audio, or subtitle files here, or click upload to import files into the draft stagings.",
+        "choose_files_btn": "Choose Files",
+        "selected_count": "{count} file(s) selected",
+        "selected_items_count": "{count} selected",
+        "confirm_btn": "Confirm",
+        "cancel_btn": "Cancel",
+        "import_separately_btn": "Import Separately",
+        "import_separately_tooltip": "Import each selected file separately as an individual media asset",
+        "merge_tracks_btn": "Merge Tracks",
+        "merge_tracks_tooltip": "Combine selected files into a single media asset (e.g. video + audio track)",
+        "delete_btn": "Delete",
+        "delete_tooltip": "Remove selected files from drafts permanently",
+        "uploading_background_tasks": "Uploading Background Tasks...",
+        "uploading_and_registering": "Uploading files to Draft Box & registering tracks...",
+        "unselect_all_btn": "Unselect All",
+        "select_all_btn": "Select All",
+        "add_files_btn": "Add Files",
+        "merge_dialog_title": "Merge Tracks",
+        "merge_dialog_desc": "Combine your selected staged files as different quality resolutions, cover art, or subtitle tracks of a single media asset.",
+        "merge_dialog": {
+            "title_label": "Media Asset Title",
+            "title_placeholder": "My Vacation Video",
+            "type_label": "Asset Type",
+            "configure_tracks": "Configure Tracks",
+            "commit_btn": "Commit Media"
+        },
+        "toasts": {
+            "delete_file_failed": "Failed to delete draft file",
+            "deleting_files": "Deleting {count} draft files...",
+            "delete_files_success": "Draft files deleted successfully",
+            "delete_files_failed": "Failed to delete draft files",
+            "unsupported_file": "Unsupported draft file",
+            "unsupported_file_desc": "{name} cannot be committed as media.",
+            "choose_media_type": "Choose the media type first",
+            "choose_media_type_desc": "Use Merge Tracks to choose whether {name} contains audio or video.",
+            "subtitle_cannot_standalone": "Subtitle files cannot become standalone media",
+            "subtitle_cannot_standalone_desc": "Merge them into a video, audio, or Live Photo media asset as tracks.",
+            "import_success": "Imported {count} media assets",
+            "import_success_desc": "They are now available as orphan assets in your library.",
+            "commit_failed": "Failed to commit media",
+            "merge_success": "Merged media created",
+            "merge_success_desc": "Successfully imported \"{title}\" into your library.",
+            "merge_failed": "Failed to commit merged media",
+            "unsupported_files_kept": "{count} file(s) kept in the Draft Box",
+            "unsupported_files_kept_desc": "Subtitle and other auxiliary files must be added as tracks to compatible media."
+        }
     }
 }
+

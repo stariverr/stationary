@@ -11,20 +11,43 @@ export enum Platform {
     BILIBILI = "BILIBILI",
     UNKNOWN = "UNKNOWN",
 }
+export enum TrackType {
+    IMAGE = "IMAGE",
+    VIDEO = "VIDEO",
+    AUDIO = "AUDIO",
+    SUBTITLE = "SUBTITLE",
+    PDF = "PDF",
+}
 
-export const PlatformSchema = v.enum_(Platform);
+export enum MediaType {
+    IMAGE = "IMAGE",
+    VIDEO = "VIDEO",
+    LIVE_PHOTO = "LIVE_PHOTO",
+    AUDIO = "AUDIO",
+    PDF = "PDF",
+}
 
-export const TrackTypeSchema = v.picklist(["IMAGE", "VIDEO", "AUDIO", "SUBTITLE"]);
-export const TrackPurposeSchema = v.picklist(["CONTENT", "COVER", "THUMBNAIL", "PREVIEW"]);
-export const TrackQualitySchema = v.picklist(["ORIGINAL", "HIGH", "MEDIUM", "LOW"]);
+export enum TrackPurpose {
+    CONTENT = "CONTENT",
+    COVER = "COVER",
+    THUMBNAIL = "THUMBNAIL",
+    PREVIEW = "PREVIEW",
+}
+
+export enum TrackQuality {
+    ORIGINAL = "ORIGINAL",
+    HIGH = "HIGH",
+    MEDIUM = "MEDIUM",
+    LOW = "LOW",
+}
 
 export const TrackSchema = v.object({
     id: v.optional(v.string()),
     url: v.string(),
-    type: TrackTypeSchema,
-    purpose: TrackPurposeSchema,
+    type: v.enum(TrackType),
+    purpose: v.enum(TrackPurpose),
     is_original: v.boolean(),
-    quality: TrackQualitySchema,
+    quality: v.enum(TrackQuality),
     priority: v.number(),
     metadata: v.record(v.string(), v.unknown()),
     mime_type: v.optional(v.nullable(v.string())),
@@ -43,7 +66,7 @@ export const ApiPostMediaSchema = v.object({
     source: v.optional(v.string()),
     title: v.nullish(v.string()),
     description: v.nullish(v.string()),
-    type: v.picklist(["IMAGE", "VIDEO", "LIVE_PHOTO", "AUDIO", "PDF"]),
+    type: v.enum(MediaType),
     sort_order: v.number(),
     create_time: v.optional(v.string()),
     published_time: v.optional(v.nullable(v.string())),
@@ -59,8 +82,8 @@ export type ApiPostMedia = v.InferOutput<typeof ApiPostMediaSchema>;
 
 export const PreviewItemSchema = v.object({
     url: v.nullable(v.string()),
-    type: v.picklist(["VIDEO", "IMAGE", "AUDIO"]),
-    quality: TrackQualitySchema,
+    type: v.enum(TrackType),
+    quality: v.enum(TrackQuality),
     codec: v.nullable(v.string()),
 });
 export type PreviewItem = v.InferOutput<typeof PreviewItemSchema>;
@@ -71,7 +94,7 @@ export const ApiPostListItemMediaSchema = v.object({
     source: v.optional(v.string()),
     title: v.nullish(v.string()),
     description: v.nullish(v.string()),
-    type: v.picklist(["IMAGE", "VIDEO", "LIVE_PHOTO", "AUDIO", "PDF"]),
+    type: v.enum(MediaType),
     sort_order: v.number(),
     create_time: v.optional(v.string()),
     published_time: v.optional(v.nullable(v.string())),
@@ -87,6 +110,7 @@ export type ApiPostListItemMedia = v.InferOutput<typeof ApiPostListItemMediaSche
 
 export const PostListItemSchema = v.object({
     id: v.string(),
+    library_id: v.string(),
     eid: v.string(),
     title: v.string(),
     source: v.string(),
@@ -105,6 +129,7 @@ export type ApiPostListItem = v.InferOutput<typeof PostListItemSchema>;
 
 export const PostDetailResponseBodySchema = v.object({
     id: v.optional(v.pipe(v.string(), v.uuid())),
+    library_id: v.optional(v.pipe(v.string(), v.uuid())),
     source: v.optional(v.string()),
     eid: v.optional(v.string()),
     title: v.optional(v.nullable(v.string())),
@@ -132,7 +157,7 @@ export const PostMediaSchema = v.object({
     source: v.optional(v.string()),
     title: v.nullish(v.string()),
     description: v.nullish(v.string()),
-    type: v.picklist(["IMAGE", "VIDEO", "LIVE_PHOTO", "AUDIO", "PDF"]),
+    type: v.enum(MediaType),
     sort_order: v.number(),
     create_time: v.optional(v.string()),
     published_time: v.optional(v.nullable(v.string())),
@@ -158,6 +183,7 @@ export type PostMedia = v.InferOutput<typeof PostMediaSchema>;
 
 export const PostSchema = v.object({
     id: v.string(),
+    library_id: v.string(),
     eid: v.string(),
     title: v.string(),
     description: v.optional(v.nullable(v.string())),
@@ -175,7 +201,7 @@ export const PostSchema = v.object({
     last_error: v.optional(v.nullable(v.string())),
 
     // Mapped fields for UI / Legacy compatibility
-    platform: PlatformSchema,
+    platform: v.enum(Platform),
     date: v.string(),
     width: v.optional(v.number()),
     height: v.optional(v.number()),

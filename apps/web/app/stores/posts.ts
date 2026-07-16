@@ -1,15 +1,7 @@
 import { defineStore } from "pinia";
 import { Temporal } from "@js-temporal/polyfill";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/vue-query";
-import {
-    type Post,
-    Platform,
-    type PostMedia,
-    type ApiPostListItem,
-    type ApiPostDetail,
-    PostListItemSchema,
-    PostDetailResponseBodySchema,
-} from "@/types/post";
+import { type Post, type Platform, type ApiPostListItem, type ApiPostDetail } from "@/types/post";
 
 import { useLibraryStore } from "@/stores/library";
 
@@ -39,7 +31,7 @@ export const usePostStore = defineStore("posts", () => {
     const mediaType = ref<string | undefined>((route.query.media_type as string) || undefined);
     const tagIds = ref<string[]>((route.query.tag_ids as string) ? (route.query.tag_ids as string).split(",").filter(Boolean) : []);
     const authorSearchKeyword = ref("");
-    const authorCache = ref<Record<string, { id: string; nickname: string; platform: string; avatar_url: string | null }>>({});
+    const authorCache = ref<Record<string, { id: string; nickname: string; platform: Platform; avatar_url: string | null }>>({});
 
     // Debounce keyword search to prevent spamming backend requests
     let debounceTimeout: any = null;
@@ -73,7 +65,7 @@ export const usePostStore = defineStore("posts", () => {
                 try {
                     const response = await useApi<{
                         success: boolean;
-                        data: { id: string; nickname: string; platform: string; avatar_url: string | null }[];
+                        data: { id: string; nickname: string; platform: Platform; avatar_url: string | null }[];
                     }>("/post/authors", {
                         query: {
                             library_id: libraryStore.activeLibraryId,
@@ -372,7 +364,7 @@ export const usePostStore = defineStore("posts", () => {
         queryFn: async () => {
             const response = await useApi<{
                 success: boolean;
-                data: { id: string; nickname: string; platform: string; avatar_url: string | null }[];
+                data: { id: string; nickname: string; platform: Platform; avatar_url: string | null }[];
             }>("/post/authors", {
                 query: {
                     library_id: libraryStore.activeLibraryId,
@@ -447,6 +439,7 @@ export const usePostStore = defineStore("posts", () => {
                 return {
                     ...detail,
                     id: detail.id || "",
+                    library_id: detail.library_id || "",
                     eid: detail.eid || "",
                     source: detail.source || "UNKNOWN",
                     title: detail.title || "Untitled",

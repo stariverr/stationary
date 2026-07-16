@@ -24,15 +24,27 @@ import {
     Tag,
     TagStatus,
     Library,
+    DraftFile,
+    DraftFileStatus,
 } from "@/db/schema";
 import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lte, exists, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { RecycleService } from "@/services/recycle";
 import { DeleteService } from "@/services/delete";
-import { PostService } from "@/services/post";
+import { PostService, replacePostTagsTx } from "@/services/post";
+import { replaceMediaTagsTx } from "@/services/media";
 import { buildCdnUrl, buildImagePreviewCdnUrl } from "@/lib/utils/cdn";
-import { toIsoTimestamp, FormTimestampSchema } from "@/lib/utils/time";
+import { toIsoTimestamp, FormTimestampSchema, nowDbTimestamp } from "@/lib/utils/time";
 import { Codec, Quality } from "@/lib/types";
+import { v7 as uuidv7 } from "uuid";
+import { TrackService } from "@/services/track";
+import { consumeDraftFile, DraftFileUnavailableError } from "@/services/draft-file";
+import {
+    assignTrackPriorities,
+    validateDraftMediaGroups,
+    validateDraftTrackFileTypes,
+    MediaDraftSchema,
+} from "@/lib/validation/media-composition";
 
 const router = new Hono();
 const activePostFilter = and(eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time));
@@ -144,6 +156,7 @@ router.get(
         const rawPosts = await db
             .select({
                 id: Post.id,
+                library_id: Post.library_id,
                 eid: Post.eid,
                 title: Post.title,
                 source: Post.source,
@@ -356,6 +369,7 @@ router.get(
             const postTags = postTagsMap.get(post.id) || [];
             return {
                 id: post.id,
+                library_id: post.library_id,
                 type: type,
                 title: post.title,
                 source: post.source,
@@ -463,6 +477,7 @@ const PostDetailRequestPathParamSchema = z.object({
 
 export const PostDetailResponseBodySchema = z.object({
     id: z.uuid().optional(),
+    library_id: z.uuid().optional(),
     source: z.string().optional(),
     eid: z.string().optional(),
     title: z.string().nullable().optional(),
@@ -534,6 +549,7 @@ router.get(
         const postRows = await db
             .select({
                 id: Post.id,
+                library_id: Post.library_id,
                 source: Post.source,
                 eid: Post.eid,
                 title: Post.title,
@@ -677,6 +693,7 @@ router.get(
 
         const result: z.infer<typeof PostDetailResponseBodySchema> = {
             id: postData.id,
+            library_id: postData.library_id,
             source: postData.source,
             eid: postData.eid,
             title: postData.title,
@@ -809,7 +826,7 @@ router.post(
 );
 
 const PostReplaceTagsSchema = z.object({
-    tags: z.array(z.string()),
+    tag_ids: z.array(z.uuid()),
 });
 
 router.post(
@@ -818,29 +835,30 @@ router.post(
     validator("json", (value, c) => {
         const parsed = PostReplaceTagsSchema.safeParse(value);
         if (!parsed.success) {
-            return c.json(error(Code.INVALID_PARAMETER, "Invalid tags array"), 400);
+            return c.json(error(Code.INVALID_PARAMETER, "Invalid tag_ids array"), 400);
         }
         return parsed.data;
     }),
     async (c) => {
         const id = c.req.param("id")!;
-        const { tags } = c.req.valid("json");
+        const { tag_ids } = c.req.valid("json");
 
         const access = await checkPostAccess(c, id);
-        if (access.errorResponse) return access.errorResponse;
-        const post = access.post!;
+        if (!access.post || access.errorResponse) return access.errorResponse;
+        const post = access.post;
 
-        const resolvedTagIds = await PostService.replaceTags(id, post.library_id, tags);
+        const resolvedTagIds = await PostService.replaceTags(id, post.library_id, tag_ids);
         return c.json(success(Code.SUCCESS, { tag_ids: resolvedTagIds }));
     },
 );
 
 const PostAttachMediaSchema = z.object({
-    media_ids: z.array(z.string().uuid()).min(1, "media_ids must contain at least one ID"),
+    media_ids: z.array(z.uuid()).min(1, "media_ids must contain at least one ID"),
 });
 
+/** Bind media to post */
 router.post(
-    "/:id/media/attach",
+    "/:id/bind_media",
     requireAuth,
     validator("json", (value, c) => {
         const parsed = PostAttachMediaSchema.safeParse(value);
@@ -857,7 +875,7 @@ router.post(
         if (access.errorResponse) return access.errorResponse;
         const post = access.post!;
 
-        const result = await PostService.attachMedia(id, post.library_id, media_ids);
+        const result = await PostService.bindMedia(id, post.library_id, media_ids);
 
         if ("error" in result) {
             return c.json(error(Code.INVALID_PARAMETER, result.error || "Attach failed"), 400);
@@ -905,7 +923,7 @@ router.post("/:id/media/:mediaId/remove", requireAuth, async (c) => {
     const access = await checkPostAccess(c, id);
     if (access.errorResponse) return access.errorResponse;
 
-    const result = await PostService.removeMedia(id, mediaId);
+    const result = await PostService.unbindMedia(id, mediaId);
 
     if ("error" in result) {
         return c.json(error(Code.INVALID_PARAMETER, result.error || "Remove failed"), 400);
@@ -913,5 +931,222 @@ router.post("/:id/media/:mediaId/remove", requireAuth, async (c) => {
 
     return c.json(success(Code.SUCCESS, result));
 });
+
+const CreatePostMediaItemSchema = z.discriminatedUnion("kind", [
+    z.object({
+        kind: z.literal("existing"),
+        media_id: z.uuid(),
+    }),
+    z.object({
+        kind: z.literal("draft"),
+        draft: MediaDraftSchema,
+    }),
+]);
+
+const CreatePostSchema = z.object({
+    library_id: z.uuid(),
+    title: z.string().min(1, "Title is required"),
+    description: z.string().optional().default(""),
+    tag_ids: z.array(z.uuid()).optional().default([]),
+    media_items: z.array(CreatePostMediaItemSchema).optional(),
+});
+
+// 7. Create Post and optionally attach existing orphan media and consume draft files
+router.post(
+    "/create",
+    requireAuth,
+    validator("json", (value, c) => {
+        const parsed = CreatePostSchema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid parameters"), 400);
+        }
+        return parsed.data;
+    }),
+    async (c) => {
+        const body = c.req.valid("json");
+        const user = c.get("user");
+        if (!user) {
+            return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+        }
+
+        // Verify library ownership
+        const libraryList = await db.select().from(Library).where(eq(Library.id, body.library_id)).limit(1);
+        const library = libraryList[0];
+        if (!library || library.owner_id !== user.id) {
+            return c.json(error(Code.FORBIDDEN, "You do not have access to this library"), 403);
+        }
+
+        // Derive media_ids and media_drafts from media_items if provided
+        const mediaIds = body.media_items?.filter((item) => item.kind === "existing").map((item) => item.media_id) || [];
+        const mediaDrafts = body.media_items?.filter((item) => item.kind === "draft").map((item) => item.draft) || [];
+
+        if (mediaDrafts.length > 0) {
+            const compositionError = validateDraftMediaGroups(mediaDrafts);
+            if (compositionError) {
+                return c.json(error(Code.INVALID_PARAMETER, compositionError), 400);
+            }
+        }
+
+        // Verify whether media items are isolated
+        if (mediaIds.length > 0) {
+            const mediaList = await db
+                .select()
+                .from(Media)
+                .where(and(inArray(Media.id, mediaIds), eq(Media.library_id, body.library_id)));
+            if (mediaList.length !== mediaIds.length) {
+                return c.json(error(Code.INVALID_PARAMETER, "Some media items are invalid or do not belong to this library"), 400);
+            }
+            // Ensure they are orphans
+            for (const media of mediaList) {
+                if (media.post_id !== null) {
+                    return c.json(error(Code.INVALID_PARAMETER, `Media ${media.title} is already linked to a post`), 400);
+                }
+            }
+        }
+
+        // Verify draft files belong to this library and are in DRAFT status
+        const draftIds = mediaDrafts.flatMap((g) => g.tracks.map((t) => t.draft_file_id));
+        if (draftIds.length > 0) {
+            const draftRows = await db
+                .select({ draft: DraftFile, file: DbFile })
+                .from(DraftFile)
+                .innerJoin(DbFile, eq(DraftFile.file_id, DbFile.id))
+                .where(
+                    and(
+                        eq(DraftFile.library_id, body.library_id),
+                        eq(DraftFile.status, DraftFileStatus.DRAFT),
+                        inArray(DraftFile.id, draftIds),
+                    ),
+                );
+
+            const activeDraftMap = new Map(
+                draftRows.map(({ draft, file }) => [
+                    draft.id,
+                    {
+                        name: draft.original_name,
+                        mime_type: file.mime_type,
+                    },
+                ]),
+            );
+
+            if (draftRows.length !== draftIds.length) {
+                const missingId = draftIds.find((id) => !activeDraftMap.has(id));
+                return c.json(error(Code.INVALID_PARAMETER, `Draft file ${missingId} is invalid or already consumed`), 400);
+            }
+
+            const fileTypeError = validateDraftTrackFileTypes(mediaDrafts, activeDraftMap);
+            if (fileTypeError) {
+                return c.json(error(Code.INVALID_PARAMETER, fileTypeError), 400);
+            }
+        }
+
+        const postId = uuidv7();
+
+        try {
+            await db.transaction(async (tx) => {
+                const now = nowDbTimestamp();
+                const totalMediaCount = body.media_items && body.media_items.length > 0 ? body.media_items.length : 0;
+
+                // Create Post
+                await tx.insert(Post).values({
+                    id: postId,
+                    eid: postId,
+                    library_id: body.library_id,
+                    source: PostSource.UNKNOWN,
+                    title: body.title,
+                    description: body.description,
+                    media_count: totalMediaCount,
+                    sync_status: SyncStatus.PENDING,
+                    create_time: now,
+                    delete_status: DeleteStatus.ACTIVE,
+                });
+
+                if (body.tag_ids && body.tag_ids.length > 0) {
+                    await replacePostTagsTx(tx, postId, body.library_id, body.tag_ids);
+                }
+
+                let sortOrder = 0;
+
+                if (body.media_items && body.media_items.length > 0) {
+                    for (const item of body.media_items) {
+                        if (item.kind === "existing") {
+                            await tx
+                                .update(Media)
+                                .set({
+                                    post_id: postId,
+                                    sort_order: sortOrder++,
+                                    update_time: now,
+                                })
+                                .where(eq(Media.id, item.media_id));
+                        } else if (item.kind === "draft") {
+                            const mediaDraft = item.draft;
+                            const mediaId = uuidv7();
+
+                            await tx.insert(Media).values({
+                                id: mediaId,
+                                eid: mediaId,
+                                post_id: postId,
+                                sort_order: sortOrder++,
+                                library_id: body.library_id,
+                                source: PostSource.UNKNOWN,
+                                title: mediaDraft.title,
+                                description: mediaDraft.description,
+                                type: mediaDraft.type,
+                                sync_status: SyncStatus.PENDING,
+                                create_time: now,
+                            });
+
+                            for (const track of assignTrackPriorities(mediaDraft.tracks)) {
+                                const fileId = await consumeDraftFile(tx, track.draft_file_id, body.library_id);
+
+                                await TrackService.upsertTrack(
+                                    mediaId,
+                                    {
+                                        type: track.type,
+                                        purpose: track.purpose,
+                                        quality: track.quality,
+                                        priority: track.priority,
+                                        is_default: track.is_default,
+                                        language: track.language || null,
+                                    },
+                                    fileId,
+                                    tx,
+                                );
+                            }
+
+                            if (mediaDraft.tag_ids && mediaDraft.tag_ids.length > 0) {
+                                await replaceMediaTagsTx(tx, mediaId, body.library_id, mediaDraft.tag_ids);
+                            }
+                        }
+                    }
+                }
+
+                // Check if all media items under the post are COMPLETED
+                const activeMedias = await tx
+                    .select({ sync_status: Media.sync_status })
+                    .from(Media)
+                    .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE)));
+
+                const allCompleted = activeMedias.every((m) => m.sync_status === SyncStatus.COMPLETED);
+                if (allCompleted) {
+                    await tx
+                        .update(Post)
+                        .set({
+                            sync_status: SyncStatus.COMPLETED,
+                            update_time: now,
+                        })
+                        .where(eq(Post.id, postId));
+                }
+            });
+        } catch (e) {
+            if (e instanceof DraftFileUnavailableError) {
+                return c.json(error(Code.ALREADY_EXISTS, e.message), 409);
+            }
+            throw e;
+        }
+
+        return c.json(success(Code.SUCCESS, { post_id: postId }));
+    },
+);
 
 export default router;

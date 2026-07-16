@@ -228,24 +228,24 @@ const scrollIntoView = () => {
         <transition name="popover-fade">
             <div
                 v-if="showPopover"
-                class="absolute left-0 top-full mt-1.5 z-[100] w-64 bg-white border border-zinc-200/80 rounded-xl shadow-xl p-2 focus:outline-none ring-1 ring-black/5"
+                class="absolute left-0 bottom-full mb-2 z-[100] w-64 bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 rounded-xl shadow-xl p-2 focus:outline-none ring-1 ring-black/5"
             >
                 <!-- Popover Search Input -->
-                <div class="relative flex items-center mb-1.5 border-b border-zinc-100 pb-1.5 px-1">
-                    <Search class="absolute left-2.5 w-3.5 h-3.5 text-zinc-400" />
+                <div class="relative flex items-center mb-1.5 border-b border-zinc-100 dark:border-zinc-800 pb-1.5 px-1">
+                    <Search class="absolute left-2.5 w-3.5 h-3.5 text-zinc-400 dark:text-zinc-500" />
                     <input
                         ref="searchInputRef"
                         v-model="searchQuery"
                         type="text"
                         :placeholder="placeholder"
-                        class="w-full pl-8 pr-7 py-1.5 text-xs text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-lg focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all"
+                        class="w-full pl-8 pr-7 py-1.5 text-xs text-zinc-800 dark:text-zinc-200 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all"
                         @keydown="onKeyDown"
                     />
                     <button
                         v-if="searchQuery"
                         type="button"
                         @click="searchQuery = ''"
-                        class="absolute right-2 text-zinc-400 hover:text-zinc-600 cursor-pointer"
+                        class="absolute right-2 text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 cursor-pointer"
                     >
                         <X class="w-3.5 h-3.5" />
                     </button>
@@ -254,7 +254,7 @@ const scrollIntoView = () => {
                 <!-- Dropdown items list -->
                 <div class="tag-editor-popover-list max-h-48 overflow-y-auto space-y-0.5 pr-0.5 custom-scrollbar">
                     <!-- Loading state -->
-                    <div v-if="tagStore.isLoading" class="flex items-center justify-center py-6 text-zinc-400 text-xs gap-1.5">
+                    <div v-if="tagStore.isLoading" class="flex items-center justify-center py-6 text-zinc-400 dark:text-zinc-500 text-xs gap-1.5">
                         <Loader2 class="w-3.5 h-3.5 animate-spin text-indigo-500" />
                         <span>Loading tags...</span>
                     </div>
@@ -268,8 +268,8 @@ const scrollIntoView = () => {
                             class="w-full text-left flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer"
                             :class="[
                                 index === focusedIndex
-                                    ? 'tag-editor-popover-item-active bg-indigo-50 text-indigo-950 font-medium'
-                                    : 'text-zinc-700 hover:bg-zinc-50 hover:text-zinc-950',
+                                    ? 'tag-editor-popover-item-active bg-indigo-50 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-200 font-medium'
+                                    : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 hover:text-zinc-950 dark:hover:text-zinc-50',
                             ]"
                             @click="handleSelectOption(option)"
                             @mouseenter="focusedIndex = index"
@@ -277,23 +277,23 @@ const scrollIntoView = () => {
                             <span class="flex items-center gap-1.5 truncate">
                                 <!-- Create Tag Indicator -->
                                 <Plus v-if="option.type === 'create'" class="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                                <Tag v-else class="w-3.5 h-3.5 text-zinc-400 shrink-0" :style="{ color: option.color || undefined }" />
+                                <Tag v-else class="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-500 shrink-0" :style="{ color: option.color || undefined }" />
 
                                 <span class="truncate">
-                                    <span v-if="option.type === 'create'" class="text-indigo-600 font-medium">Create tag: </span>
+                                    <span v-if="option.type === 'create'" class="text-indigo-600 dark:text-indigo-400 font-medium">Create tag: </span>
                                     #{{ option.name }}
                                 </span>
                             </span>
 
                             <Check
                                 v-if="option.isSelected"
-                                class="w-3.5 h-3.5 text-indigo-600 shrink-0"
+                                class="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-450 shrink-0"
                             />
                         </button>
                     </template>
 
                     <!-- Empty state -->
-                    <div v-else class="text-center py-6 text-zinc-400 text-xs">
+                    <div v-else class="text-center py-6 text-zinc-400 dark:text-zinc-500 text-xs">
                         No tags found
                     </div>
                 </div>
@@ -311,7 +311,7 @@ const scrollIntoView = () => {
 .popover-fade-enter-from,
 .popover-fade-leave-to {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(4px);
 }
 
 .tag-list-enter-active,
@@ -333,9 +333,14 @@ const scrollIntoView = () => {
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
     background: #e4e4e7;
-    border-radius: 9999px;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: #d4d4d8;
+}
+html.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #3f3f46;
+}
+html.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #52525b;
 }
 </style>

@@ -1,6 +1,6 @@
-import { and, eq, not } from "drizzle-orm";
-import { db } from "@/global/db";
-import { DeleteStatus, File, Track, TrackPurpose, TrackType } from "@/db/schema";
+import { and, eq, not, inArray } from "drizzle-orm";
+import { db, Transaction } from "@/global/db";
+import { DeleteStatus, File, Track, SyncStatus, Media, Post, TrackType, TrackPurpose } from "@/db/schema";
 import { nowDbTimestamp } from "@/lib/utils/time";
 import { generateDeterministicVariantKey } from "@/lib/utils/track";
 import { Quality } from "@/lib/types";
@@ -28,7 +28,7 @@ export const TrackService = {
             .where(and(eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)));
     },
 
-    async addOrReplaceTrack(
+    async upsertTrack(
         mediaId: string,
         trackInfo: {
             type: TrackType;
@@ -45,186 +45,230 @@ export const TrackService = {
             is_stale?: boolean;
             source_track_id?: string | null;
         },
-        fileData: FileData,
+        fileDataOrId: FileData | string,
+        tx: Transaction,
     ) {
-        return db.transaction(async (tx) => {
-            const now = nowDbTimestamp();
+        const now = nowDbTimestamp();
 
-            // 1. Insert physical File record
+        // 1. Resolve or insert physical File record
+        let fileRecord: any;
+        if (typeof fileDataOrId === "string") {
+            const [existingFile] = await tx.select().from(File).where(eq(File.id, fileDataOrId)).limit(1);
+            if (!existingFile) {
+                throw new Error(`File ${fileDataOrId} not found`);
+            }
+            fileRecord = existingFile;
+        } else {
             const [newFile] = await tx
                 .insert(File)
                 .values({
-                    path: fileData.path,
-                    bucket: fileData.bucket,
-                    mime_type: fileData.mime_type,
-                    extension: fileData.extension,
-                    size: fileData.size,
-                    width: fileData.width || null,
-                    height: fileData.height || null,
-                    duration: fileData.duration ? Math.round(fileData.duration) : null,
+                    path: fileDataOrId.path,
+                    bucket: fileDataOrId.bucket,
+                    mime_type: fileDataOrId.mime_type,
+                    extension: fileDataOrId.extension,
+                    size: fileDataOrId.size,
+                    width: fileDataOrId.width || null,
+                    height: fileDataOrId.height || null,
+                    duration: fileDataOrId.duration ? Math.round(fileDataOrId.duration) : null,
                     delete_status: DeleteStatus.ACTIVE,
                 })
                 .returning();
+            fileRecord = newFile;
+        }
 
-            const variant_key =
-                trackInfo.variant_key ??
-                generateDeterministicVariantKey(
-                    {
-                        type: trackInfo.type,
-                        purpose: trackInfo.purpose,
-                        quality: trackInfo.quality,
-                        priority: trackInfo.priority,
-                        metadata: trackInfo.metadata,
-                        language: trackInfo.language,
-                        codec: trackInfo.codec,
-                    },
-                    fileData,
-                );
+        const variant_key =
+            trackInfo.variant_key ??
+            generateDeterministicVariantKey(
+                {
+                    type: trackInfo.type,
+                    purpose: trackInfo.purpose,
+                    quality: trackInfo.quality,
+                    priority: trackInfo.priority,
+                    metadata: trackInfo.metadata,
+                    language: trackInfo.language,
+                    codec: trackInfo.codec,
+                },
+                fileRecord,
+            );
 
-            // 2. Check if a track already exists with the same (media_id, type, purpose, variant_key)
-            const [existingTrack] = await tx
+        // 2. Check if a track already exists with the same (media_id, type, purpose, variant_key)
+        const [existingTrack] = await tx
+            .select()
+            .from(Track)
+            .where(
+                and(
+                    eq(Track.media_id, mediaId),
+                    eq(Track.type, trackInfo.type),
+                    eq(Track.purpose, trackInfo.purpose),
+                    eq(Track.variant_key, variant_key),
+                    eq(Track.delete_status, DeleteStatus.ACTIVE),
+                ),
+            );
+
+        const is_default = trackInfo.is_default ?? trackInfo.priority === 0;
+        if (is_default) {
+            const unsetFilters = [
+                eq(Track.media_id, mediaId),
+                eq(Track.type, trackInfo.type),
+                eq(Track.purpose, trackInfo.purpose),
+                eq(Track.delete_status, DeleteStatus.ACTIVE),
+            ];
+            if (existingTrack) {
+                unsetFilters.push(not(eq(Track.id, existingTrack.id)));
+            }
+            await tx
+                .update(Track)
+                .set({
+                    is_default: false,
+                    update_time: now,
+                })
+                .where(and(...unsetFilters));
+        }
+
+        let oldFileId: string | null = null;
+        let trackId: string;
+
+        const extractedLang = trackInfo.language ?? trackInfo.metadata?.language ?? null;
+        const extractedCodec = trackInfo.codec ?? trackInfo.metadata?.codecs ?? null;
+
+        if (existingTrack) {
+            // Keep track of the old file to soft-delete it later
+            oldFileId = existingTrack.file_id;
+            trackId = existingTrack.id;
+
+            // Merge and update metadata
+            const mergedMetadata = {
+                ...(existingTrack.metadata || {}),
+                ...(trackInfo.metadata || {}),
+                width: fileRecord.width ?? existingTrack.metadata?.width,
+                height: fileRecord.height ?? existingTrack.metadata?.height,
+                duration: fileRecord.duration ? Math.round(fileRecord.duration) : existingTrack.metadata?.duration,
+            };
+
+            await tx
+                .update(Track)
+                .set({
+                    file_id: fileRecord.id,
+                    is_generated: false, // User took over
+                    is_original: true,
+                    source_url: trackInfo.source_url ?? existingTrack.source_url,
+                    metadata: mergedMetadata,
+                    variant_key,
+                    is_default,
+                    display_name: trackInfo.display_name ?? existingTrack.display_name,
+                    language: extractedLang,
+                    codec: extractedCodec,
+                    is_stale: false,
+                    sync_status: SyncStatus.COMPLETED,
+                    source_track_id: trackInfo.source_track_id !== undefined ? trackInfo.source_track_id : existingTrack.source_track_id,
+                    update_time: now,
+                })
+                .where(eq(Track.id, existingTrack.id));
+        } else {
+            // Insert new track
+            const mergedMetadata = {
+                ...(trackInfo.metadata || {}),
+                width: fileRecord.width,
+                height: fileRecord.height,
+                duration: fileRecord.duration ? Math.round(fileRecord.duration) : null,
+            };
+            const [inserted] = await tx
+                .insert(Track)
+                .values({
+                    media_id: mediaId,
+                    file_id: fileRecord.id,
+                    type: trackInfo.type,
+                    purpose: trackInfo.purpose,
+                    quality: trackInfo.quality,
+                    priority: trackInfo.priority,
+                    is_original: true,
+                    is_generated: false,
+                    source_url: trackInfo.source_url || "",
+                    metadata: mergedMetadata,
+                    variant_key,
+                    is_default,
+                    display_name: trackInfo.display_name,
+                    language: extractedLang,
+                    codec: extractedCodec,
+                    is_stale: false,
+                    sync_status: SyncStatus.COMPLETED,
+                    source_track_id: trackInfo.source_track_id || null,
+                    delete_status: DeleteStatus.ACTIVE,
+                })
+                .returning();
+            trackId = inserted.id;
+        }
+
+        // 3. Mark dependent tracks as stale if the source track's content has changed
+        if (existingTrack) {
+            const dependentTracks = await tx
                 .select()
                 .from(Track)
                 .where(
                     and(
                         eq(Track.media_id, mediaId),
-                        eq(Track.type, trackInfo.type),
-                        eq(Track.purpose, trackInfo.purpose),
-                        eq(Track.variant_key, variant_key),
+                        eq(Track.source_track_id, existingTrack.id),
                         eq(Track.delete_status, DeleteStatus.ACTIVE),
                     ),
                 );
 
-            const is_default = trackInfo.is_default ?? trackInfo.priority === 0;
-            if (is_default) {
-                const unsetFilters = [
-                    eq(Track.media_id, mediaId),
-                    eq(Track.type, trackInfo.type),
-                    eq(Track.purpose, trackInfo.purpose),
-                    eq(Track.delete_status, DeleteStatus.ACTIVE),
-                ];
-                if (existingTrack) {
-                    unsetFilters.push(not(eq(Track.id, existingTrack.id)));
-                }
+            for (const t of dependentTracks) {
                 await tx
                     .update(Track)
                     .set({
-                        is_default: false,
+                        is_stale: true,
                         update_time: now,
                     })
-                    .where(and(...unsetFilters));
+                    .where(eq(Track.id, t.id));
             }
+        }
 
-            let oldFileId: string | null = null;
-            let trackId: string;
+        // 4. Soft-delete old File
+        if (oldFileId) {
+            await tx
+                .update(File)
+                .set({
+                    delete_status: DeleteStatus.DELETED,
+                    delete_time: now,
+                })
+                .where(eq(File.id, oldFileId));
+        }
 
-            const extractedLang = trackInfo.language ?? trackInfo.metadata?.language ?? null;
-            const extractedCodec = trackInfo.codec ?? trackInfo.metadata?.codecs ?? null;
+        // Cascade complete status update
+        if (trackInfo.purpose === "CONTENT" && is_default) {
+            await tx
+                .update(Media)
+                .set({
+                    sync_status: SyncStatus.COMPLETED,
+                    update_time: now,
+                })
+                .where(eq(Media.id, mediaId));
 
-            if (existingTrack) {
-                // Keep track of the old file to soft-delete it later
-                oldFileId = existingTrack.file_id;
-                trackId = existingTrack.id;
+            const [mediaRow] = await tx.select({ post_id: Media.post_id }).from(Media).where(eq(Media.id, mediaId)).limit(1);
 
-                // Merge and update metadata
-                const mergedMetadata = {
-                    ...(existingTrack.metadata || {}),
-                    ...(trackInfo.metadata || {}),
-                    width: fileData.width ?? existingTrack.metadata?.width,
-                    height: fileData.height ?? existingTrack.metadata?.height,
-                    duration: fileData.duration ? Math.round(fileData.duration) : existingTrack.metadata?.duration,
-                };
+            if (mediaRow?.post_id) {
+                const postId = mediaRow.post_id;
+                const activeMedias = await tx
+                    .select({ id: Media.id, sync_status: Media.sync_status })
+                    .from(Media)
+                    .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE)));
 
-                await tx
-                    .update(Track)
-                    .set({
-                        file_id: newFile.id,
-                        is_generated: false, // User took over
-                        is_original: true,
-                        source_url: trackInfo.source_url ?? existingTrack.source_url,
-                        metadata: mergedMetadata,
-                        variant_key,
-                        is_default,
-                        display_name: trackInfo.display_name ?? existingTrack.display_name,
-                        language: extractedLang,
-                        codec: extractedCodec,
-                        is_stale: false,
-                        source_track_id:
-                            trackInfo.source_track_id !== undefined ? trackInfo.source_track_id : existingTrack.source_track_id,
-                        update_time: now,
-                    })
-                    .where(eq(Track.id, existingTrack.id));
-            } else {
-                // Insert new track
-                const mergedMetadata = {
-                    ...(trackInfo.metadata || {}),
-                    width: fileData.width,
-                    height: fileData.height,
-                    duration: fileData.duration ? Math.round(fileData.duration) : null,
-                };
-                const [inserted] = await tx
-                    .insert(Track)
-                    .values({
-                        media_id: mediaId,
-                        file_id: newFile.id,
-                        type: trackInfo.type,
-                        purpose: trackInfo.purpose,
-                        quality: trackInfo.quality,
-                        priority: trackInfo.priority,
-                        is_original: true,
-                        is_generated: false,
-                        source_url: trackInfo.source_url || "",
-                        metadata: mergedMetadata,
-                        variant_key,
-                        is_default,
-                        display_name: trackInfo.display_name,
-                        language: extractedLang,
-                        codec: extractedCodec,
-                        is_stale: false,
-                        source_track_id: trackInfo.source_track_id || null,
-                        delete_status: DeleteStatus.ACTIVE,
-                    })
-                    .returning();
-                trackId = inserted.id;
-            }
-
-            // 3. Mark dependent tracks as stale if the source track's content has changed
-            if (existingTrack) {
-                const dependentTracks = await tx
-                    .select()
-                    .from(Track)
-                    .where(
-                        and(
-                            eq(Track.media_id, mediaId),
-                            eq(Track.source_track_id, existingTrack.id),
-                            eq(Track.delete_status, DeleteStatus.ACTIVE),
-                        ),
-                    );
-
-                for (const t of dependentTracks) {
+                const allCompleted = activeMedias.every((m: { id: string; sync_status: string | null }) =>
+                    m.id === mediaId ? true : m.sync_status === SyncStatus.COMPLETED,
+                );
+                if (allCompleted) {
                     await tx
-                        .update(Track)
+                        .update(Post)
                         .set({
-                            is_stale: true,
+                            sync_status: SyncStatus.COMPLETED,
                             update_time: now,
                         })
-                        .where(eq(Track.id, t.id));
+                        .where(eq(Post.id, postId));
                 }
             }
+        }
 
-            // 4. Soft-delete old File
-            if (oldFileId) {
-                await tx
-                    .update(File)
-                    .set({
-                        delete_status: DeleteStatus.DELETED,
-                        delete_time: now,
-                    })
-                    .where(eq(File.id, oldFileId));
-            }
-
-            return { trackId, fileId: newFile.id };
-        });
+        return { trackId, fileId: fileRecord.id };
     },
 
     async replaceFile(mediaId: string, trackId: string, fileData: FileData) {

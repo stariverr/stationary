@@ -84,8 +84,9 @@ export enum TrackType {
     VIDEO = "VIDEO",
     AUDIO = "AUDIO",
     SUBTITLE = "SUBTITLE",
+    PDF = "PDF",
 }
-export const TrackTypeEnum = pgEnum("track_type", [TrackType.IMAGE, TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]);
+export const TrackTypeEnum = pgEnum("track_type", [TrackType.IMAGE, TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE, TrackType.PDF]);
 
 export enum TrackPurpose {
     CONTENT = "CONTENT",
@@ -840,3 +841,36 @@ export const AssetEmbedding = pgTable(
 );
 
 // ==== AI & Search Tables: END ====
+
+export enum DraftFileStatus {
+    PENDING = "PENDING",
+    DRAFT = "DRAFT",
+    CONSUMED = "CONSUMED",
+    DELETED = "DELETED",
+}
+export const DraftFileStatusEnum = pgEnum("draft_file_status", [
+    DraftFileStatus.PENDING,
+    DraftFileStatus.DRAFT,
+    DraftFileStatus.CONSUMED,
+    DraftFileStatus.DELETED,
+]);
+
+export const DraftFile = pgTable("draft_file", {
+    id: uuid("id")
+        .primaryKey()
+        .notNull()
+        .$defaultFn(() => uuidv7.generate()),
+    file_id: uuid("file_id").notNull(),
+    library_id: uuid("library_id").notNull(),
+    owner_id: uuid("owner_id").notNull(),
+    original_name: text("original_name").notNull(),
+    status: DraftFileStatusEnum("status").default(DraftFileStatus.DRAFT).notNull(),
+    create_time: temporal("create_time")
+        .default(sql`now()`)
+        .notNull(),
+    update_time: temporal("update_time")
+        .default(sql`now()`)
+        .notNull(),
+    expire_time: temporal("expire_time"),
+    consume_time: temporal("consume_time"),
+});

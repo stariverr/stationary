@@ -81,7 +81,7 @@ describe("Track Variant Key Generation", () => {
 });
 
 describe("TrackService & API Static Compliance", () => {
-    test("TrackService exposes replaceFile and addOrReplaceTrack using physical columns", async () => {
+    test("TrackService exposes replaceFile and upsertTrack using physical columns", async () => {
         const content = await sourceFiles.trackService();
         expect(content).toContain("replaceFile(mediaId: string, trackId: string, fileData: FileData)");
         expect(content).toContain("is_stale: true");

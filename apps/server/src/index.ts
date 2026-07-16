@@ -9,6 +9,7 @@ import library from "@/api/library";
 import search from "@/api/search";
 import tag from "@/api/tag";
 import authRouter from "@/api/auth";
+import importRouter from "@/api/import";
 
 const app = new Hono();
 
@@ -47,6 +48,7 @@ app.use("*", async (c, next) => {
 app.route("/api/auth", authRouter);
 app.route("/api/post", post);
 app.route("/api/media", media);
+app.route("/api/import", importRouter);
 app.route("/api/task", task);
 app.route("/api/user", user);
 app.route("/api/library", library);

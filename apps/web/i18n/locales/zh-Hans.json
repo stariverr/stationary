@@ -56,7 +56,8 @@
         "clear_all": "清除已选",
         "edit": "编辑",
         "save": "保存",
-        "cancel": "取消"
+        "cancel": "取消",
+        "variants": "变体"
     },
     "grid": {
         "showing_items": "显示 {count} 项",
@@ -192,7 +193,11 @@
         },
         "actions": {
             "regenerate_cover": "重新生成封面",
-            "regenerate_covers": "批量重新生成视频封面"
+            "regenerate_covers": "批量重新生成视频封面",
+            "cancel": "取消",
+            "discard": "舍弃",
+            "create": "创建媒体",
+            "add": "添加媒体"
         },
         "cover": {
             "queued": "视频封面重新生成任务已加入队列。",
@@ -202,7 +207,68 @@
             "select_video_required": "请至少选择一个视频。",
             "failed": "封面重新生成任务加入队列失败。",
             "loading": "正在请求..."
-        }
+        },
+        "create_title": "创建媒体",
+        "create_btn": "创建媒体",
+        "search_placeholder": "搜索媒体库素材...",
+        "no_orphan_found": "未找到匹配的媒体素材。",
+        "create_desc": "上传文件并将其配置为单个媒体素材的轨道。",
+        "add_tracks_title": "向媒体添加轨道",
+        "add_tracks_desc": "拖放文件到此处，从您的设备上传，或从草稿箱中选择已有文件。",
+        "upload_files": "上传文件",
+        "add_files": "添加文件",
+        "uploaded_count": "已上传 {count} 个文件",
+        "uploading": "正在上传...",
+        "title_label": "标题",
+        "title_placeholder": "我的媒体素材",
+        "type_label": "媒体类型",
+        "configure_tracks": "配置每个文件的轨道属性",
+        "unsupported_track": "不支持",
+        "not_applicable": "不适用",
+        "untitled": "未命名媒体",
+        "tracks_count": "{count} 个轨道",
+        "headers": {
+            "file": "文件",
+            "track_type": "轨道类型",
+            "purpose": "用途",
+            "quality": "清晰度",
+            "default": "默认",
+            "language": "语言"
+        },
+        "types": {
+            "IMAGE": "图片集",
+            "VIDEO": "视频素材",
+            "LIVE_PHOTO": "实况照片",
+            "AUDIO": "音频素材",
+            "PDF": "PDF 文档"
+        },
+        "track_types": {
+            "VIDEO": "视频",
+            "AUDIO": "音频",
+            "IMAGE": "图片",
+            "SUBTITLE": "字幕",
+            "PDF": "PDF"
+        },
+        "purposes": {
+            "CONTENT": "内容",
+            "COVER": "封面",
+            "THUMBNAIL": "缩略图",
+            "PREVIEW": "预览"
+        },
+        "errors": {
+            "select_at_least_one": "请选择至少一个草稿文件。",
+            "not_supported_track": "{name} 不是支持的媒体轨道。",
+            "cannot_be_used_as_type": "{name} 不能用作 {type} 轨道。",
+            "cannot_use_purpose_in_media": "{type} 轨道不能在 {mediaType} 媒体中使用 {purpose} 用途。",
+            "only_one_default_allowed": "只允许有一个默认的 {type} {purpose} 轨道。",
+            "requires_default_content_track": "{mediaType} 媒体需要一个默认的 {requiredType} CONTENT 轨道。"
+        },
+        "toast_create_success": "媒体已创建",
+        "toast_create_success_desc": "“{name}”已成功创建。",
+        "toast_create_failed": "创建媒体失败",
+        "toast_upload_failed": "上传失败",
+        "toast_remove_failed": "删除文件失败",
+        "toast_invalid_composition": "无效的轨道组合"
     },
     "search": {
         "matched_reason": "匹配原因",
@@ -306,5 +372,112 @@
         "batch_edit_color": "批量修改强调色",
         "batch_apply_color_btn": "应用颜色到已选标签",
         "batch_actions": "批量操作"
+    },
+    "post": {
+        "create_title": "创建帖子",
+        "title_label": "标题",
+        "title_placeholder": "输入帖子标题",
+        "description_label": "描述",
+        "description_placeholder": "写点关于帖子的内容...",
+        "tags_label": "标签",
+        "media_label": "媒体",
+        "add_media": "添加媒体",
+        "choose_library": "从媒体库选择",
+        "drag_or_choose": "拖拽文件到此处，或选择下方选项：",
+        "upload_media": "上传新媒体",
+        "no_media": "尚未附加媒体素材。",
+        "select_source": "从媒体库选择或上传新文件。",
+        "create_btn": "创建帖子",
+        "cancel_btn": "取消",
+        "back_btn": "返回",
+        "edit_media": "编辑媒体",
+        "new_media": "新建媒体",
+        "move_up": "上移",
+        "move_down": "下移",
+        "remove": "移除",
+        "creating": "正在创建...",
+        "toast_create_success": "帖子创建成功",
+        "toast_create_failed": "创建帖子失败",
+        "add_n_media": "添加 {count} 个媒体",
+        "tabs": {
+            "basic_info": "基本信息",
+            "manage_media": "媒体管理"
+        },
+        "manage": {
+            "link_orphan": "关联孤立素材",
+            "upload_create": "上传 / 新增",
+            "no_media_attached": "未附加媒体素材",
+            "no_media_hint": "点击上方的“上传 / 新增”或“关联孤立素材”以添加媒体。",
+            "link_orphan_title": "关联孤立媒体素材",
+            "link_orphan_desc": "从媒体库中选择不属于任何帖子的媒体素材。",
+            "no_orphan_found": "此媒体库中未找到孤立的媒体素材。",
+            "attach_selection": "关联所选素材",
+            "toast_unlink_success": "媒体已移至孤立素材",
+            "toast_unlink_failed": "解除媒体关联失败",
+            "toast_trash_success": "媒体已移至回收站",
+            "toast_trash_failed": "移动媒体到回收站失败",
+            "toast_reorder_success": "媒体排序成功",
+            "toast_reorder_failed": "媒体排序失败"
+        }
+    },
+    "draft_box": {
+        "title": "草稿箱",
+        "drop_title": "拖放到草稿箱",
+        "drop_desc": "将文件拖放到任意位置即可将其上传到媒体库草稿集合中。稍后您可以再进行音视频等轨道整理。",
+        "select_btn": "从草稿箱选择",
+        "add_btn": "从草稿箱添加",
+        "dialog_title": "从草稿箱选择",
+        "dialog_description": "从媒体库的草稿箱中选择文件作为轨道。",
+        "search_placeholder": "搜索草稿名称...",
+        "available_count": "有 {count} 个可用草稿文件",
+        "loading": "正在加载草稿箱...",
+        "empty": "草稿箱为空",
+        "empty_desc": "将图片、视频、音频或字幕文件拖放到此处，或点击上传按钮导入文件到草稿箱中暂存。",
+        "choose_files_btn": "选择文件",
+        "selected_count": "已选择 {count} 个文件",
+        "selected_items_count": "已选择 {count} 项",
+        "confirm_btn": "确认",
+        "cancel_btn": "取消",
+        "import_separately_btn": "分别导入",
+        "import_separately_tooltip": "将每个选中的文件作为独立的媒体资产分别导入",
+        "merge_tracks_btn": "合并轨道",
+        "merge_tracks_tooltip": "将选中的文件合并为单个媒体资产（例如视频+音频轨道）",
+        "delete_btn": "删除",
+        "delete_tooltip": "永久删除选中的草稿文件",
+        "uploading_background_tasks": "后台任务正在上传...",
+        "uploading_and_registering": "正在上传文件到草稿箱并注册轨道...",
+        "unselect_all_btn": "取消全选",
+        "select_all_btn": "全选",
+        "add_files_btn": "添加文件",
+        "merge_dialog_title": "合并轨道",
+        "merge_dialog_desc": "将您选择的已暂存文件组合为单个媒体资产的多种清晰度分辨率、封面图或字幕轨道。",
+        "merge_dialog": {
+            "title_label": "媒体资产标题",
+            "title_placeholder": "我的度假视频",
+            "type_label": "资产类型",
+            "configure_tracks": "配置轨道",
+            "commit_btn": "提交媒体"
+        },
+        "toasts": {
+            "delete_file_failed": "删除草稿文件失败",
+            "deleting_files": "正在删除 {count} 个草稿文件...",
+            "delete_files_success": "草稿文件已成功删除",
+            "delete_files_failed": "删除草稿文件失败",
+            "unsupported_file": "不支持的草稿文件",
+            "unsupported_file_desc": "{name} 无法作为媒体提交。",
+            "choose_media_type": "请先选择媒体类型",
+            "choose_media_type_desc": "使用“合并轨道”功能来选择 {name} 包含的是音频还是视频轨道。",
+            "subtitle_cannot_standalone": "字幕文件不能单独作为独立媒体",
+            "subtitle_cannot_standalone_desc": "请把它们合并进视频、音频或实况照片资产作为辅助轨道。",
+            "import_success": "成功导入 {count} 个媒体素材",
+            "import_success_desc": "它们现在可以在您的媒体库中作为无主素材使用。",
+            "commit_failed": "提交媒体失败",
+            "merge_success": "合并媒体已创建",
+            "merge_success_desc": "成功将 “{title}” 导入到您的媒体库中。",
+            "merge_failed": "提交合并媒体失败",
+            "unsupported_files_kept": "有 {count} 个文件被保留在草稿箱中",
+            "unsupported_files_kept_desc": "字幕和其他辅助文件必须作为轨道添加到兼容的媒体中。"
+        }
     }
 }
+

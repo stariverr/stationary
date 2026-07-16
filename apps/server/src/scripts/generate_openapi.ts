@@ -1,6 +1,7 @@
 import { writeFileSync } from "fs";
 import { z } from "zod";
-import { MediaType, PostSource, TrackType, TrackPurpose, TrackQuality } from "@/db/schema";
+import { MediaType, PostSource, TrackType, TrackPurpose } from "@/db/schema";
+import { Quality } from "@/lib/types";
 
 // FormTimestampSchema helper
 const FormTimestampSchema = z.string().or(z.number()).nullable().optional();
@@ -73,15 +74,15 @@ function makeUnifiedSuccessResponse(dataSchema: any) {
 // Recreate Schemas to avoid db side-effects
 const TokenCreateBodySchema = z.object({
     name: z.string().min(1),
-    library_id: z.string().uuid().nullable().optional(),
+    library_id: z.uuid().nullable().optional(),
     expires_in_seconds: z.number().int().positive().nullable().optional(),
 });
 
 const SearchQuerySchema = z.object({
-    library_id: z.string().uuid(),
+    library_id: z.uuid(),
     keyword: z.string().trim(),
-    source: z.nativeEnum(PostSource).optional(),
-    media_type: z.nativeEnum(MediaType).optional(),
+    source: z.enum(PostSource).optional(),
+    media_type: z.enum(MediaType).optional(),
     page: z.number().int().positive().optional().default(1),
     count: z.number().int().positive().optional().default(20),
 });
@@ -98,15 +99,15 @@ const LibraryCreateBodySchema = z.object({
 });
 
 const LibraryUpdateBodySchema = z.object({
-    id: z.string().uuid(),
+    id: z.uuid(),
     name: z.string().min(1).optional(),
     description: z.string().optional(),
 });
 
 const LibraryMoveItemsBodySchema = z.object({
-    post_ids: z.array(z.string().uuid()).default([]),
-    media_ids: z.array(z.string().uuid()).default([]),
-    target_library_id: z.string().uuid(),
+    post_ids: z.array(z.uuid()).default([]),
+    media_ids: z.array(z.uuid()).default([]),
+    target_library_id: z.uuid(),
 });
 
 const LibraryAiConfigSchema = z.object({
@@ -124,40 +125,40 @@ const LibraryAiConfigSchema = z.object({
 });
 
 const TagListQuerySchema = z.object({
-    library_id: z.string().uuid(),
+    library_id: z.uuid(),
     status: z.enum(["ACTIVE", "CANDIDATE", "IGNORED"]).optional(),
 });
 
 const TagCreateBodySchema = z.object({
-    library_id: z.string().uuid(),
+    library_id: z.uuid(),
     name: z.string().min(1),
     color: z.string().optional(),
 });
 
 const TagUpdateBodySchema = z.object({
-    id: z.string().uuid(),
+    id: z.uuid(),
     name: z.string().min(1).optional(),
     color: z.string().nullable().optional(),
     status: z.enum(["ACTIVE", "CANDIDATE", "IGNORED"]).optional(),
 });
 
 const TagMergeBodySchema = z.object({
-    library_id: z.string().uuid(),
-    source_tag_id: z.string().uuid(),
-    target_tag_id: z.string().uuid(),
+    library_id: z.uuid(),
+    source_tag_id: z.uuid(),
+    target_tag_id: z.uuid(),
     retain_as_alias: z.boolean().default(true),
 });
 
 const PostListRequestBodySchema = z.object({
-    library_id: z.string().uuid(),
+    library_id: z.uuid(),
     page: z.number().int().positive().optional(),
     count: z.number().int().positive().optional(),
     keyword: z.string().optional(),
-    source: z.nativeEnum(PostSource).optional(),
+    source: z.enum(PostSource).optional(),
     sort_by: z.enum(["import_time", "published_time"]).optional(),
     sort_order: z.enum(["asc", "desc"]).optional(),
     author_ids: z.string().optional(),
-    media_type: z.nativeEnum(MediaType).optional(),
+    media_type: z.enum(MediaType).optional(),
     tag_ids: z.string().optional(),
 });
 
@@ -173,20 +174,20 @@ const PostReplaceTagsSchema = z.object({
 });
 
 const PostAttachMediaSchema = z.object({
-    media_ids: z.array(z.string().uuid()).min(1),
+    media_ids: z.array(z.uuid()).min(1),
 });
 
 const PostReorderMediaSchema = z.object({
-    media_ids: z.array(z.string().uuid()).min(1),
+    media_ids: z.array(z.uuid()).min(1),
 });
 
 const MediaListRequestBodySchema = z.object({
     page: z.number().int().positive().optional(),
     count: z.number().int().positive().optional(),
     keyword: z.string().optional(),
-    source: z.nativeEnum(PostSource).optional(),
+    source: z.enum(PostSource).optional(),
     display_mode: z.enum(["flat", "stacked"]).default("flat"),
-    library_id: z.string().uuid().optional(),
+    library_id: z.uuid().optional(),
 });
 
 const MediaUpdateInfoSchema = z.object({
@@ -200,17 +201,17 @@ const MediaReplaceTagsSchema = z.object({
 });
 
 const PresignUploadSchema = z.object({
-    type: z.nativeEnum(TrackType),
-    purpose: z.nativeEnum(TrackPurpose),
-    quality: z.nativeEnum(TrackQuality),
+    type: z.enum(TrackType),
+    purpose: z.enum(TrackPurpose),
+    quality: z.enum(Quality),
     priority: z.number().int().default(0),
     fileName: z.string().min(1),
 });
 
 const RegisterTrackSchema = z.object({
-    type: z.nativeEnum(TrackType),
-    purpose: z.nativeEnum(TrackPurpose),
-    quality: z.nativeEnum(TrackQuality),
+    type: z.enum(TrackType),
+    purpose: z.enum(TrackPurpose),
+    quality: z.enum(Quality),
     priority: z.number().int().default(0),
     source_url: z.string().optional(),
     metadata: z.any().optional(),
@@ -248,7 +249,7 @@ const ReplaceFileSchema = z.object({
 
 const UpdateTrackMetadataSchema = z.object({
     priority: z.number().int().optional(),
-    quality: z.nativeEnum(TrackQuality).optional(),
+    quality: z.enum(Quality).optional(),
     display_name: z.string().nullable().optional(),
     variant_key: z.string().optional(),
     is_default: z.boolean().optional(),
@@ -287,10 +288,10 @@ const TrackMetadataSchema = z.object({
 
 const TrackSchema = z.object({
     url: z.string(),
-    type: z.nativeEnum(TrackType),
-    purpose: z.nativeEnum(TrackPurpose).default(TrackPurpose.CONTENT),
+    type: z.enum(TrackType),
+    purpose: z.enum(TrackPurpose).default(TrackPurpose.CONTENT),
     is_original: z.boolean().default(true),
-    quality: z.nativeEnum(TrackQuality).default(TrackQuality.ORIGINAL),
+    quality: z.enum(Quality).default(Quality.ORIGINAL),
     priority: z.number().default(0),
     metadata: TrackMetadataSchema.nullish(),
 });
@@ -299,7 +300,7 @@ const MediaItemSchema = z.object({
     external_id: z.string().optional(),
     title: z.string().nullish(),
     description: z.string().nullish(),
-    type: z.nativeEnum(MediaType),
+    type: z.enum(MediaType),
     tracks: z.array(TrackSchema).default([]),
     tags: z.array(z.string()).default([]),
     duration: z.number().nullable().optional(),
@@ -314,29 +315,29 @@ const PostItemSchema = z.object({
     external_id: z.string().optional().default(""),
     tags: z.array(z.string()).default([]),
     author: AuthorSchema,
-    platform: z.nativeEnum(PostSource),
+    platform: z.enum(PostSource),
     media: z.array(MediaItemSchema),
     published_time: z.string().optional(),
     create_time: z.string().optional(),
 });
 
 const CreateTaskSchema = z.object({
-    library_id: z.string().uuid(),
+    library_id: z.uuid(),
     posts: z.array(PostItemSchema),
     media: z.array(MediaItemSchema),
     force: z.boolean().optional(),
 });
 
 const RetrySyncSchema = z.object({
-    media_ids: z.array(z.string().uuid()).optional(),
-    post_ids: z.array(z.string().uuid()).optional(),
-    library_id: z.string().uuid(),
+    media_ids: z.array(z.uuid()).optional(),
+    post_ids: z.array(z.uuid()).optional(),
+    library_id: z.uuid(),
 });
 
 const QueueAiSchema = z.object({
-    library_id: z.string().uuid(),
+    library_id: z.uuid(),
     entity_type: z.enum(["post", "media"]),
-    entity_ids: z.array(z.string().uuid()).optional(),
+    entity_ids: z.array(z.uuid()).optional(),
     force: z.boolean().optional(),
 });
 
@@ -434,7 +435,7 @@ const routes: RouteItem[] = [
         method: "delete",
         summary: "Revoke specified API token",
         tags: ["User"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -498,7 +499,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Delete specified media library",
         tags: ["Library"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -528,7 +529,7 @@ const routes: RouteItem[] = [
         method: "get",
         summary: "Get AI embedding and description config for the media library",
         tags: ["Library"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -552,7 +553,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Modify AI embedding and description config for the media library",
         tags: ["Library"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         bodySchema: LibraryAiConfigSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object", nullable: true }),
@@ -607,7 +608,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Delete tag",
         tags: ["Tag"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -647,10 +648,10 @@ const routes: RouteItem[] = [
         summary: "Get author list in the media library",
         tags: ["Post"],
         querySchema: z.object({
-            library_id: z.string().uuid(),
+            library_id: z.uuid(),
             keyword: z.string().optional(),
             author_ids: z.string().optional(),
-            platform: z.nativeEnum(PostSource).optional(),
+            platform: z.enum(PostSource).optional(),
         }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "array", items: { type: "object" } }),
@@ -660,7 +661,7 @@ const routes: RouteItem[] = [
         method: "get",
         summary: "Get Post details",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
@@ -669,7 +670,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Move Post to trash",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -683,7 +684,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Restore Post from trash",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -697,7 +698,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Permanently delete Post",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -711,7 +712,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Update Post info (title, description, published time, etc.)",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         bodySchema: PostUpdateInfoSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -721,7 +722,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Replace tags bound to Post",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         bodySchema: PostReplaceTagsSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
@@ -732,11 +733,11 @@ const routes: RouteItem[] = [
         }),
     },
     {
-        path: "/api/post/:id/media/attach",
+        path: "/api/post/:id/bind_media",
         method: "post",
         summary: "Associate physical media with Post",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         bodySchema: PostAttachMediaSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -746,7 +747,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Reorder media items under Post",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         bodySchema: PostReorderMediaSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -756,7 +757,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Remove associated media from Post",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.string().uuid(), mediaId: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid(), mediaId: z.uuid() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
@@ -781,7 +782,7 @@ const routes: RouteItem[] = [
         method: "get",
         summary: "Get Media details",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
@@ -790,7 +791,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Move Media to trash",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -804,7 +805,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Restore Media from trash",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -818,7 +819,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Permanently delete Media and its files",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -832,7 +833,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Regenerate cover for video Media",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         bodySchema: z.object({ replace_external_cover: z.boolean().optional() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -842,7 +843,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Batch regenerate video covers",
         tags: ["Media"],
-        bodySchema: z.object({ media_ids: z.array(z.string().uuid()), replace_external_cover: z.boolean().optional() }),
+        bodySchema: z.object({ media_ids: z.array(z.uuid()), replace_external_cover: z.boolean().optional() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
@@ -851,7 +852,7 @@ const routes: RouteItem[] = [
         method: "get",
         summary: "Get MPEG-DASH MPD playlist for video",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
         responseSchema: {
             type: "string",
@@ -863,7 +864,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Update basic info of Media",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         bodySchema: MediaUpdateInfoSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -873,7 +874,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Replace tags bound to Media",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         bodySchema: MediaReplaceTagsSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
@@ -888,7 +889,7 @@ const routes: RouteItem[] = [
         method: "get",
         summary: "List all playback tracks under Media",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "array", items: { type: "object" } }),
     },
@@ -897,7 +898,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Get S3 presigned URL for uploading track",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         bodySchema: PresignUploadSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
@@ -912,11 +913,11 @@ const routes: RouteItem[] = [
         }),
     },
     {
-        path: "/api/media/:id/tracks/add-or-replace",
+        path: "/api/media/:id/tracks/upsert",
         method: "post",
         summary: "Register/replace specified track and associate physical file",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid() }),
         bodySchema: RegisterTrackSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -926,7 +927,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Replace physical file association of specified track",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.string().uuid(), trackId: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid(), trackId: z.uuid() }),
         bodySchema: ReplaceFileSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -936,7 +937,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Delete track record",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.string().uuid(), trackId: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid(), trackId: z.uuid() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
@@ -945,7 +946,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Update track attributes",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.string().uuid(), trackId: z.string().uuid() }),
+        paramSchema: z.object({ id: z.uuid(), trackId: z.uuid() }),
         bodySchema: UpdateTrackMetadataSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),

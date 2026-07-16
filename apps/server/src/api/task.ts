@@ -26,6 +26,8 @@ import {
     Media,
     Post,
     Track,
+    DraftFile,
+    DraftFileStatus,
 } from "@/db/schema";
 import { eq, and, lt, inArray, sql } from "drizzle-orm";
 import { DeleteService } from "@/services/delete";
@@ -354,6 +356,78 @@ taskApp.post("/purge-expired-files", async (c) => {
     );
 });
 
+// Cron endpoint to purge stale PENDING uploads that were never confirmed
+taskApp.post("/purge-stale-pending-drafts", async (c) => {
+    // Auth Check: Validate cron secret
+    const cronSecret = env.CRON_SECRET;
+    if (cronSecret) {
+        const authHeader = c.req.header("Authorization");
+        const internalHeader = c.req.header("X-Internal-Token");
+        let token = "";
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+            token = authHeader.substring(7);
+        } else if (internalHeader) {
+            token = internalHeader;
+        }
+        if (token !== cronSecret) {
+            return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+        }
+    } else {
+        if (process.env.NODE_ENV === "production") {
+            return c.json(error(Code.SERVICE_UNAVAILABLE, "CRON_SECRET is not configured in production"), 500);
+        }
+    }
+
+    // Set expiration threshold to 2 hours ago
+    const twoHoursAgo = Temporal.Now.instant().subtract({ hours: 2 });
+
+    const staleDrafts = await db
+        .select({
+            draftId: DraftFile.id,
+            fileId: DbFile.id,
+            filePath: DbFile.path,
+            fileBucket: DbFile.bucket,
+        })
+        .from(DraftFile)
+        .innerJoin(DbFile, eq(DraftFile.file_id, DbFile.id))
+        .where(and(eq(DraftFile.status, DraftFileStatus.PENDING), lt(DraftFile.create_time, twoHoursAgo)));
+
+    let purgedCount = 0;
+    let failedCount = 0;
+    const errors: Array<{ draftId: string; error: string }> = [];
+
+    for (const draft of staleDrafts) {
+        try {
+            // Delete physically from S3
+            try {
+                await s3.delete(draft.filePath, { bucket: draft.fileBucket });
+            } catch (s3Err: any) {
+                if (s3Err.name !== "NotFound" && s3Err.name !== "NoSuchKey") {
+                    throw s3Err;
+                }
+            }
+
+            // Delete database records in transaction
+            await db.transaction(async (tx) => {
+                await tx.delete(DraftFile).where(eq(DraftFile.id, draft.draftId));
+                await tx.delete(DbFile).where(eq(DbFile.id, draft.fileId));
+            });
+            purgedCount++;
+        } catch (e: any) {
+            failedCount++;
+            errors.push({ draftId: draft.draftId, error: e.message || String(e) });
+        }
+    }
+
+    return c.json(
+        success(Code.SUCCESS, {
+            purgedCount,
+            failedCount,
+            errors,
+        }),
+    );
+});
+
 const CoverWorkflowPayloadSchema = z.object({
     mediaId: z.uuid(),
     force: z.boolean().optional(),
@@ -457,8 +531,8 @@ taskApp.post("/scan-missing-covers", async (c) => {
 
 // Endpoint to retry sync for failed items
 const RetrySyncSchema = z.object({
-    post_ids: z.array(z.string().uuid()).optional(),
-    media_ids: z.array(z.string().uuid()).optional(),
+    post_ids: z.array(z.uuid()).optional(),
+    media_ids: z.array(z.uuid()).optional(),
 });
 
 taskApp.post("/retry-sync", requireAuth, zValidator("json", RetrySyncSchema), async (c) => {
@@ -597,8 +671,8 @@ taskApp.post("/sweep-orphan-tags", async (c) => {
 
 // Endpoint to queue items for AI enrichment
 const QueueAiSchema = z.object({
-    post_ids: z.array(z.string().uuid()).optional(),
-    media_ids: z.array(z.string().uuid()).optional(),
+    post_ids: z.array(z.uuid()).optional(),
+    media_ids: z.array(z.uuid()).optional(),
 });
 
 taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async (c) => {
