@@ -22,7 +22,7 @@ class ApiService {
     if (defaultTargetPlatform == TargetPlatform.android) {
       return 'http://10.0.2.2:9400';
     }
-    return 'http://maple:4000'; // iOS Simulator / macOS desktop / etc.
+    return 'http://localhost:4000'; // iOS Simulator / macOS desktop / etc.
   }
 
   Future<void> init() async {
