@@ -409,7 +409,9 @@ export const Media = pgTable(
         recycle_time: temporal("recycle_time"),
     },
     (table) => [
-        uniqueIndex("media_post_sort_unique").on(table.post_id, table.sort_order),
+        uniqueIndex("media_post_sort_unique")
+            .on(table.post_id, table.sort_order)
+            .where(sql`delete_status = 'ACTIVE'`),
         index("media_source_eid_idx").on(table.source, table.eid),
         index("media_library_delete_time_idx").on(table.library_id, table.delete_time),
         index("media_post_delete_time_idx").on(table.post_id, table.delete_time),
