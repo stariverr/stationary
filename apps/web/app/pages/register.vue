@@ -5,5 +5,5 @@ definePageMeta({
 </script>
 
 <template>
-    <AuthCard mode="login" />
+    <AuthCard mode="register" />
 </template>

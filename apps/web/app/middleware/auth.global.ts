@@ -5,20 +5,23 @@ export default defineNuxtRouteMiddleware(async (to) => {
         // 使用 useSession(useFetch) 是官方推荐的 Nuxt SSR 方式，
         // 能确保在服务端渲染时请求带着正确的 cookie 且不丢失 Nuxt 上下文。
         const { data: session } = await useSession(useFetch);
+        const publicRoutes = ["/login", "/register", "/verify-email", "/forgot-password", "/terms", "/privacy"];
 
         if (!session.value) {
-            if (to.path === "/login") {
+            if (publicRoutes.includes(to.path)) {
                 return;
             }
             return navigateTo("/login");
         }
 
-        if (to.path === "/login" && session.value) {
+        const authOnlyRoutes = ["/login", "/register", "/verify-email", "/forgot-password"];
+        if (authOnlyRoutes.includes(to.path) && session.value) {
             return navigateTo("/");
         }
     } catch (e) {
         console.error("Middleware Error:", e);
-        if (to.path !== "/login") {
+        const publicRoutes = ["/login", "/register", "/verify-email", "/forgot-password", "/terms", "/privacy"];
+        if (!publicRoutes.includes(to.path)) {
             return navigateTo("/login");
         }
     }

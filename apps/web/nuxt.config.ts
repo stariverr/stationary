@@ -38,12 +38,6 @@ export default defineNuxtConfig({
     },
     vite: {
         plugins: [tailwindcss()],
-        resolve: {
-            tsconfigPaths: true,
-        },
-        devtools: {
-            enabled: true,
-        },
         optimizeDeps: {
             include: [
                 "@vueuse/core",
@@ -65,6 +59,7 @@ export default defineNuxtConfig({
             cdnBaseUrl: process.env.NUXT_PUBLIC_CDN_BASE_URL || "http://localhost:9400",
             appUrl: process.env.NUXT_PUBLIC_APP_URL || "http://localhost:4000",
             imageProvider: process.env.NUXT_PUBLIC_IMAGE_PROVIDER || "cloudflare",
+            turnstileSiteKey: process.env.NUXT_PUBLIC_TURNSTILE_SITE_KEY || "1x00000000000000000000AA",
         },
     },
     nitro: {

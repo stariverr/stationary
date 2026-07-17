@@ -15,6 +15,10 @@ const envSchema = z.object({
     RESEND_API_KEY: z.string(),
     AUTH_SECRET: z.string(),
 
+    /** Cloudflare Turnstile Keys */
+    TURNSTILE_SITE_KEY: z.string().default("1x00000000000000000000AA"),
+    TURNSTILE_SECRET_KEY: z.string().default("1x0000000000000000000000000000000AA"),
+
     BETTER_AUTH_URL: z.string().optional(),
     BETTER_AUTH_SECRET: z.string().optional(),
 
