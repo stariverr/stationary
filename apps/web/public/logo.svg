@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+    <defs>
+        <linearGradient id="l44-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#10b981" />
+            <stop offset="100%" stop-color="#059669" />
+        </linearGradient>
+    </defs>
+    <!-- Sliced Wave Circle (Deepnote style) -->
+    <path d="M 256,50 C 370,50 462,142 462,256 C 462,370 370,462 256,462 C 142,462 50,370 50,256 C 50,142 142,50 256,50 Z" fill="none" stroke="url(#l44-grad)" stroke-width="24" />
+    <path d="M 110,210 C 190,160 322,260 402,210" fill="none" stroke="url(#l44-grad)" stroke-width="32" stroke-linecap="round" />
+    <path d="M 110,302 C 190,252 322,352 402,302" fill="none" stroke="url(#l44-grad)" stroke-width="32" stroke-linecap="round" />
+</svg>

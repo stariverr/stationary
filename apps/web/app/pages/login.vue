@@ -28,9 +28,7 @@ const loginWithGoogle = async () => {
         <div class="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden flex flex-col">
             <div class="p-8 flex flex-col items-center text-center">
                 <!-- Logo / Icon -->
-                <div class="w-16 h-16 bg-black rounded-2xl flex items-center justify-center mb-6 shadow-lg shadow-black/10">
-                    <div class="w-8 h-8 bg-white rounded-full"></div>
-                </div>
+                <img src="/logo.svg" alt="Stationary Logo" class="w-16 h-16 mb-6" />
 
                 <h1 class="text-2xl font-bold text-gray-900 mb-2">Welcome Back</h1>
                 <p class="text-gray-500 mb-8">Sign in to your account to continue</p>

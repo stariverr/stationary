@@ -2,6 +2,14 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineNuxtConfig({
     srcDir: "app",
+    app: {
+        head: {
+            title: "Stationary - Media Asset Management",
+            link: [
+                { rel: "icon", type: "image/svg+xml", href: "/logo.svg" }
+            ]
+        }
+    },
     compatibilityDate: "2026-05-18",
     ssr: true,
     devtools: { enabled: false },
