@@ -26,7 +26,7 @@ import { storeToRefs } from "pinia";
 const store = useMediaStore();
 const { medias, isLoadingMedia, keyword, source, displayMode, total, page, count, selectedMediaId, useAiSearch } = storeToRefs(store);
 const { refetchMedia, selectMedia } = store;
-const { toggleSidebar, isCreateMediaOpen } = useLayout();
+const { toggleSidebar, isCreateMediaOpen } = useAppLayout();
 const libraryStore = useLibraryStore();
 const { isMultiSelectClick } = useMultiSelectModifier();
 const visualViewportBottomOffsetStyle = useVisualViewportBottomOffset();

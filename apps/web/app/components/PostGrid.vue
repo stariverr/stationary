@@ -45,7 +45,7 @@ const {
     authorSearchKeyword,
     authorCache,
 } = usePosts();
-const { toggleSidebar, isCreatePostOpen } = useLayout();
+const { toggleSidebar, isCreatePostOpen } = useAppLayout();
 const libraryStore = useLibraryStore();
 const tagStore = useTagStore();
 const { isMultiSelectClick } = useMultiSelectModifier();

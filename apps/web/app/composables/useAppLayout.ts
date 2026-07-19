@@ -1,7 +1,7 @@
 import { useLayoutStore } from "@/stores/layout";
 import { computed } from "vue";
 
-export const useLayout = () => {
+export const useAppLayout = () => {
     const store = useLayoutStore();
 
     return {

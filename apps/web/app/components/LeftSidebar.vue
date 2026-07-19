@@ -8,7 +8,7 @@ const route = useRoute();
 const router = useRouter();
 
 const isSettingsOpen = ref(false);
-const { toggleSidebar } = useLayout();
+const { toggleSidebar } = useAppLayout();
 const layoutStore = useLayoutStore();
 
 const menuItems = computed(() => [
@@ -56,7 +56,7 @@ const folders = [{ icon: Folder, label: "2D", count: 5 }];
                 class="w-full justify-center gap-1.5 shadow-xs active:scale-[0.98] cursor-pointer"
             >
                 <Plus class="w-3.5 h-3.5" />
-                <span>{{ $t('post.create_btn') }}</span>
+                <span>{{ $t("post.create_btn") }}</span>
             </Button>
             <Button
                 @click="triggerCreateMedia"
@@ -64,7 +64,7 @@ const folders = [{ icon: Folder, label: "2D", count: 5 }];
                 class="w-full justify-center gap-1.5 shadow-xs active:scale-[0.98] cursor-pointer"
             >
                 <Upload class="w-3.5 h-3.5" />
-                <span>{{ $t('media.create_btn') }}</span>
+                <span>{{ $t("media.create_btn") }}</span>
             </Button>
         </div>
 
@@ -109,7 +109,7 @@ const folders = [{ icon: Folder, label: "2D", count: 5 }];
             >
                 <div class="flex items-center gap-2">
                     <FolderPlus class="w-4 h-4 opacity-70" />
-                    <span class="truncate">{{ $t('draft_box.title') }}</span>
+                    <span class="truncate">{{ $t("draft_box.title") }}</span>
                 </div>
                 <span
                     v-if="importStore.draftFiles.length > 0"

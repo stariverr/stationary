@@ -5,10 +5,8 @@ export default defineNuxtConfig({
     app: {
         head: {
             title: "Stationary - Media Asset Management",
-            link: [
-                { rel: "icon", type: "image/svg+xml", href: "/logo.svg" }
-            ]
-        }
+            link: [{ rel: "icon", type: "image/svg+xml", href: "/logo.svg" }],
+        },
     },
     compatibilityDate: "2026-05-18",
     ssr: true,
@@ -39,14 +37,7 @@ export default defineNuxtConfig({
     vite: {
         plugins: [tailwindcss()],
         optimizeDeps: {
-            include: [
-                "@vueuse/core",
-                "@tanstack/vue-query",
-                "@lucide/vue",
-                "swiper/vue",
-                "@js-temporal/polyfill",
-                "plyr",
-            ],
+            include: ["@vueuse/core", "@tanstack/vue-query", "@lucide/vue", "swiper/vue", "@js-temporal/polyfill", "plyr"],
         },
     },
     css: ["@/assets/css/main.css"],

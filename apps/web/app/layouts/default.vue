@@ -3,7 +3,7 @@ import { useUserStore } from "@/stores/user";
 import { useSession } from "@/lib/auth-client";
 import { watch, onMounted } from "vue";
 
-const { isSidebarOpen, isSidebarCollapsed, closeSidebar } = useLayout();
+const { isSidebarOpen, isSidebarCollapsed, closeSidebar } = useAppLayout();
 const route = useRoute();
 
 const userStore = useUserStore();
