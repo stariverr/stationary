@@ -14,6 +14,9 @@ export default defineNuxtConfig({
     devServer: {
         port: 4000,
     },
+    experimental: {
+        ssrStreaming: true,
+    },
     modules: ["@pinia/nuxt", "shadcn-nuxt", "@nuxtjs/i18n"],
     i18n: {
         locales: [
