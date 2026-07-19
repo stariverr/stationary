@@ -55,6 +55,10 @@ export default defineNuxtConfig({
     },
     nitro: {
         preset: "cloudflare-module",
+        // TODO: temporarily add this to fix the build error: Nitro's global replace plugin naively replaces 'typeof window' inside unhead's iife.mjs string literals, which corrupts the output syntax and crashes Rollup.
+        replace: {
+            "typeof window": "typeof window",
+        },
     },
     shadcn: {
         prefix: "",
