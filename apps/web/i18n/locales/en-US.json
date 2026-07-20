@@ -518,6 +518,10 @@
         "privacy_policy": "Privacy Policy",
         "toast_enter_credentials": "Please enter email and password.",
         "toast_complete_captcha": "Please complete the Turnstile captcha check.",
+        "err_otp_cooldown": "Verification code requested too frequently. Please wait.",
+        "err_otp_daily_limit": "Daily verification limit reached. Please try again tomorrow.",
+        "err_ip_hourly_limit": "IP address limit exceeded. Please try again later.",
+        "err_too_many_requests": "Too many requests. Please try again later.",
         "toast_fill_fields": "Please fill in all registration fields.",
         "toast_email_not_verified": "Your email is not verified yet. Redirecting to verification.",
         "toast_registration_success": "Registration successful! Code sent to your email.",
@@ -554,4 +558,3 @@
         "toast_registration_failed": "Registration failed."
     }
 }
-

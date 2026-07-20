@@ -511,6 +511,10 @@
         "privacy_policy": "隱私權政策",
         "toast_enter_credentials": "請輸入電子郵件和密碼。",
         "toast_complete_captcha": "請完成 Turnstile 人機身份驗證。",
+        "err_otp_cooldown": "驗證碼請求過於頻繁，請稍後再試。",
+        "err_otp_daily_limit": "已達到今日發送上限，請明天再試。",
+        "err_ip_hourly_limit": "您的 IP 請求驗證碼過於頻繁，請稍後再試。",
+        "err_too_many_requests": "請求過多，請稍後再試。",
         "toast_fill_fields": "請填寫所有註冊欄位。",
         "toast_email_not_verified": "您的信箱尚未驗證，正在跳轉到驗證頁面。",
         "toast_registration_success": "註冊成功！驗證碼已發送至您的信箱。",
@@ -547,4 +551,3 @@
         "toast_registration_failed": "註冊失敗。"
     }
 }
-
