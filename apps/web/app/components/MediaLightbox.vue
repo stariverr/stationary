@@ -513,8 +513,9 @@ const handleAddTag = async (tagToAdd: string) => {
 </script>
 
 <template>
-    <Teleport to="body">
-        <Transition name="fade">
+    <ClientOnly>
+        <Teleport to="body">
+            <Transition name="fade">
             <div v-if="isVisible" class="fixed inset-0 z-[200] flex bg-black/95 backdrop-blur-sm pointer-events-auto">
                 <!-- Main Lightbox Area -->
                 <div class="flex-1 relative flex items-center justify-center group/lightbox min-w-0">
@@ -948,6 +949,7 @@ const handleAddTag = async (tagToAdd: string) => {
             </div>
         </Transition>
     </Teleport>
+    </ClientOnly>
 </template>
 
 <style scoped>
