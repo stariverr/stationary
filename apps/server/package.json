@@ -3,7 +3,7 @@
     "type": "module",
     "scripts": {
         "dev": "bun run --hot src/index.ts",
-        "typecheck": "bun run tsgo --noEmit",
+        "typecheck": "bun run tsc --noEmit",
         "build": "bun build src/index.ts --outdir ./dist --target bun",
         "deploy": "bunx wrangler deploy",
         "worker:dev": "bunx wrangler dev",

@@ -1,9 +1,9 @@
 // src/global/kv.ts
 import { env } from "./env";
-import { createClient } from "redis";
+import { createClient, type RedisClientType } from "redis";
 import { Temporal } from "@js-temporal/polyfill";
 
-export type RedisClient = ReturnType<typeof createClient>;
+export type RedisClient = RedisClientType;
 export type KVValue = string | ArrayBuffer | ReadableStream;
 
 export interface KVStore {
@@ -29,6 +29,7 @@ export interface KVStore {
     zrange(key: string, start: number, stop: number): Promise<string[]>;
     publish(channel: string, message: string): Promise<void>;
     subscribe(channel: string, callback: (message: string) => void): Promise<void>;
+    consumeFixedWindow(key: string, limit: number, ttl: number): Promise<{ allowed: boolean; retryAfter: number }>;
 }
 
 /* Redis connection pool */
@@ -266,6 +267,44 @@ class PooledRedisKVStore implements KVStore {
         const client = await this.pool.getClient();
         try {
             return await client.incr(key);
+        } finally {
+            this.pool.returnClient(client);
+        }
+    }
+
+    async consumeFixedWindow(key: string, limit: number, ttl: number): Promise<{ allowed: boolean; retryAfter: number }> {
+        const client = await this.pool.getClient();
+        try {
+            const result = (await client.eval(
+                `local key = KEYS[1]
+                 local limit = tonumber(ARGV[1])
+                 local ttl = tonumber(ARGV[2])
+                 local current = redis.call('get', key)
+                 if current then
+                     current = tonumber(current)
+                     if current >= limit then
+                         local pttl = redis.call('pttl', key)
+                         local retryAfter = math.ceil(pttl / 1000)
+                         if retryAfter < 0 then retryAfter = 0 end
+                         return {0, retryAfter}
+                     else
+                         redis.call('incr', key)
+                         return {1, 0}
+                     end
+                 else
+                     redis.call('set', key, 1, 'EX', ttl)
+                     return {1, 0}
+                 end`,
+                {
+                    keys: [key],
+                    arguments: [limit.toString(), ttl.toString()],
+                },
+            )) as [number, number];
+
+            return {
+                allowed: result[0] === 1,
+                retryAfter: result[1],
+            };
         } finally {
             this.pool.returnClient(client);
         }
