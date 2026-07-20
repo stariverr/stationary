@@ -90,9 +90,8 @@ const handleRequestReset = async () => {
     }
     loading.value = true;
     try {
-        const { data, error } = await authClient.emailOtp.sendVerificationOtp({
+        const { data, error } = await authClient.emailOtp.requestPasswordReset({
             email: email.value,
-            type: "forget-password",
             fetchOptions: {
                 headers: {
                     "x-captcha-response": turnstileToken.value,
@@ -100,7 +99,9 @@ const handleRequestReset = async () => {
             },
         });
         if (error) {
-            toast.error(error.message || t("auth.toast_unexpected_error"));
+            const translationKey = `auth.err_${error.code?.toLowerCase()}`;
+            const message = t(translationKey) === translationKey ? error.message || t("auth.toast_unexpected_error") : t(translationKey);
+            toast.error(message);
             turnstileRequestRef.value?.reset();
         } else {
             toast.success(t("auth.toast_code_sent"));
@@ -145,7 +146,9 @@ const handleResetPassword = async () => {
             },
         });
         if (error) {
-            toast.error(error.message || t("auth.toast_unexpected_error"));
+            const translationKey = `auth.err_${error.code?.toLowerCase()}`;
+            const message = t(translationKey) === translationKey ? error.message || t("auth.toast_unexpected_error") : t(translationKey);
+            toast.error(message);
             turnstileResetRef.value?.reset();
         } else {
             toast.success(t("auth.toast_reset_success"));

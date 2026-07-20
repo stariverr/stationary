@@ -134,13 +134,22 @@ const handleSignIn = async () => {
         if (error) {
             if (error.code === "EMAIL_NOT_VERIFIED") {
                 toast.info(t("auth.toast_email_not_verified"));
-                await authClient.emailOtp.sendVerificationOtp({
+                const { error: resendError } = await authClient.emailOtp.sendVerificationOtp({
                     email: email.value,
                     type: "email-verification",
                 });
+                if (resendError) {
+                    const translationKey = `auth.err_${resendError.code?.toLowerCase()}`;
+                    const msg =
+                        t(translationKey) === translationKey ? resendError.message || t("auth.toast_unexpected_error") : t(translationKey);
+                    toast.error(msg);
+                }
                 navigateTo(`/verify-email?email=${encodeURIComponent(email.value)}`);
             } else {
-                toast.error(error.message || t("auth.toast_invalid_credentials"));
+                const translationKey = `auth.err_${error.code?.toLowerCase()}`;
+                const message =
+                    t(translationKey) === translationKey ? error.message || t("auth.toast_invalid_credentials") : t(translationKey);
+                toast.error(message);
                 turnstileRef.value?.reset();
             }
         } else {
@@ -186,7 +195,9 @@ const handleSignUp = async () => {
             },
         });
         if (error) {
-            toast.error(error.message || t("auth.toast_registration_failed"));
+            const translationKey = `auth.err_${error.code?.toLowerCase()}`;
+            const message = t(translationKey) === translationKey ? error.message || t("auth.toast_registration_failed") : t(translationKey);
+            toast.error(message);
             turnstileRef.value?.reset();
         } else {
             toast.success(t("auth.toast_registration_success"));
@@ -311,27 +322,11 @@ const handleSubmit = async () => {
                         </div>
 
                         <!-- Password -->
-                        <div class="space-y-1">
-                            <div class="flex justify-between items-center">
-                                <label class="text-xs font-bold text-gray-500 uppercase tracking-wider">{{
-                                    $t("auth.password_label")
-                                }}</label>
-                                <NuxtLink
-                                    v-if="currentMode === 'login'"
-                                    to="/forgot-password"
-                                    class="text-xs font-bold text-emerald-600 hover:text-emerald-700 hover:underline"
-                                >
-                                    {{ $t("auth.forgot_password") }}
-                                </NuxtLink>
-                                <span
-                                    v-else-if="currentMode === 'register' && password"
-                                    :class="signUpPasswordStrength.textColor"
-                                    class="text-xs font-bold"
-                                >
-                                    {{ $t("auth.password_strength", { strength: $t(`auth.strength_${signUpPasswordStrength.textKey}`) }) }}
-                                </span>
-                            </div>
-                            <div class="relative">
+                        <div class="grid grid-cols-2 gap-y-1">
+                            <label class="text-xs font-bold text-gray-500 uppercase tracking-wider col-start-1 row-start-1">{{
+                                $t("auth.password_label")
+                            }}</label>
+                            <div class="relative col-span-2 col-start-1 row-start-2">
                                 <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-400">
                                     <Lock class="w-4 h-4" />
                                 </span>
@@ -357,16 +352,30 @@ const handleSubmit = async () => {
                                     :class="signUpPasswordStrength.color"
                                 ></div>
                             </div>
+                            <NuxtLink
+                                v-if="currentMode === 'login'"
+                                to="/forgot-password"
+                                class="text-xs font-bold text-emerald-600 hover:text-emerald-700 hover:underline col-start-2 row-start-1 justify-self-end"
+                            >
+                                {{ $t("auth.forgot_password") }}
+                            </NuxtLink>
+                            <span
+                                v-else-if="currentMode === 'register' && password"
+                                :class="signUpPasswordStrength.textColor"
+                                class="text-xs font-bold col-start-2 row-start-1 justify-self-end"
+                            >
+                                {{ $t("auth.password_strength", { strength: $t(`auth.strength_${signUpPasswordStrength.textKey}`) }) }}
+                            </span>
                             <!-- Validation warning text (only visible when validation fails) -->
                             <p
                                 v-if="currentMode === 'register' && password && !/^[\x20-\x7E]*$/.test(password)"
-                                class="text-[11px] text-red-500 mt-1"
+                                class="text-[11px] text-red-500 mt-1 col-span-2"
                             >
                                 {{ $t("auth.strength_ascii_only") }}
                             </p>
                             <p
                                 v-else-if="currentMode === 'register' && password && (password.length < 8 || password.length > 20)"
-                                class="text-[11px] text-red-500 mt-1"
+                                class="text-[11px] text-red-500 mt-1 col-span-2"
                             >
                                 {{ $t("auth.strength_length_error") }}
                             </p>

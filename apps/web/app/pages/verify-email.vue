@@ -77,7 +77,9 @@ const handleResendOTP = async () => {
             type: "email-verification",
         });
         if (error) {
-            toast.error(error.message || t("auth.toast_unexpected_error"));
+            const translationKey = `auth.err_${error.code?.toLowerCase()}`;
+            const message = t(translationKey) === translationKey ? error.message || t("auth.toast_unexpected_error") : t(translationKey);
+            toast.error(message);
         } else {
             toast.success(t("auth.toast_code_resent"));
             startCooldown();

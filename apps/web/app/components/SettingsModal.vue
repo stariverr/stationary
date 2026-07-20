@@ -520,7 +520,12 @@ watch(
                                     <Button
                                         variant="outline"
                                         class="w-full text-red-600 hover:text-red-700 hover:bg-red-50"
-                                        @click="authClient.signOut()"
+                                        @click="
+                                            async () => {
+                                                await authClient.signOut();
+                                                navigateTo('/login');
+                                            }
+                                        "
                                     >
                                         {{ $t("settings.account.sign_out") }}
                                     </Button>

@@ -105,7 +105,15 @@ const showCreateDialog = ref(false);
                 <Settings class="mr-2 h-4 w-4" />
                 <span>Settings</span>
             </DropdownMenuItem>
-            <DropdownMenuItem class="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50" @click="authClient.signOut()">
+            <DropdownMenuItem
+                class="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
+                @click="
+                    async () => {
+                        await authClient.signOut();
+                        navigateTo('/login');
+                    }
+                "
+            >
                 <LogOut class="mr-2 h-4 w-4" />
                 <span>Log out</span>
             </DropdownMenuItem>
