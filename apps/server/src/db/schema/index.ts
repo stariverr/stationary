@@ -485,6 +485,7 @@ export const Track = pgTable(
         metadata: jsonb("metadata").$type<MediaFileMetadata>().default({}).notNull(),
         variant_key: varchar("variant_key", { length: 255 }).default("temp-migration").notNull(),
         is_default: boolean("is_default").default(false).notNull(),
+        is_primary: boolean("is_primary").default(false).notNull(),
         display_name: text("display_name"),
         language: text("language"),
         codec: text("codec"),
@@ -506,6 +507,9 @@ export const Track = pgTable(
         uniqueIndex("track_media_default_active_unique")
             .on(table.media_id, table.type, table.purpose)
             .where(sql`is_default = true AND delete_status = 'ACTIVE'`),
+        uniqueIndex("track_media_primary_active_unique")
+            .on(table.media_id)
+            .where(sql`is_primary = true AND delete_status = 'ACTIVE'`),
     ],
 );
 

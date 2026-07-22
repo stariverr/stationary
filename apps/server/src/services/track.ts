@@ -39,6 +39,7 @@ export const TrackService = {
             metadata?: any;
             variant_key?: string;
             is_default?: boolean;
+            is_primary?: boolean;
             display_name?: string;
             language?: string | null;
             codec?: string | null;
@@ -125,6 +126,21 @@ export const TrackService = {
                 .where(and(...unsetFilters));
         }
 
+        const is_primary = trackInfo.is_primary ?? (trackInfo.purpose === TrackPurpose.CONTENT && is_default);
+        if (is_primary) {
+            const unsetPrimaryFilters = [eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)];
+            if (existingTrack) {
+                unsetPrimaryFilters.push(not(eq(Track.id, existingTrack.id)));
+            }
+            await tx
+                .update(Track)
+                .set({
+                    is_primary: false,
+                    update_time: now,
+                })
+                .where(and(...unsetPrimaryFilters));
+        }
+
         let oldFileId: string | null = null;
         let trackId: string;
 
@@ -155,6 +171,7 @@ export const TrackService = {
                     metadata: mergedMetadata,
                     variant_key,
                     is_default,
+                    is_primary,
                     display_name: trackInfo.display_name ?? existingTrack.display_name,
                     language: extractedLang,
                     codec: extractedCodec,
@@ -179,113 +196,99 @@ export const TrackService = {
                     file_id: fileRecord.id,
                     type: trackInfo.type,
                     purpose: trackInfo.purpose,
-                    quality: trackInfo.quality,
-                    priority: trackInfo.priority,
                     is_original: true,
                     is_generated: false,
+                    quality: trackInfo.quality,
+                    priority: trackInfo.priority,
                     source_url: trackInfo.source_url || "",
+                    sync_status: SyncStatus.COMPLETED,
                     metadata: mergedMetadata,
                     variant_key,
                     is_default,
+                    is_primary,
                     display_name: trackInfo.display_name,
                     language: extractedLang,
                     codec: extractedCodec,
-                    is_stale: false,
-                    sync_status: SyncStatus.COMPLETED,
                     source_track_id: trackInfo.source_track_id || null,
-                    delete_status: DeleteStatus.ACTIVE,
+                    create_time: now,
+                    update_time: now,
                 })
                 .returning();
             trackId = inserted.id;
         }
 
-        // 3. Mark dependent tracks as stale if the source track's content has changed
-        if (existingTrack) {
-            const dependentTracks = await tx
-                .select()
-                .from(Track)
-                .where(
-                    and(
-                        eq(Track.media_id, mediaId),
-                        eq(Track.source_track_id, existingTrack.id),
-                        eq(Track.delete_status, DeleteStatus.ACTIVE),
-                    ),
-                );
+        // 3. Mark media and post sync status as COMPLETED
+        await tx
+            .update(Media)
+            .set({
+                sync_status: SyncStatus.COMPLETED,
+                update_time: now,
+            })
+            .where(eq(Media.id, mediaId));
 
-            for (const t of dependentTracks) {
+        const [media] = await tx.select().from(Media).where(eq(Media.id, mediaId)).limit(1);
+        if (media && media.post_id) {
+            const activeMedias = await tx
+                .select({ sync_status: Media.sync_status })
+                .from(Media)
+                .where(and(eq(Media.post_id, media.post_id), eq(Media.delete_status, DeleteStatus.ACTIVE)));
+
+            const allCompleted = activeMedias.every((m) => m.sync_status === SyncStatus.COMPLETED);
+            if (allCompleted) {
                 await tx
-                    .update(Track)
+                    .update(Post)
                     .set({
-                        is_stale: true,
+                        sync_status: SyncStatus.COMPLETED,
                         update_time: now,
                     })
-                    .where(eq(Track.id, t.id));
+                    .where(eq(Post.id, media.post_id));
             }
         }
 
-        // 4. Soft-delete old File
-        if (oldFileId) {
-            await tx
-                .update(File)
-                .set({
-                    delete_status: DeleteStatus.DELETED,
-                    delete_time: now,
-                })
-                .where(eq(File.id, oldFileId));
-        }
+        // 4. Soft-delete old file if it is no longer referenced anywhere
+        if (oldFileId && oldFileId !== fileRecord.id) {
+            const [refTrack] = await tx
+                .select()
+                .from(Track)
+                .where(and(eq(Track.file_id, oldFileId), eq(Track.delete_status, DeleteStatus.ACTIVE)))
+                .limit(1);
 
-        // Cascade complete status update
-        if (trackInfo.purpose === "CONTENT" && is_default) {
-            await tx
-                .update(Media)
-                .set({
-                    sync_status: SyncStatus.COMPLETED,
-                    update_time: now,
-                })
-                .where(eq(Media.id, mediaId));
-
-            const [mediaRow] = await tx.select({ post_id: Media.post_id }).from(Media).where(eq(Media.id, mediaId)).limit(1);
-
-            if (mediaRow?.post_id) {
-                const postId = mediaRow.post_id;
-                const activeMedias = await tx
-                    .select({ id: Media.id, sync_status: Media.sync_status })
-                    .from(Media)
-                    .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE)));
-
-                const allCompleted = activeMedias.every((m: { id: string; sync_status: string | null }) =>
-                    m.id === mediaId ? true : m.sync_status === SyncStatus.COMPLETED,
-                );
-                if (allCompleted) {
-                    await tx
-                        .update(Post)
-                        .set({
-                            sync_status: SyncStatus.COMPLETED,
-                            update_time: now,
-                        })
-                        .where(eq(Post.id, postId));
-                }
+            if (!refTrack) {
+                await tx
+                    .update(File)
+                    .set({
+                        delete_status: DeleteStatus.DELETED,
+                        delete_time: now,
+                    })
+                    .where(eq(File.id, oldFileId));
             }
         }
 
-        return { trackId, fileId: fileRecord.id };
+        // 5. Return updated track with physical File object
+        const [resultTrack] = await tx.select().from(Track).where(eq(Track.id, trackId)).limit(1);
+        return {
+            track: resultTrack,
+            file: fileRecord,
+        };
     },
 
     async replaceFile(mediaId: string, trackId: string, fileData: FileData) {
         return db.transaction(async (tx) => {
             const now = nowDbTimestamp();
 
-            // 1. Fetch the target Track
-            const [trackRecord] = await tx
+            // 1. Fetch existing track
+            const [existingTrack] = await tx
                 .select()
                 .from(Track)
                 .where(and(eq(Track.id, trackId), eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)));
 
-            if (!trackRecord) {
+            if (!existingTrack) {
                 throw new Error("Track not found");
             }
 
-            // 2. Insert physical File record
+            const oldFileId = existingTrack.file_id;
+
+            // 2. Insert new physical File record
             const [newFile] = await tx
                 .insert(File)
                 .values({
@@ -301,57 +304,49 @@ export const TrackService = {
                 })
                 .returning();
 
-            const oldFileId = trackRecord.file_id;
-
-            // Merge metadata with new file dimension fields
+            // Merge metadata
             const mergedMetadata = {
-                ...(trackRecord.metadata || {}),
-                width: fileData.width ?? trackRecord.metadata?.width,
-                height: fileData.height ?? trackRecord.metadata?.height,
-                duration: fileData.duration ? Math.round(fileData.duration) : trackRecord.metadata?.duration,
+                ...(existingTrack.metadata || {}),
+                width: newFile.width ?? existingTrack.metadata?.width,
+                height: newFile.height ?? existingTrack.metadata?.height,
+                duration: newFile.duration ? Math.round(newFile.duration) : existingTrack.metadata?.duration,
             };
 
-            // 3. Update the Track record
-            await tx
+            // 3. Update existing track record with new file_id
+            const [updatedTrack] = await tx
                 .update(Track)
                 .set({
                     file_id: newFile.id,
-                    is_stale: false,
-                    is_generated: false,
-                    is_original: true,
                     metadata: mergedMetadata,
+                    is_stale: false,
                     update_time: now,
                 })
-                .where(eq(Track.id, trackId));
+                .where(eq(Track.id, trackId))
+                .returning();
 
-            // 4. Mark dependent tracks as stale if the updated track has dependents
-            const dependentTracks = await tx
-                .select()
-                .from(Track)
-                .where(and(eq(Track.media_id, mediaId), eq(Track.source_track_id, trackId), eq(Track.delete_status, DeleteStatus.ACTIVE)));
+            // 4. Soft-delete old file if no longer referenced
+            if (oldFileId && oldFileId !== newFile.id) {
+                const [refTrack] = await tx
+                    .select()
+                    .from(Track)
+                    .where(and(eq(Track.file_id, oldFileId), eq(Track.delete_status, DeleteStatus.ACTIVE)))
+                    .limit(1);
 
-            for (const t of dependentTracks) {
-                await tx
-                    .update(Track)
-                    .set({
-                        is_stale: true,
-                        update_time: now,
-                    })
-                    .where(eq(Track.id, t.id));
+                if (!refTrack) {
+                    await tx
+                        .update(File)
+                        .set({
+                            delete_status: DeleteStatus.DELETED,
+                            delete_time: now,
+                        })
+                        .where(eq(File.id, oldFileId));
+                }
             }
 
-            // 5. Soft-delete old File
-            if (oldFileId) {
-                await tx
-                    .update(File)
-                    .set({
-                        delete_status: DeleteStatus.DELETED,
-                        delete_time: now,
-                    })
-                    .where(eq(File.id, oldFileId));
-            }
-
-            return { trackId, fileId: newFile.id };
+            return {
+                track: updatedTrack,
+                file: newFile,
+            };
         });
     },
 
@@ -365,7 +360,7 @@ export const TrackService = {
                 .where(and(eq(Track.id, trackId), eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)));
 
             if (!trackRecord) {
-                throw new Error("Track not found or already deleted");
+                throw new Error("Track not found");
             }
 
             // Soft-delete the track
@@ -374,19 +369,32 @@ export const TrackService = {
                 .set({
                     delete_status: DeleteStatus.DELETED,
                     delete_time: now,
-                    update_time: now,
                 })
                 .where(eq(Track.id, trackId));
 
-            // Soft-delete the corresponding file
+            // Soft-delete the corresponding file if unreferenced
             if (trackRecord.file_id) {
-                await tx
-                    .update(File)
-                    .set({
-                        delete_status: DeleteStatus.DELETED,
-                        delete_time: now,
-                    })
-                    .where(eq(File.id, trackRecord.file_id));
+                const [otherRef] = await tx
+                    .select()
+                    .from(Track)
+                    .where(
+                        and(
+                            eq(Track.file_id, trackRecord.file_id),
+                            not(eq(Track.id, trackId)),
+                            eq(Track.delete_status, DeleteStatus.ACTIVE),
+                        ),
+                    )
+                    .limit(1);
+
+                if (!otherRef) {
+                    await tx
+                        .update(File)
+                        .set({
+                            delete_status: DeleteStatus.DELETED,
+                            delete_time: now,
+                        })
+                        .where(eq(File.id, trackRecord.file_id));
+                }
             }
 
             return { success: true };
@@ -402,6 +410,7 @@ export const TrackService = {
             display_name?: string | null;
             variant_key?: string;
             is_default?: boolean;
+            is_primary?: boolean;
             language?: string | null;
             codec?: string | null;
             is_stale?: boolean;
@@ -431,6 +440,7 @@ export const TrackService = {
             if (updates.display_name !== undefined) setParams.display_name = updates.display_name;
             if (updates.variant_key !== undefined) setParams.variant_key = updates.variant_key;
             if (updates.is_default !== undefined) setParams.is_default = updates.is_default;
+            if (updates.is_primary !== undefined) setParams.is_primary = updates.is_primary;
             if (updates.language !== undefined) setParams.language = updates.language;
             if (updates.codec !== undefined) setParams.codec = updates.codec;
             if (updates.is_stale !== undefined) setParams.is_stale = updates.is_stale;
@@ -443,7 +453,7 @@ export const TrackService = {
                 };
             }
 
-            // 2. If toggling is_default to true, unset others
+            // 2. If toggling is_default to true, unset others in the same group
             if (updates.is_default === true) {
                 await tx
                     .update(Track)
@@ -460,6 +470,17 @@ export const TrackService = {
                             eq(Track.delete_status, DeleteStatus.ACTIVE),
                         ),
                     );
+            }
+
+            // 3. If toggling is_primary to true, unset primary on all other tracks for this media
+            if (updates.is_primary === true) {
+                await tx
+                    .update(Track)
+                    .set({
+                        is_primary: false,
+                        update_time: now,
+                    })
+                    .where(and(eq(Track.media_id, mediaId), not(eq(Track.id, trackId)), eq(Track.delete_status, DeleteStatus.ACTIVE)));
             }
 
             const [updated] = await tx.update(Track).set(setParams).where(eq(Track.id, trackId)).returning();

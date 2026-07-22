@@ -3,36 +3,39 @@ trigger: always_on
 ---
 
 - [Server] All API Responses should be wrapped by unified functions.
-    - For example: 
+    - For example:
         - c.json(success(CODE.SUCCESS, null, data))
         - c.json(error(CODE.UNAUTHORIZED, 'please login first'))
 - [DB] Field Name: Only snake_case is allowed.
 - [DB] No explicit foreign key.
-    For modern distributed systems, foreign key might be a burden for scaling.
+  For modern distributed systems, foreign key might be a burden for scaling.
 - [DB] Reference Counting: When multiple entities reference the same physical File, do not use a simple 'ref_count' column on the File table. Use a dedicated 'file_usage' mapping table to count and manage references dynamically.
 - [TS/Bun] Date -> Temporal: Do not use the native JavaScript `Date` constructor. All date, time, and timezone operations must utilize the `Temporal` API.
 - [TS/Bun] node:stream -> Web API stream: Use standard Web API streams instead of Node.js stream modules.
 - [TS/Bun] node:fs -> bun:File: Use the native `bun:File` APIs (such as `Bun.file()`) and Bun's built-in file system utilities.
 - [TS] Code Formatting: Always use oxc to format code.
 
-
 # Important Rules
+
 ## S3 & DB Consistency Rules
 
 ### core_patterns
-* **Upload [State Machine]:** DB `status='pending'` -> Client uploads via Presigned URL -> Client confirms -> DB `status='active'`.
-* **Upload [Event Driven]:** Client uploads -> S3 `ObjectCreated` event triggers Queue/Webhook -> Backend creates DB record.
-* **Delete [Soft Delete]:** DB `is_deleted=true` + enqueue async task within DB transaction -> Worker deletes S3 object (retry + DLQ).
-* **Delete [Lifecycle]:** DB hard deletes record -> Backend writes S3 `Delete Marker` -> S3 Lifecycle Policy purges noncurrent versions automatically.
+
+- **Upload [State Machine]:** DB `status='pending'` -> Client uploads via Presigned URL -> Client confirms -> DB `status='active'`.
+- **Upload [Event Driven]:** Client uploads -> S3 `ObjectCreated` event triggers Queue/Webhook -> Backend creates DB record.
+- **Delete [Soft Delete]:** DB `is_deleted=true` + enqueue async task within DB transaction -> Worker deletes S3 object (retry + DLQ).
+- **Delete [Lifecycle]:** DB hard deletes record -> Backend writes S3 `Delete Marker` -> S3 Lifecycle Policy purges noncurrent versions automatically.
 
 ### anti_patterns
-* DO NOT upload files synchronously within a DB transaction.
-* DO NOT hard delete DB records before verifying or asynchronously scheduling S3 file deletion.
-* DO NOT chain S3 API calls directly in user-facing HTTP request-response cycles.
+
+- DO NOT upload files synchronously within a DB transaction.
+- DO NOT hard delete DB records before verifying or asynchronously scheduling S3 file deletion.
+- DO NOT chain S3 API calls directly in user-facing HTTP request-response cycles.
 
 ### edge cases & blind spots
-* **Idempotency Required:** S3 delete workers *must* handle "File Not Found" errors gracefully without crashing or infinite retries.
-* **Orphan Cleanup:** Implement a scheduled cron job (or S3 Inventory sync) to sweep stale `pending` DB entries and unindexed S3 artifacts.
+
+- **Idempotency Required:** S3 delete workers _must_ handle "File Not Found" errors gracefully without crashing or infinite retries.
+- **Orphan Cleanup:** Implement a scheduled cron job (or S3 Inventory sync) to sweep stale `pending` DB entries and unindexed S3 artifacts.
 
 ## Delete Rules Without Physical Foreign Keys
 
@@ -49,14 +52,14 @@ active → deleting → deleted → purged
 ```
 
 - Transaction only:
-  - mark root as `deleting`
-  - delete small critical dependencies
-  - write deletion job / outbox
+    - mark root as `deleting`
+    - delete small critical dependencies
+    - write deletion job / outbox
 - Worker handles:
-  - large tables
-  - logs/events/history
-  - files/indexes/cache
-  - retries, chunking, rate limits
+    - large tables
+    - logs/events/history
+    - files/indexes/cache
+    - retries, chunking, rate limits
 - Queries must ignore deleted records:
 
 ```sql
