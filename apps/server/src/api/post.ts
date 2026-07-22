@@ -27,7 +27,7 @@ import {
     DraftFile,
     DraftFileStatus,
 } from "@/db/schema";
-import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lte, exists, or } from "drizzle-orm";
+import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lt, lte, gt, gte, exists, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { RecycleService } from "@/services/recycle";
 import { DeleteService } from "@/services/delete";
@@ -585,112 +585,6 @@ router.get(
             .orderBy(asc(PostTag.id));
         const postTags = postTagsList.map((pt) => pt.name);
 
-        const mediaRows = await db
-            .select({
-                id: Media.id,
-                eid: Media.eid,
-                post_id: Media.post_id,
-                source: Media.source,
-                title: Media.title,
-                description: Media.description,
-                type: Media.type,
-                sort_order: Media.sort_order,
-                create_time: Media.create_time,
-                published_time: Media.published_time,
-                sync_status: Media.sync_status,
-                last_error: Media.last_error,
-            })
-            .from(Media)
-            .where(and(eq(Media.post_id, id), activeMediaFilter))
-            .orderBy(asc(Media.sort_order));
-
-        const allMediaIds = mediaRows.map((mr) => mr.id);
-        const filesByMediaId = new Map<string, any[]>();
-        const aiMetadataMap = new Map<string, { ai_status: string; ai_error: string | null }>();
-
-        if (allMediaIds.length > 0) {
-            const aiMetadatas = await db
-                .select({
-                    entity_id: AssetAiMetadata.entity_id,
-                    processing_status: AssetAiMetadata.processing_status,
-                    last_error: AssetAiMetadata.last_error,
-                })
-                .from(AssetAiMetadata)
-                .where(and(inArray(AssetAiMetadata.entity_id, allMediaIds), eq(AssetAiMetadata.entity_type, EntityType.MEDIA)));
-
-            for (const meta of aiMetadatas) {
-                const existing = aiMetadataMap.get(meta.entity_id);
-                if (
-                    !existing ||
-                    meta.processing_status === "COMPLETED" ||
-                    (existing.ai_status !== "COMPLETED" && meta.processing_status === "FAILED")
-                ) {
-                    aiMetadataMap.set(meta.entity_id, {
-                        ai_status: meta.processing_status,
-                        ai_error: meta.last_error,
-                    });
-                }
-            }
-
-            const allFiles = await db
-                .select({
-                    track_id: Track.id,
-                    media_id: Track.media_id,
-                    type: Track.type,
-                    purpose: Track.purpose,
-                    is_original: Track.is_original,
-                    quality: Track.quality,
-                    priority: Track.priority,
-                    metadata: Track.metadata,
-                    variant_key: Track.variant_key,
-                    is_default: Track.is_default,
-                    display_name: Track.display_name,
-                    language: Track.language,
-                    codec: Track.codec,
-                    is_stale: Track.is_stale,
-                    file_id: DbFile.id,
-                    file_path: DbFile.path,
-                    file_bucket: DbFile.bucket,
-                    mime_type: DbFile.mime_type,
-                    extension: DbFile.extension,
-                    width: DbFile.width,
-                    height: DbFile.height,
-                })
-                .from(Track)
-                .leftJoin(DbFile, eq(Track.file_id, DbFile.id))
-                .where(
-                    and(
-                        inArray(Track.media_id, allMediaIds),
-                        eq(Track.delete_status, DeleteStatus.ACTIVE),
-                        eq(Track.sync_status, SyncStatus.COMPLETED),
-                    ),
-                );
-
-            for (const file of allFiles) {
-                if (!file.media_id) continue;
-                if (!filesByMediaId.has(file.media_id)) {
-                    filesByMediaId.set(file.media_id, []);
-                }
-                filesByMediaId.get(file.media_id)!.push(file);
-            }
-        }
-
-        const mediaResponses = mediaRows.map((m) => {
-            const files = filesByMediaId.get(m.id) || [];
-            const aiMeta = aiMetadataMap.get(m.id);
-            return {
-                ...mapMediaToResponse(
-                    {
-                        ...m,
-                        ai_status: aiMeta?.ai_status,
-                        ai_error: aiMeta?.ai_error,
-                    },
-                    files,
-                ),
-                post_eid: postData.eid,
-            };
-        });
-
         const result: z.infer<typeof PostDetailResponseBodySchema> = {
             id: postData.id,
             library_id: postData.library_id,
@@ -705,14 +599,177 @@ router.get(
             create_time: toIsoTimestamp(postData.create_time) ?? undefined,
             published_time: toIsoTimestamp(postData.published_time),
             media_count: postData.media_count,
-            type: mediaResponses.length > 0 ? "MULTI_MEDIA" : "TEXT",
+            type: (postData.media_count ?? 0) > 0 ? "MULTI_MEDIA" : "TEXT",
             sync_status: postData.sync_status,
             last_error: postData.last_error,
-            media: mediaResponses,
             url: postData.url,
         };
 
         return c.json(success(Code.SUCCESS, result));
+    },
+);
+
+const PostMediaListQuerySchema = z.object({
+    page: z.preprocess((val) => (val === undefined ? 1 : Number(val)), z.number().int().positive().default(1)),
+    limit: z.preprocess((val) => (val === undefined ? 50 : Number(val)), z.number().int().positive().default(50)),
+    keyword: z.string().optional(),
+    type: z.enum([MediaType.IMAGE, MediaType.VIDEO, MediaType.LIVE_PHOTO, MediaType.AUDIO, MediaType.PDF]).optional(),
+});
+
+router.get(
+    "/:id/media",
+    requireAuth,
+    validator("param", (value, c) => {
+        const schema = z.object({
+            id: z.uuid(),
+        });
+        const parsed = schema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(error(Code.INVALID_PARAMETER, "Invalid post ID"), 400);
+        }
+        return parsed.data.id;
+    }),
+    validator("query", (value, c) => {
+        const parsed = PostMediaListQuerySchema.safeParse(value);
+        if (!parsed.success) {
+            return c.json(error(Code.INVALID_PARAMETER, "Invalid query parameters"), 400);
+        }
+        return parsed.data;
+    }),
+    async (c) => {
+        const postId = c.req.valid("param");
+        const { page, limit, keyword, type } = c.req.valid("query");
+
+        const postExists = await db
+            .select({ id: Post.id })
+            .from(Post)
+            .where(and(eq(Post.id, postId), activePostFilter))
+            .limit(1);
+
+        if (postExists.length === 0) {
+            return c.json(error(Code.NOT_FOUND, "Post not found"), 404);
+        }
+
+        const conditions: SQL[] = [eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)];
+
+        if (type) {
+            conditions.push(eq(Media.type, type));
+        }
+
+        if (keyword) {
+            conditions.push(ilike(Media.title, `%${keyword}%`));
+        }
+
+        // 1. Get total count
+        const totalResult = await db
+            .select({ count: count() })
+            .from(Media)
+            .where(and(...conditions));
+        const total = totalResult[0]?.count ?? 0;
+
+        // 2. Fetch rows using page & limit offset pagination
+        const offset = (page - 1) * limit;
+
+        const finalRows = await db
+            .select()
+            .from(Media)
+            .where(and(...conditions))
+            .orderBy(asc(Media.sort_order), asc(Media.id))
+            .limit(limit)
+            .offset(offset);
+
+        const totalPages = Math.ceil(total / limit);
+
+        // 3. Hydrate file URLs & Metadata
+        const mediaIds = finalRows.map((mr) => mr.id);
+        const filesByMediaId = new Map<string, Awaited<typeof trackQuery>>();
+        const trackQuery = db
+            .select({
+                track_id: Track.id,
+                media_id: Track.media_id,
+                type: Track.type,
+                purpose: Track.purpose,
+                is_original: Track.is_original,
+                quality: Track.quality,
+                priority: Track.priority,
+                metadata: Track.metadata,
+                variant_key: Track.variant_key,
+                is_default: Track.is_default,
+                display_name: Track.display_name,
+                language: Track.language,
+                codec: Track.codec,
+                file_id: DbFile.id,
+                file_path: DbFile.path,
+                file_bucket: DbFile.bucket,
+                mime_type: DbFile.mime_type,
+                extension: DbFile.extension,
+            })
+            .from(Track)
+            .leftJoin(DbFile, eq(Track.file_id, DbFile.id));
+
+        if (mediaIds.length > 0) {
+            const allFiles = await trackQuery.where(
+                and(
+                    inArray(Track.media_id, mediaIds),
+                    eq(Track.delete_status, DeleteStatus.ACTIVE),
+                    eq(Track.sync_status, SyncStatus.COMPLETED),
+                ),
+            );
+
+            for (const file of allFiles) {
+                if (!file.media_id) continue;
+                if (!filesByMediaId.has(file.media_id)) {
+                    filesByMediaId.set(file.media_id, []);
+                }
+                filesByMediaId.get(file.media_id)!.push(file);
+            }
+        }
+
+        const mediaList = finalRows.map((m, i) => {
+            const files = filesByMediaId.get(m.id) || [];
+            const sortedFiles = [...files].sort((a, b) => a.priority - b.priority);
+
+            const tracks = sortedFiles
+                .filter((f) => f.file_path && f.file_bucket)
+                .map((f) => ({
+                    id: f.track_id,
+                    file_id: f.file_id || "",
+                    url: buildCdnUrl(f.file_bucket, f.file_path) || "",
+                    type: f.type,
+                    purpose: f.purpose,
+                    is_original: f.is_original,
+                    quality: f.quality,
+                    priority: f.priority,
+                    metadata: f.metadata || {},
+                    variant_key: f.variant_key,
+                    is_default: f.is_default,
+                    display_name: f.display_name,
+                    language: f.language,
+                    codec: f.codec,
+                }));
+
+            const coverTrack = tracks.find((t) => t.purpose === TrackPurpose.COVER);
+
+            return {
+                id: m.id,
+                type: m.type,
+                title: m.title,
+                sort_order: m.sort_order,
+                position: offset + i,
+                cover_url: coverTrack?.url ?? "",
+                tracks,
+            };
+        });
+
+        return c.json(
+            success(Code.SUCCESS, {
+                list: mediaList,
+                page,
+                limit,
+                total,
+                total_pages: totalPages,
+            }),
+        );
     },
 );
 

@@ -35,6 +35,7 @@ const { selectedMediaId, selectedMedia, medias, displayMode } = storeToRefs(stor
 
 const { t } = useI18n();
 const regeneratingCoverMediaId = ref<string | null>(null);
+const isSidebarOpen = ref(true);
 
 interface CoverRegenData {
     status: string;
@@ -127,6 +128,7 @@ interface MediaInputForSubtitles {
 
 interface SwiperInstanceType {
     slideTo: (index: number, speed?: number) => void;
+    slideToLoop: (index: number, speed?: number) => void;
     slidePrev: () => void;
     slideNext: () => void;
 }
@@ -207,16 +209,63 @@ watch(selectedMediaId, async (newId) => {
 
         isLoadingPost.value = true;
         try {
-            const response = await useApi<{ success: boolean; data: ApiPostDetail }>(`/post/detail/${selectedMedia.value.post_id}`);
-            if (response && response.success && response.data) {
-                postDetail.value = response.data;
-                // Map the post's media list to include valid URLs
-                const mapped = (response.data.media || []).map(mapMediaWithSubtitles).filter((m): m is MappedSiblingMedia => !!m);
+            const detailResponse = await useApi<{ success: boolean; data: ApiPostDetail }>(`/post/detail/${selectedMedia.value.post_id}`);
+            if (detailResponse && detailResponse.success && detailResponse.data) {
+                postDetail.value = detailResponse.data;
+            }
+
+            const mediaResponse = await useApi<{
+                success: boolean;
+                data: {
+                    list: Array<{
+                        id: string;
+                        type: string;
+                        title: string;
+                        sort_order: number;
+                        thumbnail_url: string;
+                        preview_url?: string;
+                        width: number;
+                        height: number;
+                        duration?: number;
+                        page_count?: number;
+                        position: number;
+                        subtitles?: Array<{
+                            url: string;
+                            language: string;
+                            label: string;
+                            format: string;
+                        }>;
+                    }>;
+                };
+            }>(`/post/${selectedMedia.value.post_id}/media`, {
+                query: {
+                    limit: 100,
+                },
+            });
+
+            if (mediaResponse && mediaResponse.success && mediaResponse.data) {
+                const mapped = mediaResponse.data.list.map(
+                    (m) =>
+                        ({
+                            id: m.id,
+                            type: m.type,
+                            url: m.preview_url || m.thumbnail_url || null,
+                            thumbnail: m.thumbnail_url || null,
+                            width: m.width,
+                            height: m.height,
+                            title: m.title,
+                            sort_order: m.sort_order,
+                            duration: m.duration,
+                            page_count: m.page_count,
+                            subtitles: m.subtitles || [],
+                        }) as unknown as MappedSiblingMedia,
+                );
+
                 postSiblings.value = mapped;
                 const index = mapped.findIndex((m) => m.id === newId);
                 currentIndex.value = Math.max(0, index);
                 nextTick(() => {
-                    if (swiperInstance.value) swiperInstance.value.slideTo(currentIndex.value, 0);
+                    if (swiperInstance.value) swiperInstance.value.slideToLoop(currentIndex.value, 0);
                 });
             } else {
                 const sibling = selectedMedia.value ? mapMediaWithSubtitles(selectedMedia.value) : null;
@@ -234,7 +283,7 @@ watch(selectedMediaId, async (newId) => {
         const index = postSiblings.value.findIndex((m) => m.id === newId);
         currentIndex.value = Math.max(0, index);
         nextTick(() => {
-            if (swiperInstance.value) swiperInstance.value.slideTo(currentIndex.value, 0);
+            if (swiperInstance.value) swiperInstance.value.slideToLoop(currentIndex.value, 0);
         });
     }
 });
@@ -395,7 +444,37 @@ const saveEditingMedia = async () => {
             const detailRes = await useApi<{ success: boolean; data: ApiPostDetail }>(`/post/detail/${selectedMedia.value.post_id}`);
             if (detailRes && detailRes.success && detailRes.data) {
                 postDetail.value = detailRes.data;
-                postSiblings.value = (detailRes.data.media || []).map(mapMediaWithSubtitles).filter((m): m is MappedSiblingMedia => !!m);
+            }
+
+            const mediaResponse = await useApi<{
+                success: boolean;
+                data: {
+                    list: any[];
+                };
+            }>(`/post/${selectedMedia.value.post_id}/media`, {
+                query: {
+                    limit: 100,
+                },
+            });
+
+            if (mediaResponse && mediaResponse.success && mediaResponse.data) {
+                const mapped = mediaResponse.data.list.map(
+                    (m) =>
+                        ({
+                            id: m.id,
+                            type: m.type,
+                            url: m.preview_url || m.thumbnail_url || null,
+                            thumbnail: m.thumbnail_url || null,
+                            width: m.width,
+                            height: m.height,
+                            title: m.title,
+                            sort_order: m.sort_order,
+                            duration: m.duration,
+                            page_count: m.page_count,
+                            subtitles: m.subtitles || [],
+                        }) as unknown as MappedSiblingMedia,
+                );
+                postSiblings.value = mapped;
             }
         } else {
             // Otherwise refetch media list
@@ -516,439 +595,485 @@ const handleAddTag = async (tagToAdd: string) => {
     <ClientOnly>
         <Teleport to="body">
             <Transition name="fade">
-            <div v-if="isVisible" class="fixed inset-0 z-[200] flex bg-black/95 backdrop-blur-sm pointer-events-auto">
-                <!-- Main Lightbox Area -->
-                <div class="flex-1 relative flex items-center justify-center group/lightbox min-w-0">
-                    <!-- Close Button -->
-                    <button
-                        @click="closeLightbox"
-                        class="absolute top-4 left-4 p-2 rounded-full bg-black/50 text-white hover:bg-white/20 transition-colors z-[210]"
-                    >
-                        <X class="w-6 h-6" />
-                    </button>
-
-                    <!-- Counter -->
-                    <div
-                        v-if="displayMode === 'stacked' && postSiblings.length > 1"
-                        class="absolute top-4 right-4 px-3 py-1.5 rounded-full bg-black/50 text-white text-sm font-medium z-[210] font-mono tracking-wider backdrop-blur-md"
-                    >
-                        {{ currentIndex + 1 }} / {{ postSiblings.length }}
-                    </div>
-
-                    <!-- Media Carousel -->
-                    <div class="w-full h-full">
-                        <swiper
-                            :slides-per-view="1"
-                            :loop="false"
-                            :initial-slide="currentIndex"
-                            @swiper="onSwiper"
-                            @slideChange="onSlideChange"
-                            class="w-full h-full"
+                <div v-if="isVisible" class="fixed inset-0 z-[200] flex bg-black/95 backdrop-blur-sm pointer-events-auto">
+                    <!-- Main Lightbox Area -->
+                    <div class="flex-1 relative flex items-center justify-center group/lightbox min-w-0">
+                        <!-- Close Button -->
+                        <button
+                            @click="closeLightbox"
+                            class="absolute top-4 left-4 p-2 rounded-full bg-white/5 border border-white/10 text-white backdrop-blur-md hover:bg-white/10 hover:scale-102 active:scale-98 transition-all z-[210] cursor-pointer"
+                            title="Close preview"
                         >
-                            <swiper-slide
+                            <X class="w-5 h-5" />
+                        </button>
+
+                        <!-- Floating Top Right Controls -->
+                        <div class="absolute top-4 right-4 flex items-center gap-2 z-[210]">
+                            <!-- Sidebar Toggle Button -->
+                            <button
+                                @click="isSidebarOpen = !isSidebarOpen"
+                                class="p-2 rounded-full bg-white/5 border border-white/10 text-white backdrop-blur-md hover:bg-white/10 hover:scale-102 active:scale-98 transition-all cursor-pointer"
+                                :title="isSidebarOpen ? 'Hide asset details' : 'Show asset details'"
+                            >
+                                <Info class="w-5 h-5" />
+                            </button>
+
+                            <!-- Counter -->
+                            <div
+                                v-if="displayMode === 'stacked' && postSiblings.length > 1"
+                                class="px-3.5 py-1.5 rounded-full bg-white/5 border border-white/10 text-white text-xs font-semibold font-mono tracking-wider backdrop-blur-md shadow-xs"
+                            >
+                                {{ currentIndex + 1 }} / {{ postSiblings.length }}
+                            </div>
+                        </div>
+
+                        <!-- Media Carousel -->
+                        <div class="w-full h-full">
+                            <swiper
+                                :slides-per-view="1"
+                                :loop="true"
+                                :initial-slide="currentIndex"
+                                @swiper="onSwiper"
+                                @slideChange="onSlideChange"
+                                class="w-full h-full"
+                            >
+                                <swiper-slide
+                                    v-for="(media, index) in postSiblings"
+                                    :key="media.id || index"
+                                    class="flex items-center justify-center"
+                                >
+                                    <div class="w-full h-full flex items-center justify-center p-4 md:p-12">
+                                        <div
+                                            v-if="media.isPlaceholder"
+                                            class="flex flex-col items-center justify-center gap-2 text-zinc-500"
+                                        >
+                                            <Loader2 class="w-8 h-8 animate-spin text-zinc-400" />
+                                        </div>
+                                        <VideoPlayer
+                                            v-else-if="media.type?.toLowerCase() === 'video'"
+                                            :src="media.url || media.media_url || ''"
+                                            :subtitles="media.subtitles"
+                                            :width="media.width"
+                                            :height="media.height"
+                                            class="max-h-full max-w-full h-full w-auto drop-shadow-2xl rounded-sm"
+                                        />
+                                        <LivePhotoPlayer
+                                            v-else-if="media.type?.toLowerCase() === 'live_photo'"
+                                            :src="
+                                                getOptimizedImageUrl(media.url || media.media_url || '', {
+                                                    width: 1920,
+                                                    fit: 'scale-down',
+                                                })
+                                            "
+                                            :live-src="media.live_url || ''"
+                                            :mime-type="media.mime_type || media.mimeType || undefined"
+                                            :width="media.width"
+                                            :height="media.height"
+                                            class="max-h-full max-w-full object-contain drop-shadow-2xl rounded-sm"
+                                        />
+                                        <HeicImage
+                                            v-else
+                                            :src="media.url || media.media_url || ''"
+                                            :mime-type="media.mime_type || media.mimeType || undefined"
+                                            class="max-h-full max-w-full object-contain drop-shadow-2xl rounded-sm"
+                                        />
+                                    </div>
+                                </swiper-slide>
+                            </swiper>
+                        </div>
+
+                        <!-- Navigation Arrows -->
+                        <button
+                            v-if="displayMode === 'stacked' || currentIndex > 0"
+                            class="absolute left-6 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/lightbox:opacity-100 transition-all hover:bg-black/80 hover:scale-110 z-[210] cursor-pointer"
+                            @click.stop="scrollPrev"
+                        >
+                            <ChevronLeft class="w-8 h-8" />
+                        </button>
+                        <button
+                            v-if="displayMode === 'stacked' || currentIndex < postSiblings.length - 1"
+                            class="absolute right-6 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/lightbox:opacity-100 transition-all hover:bg-black/80 hover:scale-110 z-[210] cursor-pointer"
+                            @click.stop="scrollNext"
+                        >
+                            <ChevronRight class="w-8 h-8" />
+                        </button>
+
+                        <!-- Bottom Filmstrip (Only for Stacked mode with siblings) -->
+                        <div
+                            v-if="displayMode === 'stacked' && postSiblings.length > 1"
+                            class="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2.5 p-2 bg-black/45 border border-white/5 backdrop-blur-md rounded-xl z-[210] max-w-[80%] overflow-x-auto custom-scrollbar shadow-lg"
+                        >
+                            <div
                                 v-for="(media, index) in postSiblings"
                                 :key="media.id || index"
-                                class="flex items-center justify-center"
-                            >
-                                <div class="w-full h-full flex items-center justify-center p-4 md:p-12">
-                                    <div v-if="media.isPlaceholder" class="flex flex-col items-center justify-center gap-2 text-zinc-500">
-                                        <Loader2 class="w-8 h-8 animate-spin text-zinc-400" />
-                                    </div>
-                                    <VideoPlayer
-                                        v-else-if="media.type?.toLowerCase() === 'video'"
-                                        :src="media.url || media.media_url || ''"
-                                        :subtitles="media.subtitles"
-                                        :width="media.width"
-                                        :height="media.height"
-                                        class="max-h-full max-w-full h-full w-auto drop-shadow-2xl rounded-sm"
-                                    />
-                                    <LivePhotoPlayer
-                                        v-else-if="media.type?.toLowerCase() === 'live_photo'"
-                                        :src="
-                                            getOptimizedImageUrl(media.url || media.media_url || '', {
-                                                width: 1920,
-                                                fit: 'scale-down',
-                                            })
-                                        "
-                                        :live-src="media.live_url || ''"
-                                        :mime-type="media.mime_type || media.mimeType || undefined"
-                                        :width="media.width"
-                                        :height="media.height"
-                                        class="max-h-full max-w-full object-contain drop-shadow-2xl rounded-sm"
-                                    />
-                                    <HeicImage
-                                        v-else
-                                        :src="media.url || media.media_url || ''"
-                                        :mime-type="media.mime_type || media.mimeType || undefined"
-                                        class="max-h-full max-w-full object-contain drop-shadow-2xl rounded-sm"
-                                    />
-                                </div>
-                            </swiper-slide>
-                        </swiper>
-                    </div>
-
-                    <!-- Navigation Arrows -->
-                    <button
-                        v-if="currentIndex > 0"
-                        class="absolute left-6 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/lightbox:opacity-100 transition-all hover:bg-black/80 hover:scale-110 z-[210]"
-                        @click.stop="scrollPrev"
-                    >
-                        <ChevronLeft class="w-8 h-8" />
-                    </button>
-                    <button
-                        v-if="currentIndex < postSiblings.length - 1"
-                        class="absolute right-6 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/lightbox:opacity-100 transition-all hover:bg-black/80 hover:scale-110 z-[210]"
-                        @click.stop="scrollNext"
-                    >
-                        <ChevronRight class="w-8 h-8" />
-                    </button>
-
-                    <!-- Bottom Filmstrip (Only for Stacked mode with siblings) -->
-                    <div
-                        v-if="displayMode === 'stacked' && postSiblings.length > 1"
-                        class="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 p-2 bg-black/50 backdrop-blur-md rounded-xl z-[210] max-w-[80%] overflow-x-auto custom-scrollbar"
-                    >
-                        <div
-                            v-for="(media, index) in postSiblings"
-                            :key="media.id || index"
-                            @click="swiperInstance?.slideTo(index)"
-                            class="w-12 h-12 shrink-0 rounded-md overflow-hidden border-2 cursor-pointer transition-all hover:opacity-100"
-                            :class="index === currentIndex ? 'border-white opacity-100' : 'border-transparent opacity-50'"
-                        >
-                            <div v-if="media.isPlaceholder" class="w-full h-full bg-zinc-900 flex items-center justify-center">
-                                <Loader2 class="w-3 h-3 animate-spin text-zinc-500" />
-                            </div>
-                            <HeicImage
-                                v-else-if="media.type?.toLowerCase() !== 'video'"
-                                :src="
-                                    getOptimizedImageUrl(media.url || media.media_url || '', {
-                                        width: 320,
-                                        height: 240,
-                                        fit: 'cover',
-                                        gravity: 'auto',
-                                    })
+                                @click="swiperInstance?.slideToLoop(index)"
+                                class="w-12 h-12 shrink-0 rounded-md overflow-hidden border-2 cursor-pointer transition-all duration-200 hover:opacity-100"
+                                :class="
+                                    index === currentIndex
+                                        ? 'border-emerald-500 opacity-100 scale-105 shadow-xs'
+                                        : 'border-transparent opacity-40 hover:opacity-75'
                                 "
-                                :mime-type="media.mime_type || media.mimeType || undefined"
-                                class="w-full h-full object-cover"
-                            />
-                            <div v-else class="w-full h-full bg-gray-800 flex items-center justify-center text-white text-xs">VID</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Resizing Overlay to prevent iframe/video event stealing -->
-                <div v-if="isResizing" class="fixed inset-0 z-[300] cursor-col-resize select-none"></div>
-
-                <!-- Resize Drag Handle -->
-                <div
-                    @mousedown="startResize"
-                    class="w-1 hover:w-1.5 bg-zinc-200/50 hover:bg-indigo-500/50 cursor-col-resize h-full shrink-0 relative z-[220] transition-all hidden md:block"
-                    :class="isResizing ? 'bg-indigo-500/70 w-1.5' : ''"
-                ></div>
-
-                <!-- Right Sidebar (Info & Provenance) -->
-                <div
-                    :style="{ width: `${sidebarWidth}px` }"
-                    class="bg-white h-full shrink-0 flex flex-col shadow-2xl relative z-[210] overflow-hidden hidden md:flex"
-                >
-                    <div class="p-5 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between shrink-0">
-                        <h3 class="font-semibold text-gray-900 flex items-center gap-2">
-                            <Info class="w-4 h-4 text-blue-500" />
-                            {{ $t("common.details", "Asset Details") }}
-                        </h3>
-                        <button
-                            v-if="!isEditingMedia && activeTab === 'details'"
-                            @click="startEditingMedia"
-                            class="px-2 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 rounded-md transition-colors cursor-pointer"
-                        >
-                            {{ $t("common.edit") }}
-                        </button>
-                    </div>
-
-                    <!-- Tab Bar -->
-                    <div class="flex border-b border-gray-100 bg-gray-50/50 px-5 gap-6 h-12 items-center text-xs shrink-0 select-none">
-                        <button
-                            @click="activeTab = 'details'"
-                            class="font-semibold uppercase tracking-wider transition-colors relative h-full flex items-center cursor-pointer"
-                            :class="
-                                activeTab === 'details' ? 'text-zinc-900 border-b-2 border-zinc-800' : 'text-zinc-400 hover:text-zinc-700'
-                            "
-                        >
-                            {{ $t("common.details", "Details") }}
-                        </button>
-                        <button
-                            @click="activeTab = 'variants'"
-                            class="font-semibold uppercase tracking-wider transition-colors relative h-full flex items-center cursor-pointer"
-                            :class="
-                                activeTab === 'variants' ? 'text-zinc-900 border-b-2 border-zinc-800' : 'text-zinc-400 hover:text-zinc-700'
-                            "
-                        >
-                            {{ $t("common.variants", "Variants") }}
-                        </button>
-                    </div>
-
-                    <div v-if="activeTab === 'details'" key="tab-details" class="p-5 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
-                        <!-- Basic Info -->
-                        <div class="space-y-4">
-                            <div>
-                                <label class="text-[10px] uppercase text-gray-400 font-bold tracking-wider mb-1 block">Title</label>
-                                <input
-                                    v-if="isEditingMedia"
-                                    type="text"
-                                    v-model="editMediaTitle"
-                                    class="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-md focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white text-gray-900"
-                                    placeholder="Enter title"
-                                />
-                                <div v-else class="text-sm font-medium text-gray-900 break-words">
-                                    {{ currentMediaItem?.title || "Untitled Asset" }}
-                                </div>
-                            </div>
-
-                            <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="text-[10px] uppercase text-gray-400 font-bold tracking-wider mb-1 block">Type</label>
-                                    <div class="flex items-center gap-1.5 text-sm text-gray-700 bg-gray-100 w-fit px-2 py-0.5 rounded">
-                                        <FileImage class="w-3.5 h-3.5 text-gray-500" />
-                                        <span class="capitalize">{{ currentMediaItem?.type || "Image" }}</span>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label class="text-[10px] uppercase text-gray-400 font-bold tracking-wider mb-1 block">Source</label>
-                                    <div class="text-sm text-gray-700">
-                                        {{ currentMediaItem?.source || "Local" }}
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div>
-                                <label class="text-[10px] uppercase text-gray-400 font-bold tracking-wider mb-1 block"
-                                    >Published Time</label
-                                >
-                                <input
-                                    v-if="isEditingMedia"
-                                    type="datetime-local"
-                                    v-model="editMediaPublishedTime"
-                                    class="w-full px-2 py-1 text-xs border border-gray-200 rounded-md focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-white text-gray-900"
-                                />
-                                <div v-else class="text-sm text-gray-700">
-                                    {{ formatDate(currentPublishedTime || "") }}
-                                </div>
-                            </div>
-
-                            <!-- Save / Cancel Buttons -->
-                            <div v-if="isEditingMedia" class="flex items-center gap-2 justify-end pt-2">
-                                <button
-                                    @click="cancelEditingMedia"
-                                    class="px-2.5 py-1 text-xs font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded transition-colors cursor-pointer"
-                                    :disabled="isSavingMedia"
-                                >
-                                    {{ $t("common.cancel") }}
-                                </button>
-                                <button
-                                    @click="saveEditingMedia"
-                                    class="px-2.5 py-1 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded shadow-sm transition-colors cursor-pointer flex items-center gap-1"
-                                    :disabled="isSavingMedia"
-                                >
-                                    <Loader2 v-if="isSavingMedia" class="w-3 animate-spin" />
-                                    {{ $t("common.save") }}
-                                </button>
-                            </div>
-                        </div>
-
-                        <hr class="border-gray-100" />
-
-                        <!-- Tags -->
-                        <div class="space-y-3">
-                            <label class="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1">
-                                <Tag class="w-3 h-3 text-gray-400" /> {{ $t("common.tags", "Tags") }}
-                            </label>
-                            <div v-if="isLoadingMediaDetails" class="text-xs text-zinc-400 flex items-center gap-1.5 py-1">
-                                <Loader2 class="w-3 h-3 animate-spin text-indigo-500" />
-                                <span>Loading tags...</span>
-                            </div>
-                            <TagEditor v-else :tags="mediaDetails?.tags || []" @add-tag="handleAddTag" @remove-tag="handleRemoveTag" />
-                        </div>
-
-                        <hr class="border-gray-100" />
-
-                        <!-- Match Details -->
-                        <div
-                            v-if="currentMediaItem?.matched_details"
-                            class="space-y-4 bg-gray-50/50 dark:bg-gray-900/10 p-4 rounded-xl border border-gray-100/80 dark:border-gray-800/40"
-                        >
-                            <h4
-                                class="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2 flex items-center gap-1.5"
                             >
-                                <Sparkles class="w-3.5 h-3.5 text-amber-500 fill-amber-500/20" />
-                                {{ $t("search.matched_reason") }}
-                            </h4>
-
-                            <!-- Keyword Dimension -->
-                            <div v-if="currentMediaItem.matched_details.keyword" class="space-y-1">
-                                <div class="flex items-center gap-1.5">
-                                    <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                                    <span class="text-xs font-semibold text-gray-950 dark:text-gray-50">{{
-                                        $t("search.keyword_search")
-                                    }}</span>
+                                <div v-if="media.isPlaceholder" class="w-full h-full bg-zinc-900 flex items-center justify-center">
+                                    <Loader2 class="w-3 h-3 animate-spin text-zinc-500" />
                                 </div>
-                                <p class="text-[11px] text-gray-500 dark:text-gray-400 pl-3 leading-relaxed">
-                                    {{ $t("search.keyword_search_tooltip") }}
-                                </p>
-                            </div>
-
-                            <!-- Text Embedding Dimension -->
-                            <div v-if="currentMediaItem.matched_details.text_semantic" class="space-y-1">
-                                <div class="flex items-center justify-between gap-1.5">
-                                    <div class="flex items-center gap-1.5">
-                                        <span class="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
-                                        <span class="text-xs font-semibold text-gray-950 dark:text-gray-50">{{
-                                            $t("search.text_embedding")
-                                        }}</span>
-                                    </div>
-                                    <span
-                                        class="text-[10px] font-mono bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 px-1.5 py-0.5 rounded border border-purple-100/30"
-                                    >
-                                        d={{ currentMediaItem.matched_details.text_semantic.distance?.toFixed(4) }}
-                                    </span>
-                                </div>
-                                <p
-                                    v-if="currentMediaItem.matched_details.text_semantic.caption"
-                                    class="text-[11px] text-gray-600 dark:text-gray-400 pl-3 italic border-l-2 border-purple-100 dark:border-purple-900/30 my-1 py-0.5 leading-relaxed"
-                                >
-                                    "{{ currentMediaItem.matched_details.text_semantic.caption }}"
-                                </p>
-                            </div>
-
-                            <!-- Image Embedding Dimension -->
-                            <div v-if="currentMediaItem.matched_details.visual_semantic" class="space-y-1">
-                                <div class="flex items-center justify-between gap-1.5">
-                                    <div class="flex items-center gap-1.5">
-                                        <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                                        <span class="text-xs font-semibold text-gray-950 dark:text-gray-50">{{
-                                            $t("search.image_embedding")
-                                        }}</span>
-                                    </div>
-                                    <span
-                                        class="text-[10px] font-mono bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded border border-amber-100/30"
-                                    >
-                                        d={{ currentMediaItem.matched_details.visual_semantic.distance?.toFixed(4) }}
-                                    </span>
-                                </div>
-                                <div
-                                    v-if="
-                                        currentMediaItem.matched_details.visual_semantic.scene ||
-                                        currentMediaItem.matched_details.visual_semantic.styles?.length
+                                <HeicImage
+                                    v-else-if="media.type?.toLowerCase() !== 'video'"
+                                    :src="
+                                        getOptimizedImageUrl(media.url || media.media_url || '', {
+                                            width: 320,
+                                            height: 240,
+                                            fit: 'cover',
+                                            gravity: 'auto',
+                                        })
                                     "
-                                    class="text-[11px] text-gray-600 dark:text-gray-400 pl-3 space-y-1 leading-relaxed"
+                                    :mime-type="media.mime_type || media.mimeType || undefined"
+                                    class="w-full h-full object-cover"
+                                />
+                                <div
+                                    v-else
+                                    class="w-full h-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-350 text-[10px] font-bold"
                                 >
-                                    <div v-if="currentMediaItem.matched_details.visual_semantic.scene">
-                                        <span class="text-gray-400 dark:text-gray-500">{{ $t("search.scene") }}:</span>
-                                        {{ currentMediaItem.matched_details.visual_semantic.scene }}
+                                    VIDEO
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Resizing Overlay to prevent iframe/video event stealing -->
+                    <div v-if="isResizing" class="fixed inset-0 z-[300] cursor-col-resize select-none"></div>
+
+                    <!-- Resize Drag Handle -->
+                    <div
+                        v-if="isSidebarOpen"
+                        @mousedown="startResize"
+                        class="w-1 hover:w-1.5 bg-zinc-850 hover:bg-emerald-550/50 cursor-col-resize h-full shrink-0 relative z-[220] transition-all hidden md:block"
+                        :class="
+                            isResizing ? 'bg-emerald-500/70 w-1.5 border-l border-r border-zinc-900' : 'border-l border-r border-[#08090b]'
+                        "
+                    ></div>
+
+                    <!-- Right Sidebar (Info & Provenance) -->
+                    <div
+                        v-if="isSidebarOpen"
+                        :style="{ width: `${sidebarWidth}px` }"
+                        class="bg-[#0b0c0e] border-l border-zinc-900 h-full shrink-0 flex flex-col shadow-2xl relative z-[210] overflow-hidden hidden md:flex"
+                    >
+                        <div class="p-5 border-b border-zinc-900 bg-[#0e0f12] flex items-center justify-between shrink-0">
+                            <h3 class="font-semibold text-zinc-150 flex items-center gap-2">
+                                <Info class="w-4 h-4 text-emerald-450" />
+                                {{ $t("common.details", "Asset Details") }}
+                            </h3>
+                            <button
+                                v-if="!isEditingMedia && activeTab === 'details'"
+                                @click="startEditingMedia"
+                                class="px-2.5 py-1 text-xs font-semibold text-emerald-400 bg-emerald-950/20 hover:bg-emerald-900/20 border border-emerald-900/50 rounded-md transition-colors cursor-pointer"
+                            >
+                                {{ $t("common.edit") }}
+                            </button>
+                        </div>
+
+                        <!-- Tab Bar -->
+                        <div class="flex border-b border-zinc-900 bg-[#0e0f12] px-5 gap-6 h-12 items-center text-xs shrink-0 select-none">
+                            <button
+                                @click="activeTab = 'details'"
+                                class="font-semibold uppercase tracking-wider transition-colors relative h-full flex items-center cursor-pointer"
+                                :class="
+                                    activeTab === 'details'
+                                        ? 'text-zinc-100 border-b-2 border-emerald-500'
+                                        : 'text-zinc-500 hover:text-zinc-300'
+                                "
+                            >
+                                {{ $t("common.details", "Details") }}
+                            </button>
+                            <button
+                                @click="activeTab = 'variants'"
+                                class="font-semibold uppercase tracking-wider transition-colors relative h-full flex items-center cursor-pointer"
+                                :class="
+                                    activeTab === 'variants'
+                                        ? 'text-zinc-100 border-b-2 border-emerald-500'
+                                        : 'text-zinc-500 hover:text-zinc-300'
+                                "
+                            >
+                                {{ $t("common.variants", "Variants") }}
+                            </button>
+                        </div>
+
+                        <div v-if="activeTab === 'details'" key="tab-details" class="p-5 space-y-6 flex-1 overflow-y-auto custom-scrollbar">
+                            <!-- Basic Info -->
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="text-[10px] uppercase text-zinc-500 font-bold tracking-wider mb-1.5 block">Title</label>
+                                    <input
+                                        v-if="isEditingMedia"
+                                        type="text"
+                                        v-model="editMediaTitle"
+                                        class="w-full px-3 py-1.5 text-sm border border-zinc-800 rounded-md focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none bg-zinc-950 text-white"
+                                        placeholder="Enter title"
+                                    />
+                                    <div v-else class="text-sm font-semibold text-zinc-100 break-words leading-relaxed">
+                                        {{ currentMediaItem?.title || "Untitled Asset" }}
                                     </div>
-                                    <div v-if="currentMediaItem.matched_details.visual_semantic.styles?.length">
-                                        <span class="text-gray-400 dark:text-gray-500">{{ $t("search.styles") }}:</span>
-                                        <div class="flex flex-wrap gap-1 mt-0.5">
-                                            <span
-                                                v-for="style in currentMediaItem.matched_details.visual_semantic.styles"
-                                                :key="style"
-                                                class="bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 px-1.5 py-0.5 rounded text-[10px]"
-                                            >
-                                                {{ style }}
-                                            </span>
+                                </div>
+
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="text-[10px] uppercase text-zinc-500 font-bold tracking-wider mb-1.5 block"
+                                            >Type</label
+                                        >
+                                        <div
+                                            class="flex items-center gap-1.5 text-xs font-medium text-zinc-200 bg-zinc-900 border border-zinc-800 w-fit px-2.5 py-0.5 rounded-md"
+                                        >
+                                            <FileImage class="w-3.5 h-3.5 text-zinc-400" />
+                                            <span class="capitalize">{{ currentMediaItem?.type || "Image" }}</span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="text-[10px] uppercase text-zinc-500 font-bold tracking-wider mb-1.5 block"
+                                            >Source</label
+                                        >
+                                        <div class="text-xs font-semibold text-zinc-200">
+                                            {{ currentMediaItem?.source || "Local" }}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label class="text-[10px] uppercase text-zinc-500 font-bold tracking-wider mb-1.5 block"
+                                        >Published Time</label
+                                    >
+                                    <input
+                                        v-if="isEditingMedia"
+                                        type="datetime-local"
+                                        v-model="editMediaPublishedTime"
+                                        class="w-full px-2.5 py-1.5 text-sm border border-zinc-800 rounded-md focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none bg-zinc-950 text-white"
+                                    />
+                                    <div v-else class="text-xs font-semibold text-zinc-300">
+                                        {{ formatDate(currentPublishedTime || "") }}
+                                    </div>
+                                </div>
+
+                                <!-- Save / Cancel Buttons -->
+                                <div v-if="isEditingMedia" class="flex items-center gap-2 justify-end pt-2">
+                                    <button
+                                        @click="cancelEditingMedia"
+                                        class="px-3 py-1 text-xs font-semibold text-zinc-300 bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 rounded transition-colors cursor-pointer"
+                                        :disabled="isSavingMedia"
+                                    >
+                                        {{ $t("common.cancel") }}
+                                    </button>
+                                    <button
+                                        @click="saveEditingMedia"
+                                        class="px-3 py-1 text-xs font-semibold text-zinc-950 bg-emerald-400 hover:bg-emerald-300 rounded shadow-sm transition-colors cursor-pointer flex items-center gap-1"
+                                        :disabled="isSavingMedia"
+                                    >
+                                        <Loader2 v-if="isSavingMedia" class="w-3 animate-spin" />
+                                        {{ $t("common.save") }}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <hr class="border-zinc-900" />
+
+                            <!-- Tags -->
+                            <div class="space-y-3">
+                                <label class="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-1.5">
+                                    <Tag class="w-3.5 h-3.5 text-zinc-400" /> {{ $t("common.tags", "Tags") }}
+                                </label>
+                                <div v-if="isLoadingMediaDetails" class="text-xs text-zinc-400 flex items-center gap-1.5 py-1">
+                                    <Loader2 class="w-3.5 h-3.5 animate-spin text-emerald-500" />
+                                    <span>Loading tags...</span>
+                                </div>
+                                <TagEditor
+                                    v-else
+                                    :tags="mediaDetails?.tags || []"
+                                    :is-dark="true"
+                                    @add-tag="handleAddTag"
+                                    @remove-tag="handleRemoveTag"
+                                />
+                            </div>
+
+                            <hr class="border-zinc-900" />
+
+                            <!-- Match Details -->
+                            <div
+                                v-if="currentMediaItem?.matched_details"
+                                class="space-y-4 bg-zinc-900/30 p-4 rounded-xl border border-zinc-900"
+                            >
+                                <h4 class="text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                                    <Sparkles class="w-3.5 h-3.5 text-amber-500 fill-amber-500/20" />
+                                    {{ $t("search.matched_reason") }}
+                                </h4>
+
+                                <!-- Keyword Dimension -->
+                                <div v-if="currentMediaItem.matched_details.keyword" class="space-y-1">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                                        <span class="text-xs font-semibold text-zinc-100">{{ $t("search.keyword_search") }}</span>
+                                    </div>
+                                    <p class="text-[11px] text-zinc-400 pl-3 leading-relaxed">
+                                        {{ $t("search.keyword_search_tooltip") }}
+                                    </p>
+                                </div>
+
+                                <!-- Text Embedding Dimension -->
+                                <div v-if="currentMediaItem.matched_details.text_semantic" class="space-y-1">
+                                    <div class="flex items-center justify-between gap-1.5">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+                                            <span class="text-xs font-semibold text-zinc-100">{{ $t("search.text_embedding") }}</span>
+                                        </div>
+                                        <span
+                                            class="text-[10px] font-mono bg-purple-950/30 text-purple-400 px-1.5 py-0.5 rounded border border-purple-900/35"
+                                        >
+                                            d={{ currentMediaItem.matched_details.text_semantic.distance?.toFixed(4) }}
+                                        </span>
+                                    </div>
+                                    <p
+                                        v-if="currentMediaItem.matched_details.text_semantic.caption"
+                                        class="text-[11px] text-zinc-300 pl-3 italic border-l-2 border-purple-900/40 my-1 py-0.5 leading-relaxed"
+                                    >
+                                        "{{ currentMediaItem.matched_details.text_semantic.caption }}"
+                                    </p>
+                                </div>
+
+                                <!-- Image Embedding Dimension -->
+                                <div v-if="currentMediaItem.matched_details.visual_semantic" class="space-y-1">
+                                    <div class="flex items-center justify-between gap-1.5">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                                            <span class="text-xs font-semibold text-zinc-100">{{ $t("search.image_embedding") }}</span>
+                                        </div>
+                                        <span
+                                            class="text-[10px] font-mono bg-amber-950/30 text-amber-400 px-1.5 py-0.5 rounded border border-amber-900/35"
+                                        >
+                                            d={{ currentMediaItem.matched_details.visual_semantic.distance?.toFixed(4) }}
+                                        </span>
+                                    </div>
+                                    <div
+                                        v-if="
+                                            currentMediaItem.matched_details.visual_semantic.scene ||
+                                            currentMediaItem.matched_details.visual_semantic.styles?.length
+                                        "
+                                        class="text-[11px] text-zinc-300 pl-3 space-y-1 leading-relaxed"
+                                    >
+                                        <div v-if="currentMediaItem.matched_details.visual_semantic.scene">
+                                            <span class="text-zinc-400">{{ $t("search.scene") }}:</span>
+                                            {{ currentMediaItem.matched_details.visual_semantic.scene }}
+                                        </div>
+                                        <div v-if="currentMediaItem.matched_details.visual_semantic.styles?.length">
+                                            <span class="text-zinc-400">{{ $t("search.styles") }}:</span>
+                                            <div class="flex flex-wrap gap-1 mt-0.5">
+                                                <span
+                                                    v-for="style in currentMediaItem.matched_details.visual_semantic.styles"
+                                                    :key="style"
+                                                    class="bg-zinc-800 text-zinc-300 px-1.5 py-0.5 rounded text-[10px]"
+                                                >
+                                                    {{ style }}
+                                                </span>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <hr class="border-gray-100" />
+                            <hr class="border-zinc-900" />
 
-                        <!-- Actions (Regenerate Cover) -->
-                        <div v-if="isVideo" class="space-y-3">
-                            <label class="text-xs uppercase text-gray-500 font-bold tracking-wider flex items-center gap-1.5">
-                                <Info class="w-3.5 h-3.5" />
-                                {{ $t("media.actions.regenerate_cover", "Regenerate Cover") }}
-                            </label>
-                            <button
-                                :disabled="!currentMediaItem || regeneratingCoverMediaId === currentMediaItem.id"
-                                @click="currentMediaItem && handleRegenerateCover(currentMediaItem.id)"
-                                class="w-full flex items-center justify-center gap-2 px-4 py-2 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed select-none"
-                            >
-                                <Loader2
-                                    v-if="currentMediaItem && regeneratingCoverMediaId === currentMediaItem.id"
-                                    class="w-4 h-4 animate-spin text-gray-500"
-                                />
-                                <FileImage v-else class="w-4 h-4 text-gray-500" />
-                                <span>
-                                    {{
-                                        currentMediaItem && regeneratingCoverMediaId === currentMediaItem.id
-                                            ? $t("media.cover.loading", "Requesting...")
-                                            : $t("media.actions.regenerate_cover", "Regenerate Cover")
-                                    }}
-                                </span>
-                            </button>
-                        </div>
-
-                        <hr v-if="isVideo" class="border-gray-100" />
-
-                        <!-- Provenance / Part of Post (The Wormhole) -->
-                        <div v-if="postDetail || isLoadingPost" class="space-y-3">
-                            <label class="text-xs uppercase text-gray-500 font-bold tracking-wider flex items-center gap-1.5">
-                                <Layers class="w-3.5 h-3.5" /> Part of Post
-                            </label>
-
-                            <div v-if="isLoadingPost" class="border border-zinc-100 rounded-xl p-4 space-y-3 animate-pulse">
-                                <div class="flex items-center gap-2">
-                                    <div class="w-6 h-6 rounded-full bg-zinc-200"></div>
-                                    <div class="h-4 bg-zinc-200 rounded w-1/3"></div>
-                                </div>
-                                <div class="space-y-2">
-                                    <div class="h-3 bg-zinc-200 rounded w-full"></div>
-                                    <div class="h-3 bg-zinc-200 rounded w-5/6"></div>
-                                </div>
-                            </div>
-                            <div
-                                v-else-if="postDetail"
-                                class="bg-blue-50/50 border border-blue-100 rounded-xl p-4 transition-all hover:bg-blue-50 cursor-pointer"
-                                @click="navigateTo(`/posts/${postDetail.id}`)"
-                            >
-                                <div class="flex items-center gap-2 mb-2">
-                                    <img
-                                        v-if="postDetail.author_avatar_url"
-                                        :src="postDetail.author_avatar_url"
-                                        alt="avatar"
-                                        class="w-6 h-6 rounded-full object-cover shrink-0"
-                                        loading="lazy"
+                            <!-- Actions (Regenerate Cover) -->
+                            <div v-if="isVideo" class="space-y-3">
+                                <label class="text-[10px] uppercase text-zinc-500 font-bold tracking-wider flex items-center gap-1.5">
+                                    <Info class="w-3.5 h-3.5" />
+                                    {{ $t("media.actions.regenerate_cover", "Regenerate Cover") }}
+                                </label>
+                                <button
+                                    :disabled="!currentMediaItem || regeneratingCoverMediaId === currentMediaItem.id"
+                                    @click="currentMediaItem && handleRegenerateCover(currentMediaItem.id)"
+                                    class="w-full flex items-center justify-center gap-2 px-4 py-2 border border-zinc-800 rounded-xl text-sm font-semibold text-zinc-300 bg-zinc-900/50 hover:bg-zinc-850 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed select-none cursor-pointer"
+                                >
+                                    <Loader2
+                                        v-if="currentMediaItem && regeneratingCoverMediaId === currentMediaItem.id"
+                                        class="w-4 h-4 animate-spin text-zinc-400"
                                     />
-                                    <div
-                                        v-else
-                                        class="w-6 h-6 rounded-full bg-white shadow-sm flex items-center justify-center text-xs font-bold text-blue-600 shrink-0"
-                                    >
-                                        {{ postDetail.author_name?.charAt(0) || "A" }}
+                                    <FileImage v-else class="w-4 h-4 text-zinc-400" />
+                                    <span>
+                                        {{
+                                            currentMediaItem && regeneratingCoverMediaId === currentMediaItem.id
+                                                ? $t("media.cover.loading", "Requesting...")
+                                                : $t("media.actions.regenerate_cover", "Regenerate Cover")
+                                        }}
+                                    </span>
+                                </button>
+                            </div>
+
+                            <hr v-if="isVideo" class="border-zinc-900" />
+
+                            <!-- Provenance / Part of Post (The Wormhole) -->
+                            <div v-if="postDetail || isLoadingPost" class="space-y-3">
+                                <label class="text-[10px] uppercase text-zinc-500 font-bold tracking-wider flex items-center gap-1.5">
+                                    <Layers class="w-3.5 h-3.5" /> Part of Post
+                                </label>
+
+                                <div
+                                    v-if="isLoadingPost"
+                                    class="border border-zinc-850 rounded-xl p-4 space-y-3 animate-pulse bg-zinc-900/20"
+                                >
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-6 h-6 rounded-full bg-zinc-800"></div>
+                                        <div class="h-4 bg-zinc-800 rounded w-1/3"></div>
                                     </div>
-                                    <span class="text-sm font-semibold text-gray-900 truncate">{{
-                                        postDetail.author_name || "Unknown Author"
-                                    }}</span>
+                                    <div class="space-y-2">
+                                        <div class="h-3 bg-zinc-800 rounded w-full"></div>
+                                        <div class="h-3 bg-zinc-800 rounded w-5/6"></div>
+                                    </div>
                                 </div>
-                                <p class="text-xs text-gray-600 line-clamp-3 leading-relaxed">
-                                    {{ postDetail.description || postDetail.title || "View the original post context." }}
-                                </p>
-                                <div class="mt-3 flex items-center text-blue-600 text-xs font-medium gap-1">
-                                    View Full Post
-                                    <ChevronRight class="w-3 h-3" />
+                                <div
+                                    v-else-if="postDetail"
+                                    class="bg-[#12141a]/40 hover:bg-[#12141a]/70 border border-zinc-850 rounded-xl p-4 transition-all cursor-pointer shadow-sm group/post-card"
+                                    @click="navigateTo(`/posts/${postDetail.id}`)"
+                                >
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <img
+                                            v-if="postDetail.author_avatar_url"
+                                            :src="postDetail.author_avatar_url"
+                                            alt="avatar"
+                                            class="w-6 h-6 rounded-full object-cover shrink-0"
+                                            loading="lazy"
+                                        />
+                                        <div
+                                            v-else
+                                            class="w-6 h-6 rounded-full bg-zinc-850 flex items-center justify-center text-xs font-bold text-emerald-400 shrink-0"
+                                        >
+                                            {{ postDetail.author_name?.charAt(0) || "A" }}
+                                        </div>
+                                        <span class="text-sm font-semibold text-zinc-100 truncate">{{
+                                            postDetail.author_name || "Unknown Author"
+                                        }}</span>
+                                    </div>
+                                    <p class="text-xs text-zinc-400 line-clamp-3 leading-relaxed">
+                                        {{ postDetail.description || postDetail.title || "View the original post context." }}
+                                    </p>
+                                    <div
+                                        class="mt-3 flex items-center text-emerald-400 text-xs font-semibold gap-1.5 transition-all group-hover/post-card:text-emerald-350"
+                                    >
+                                        View Full Post
+                                        <ChevronRight class="w-3.5 h-3.5 transition-transform group-hover/post-card:translate-x-0.5" />
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- Variants panel -->
-                    <div v-if="activeTab === 'variants'" key="tab-variants" class="flex-1 flex flex-col overflow-hidden min-h-0 bg-white">
-                        <MediaVariantsManager v-if="currentMediaItem" :media-id="currentMediaItem.id" />
+                        <!-- Variants panel -->
+                        <div
+                            v-if="activeTab === 'variants'"
+                            key="tab-variants"
+                            class="flex-1 flex flex-col overflow-hidden min-h-0 bg-[#0b0c0e]"
+                        >
+                            <MediaVariantsManager v-if="currentMediaItem" :media-id="currentMediaItem.id" :is-dark="true" />
+                        </div>
                     </div>
                 </div>
-            </div>
-        </Transition>
-    </Teleport>
+            </Transition>
+        </Teleport>
     </ClientOnly>
 </template>
 

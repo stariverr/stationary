@@ -8,9 +8,11 @@ const props = withDefaults(
     defineProps<{
         tags: string[];
         placeholder?: string;
+        isDark?: boolean;
     }>(),
     {
         placeholder: "Search or create tag...",
+        isDark: false,
     },
 );
 
@@ -60,15 +62,15 @@ const getTagStyle = (tagName: string) => {
             const g = parseInt(baseColor.slice(3, 5), 16);
             const b = parseInt(baseColor.slice(5, 7), 16);
             return {
-                backgroundColor: `rgba(${r}, ${g}, ${b}, 0.08)`,
+                backgroundColor: props.isDark ? `rgba(${r}, ${g}, ${b}, 0.15)` : `rgba(${r}, ${g}, ${b}, 0.08)`,
                 color: baseColor,
-                borderColor: `rgba(${r}, ${g}, ${b}, 0.2)`,
+                borderColor: `rgba(${r}, ${g}, ${b}, 0.3)`,
             };
         } else {
             return {
-                backgroundColor: `${baseColor}14`,
+                backgroundColor: `${baseColor}20`,
                 color: baseColor,
-                borderColor: `${baseColor}33`,
+                borderColor: `${baseColor}44`,
             };
         }
     }
@@ -128,7 +130,7 @@ const selectOptions = computed(() => {
 });
 
 // Handle selection of a tag/create option
-const handleSelectOption = (option: typeof selectOptions.value[0]) => {
+const handleSelectOption = (option: (typeof selectOptions.value)[0]) => {
     if (option.type === "create") {
         emit("add-tag", option.name);
         searchQuery.value = "";
@@ -200,16 +202,26 @@ const scrollIntoView = () => {
                     v-for="tag in tags"
                     :key="tag"
                     :style="getTagStyle(tag)"
-                    class="group/tag inline-flex items-center gap-1.5 px-3 py-1.5 bg-zinc-50 border border-zinc-200 hover:bg-zinc-100 hover:border-zinc-300 rounded-md text-xs text-zinc-700 font-medium transition-colors cursor-pointer"
+                    class="group/tag inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer border"
+                    :class="[
+                        isDark
+                            ? 'bg-zinc-900/50 border-zinc-800 text-zinc-300 hover:bg-zinc-900 hover:border-zinc-700'
+                            : 'bg-zinc-50 border-zinc-200 text-zinc-700 hover:bg-zinc-100 hover:border-zinc-300',
+                    ]"
                 >
                     <span>#{{ tag }}</span>
                     <button
                         type="button"
                         @click.stop="emit('remove-tag', tag)"
-                        class="text-zinc-400 hover:text-red-600 transition-colors cursor-pointer rounded-full p-0.5 hover:bg-black/5 shrink-0 -mr-1"
+                        class="transition-colors cursor-pointer rounded-full p-0.5 shrink-0 -mr-1"
+                        :class="
+                            isDark
+                                ? 'text-zinc-500 hover:text-red-400 hover:bg-white/5'
+                                : 'text-zinc-400 hover:text-red-600 hover:bg-black/5'
+                        "
                         title="Remove tag"
                     >
-                        <X class="w-3 h-3" />
+                        <X class="w-3.5 h-3.5" />
                     </button>
                 </span>
             </transition-group>
@@ -218,7 +230,12 @@ const scrollIntoView = () => {
             <button
                 type="button"
                 @click="showPopover = !showPopover"
-                class="px-3 py-1.5 border border-dashed border-zinc-300 hover:border-zinc-400 hover:text-zinc-600 rounded-md text-xs text-zinc-400 hover:bg-zinc-50 transition-colors cursor-pointer"
+                class="px-3 py-1.5 border border-dashed rounded-md text-xs transition-colors cursor-pointer"
+                :class="[
+                    isDark
+                        ? 'border-zinc-800 text-zinc-500 hover:border-zinc-750 hover:text-zinc-300 hover:bg-zinc-900/30'
+                        : 'border-zinc-305 hover:border-zinc-400 text-zinc-450 hover:text-zinc-650 hover:bg-zinc-50',
+                ]"
             >
                 + {{ $t("common.add_tag", "Add Tag") }}
             </button>
@@ -228,24 +245,31 @@ const scrollIntoView = () => {
         <transition name="popover-fade">
             <div
                 v-if="showPopover"
-                class="absolute left-0 bottom-full mb-2 z-[100] w-64 bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 rounded-xl shadow-xl p-2 focus:outline-none ring-1 ring-black/5"
+                class="absolute left-0 bottom-full mb-2 z-[100] w-64 rounded-xl shadow-xl p-2 focus:outline-none ring-1 ring-black/5"
+                :class="[isDark ? 'bg-[#0f1115] border border-zinc-800 text-white' : 'bg-white border border-zinc-200/80 text-zinc-900']"
             >
                 <!-- Popover Search Input -->
-                <div class="relative flex items-center mb-1.5 border-b border-zinc-100 dark:border-zinc-800 pb-1.5 px-1">
+                <div class="relative flex items-center mb-1.5 pb-1.5 px-1 border-b" :class="isDark ? 'border-zinc-850' : 'border-zinc-100'">
                     <Search class="absolute left-2.5 w-3.5 h-3.5 text-zinc-400 dark:text-zinc-500" />
                     <input
                         ref="searchInputRef"
                         v-model="searchQuery"
                         type="text"
                         :placeholder="placeholder"
-                        class="w-full pl-8 pr-7 py-1.5 text-xs text-zinc-800 dark:text-zinc-200 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none transition-all"
+                        class="w-full pl-8 pr-7 py-1.5 text-xs rounded-lg outline-none transition-all focus:ring-1"
+                        :class="[
+                            isDark
+                                ? 'text-white bg-zinc-950 border border-zinc-850 focus:border-emerald-500 focus:ring-emerald-500/20'
+                                : 'text-zinc-800 bg-zinc-50 border border-zinc-200 focus:border-indigo-500 focus:ring-indigo-500',
+                        ]"
                         @keydown="onKeyDown"
                     />
                     <button
                         v-if="searchQuery"
                         type="button"
                         @click="searchQuery = ''"
-                        class="absolute right-2 text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 cursor-pointer"
+                        class="absolute right-2 cursor-pointer transition-colors"
+                        :class="isDark ? 'text-zinc-500 hover:text-zinc-300' : 'text-zinc-400 hover:text-zinc-650'"
                     >
                         <X class="w-3.5 h-3.5" />
                     </button>
@@ -254,8 +278,12 @@ const scrollIntoView = () => {
                 <!-- Dropdown items list -->
                 <div class="tag-editor-popover-list max-h-48 overflow-y-auto space-y-0.5 pr-0.5 custom-scrollbar">
                     <!-- Loading state -->
-                    <div v-if="tagStore.isLoading" class="flex items-center justify-center py-6 text-zinc-400 dark:text-zinc-500 text-xs gap-1.5">
-                        <Loader2 class="w-3.5 h-3.5 animate-spin text-indigo-500" />
+                    <div
+                        v-if="tagStore.isLoading"
+                        class="flex items-center justify-center py-6 text-xs gap-1.5"
+                        :class="isDark ? 'text-zinc-500' : 'text-zinc-400'"
+                    >
+                        <Loader2 class="w-3.5 h-3.5 animate-spin" :class="isDark ? 'text-emerald-500' : 'text-indigo-500'" />
                         <span>Loading tags...</span>
                     </div>
 
@@ -268,34 +296,50 @@ const scrollIntoView = () => {
                             class="w-full text-left flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer"
                             :class="[
                                 index === focusedIndex
-                                    ? 'tag-editor-popover-item-active bg-indigo-50 dark:bg-indigo-950/40 text-indigo-950 dark:text-indigo-200 font-medium'
-                                    : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 hover:text-zinc-950 dark:hover:text-zinc-50',
+                                    ? isDark
+                                        ? 'tag-editor-popover-item-active bg-emerald-950/40 text-emerald-300 font-semibold'
+                                        : 'tag-editor-popover-item-active bg-indigo-50 text-indigo-950 font-medium'
+                                    : isDark
+                                      ? 'text-zinc-350 hover:bg-zinc-900/60 hover:text-zinc-100'
+                                      : 'text-zinc-700 hover:bg-zinc-50 hover:text-zinc-950',
                             ]"
                             @click="handleSelectOption(option)"
                             @mouseenter="focusedIndex = index"
                         >
                             <span class="flex items-center gap-1.5 truncate">
                                 <!-- Create Tag Indicator -->
-                                <Plus v-if="option.type === 'create'" class="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                                <Tag v-else class="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-500 shrink-0" :style="{ color: option.color || undefined }" />
+                                <Plus
+                                    v-if="option.type === 'create'"
+                                    class="w-3.5 h-3.5 shrink-0"
+                                    :class="isDark ? 'text-emerald-400' : 'text-indigo-500'"
+                                />
+                                <Tag
+                                    v-else
+                                    class="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-500 shrink-0"
+                                    :style="{ color: option.color || undefined }"
+                                />
 
                                 <span class="truncate">
-                                    <span v-if="option.type === 'create'" class="text-indigo-600 dark:text-indigo-400 font-medium">Create tag: </span>
+                                    <span
+                                        v-if="option.type === 'create'"
+                                        class="font-semibold"
+                                        :class="isDark ? 'text-emerald-400' : 'text-indigo-650'"
+                                        >Create tag:
+                                    </span>
                                     #{{ option.name }}
                                 </span>
                             </span>
 
                             <Check
                                 v-if="option.isSelected"
-                                class="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-450 shrink-0"
+                                class="w-3.5 h-3.5 shrink-0"
+                                :class="isDark ? 'text-emerald-450' : 'text-indigo-600'"
                             />
                         </button>
                     </template>
 
                     <!-- Empty state -->
-                    <div v-else class="text-center py-6 text-zinc-400 dark:text-zinc-500 text-xs">
-                        No tags found
-                    </div>
+                    <div v-else class="text-center py-6 text-zinc-400 dark:text-zinc-500 text-xs">No tags found</div>
                 </div>
             </div>
         </transition>

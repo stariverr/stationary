@@ -10,29 +10,48 @@ import { type Post, type Track } from "@/types/post";
 const props = defineProps<{
     post: Post;
     layout: "embedded" | "immersive";
+    mediaList?: any[];
 }>();
 
 const currentIndex = defineModel<number>("currentIndex", { default: 0 });
 const mappedMedia = ref<any[]>([]);
 
+const rawMedia = computed(() => props.mediaList || props.post?.media || []);
+
 watch(
-    () => props.post?.media,
+    rawMedia,
     (newMedia) => {
         if (!newMedia) {
             mappedMedia.value = [];
             return;
         }
         mappedMedia.value = newMedia.map((m) => {
-            const subtitleTracks = (m.tracks || []).filter((t: Track) => t.type === "SUBTITLE");
-            return {
-                ...m,
-                subtitles: subtitleTracks.map((sub: Track) => ({
-                    url: sub.url,
-                    language: (sub.metadata?.language as string) || "unknown",
-                    label: (sub.metadata?.label as string) || (sub.metadata?.language as string) || "unknown",
-                    format: sub.metadata?.format === "json" ? "vtt" : (sub.metadata?.format as string) || "vtt",
-                })),
-            };
+            if (props.mediaList) {
+                // If it is from the paginated summary, subtitles are already processed
+                const subtitles = m.subtitles || [];
+                return {
+                    ...m,
+                    url: m.preview_url || m.thumbnail_url || null,
+                    thumbnail: m.thumbnail_url || null,
+                    subtitles: subtitles.map((sub: any) => ({
+                        url: sub.url,
+                        language: sub.language || "unknown",
+                        label: sub.label || sub.language || "unknown",
+                        format: sub.format || "vtt",
+                    })),
+                };
+            } else {
+                const subtitleTracks = (m.tracks || []).filter((t: Track) => t.type === "SUBTITLE");
+                return {
+                    ...m,
+                    subtitles: subtitleTracks.map((sub: Track) => ({
+                        url: sub.url,
+                        language: (sub.metadata?.language as string) || "unknown",
+                        label: (sub.metadata?.label as string) || (sub.metadata?.language as string) || "unknown",
+                        format: sub.metadata?.format === "json" ? "vtt" : (sub.metadata?.format as string) || "vtt",
+                    })),
+                };
+            }
         });
     },
     { immediate: true },
