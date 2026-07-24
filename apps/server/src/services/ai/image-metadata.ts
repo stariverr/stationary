@@ -26,15 +26,20 @@ const ImageMetadataOutput = Output.object({
     }),
 });
 
-function toImageContent(image: Buffer | Uint8Array | string): {
-    type: "image";
-    image: URL | Buffer;
+function toImageContent(
+    image: Buffer | Uint8Array | string,
+    mimeType: string = "image/jpeg",
+): {
+    type: "file";
+    data: URL | Buffer;
+    mediaType: string;
 } {
+    const validMime = mimeType && mimeType.includes("/") ? mimeType : "image/jpeg";
     if (typeof image === "string") {
-        return { type: "image", image: new URL(image) };
+        return { type: "file", data: new URL(image), mediaType: validMime };
     }
 
-    return { type: "image", image: Buffer.from(image) };
+    return { type: "file", data: Buffer.from(image), mediaType: validMime };
 }
 
 function normalizeImageAiMetadata(output: Partial<ImageAiMetadata>): ImageAiMetadata {
@@ -49,14 +54,18 @@ function normalizeImageAiMetadata(output: Partial<ImageAiMetadata>): ImageAiMeta
     };
 }
 
-export async function describeImageWithModel(model: LanguageModel, image: Buffer | Uint8Array | string): Promise<ImageAiMetadata> {
+export async function describeImageWithModel(
+    model: LanguageModel,
+    image: Buffer | Uint8Array | string,
+    mimeType: string = "image/jpeg",
+): Promise<ImageAiMetadata> {
     const { output } = await generateText({
         model,
         output: ImageMetadataOutput,
         messages: [
             {
                 role: "user",
-                content: [{ type: "text", text: IMAGE_METADATA_PROMPT }, toImageContent(image)],
+                content: [{ type: "text", text: IMAGE_METADATA_PROMPT }, toImageContent(image, mimeType)],
             },
         ],
     });

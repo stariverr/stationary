@@ -124,7 +124,7 @@ export class AiService {
         return this.provider.embedImage(params);
     }
 
-    async describeImage(image: Buffer | Uint8Array | string, _mimeType: string): Promise<ImageAiMetadata> {
+    async describeImage(image: Buffer | Uint8Array | string, mimeType: string = "image/jpeg"): Promise<ImageAiMetadata> {
         const modelName = this.provider.chatModelName;
         if (!modelName) {
             throw new Error(`The chat model for image description is not configured for AI provider "${this.provider.providerName}".`);
@@ -137,6 +137,6 @@ export class AiService {
             throw new Error(`The chat model for image description is not configured for AI provider "${this.provider.providerName}".`);
         }
 
-        return describeImageWithModel(model, image);
+        return describeImageWithModel(model, image, mimeType);
     }
 }
