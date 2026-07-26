@@ -24,6 +24,7 @@ import {
 } from "@/utils/draft-media-rules";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Upload, File, Video, Music, X, Loader2, Plus, AlertCircle, Info, ArrowLeft, Search, FolderOpen } from "@lucide/vue";
+import { TrackQuality } from "@/types/post";
 
 const props = withDefaults(
     defineProps<{
@@ -192,7 +193,7 @@ type TrackConfig = {
     mime_type: string;
     type: TrackType | null;
     purpose: TrackPurpose;
-    quality: "ORIGINAL" | "HIGH" | "MEDIUM" | "LOW";
+    quality: TrackQuality;
     is_default: boolean;
     language: string;
 };
@@ -377,7 +378,7 @@ function rebuildTracks() {
                 mime_type: draft.mime_type,
                 type,
                 purpose: TrackPurpose.CONTENT,
-                quality: "ORIGINAL",
+                quality: TrackQuality.HIGH,
                 is_default: false,
                 language: "",
             });
@@ -841,7 +842,6 @@ onUnmounted(() => {
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="ORIGINAL">{{ $t("media.quality.original") }}</SelectItem>
                                                 <SelectItem value="HIGH">{{ $t("media.quality.high") }}</SelectItem>
                                                 <SelectItem value="MEDIUM">{{ $t("media.quality.medium") }}</SelectItem>
                                                 <SelectItem value="LOW">{{ $t("media.quality.low") }}</SelectItem>
@@ -922,7 +922,6 @@ onUnmounted(() => {
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="ORIGINAL">{{ $t("media.quality.original") }}</SelectItem>
                                             <SelectItem value="HIGH">{{ $t("media.quality.high") }}</SelectItem>
                                             <SelectItem value="MEDIUM">{{ $t("media.quality.medium") }}</SelectItem>
                                             <SelectItem value="LOW">{{ $t("media.quality.low") }}</SelectItem>

@@ -10,13 +10,13 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { authClient, useSession } from "@/lib/auth-client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch, onUnmounted } from "vue";
 import { Input } from "@/components/ui/input";
 import { toast } from "vue-sonner";
 import { useLibraryStore } from "@/stores/library";
 import { useUserStore } from "@/stores/user";
 import { storeToRefs } from "pinia";
-import { Key, Copy, Plus, Check, Loader2, Trash2, AlertTriangle, Calendar, Layers, Sparkles } from "@lucide/vue";
+import { Key, Copy, Plus, Check, Loader2, Trash2, AlertTriangle, Calendar, Layers, Sparkles, RefreshCw, Save, Info } from "@lucide/vue";
 
 const props = defineProps({
     open: { type: Boolean, default: false },
@@ -35,7 +35,7 @@ interface NuxtI18nComposer {
     locale: WritableComputedRef<string>;
     setLocale: (locale: string) => Promise<void>;
     locales: ComputedRef<Array<{ code: string; name?: string } | string>>;
-    t: (key: string, values?: Record<string, unknown>) => string;
+    t: (key: string, defaultMsgOrValues?: string | Record<string, unknown>, values?: Record<string, unknown>) => string;
 }
 
 const { locale, setLocale, locales, t } = useI18n() as unknown as NuxtI18nComposer;
@@ -73,6 +73,7 @@ interface ApiToken {
 
 interface ApiResponse<T = unknown> {
     success: boolean;
+    code?: number;
     message?: string;
     data?: T;
 }
@@ -107,31 +108,6 @@ const newTokenExpiresIn = ref<string>("0");
 const generatedToken = ref<string | null>(null);
 const justCopied = ref(false);
 
-const isRecovering = ref(false);
-
-const triggerCoverRecovery = async () => {
-    try {
-        isRecovering.value = true;
-        const res = await useApi<ApiResponse<{ queued: number }>>("/task/scan-missing-covers", {
-            method: "POST",
-            body: {},
-        });
-        if (res && res.success && res.data) {
-            toast.success(t("settings.general.video_cover_recovery_success", { count: res.data.queued }));
-        } else {
-            throw new Error(res?.message || "Server error");
-        }
-    } catch (err: unknown) {
-        console.error("Failed to run video cover recovery", err);
-        const fetchErr = err as FetchErrorLike;
-        toast.error(t("settings.general.video_cover_recovery_error"), {
-            description: fetchErr?.message || "Unknown error occurred",
-        });
-    } finally {
-        isRecovering.value = false;
-    }
-};
-
 const fetchTokens = async () => {
     if (!props.open) return;
     isLoading.value = true;
@@ -163,11 +139,12 @@ watch(
             generatedToken.value = null;
             justCopied.value = false;
 
-            // Initialize selectedLibraryId for AI configuration
-            if (libraryStore.activeLibraryId) {
-                selectedLibraryId.value = libraryStore.activeLibraryId;
-            } else if (libraryStore.libraries.length > 0) {
-                selectedLibraryId.value = libraryStore.libraries[0]?.id || "";
+            // Initialize selectedLibraryId
+            const targetId = libraryStore.activeLibraryId || libraryStore.libraries[0]?.id || "";
+            selectedLibraryId.value = targetId;
+            if (targetId) {
+                fetchAiConfig();
+                fetchCoverConfig(targetId);
             }
         }
     },
@@ -343,11 +320,241 @@ const saveAiConfig = async () => {
     }
 };
 
+interface ActiveTask {
+    id: string;
+    type: string;
+    status: string; // DISCOVERING, RUNNING, PAUSED, COMPLETED, CANCELLED, FAILED
+    discovery_complete: boolean;
+    total_units: number;
+    succeeded_units: number;
+    failed_units: number;
+    cancelled_units: number;
+    create_time: string;
+    update_time: string;
+}
+
+const reconcileStatus = ref<string>("COMPLETED");
+const activeTask = ref<ActiveTask | null>(null);
+const isRecovering = ref(false);
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+const activeTaskProcessedUnits = computed(() => {
+    if (!activeTask.value) return 0;
+    return activeTask.value.succeeded_units + activeTask.value.failed_units + activeTask.value.cancelled_units;
+});
+
+const activeTaskPercentage = computed(() => {
+    if (!activeTask.value || activeTask.value.total_units <= 0) return 0;
+    return Math.min(100, Math.floor((activeTaskProcessedUnits.value / activeTask.value.total_units) * 100));
+});
+
+const stopPolling = () => {
+    if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+    }
+};
+
+const startPolling = (libId: string) => {
+    stopPolling();
+    pollTimer = setInterval(async () => {
+        await fetchCoverConfig(libId);
+    }, 2000);
+};
+
+onUnmounted(() => {
+    stopPolling();
+});
+
+const triggerCoverRecovery = async () => {
+    const libId = selectedLibraryId.value || libraryStore.activeLibraryId;
+    if (!libId) return;
+    try {
+        isRecovering.value = true;
+        const res = await useApi<ApiResponse<{ task_id: string; active_task?: ActiveTask }>>(`/library/${libId}/cover-jobs`, {
+            method: "POST",
+            body: { type: "RECONCILE" },
+        });
+        if (res && res.success) {
+            toast.success(t("settings.general.video_cover_recovery_success"));
+            if (res.data?.active_task) {
+                activeTask.value = res.data.active_task;
+            }
+            await fetchCoverConfig(libId);
+            startPolling(libId);
+        } else {
+            throw new Error(res?.message || "Server error");
+        }
+    } catch (err: unknown) {
+        console.error("Failed to run video cover recovery", err);
+        const fetchErr = err as FetchErrorLike;
+        toast.error(t("settings.general.video_cover_recovery_error"), {
+            description: fetchErr?.data?.message || "Unknown error occurred",
+        });
+    } finally {
+        isRecovering.value = false;
+    }
+};
+
+const pauseJob = async () => {
+    if (!activeTask.value) return;
+    try {
+        await useApi(`/jobs/${activeTask.value.id}/pause`, { method: "POST" });
+        toast.info("已请求暂停封面处理");
+        if (selectedLibraryId.value) await fetchCoverConfig(selectedLibraryId.value);
+    } catch {
+        toast.error("暂停失败");
+    }
+};
+
+const resumeJob = async () => {
+    if (!activeTask.value) return;
+    try {
+        await useApi(`/jobs/${activeTask.value.id}/resume`, { method: "POST" });
+        toast.success("已恢复封面处理");
+        if (selectedLibraryId.value) {
+            await fetchCoverConfig(selectedLibraryId.value);
+            startPolling(selectedLibraryId.value);
+        }
+    } catch {
+        toast.error("恢复失败");
+    }
+};
+
+const cancelJob = async () => {
+    if (!activeTask.value) return;
+    try {
+        await useApi(`/jobs/${activeTask.value.id}/cancel`, { method: "POST" });
+        toast.warning("已请求取消封面处理");
+        if (selectedLibraryId.value) await fetchCoverConfig(selectedLibraryId.value);
+    } catch {
+        toast.error("取消失败");
+    }
+};
+
+const savedCoverQualities = ref<string[]>(["LOW", "MEDIUM"]);
+const selectedCoverQualities = ref<string[]>(["LOW", "MEDIUM"]);
+const isLoadingCoverConfig = ref(false);
+const isSavingCoverConfig = ref(false);
+
+const isCoverConfigChanged = computed(() => {
+    const s1 = [...savedCoverQualities.value].sort().join(",");
+    const s2 = [...selectedCoverQualities.value].sort().join(",");
+    return s1 !== s2;
+});
+
+const fetchCoverConfig = async (targetLibId?: string) => {
+    const libId = targetLibId || selectedLibraryId.value || libraryStore.activeLibraryId;
+    if (!libId) return;
+
+    isLoadingCoverConfig.value = true;
+    try {
+        const [configRes, activeJobRes] = await Promise.all([
+            useApi<
+                ApiResponse<{
+                    qualities: string[];
+                    config_version: number;
+                }>
+            >(`/library/${libId}/cover-config`),
+            useApi<
+                ApiResponse<{
+                    reconcile_status: string;
+                    active_task: ActiveTask | null;
+                }>
+            >(`/library/${libId}/cover-jobs/active`),
+        ]);
+
+        if (configRes && configRes.data) {
+            if (Array.isArray(configRes.data.qualities) && configRes.data.qualities.length > 0) {
+                if (!isCoverConfigChanged.value) {
+                    selectedCoverQualities.value = [...configRes.data.qualities];
+                }
+                savedCoverQualities.value = [...configRes.data.qualities];
+            } else {
+                if (!isCoverConfigChanged.value) {
+                    selectedCoverQualities.value = ["LOW", "MEDIUM"];
+                }
+                savedCoverQualities.value = ["LOW", "MEDIUM"];
+            }
+        }
+
+        if (activeJobRes && activeJobRes.data) {
+            reconcileStatus.value = activeJobRes.data.reconcile_status || "IDLE";
+            activeTask.value = activeJobRes.data.active_task;
+
+            if (
+                activeJobRes.data.reconcile_status === "IN_PROGRESS" ||
+                (activeJobRes.data.active_task && ["DISCOVERING", "RUNNING"].includes(activeJobRes.data.active_task.status))
+            ) {
+                if (!pollTimer) {
+                    startPolling(libId);
+                }
+            } else {
+                stopPolling();
+            }
+        }
+    } catch (e) {
+        console.error("Failed to fetch cover config or active job:", e);
+    } finally {
+        isLoadingCoverConfig.value = false;
+    }
+};
+
+const handleQualityToggle = (quality: string) => {
+    const current = [...selectedCoverQualities.value];
+    if (current.includes(quality)) {
+        if (current.length <= 1) {
+            toast.warning(t("settings.general.cover_qualities_min_err"));
+            return;
+        }
+        selectedCoverQualities.value = current.filter((q) => q !== quality);
+    } else {
+        selectedCoverQualities.value = [...current, quality];
+    }
+};
+
+const saveCoverConfig = async () => {
+    const libId = selectedLibraryId.value || libraryStore.activeLibraryId;
+    if (!libId) return;
+
+    isSavingCoverConfig.value = true;
+    try {
+        const res = await useApi<
+            ApiResponse<{
+                qualities: string[];
+                is_changed: boolean;
+                active_task: ActiveTask | null;
+            }>
+        >(`/library/${libId}/cover-config`, {
+            method: "PUT",
+            body: { qualities: selectedCoverQualities.value },
+        });
+
+        if (res && res.success) {
+            savedCoverQualities.value = [...selectedCoverQualities.value];
+            if (res.data?.active_task) {
+                activeTask.value = res.data.active_task;
+                toast.success("清晰度配置已更新，已自动启动全库封面后台更新");
+            } else {
+                toast.success("封面清晰度配置已保存");
+            }
+            await fetchCoverConfig(libId);
+            startPolling(libId);
+        }
+    } catch (e: any) {
+        toast.error("更新封面质量档位配置失败");
+        await fetchCoverConfig(libId);
+    } finally {
+        isSavingCoverConfig.value = false;
+    }
+};
+
 watch(
     () => selectedLibraryId.value,
     (newId) => {
         if (newId) {
             fetchAiConfig();
+            fetchCoverConfig(newId);
         }
     },
 );
@@ -423,40 +630,6 @@ watch(
                                             </SelectContent>
                                         </Select>
                                     </div>
-                                </CardContent>
-                            </Card>
-
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle>{{ $t("settings.general.other_title") }}</CardTitle>
-                                    <CardDescription>
-                                        {{ $t("settings.general.other_desc") }}
-                                    </CardDescription>
-                                </CardHeader>
-                                <CardContent class="grid gap-4">
-                                    <div class="flex flex-col gap-1.5">
-                                        <h4 class="text-sm font-semibold text-gray-900">
-                                            {{ $t("settings.general.video_cover_recovery") }}
-                                        </h4>
-                                        <p class="text-xs text-muted-foreground">
-                                            {{ $t("settings.general.video_cover_recovery_desc") }}
-                                        </p>
-                                    </div>
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        class="w-full mt-2"
-                                        :disabled="isRecovering"
-                                        @click="triggerCoverRecovery"
-                                    >
-                                        <Loader2 v-if="isRecovering" class="w-4 h-4 mr-2 animate-spin" />
-                                        <Check v-else class="w-4 h-4 mr-2" />
-                                        {{
-                                            isRecovering
-                                                ? $t("settings.general.video_cover_recovery_loading")
-                                                : $t("settings.general.video_cover_recovery_btn")
-                                        }}
-                                    </Button>
                                 </CardContent>
                             </Card>
                         </div>
@@ -759,7 +932,257 @@ watch(
                                     </div>
 
                                     <template v-else-if="selectedLibraryId">
-                                        <div class="grid gap-2">
+                                        <!-- Cover Photo Quality Tiers Section -->
+                                        <div class="space-y-3 pt-2">
+                                            <div class="flex items-center justify-between">
+                                                <div class="space-y-0.5">
+                                                    <Label class="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                                                        <Sparkles class="w-4 h-4 text-amber-500 shrink-0" />
+                                                        {{ $t("settings.general.cover_qualities_title") }}
+                                                    </Label>
+                                                    <p class="text-xs text-muted-foreground">
+                                                        {{ $t("settings.general.cover_qualities_desc") }}
+                                                    </p>
+                                                </div>
+                                                <Button
+                                                    v-if="isCoverConfigChanged"
+                                                    type="button"
+                                                    size="sm"
+                                                    class="h-8 text-xs font-semibold gap-1.5 shadow-sm transition-all bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                                                    :disabled="isSavingCoverConfig"
+                                                    @click="saveCoverConfig"
+                                                >
+                                                    <Loader2 v-if="isSavingCoverConfig" class="w-3.5 h-3.5 animate-spin" />
+                                                    <Save v-else class="w-3.5 h-3.5" />
+                                                    保存配置
+                                                </Button>
+                                            </div>
+
+                                            <div class="grid grid-cols-3 gap-3">
+                                                <div
+                                                    v-for="item in [
+                                                        {
+                                                            key: 'LOW',
+                                                            label: 'LOW',
+                                                            res: '360p',
+                                                            desc: '网格列表与极速预览',
+                                                            badge: '推荐',
+                                                        },
+                                                        {
+                                                            key: 'MEDIUM',
+                                                            label: 'MEDIUM',
+                                                            res: '720p',
+                                                            desc: '标准屏与详情弹窗展示',
+                                                            badge: '推荐',
+                                                        },
+                                                        {
+                                                            key: 'HIGH',
+                                                            label: 'HIGH',
+                                                            res: '1440p',
+                                                            desc: '4K 高分屏与大屏展示',
+                                                            badge: '高精',
+                                                        },
+                                                    ]"
+                                                    :key="item.key"
+                                                    class="relative flex flex-col justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none group"
+                                                    :class="
+                                                        selectedCoverQualities.includes(item.key)
+                                                            ? 'border-zinc-900 bg-white ring-1 ring-zinc-900 shadow-sm dark:border-zinc-100 dark:bg-zinc-850 dark:ring-zinc-100'
+                                                            : 'border-zinc-200/80 bg-zinc-50/50 hover:bg-zinc-100/70 hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/50 dark:hover:bg-zinc-800'
+                                                    "
+                                                    @click="handleQualityToggle(item.key)"
+                                                >
+                                                    <div>
+                                                        <div class="flex items-center justify-between mb-1.5">
+                                                            <span class="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                                                                {{ item.label }}
+                                                            </span>
+                                                            <span
+                                                                class="text-[10px] font-mono px-1.5 py-0.5 rounded font-semibold transition-colors"
+                                                                :class="
+                                                                    selectedCoverQualities.includes(item.key)
+                                                                        ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+                                                                        : 'bg-zinc-200/70 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+                                                                "
+                                                            >
+                                                                {{ item.res }}
+                                                            </span>
+                                                        </div>
+                                                        <p class="text-[11px] leading-snug mb-3 text-muted-foreground">
+                                                            {{ item.desc }}
+                                                        </p>
+                                                    </div>
+
+                                                    <div
+                                                        class="flex items-center justify-between pt-2 border-t border-zinc-200/60 dark:border-zinc-800"
+                                                    >
+                                                        <span class="text-[10px] font-medium text-zinc-500">
+                                                            {{ item.badge }}
+                                                        </span>
+                                                        <div
+                                                            class="w-4 h-4 rounded-full border flex items-center justify-center transition-colors"
+                                                            :class="
+                                                                selectedCoverQualities.includes(item.key)
+                                                                    ? 'bg-zinc-900 border-zinc-900 text-white dark:bg-zinc-100 dark:border-zinc-100 dark:text-zinc-900'
+                                                                    : 'border-zinc-300 bg-white dark:border-zinc-700 dark:bg-zinc-900'
+                                                            "
+                                                        >
+                                                            <Check
+                                                                v-if="selectedCoverQualities.includes(item.key)"
+                                                                class="w-2.5 h-2.5 stroke-[3]"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Modified Notice Prompt -->
+                                            <div
+                                                v-if="isCoverConfigChanged"
+                                                class="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-2.5 rounded-lg border border-amber-200/80 dark:border-amber-900/50"
+                                            >
+                                                <Info class="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                                                <span>已检测到清晰度改动，保存后系统将自动重新扫描全库并更新封面。</span>
+                                            </div>
+
+                                            <!-- Reconcile Action & Live Progress Card -->
+                                            <div class="mt-4 pt-4 border-t border-zinc-200/80 dark:border-zinc-800 space-y-3">
+                                                <div class="flex items-center justify-between gap-3">
+                                                    <div class="space-y-0.5">
+                                                        <h5 class="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                                                            {{ $t("settings.general.video_cover_recovery") }}
+                                                        </h5>
+                                                        <p class="text-[11px] text-muted-foreground leading-tight">
+                                                            {{ $t("settings.general.video_cover_recovery_desc") }}
+                                                        </p>
+                                                    </div>
+
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        size="sm"
+                                                        class="shrink-0 text-xs gap-1.5 h-8 font-medium border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                                        :disabled="
+                                                            isRecovering ||
+                                                            (activeTask &&
+                                                                (activeTask.status === 'DISCOVERING' || activeTask.status === 'RUNNING'))
+                                                        "
+                                                        @click="triggerCoverRecovery"
+                                                    >
+                                                        <Loader2
+                                                            v-if="
+                                                                isRecovering ||
+                                                                (activeTask &&
+                                                                    (activeTask.status === 'DISCOVERING' ||
+                                                                        activeTask.status === 'RUNNING'))
+                                                            "
+                                                            class="w-3.5 h-3.5 animate-spin text-zinc-600 dark:text-zinc-400"
+                                                        />
+                                                        <RefreshCw v-else class="w-3.5 h-3.5 text-zinc-600 dark:text-zinc-400" />
+                                                        {{
+                                                            isRecovering ||
+                                                            (activeTask &&
+                                                                (activeTask.status === "DISCOVERING" || activeTask.status === "RUNNING"))
+                                                                ? $t("settings.general.video_cover_recovery_loading")
+                                                                : $t("settings.general.video_cover_recovery_btn")
+                                                        }}
+                                                    </Button>
+                                                </div>
+
+                                                <!-- Live Progress Bar Box when DISCOVERING, RUNNING, or PAUSED -->
+                                                <div
+                                                    v-if="activeTask && ['DISCOVERING', 'RUNNING', 'PAUSED'].includes(activeTask.status)"
+                                                    class="p-3 rounded-xl bg-zinc-100/80 dark:bg-zinc-800/60 border border-zinc-200/80 dark:border-zinc-700/60 space-y-2.5"
+                                                >
+                                                    <div class="flex items-center justify-between text-xs">
+                                                        <span
+                                                            class="font-semibold text-zinc-800 dark:text-zinc-200 flex items-center gap-1.5"
+                                                        >
+                                                            <Loader2
+                                                                v-if="
+                                                                    activeTask.status === 'DISCOVERING' || activeTask.status === 'RUNNING'
+                                                                "
+                                                                class="w-3.5 h-3.5 animate-spin text-zinc-600 dark:text-zinc-400 shrink-0"
+                                                            />
+                                                            {{
+                                                                activeTask.status === "DISCOVERING"
+                                                                    ? "正在检索全库媒体..."
+                                                                    : activeTask.status === "PAUSED"
+                                                                      ? "已暂停生成封面"
+                                                                      : "正在后台并发生成封面..."
+                                                            }}
+                                                        </span>
+                                                        <div class="flex items-center gap-2">
+                                                            <span class="font-mono text-[11px] font-bold text-zinc-700 dark:text-zinc-300">
+                                                                <template
+                                                                    v-if="!activeTask.discovery_complete && activeTask.total_units === 0"
+                                                                >
+                                                                    <span class="font-normal text-muted-foreground">正在检索单元...</span>
+                                                                </template>
+                                                                <template v-else>
+                                                                    {{ activeTaskProcessedUnits }} / {{ activeTask.total_units }} ({{
+                                                                        activeTaskPercentage
+                                                                    }}%)
+                                                                    <span
+                                                                        v-if="!activeTask.discovery_complete"
+                                                                        class="text-[10px] font-normal text-muted-foreground ml-1"
+                                                                    >
+                                                                        (检索中...)
+                                                                    </span>
+                                                                </template>
+                                                            </span>
+                                                            <Button
+                                                                v-if="
+                                                                    activeTask.status === 'RUNNING' || activeTask.status === 'DISCOVERING'
+                                                                "
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="xs"
+                                                                class="h-6 px-2 text-[10px]"
+                                                                @click="pauseJob"
+                                                            >
+                                                                暂停
+                                                            </Button>
+                                                            <Button
+                                                                v-if="activeTask.status === 'PAUSED'"
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="xs"
+                                                                class="h-6 px-2 text-[10px]"
+                                                                @click="resumeJob"
+                                                            >
+                                                                继续
+                                                            </Button>
+                                                            <Button
+                                                                v-if="!['COMPLETED', 'CANCELLED', 'FAILED'].includes(activeTask.status)"
+                                                                type="button"
+                                                                variant="outline"
+                                                                size="xs"
+                                                                class="h-6 px-2 text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                                @click="cancelJob"
+                                                            >
+                                                                取消
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+
+                                                    <!-- Progress Bar Track -->
+                                                    <div class="w-full bg-zinc-200 dark:bg-zinc-700/80 h-2 rounded-full overflow-hidden">
+                                                        <div
+                                                            v-if="!activeTask.discovery_complete && activeTask.total_units === 0"
+                                                            class="bg-zinc-900/40 dark:bg-zinc-100/40 h-full rounded-full w-full animate-pulse"
+                                                        />
+                                                        <div
+                                                            v-else
+                                                            class="bg-zinc-900 dark:bg-zinc-100 h-full rounded-full transition-all duration-300"
+                                                            :style="{ width: `${activeTaskPercentage}%` }"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="grid gap-2 border-t pt-4">
                                             <Label>{{ $t("settings.ai_config.provider") }}</Label>
                                             <Select v-model="aiConfig.ai_provider">
                                                 <SelectTrigger>

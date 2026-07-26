@@ -363,6 +363,10 @@ const currentPublishedTime = computed(() => {
 });
 
 const isVideo = computed(() => currentMediaItem.value?.type?.toLowerCase() === "video");
+const isCoverable = computed(() => {
+    const t = currentMediaItem.value?.type?.toLowerCase() || "";
+    return ["image", "live_photo", "video"].includes(t);
+});
 
 const formatDate = (dateStr: string) => {
     if (!dateStr) return "Unknown";
@@ -980,7 +984,7 @@ const handleAddTag = async (tagToAdd: string) => {
                             <hr class="border-zinc-900" />
 
                             <!-- Actions (Regenerate Cover) -->
-                            <div v-if="isVideo" class="space-y-3">
+                            <div v-if="isCoverable" class="space-y-3">
                                 <label class="text-[10px] uppercase text-zinc-500 font-bold tracking-wider flex items-center gap-1.5">
                                     <Info class="w-3.5 h-3.5" />
                                     {{ $t("media.actions.regenerate_cover", "Regenerate Cover") }}
@@ -1005,7 +1009,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                 </button>
                             </div>
 
-                            <hr v-if="isVideo" class="border-zinc-900" />
+                            <hr v-if="isCoverable" class="border-zinc-900" />
 
                             <!-- Provenance / Part of Post (The Wormhole) -->
                             <div v-if="postDetail || isLoadingPost" class="space-y-3">

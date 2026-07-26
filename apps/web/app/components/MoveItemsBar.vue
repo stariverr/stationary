@@ -153,62 +153,106 @@ const handleBatchQueueAi = async () => {
     }
 };
 
-type VideoItemLike = MappedMediaItem | PostMedia;
+type MediaItemLike = MappedMediaItem | PostMedia;
 
-const selectedVideos = computed<VideoItemLike[]>(() => {
-    const directVideos = mediaStore.medias.filter(
-        (m: MappedMediaItem) => props.mediaIds.includes(String(m.id)) && m.type?.toLowerCase() === "video",
-    );
+const isCoverableType = (type?: string | null) => {
+    if (!type) return false;
+    const lower = type.toLowerCase();
+    return lower === "image" || lower === "live_photo" || lower === "video";
+};
 
-    const postVideos: PostMedia[] = [];
+const selectedCoverableMedia = computed<MediaItemLike[]>(() => {
+    const directMedia = mediaStore.medias.filter((m: MappedMediaItem) => props.mediaIds.includes(String(m.id)) && isCoverableType(m.type));
+
+    const postMedia: PostMedia[] = [];
     if (props.postIds && props.postIds.length > 0) {
         const selectedPosts = postStore.posts.filter((p: Post) => props.postIds.includes(String(p.id)));
         for (const post of selectedPosts) {
             if (post.media) {
                 for (const media of post.media) {
-                    if (media.type?.toLowerCase() === "video" || media.type === "VIDEO") {
-                        postVideos.push(media);
+                    if (isCoverableType(media.type)) {
+                        postMedia.push(media);
                     }
                 }
             }
         }
     }
 
-    const combined: VideoItemLike[] = [...directVideos, ...postVideos];
-    const uniqueMap = new Map<string, VideoItemLike>();
+    const combined: MediaItemLike[] = [...directMedia, ...postMedia];
+    const uniqueMap = new Map<string, MediaItemLike>();
     for (const v of combined) {
         uniqueMap.set(String(v.id), v);
     }
     return Array.from(uniqueMap.values());
 });
 
-const hasSelectedVideos = computed(() => selectedVideos.value.length > 0);
+const hasSelectedVideos = computed(() => selectedCoverableMedia.value.length > 0);
 
 const handleBatchRegenerate = async () => {
-    const videoIds = selectedVideos.value.map((v: VideoItemLike) => v.id);
-    if (videoIds.length === 0) {
-        toast.warning(t("media.cover.select_video_required", "Please select at least one video."));
+    const mediaIds = selectedCoverableMedia.value.map((v: MediaItemLike) => v.id);
+    if (mediaIds.length === 0) {
+        toast.warning(t("media.cover.select_coverable_required", "Please select at least one media item."));
+        return;
+    }
+
+    const libIds = Array.from(
+        new Set(
+            selectedCoverableMedia.value
+                .map((v: any) => v.library_id)
+                .filter((id): id is string => typeof id === "string" && id.length > 0),
+        ),
+    );
+
+    if (libIds.length > 1) {
+        toast.warning(
+            t(
+                "media.cover.multiple_libraries_error",
+                "Selected items belong to different libraries. Please select items from a single library.",
+            ),
+        );
+        return;
+    }
+
+    const currentLibId = libraryStore.activeLibraryId || libIds[0];
+    if (!currentLibId) {
+        toast.warning(t("media.cover.library_required", "Unable to determine library for selected items."));
         return;
     }
 
     try {
         isRegenerating.value = true;
-        const response = await useApi<{ success: boolean; data: { queued: number; skipped: number }; message?: string }>(
-            "/media/regenerate-covers",
-            {
-                method: "POST",
-                body: {
-                    media_ids: videoIds,
-                },
-            },
-        );
+        const payloadBody: Record<string, any> = {
+            library_id: currentLibId,
+        };
+        if (props.mediaIds && props.mediaIds.length > 0) {
+            payloadBody.media_ids = props.mediaIds;
+        }
+        if (props.postIds && props.postIds.length > 0) {
+            payloadBody.post_ids = props.postIds;
+        }
+
+        const response = await useApi<{
+            success: boolean;
+            data: {
+                queued_media_count?: number;
+                job_id?: string;
+                queuedCount?: number;
+                skippedCount?: number;
+                queued?: number;
+                skipped?: number;
+            };
+            message?: string;
+        }>("/media/regenerate-covers", {
+            method: "POST",
+            body: payloadBody,
+        });
         if (response && response.success && response.data) {
-            const { queued, skipped } = response.data;
+            const queued = response.data.queued_media_count ?? response.data.queuedCount ?? response.data.queued ?? mediaIds.length;
+            const skipped = response.data.skippedCount ?? response.data.skipped ?? 0;
             toast.success(
                 t("media.cover.batch_queued", {
                     queued,
                     skipped,
-                    default: "Queued {queued} cover regeneration tasks. Skipped {skipped}.",
                 }),
             );
             emit("cancel");

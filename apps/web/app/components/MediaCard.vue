@@ -320,7 +320,7 @@ const handleQueueAi = async () => {
         </ContextMenuTrigger>
         <ContextMenuContent class="w-52">
             <ContextMenuItem
-                v-if="media.type?.toLowerCase() === 'video'"
+                v-if="['image', 'live_photo', 'video'].includes(media.type?.toLowerCase() || '')"
                 :disabled="isRegenerating"
                 class="flex items-center gap-2"
                 @click.stop="handleRegenerateCover"

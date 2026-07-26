@@ -70,7 +70,7 @@ watch(
                 newTrackParams.value.type = "VIDEO";
             }
             if (!newTrackParams.value.quality) {
-                newTrackParams.value.quality = "ORIGINAL";
+                newTrackParams.value.quality = "HIGH";
             }
         }
     },
@@ -299,7 +299,7 @@ const handleUploadTrack = async (
         const params = customParams || {
             type: detectedType,
             purpose: "CONTENT",
-            quality: "ORIGINAL",
+            quality: "HIGH",
             priority: 0,
             variant_key: "",
             is_default: false,
@@ -829,7 +829,6 @@ const handleVideoMouseLeave = (e: Event) => {
                                                             : 'bg-white border-zinc-200 text-zinc-800'
                                                     "
                                                 >
-                                                    <SelectItem value="ORIGINAL">Original</SelectItem>
                                                     <SelectItem value="HIGH">High</SelectItem>
                                                     <SelectItem value="MEDIUM">Medium</SelectItem>
                                                     <SelectItem value="LOW">Low</SelectItem>
@@ -1121,7 +1120,6 @@ const handleVideoMouseLeave = (e: Event) => {
                             class="border text-xs"
                             :class="isDark ? 'bg-zinc-900 border-zinc-800 text-white' : 'bg-white border-zinc-200 text-zinc-800'"
                         >
-                            <SelectItem value="ORIGINAL">{{ $t("media.quality.original", "Original") }}</SelectItem>
                             <SelectItem value="HIGH">{{ $t("media.quality.high", "High") }}</SelectItem>
                             <SelectItem value="MEDIUM">{{ $t("media.quality.medium", "Medium") }}</SelectItem>
                             <SelectItem value="LOW">{{ $t("media.quality.low", "Low") }}</SelectItem>

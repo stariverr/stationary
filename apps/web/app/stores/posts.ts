@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { Temporal } from "@js-temporal/polyfill";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/vue-query";
-import { type Post, type Platform, type ApiPostListItem, type ApiPostDetail } from "@/types/post";
+import { type Post, type Platform, type ApiPostListItem, type ApiPostDetail, TrackQuality } from "@/types/post";
 
 import { useLibraryStore } from "@/stores/library";
 
@@ -233,32 +233,29 @@ export const usePostStore = defineStore("posts", () => {
             const lowCover = coversList.find((c) => c.quality === "LOW")?.url || null;
             const mediumCover = coversList.find((c) => c.quality === "MEDIUM")?.url || null;
             const highCover = coversList.find((c) => c.quality === "HIGH")?.url || null;
-            const originalCover = coversList.find((c) => c.quality === "ORIGINAL")?.url || null;
 
-            const originalVideo = videosList.find((v) => v.quality === "ORIGINAL")?.url || null;
             const fallbackVideo = videosList[0]?.url || null;
 
             const srcsetParts: string[] = [];
             for (const c of coversList) {
                 if (c.url) {
-                    if (c.quality === "LOW") srcsetParts.push(`${c.url} 360w`);
-                    else if (c.quality === "MEDIUM") srcsetParts.push(`${c.url} 720w`);
-                    else if (c.quality === "HIGH") srcsetParts.push(`${c.url} 1440w`);
-                    else if (c.quality === "ORIGINAL") srcsetParts.push(`${c.url} 3840w`);
+                    if (c.quality === TrackQuality.LOW) srcsetParts.push(`${c.url} 360w`);
+                    else if (c.quality === TrackQuality.MEDIUM) srcsetParts.push(`${c.url} 720w`);
+                    else if (c.quality === TrackQuality.HIGH) srcsetParts.push(`${c.url} 1440w`);
                 }
             }
             const srcset = srcsetParts.length > 0 ? srcsetParts.join(", ") : null;
 
             let url: string | null = null;
             if (m.type === "VIDEO") {
-                url = originalVideo || fallbackVideo;
+                url = fallbackVideo;
             } else {
-                url = originalCover || highCover || mediumCover || lowCover;
+                url = highCover || mediumCover || lowCover;
             }
 
-            const thumbnail = lowCover || mediumCover || originalCover;
-            const poster = mediumCover || highCover || lowCover || originalCover;
-            const live_url = m.type === "LIVE_PHOTO" ? originalVideo || fallbackVideo : null;
+            const thumbnail = lowCover || mediumCover || highCover;
+            const poster = mediumCover || highCover || lowCover;
+            const live_url = m.type === "LIVE_PHOTO" ? fallbackVideo : null;
 
             return {
                 ...m,

@@ -35,7 +35,6 @@ export enum TrackPurpose {
 }
 
 export enum TrackQuality {
-    ORIGINAL = "ORIGINAL",
     HIGH = "HIGH",
     MEDIUM = "MEDIUM",
     LOW = "LOW",
@@ -60,6 +59,20 @@ export const TrackSchema = v.object({
 });
 export type Track = v.InferOutput<typeof TrackSchema>;
 
+export const CoverVariantSchema = v.object({
+    track_id: v.string(),
+    url: v.string(),
+    width: v.nullable(v.number()),
+    height: v.nullable(v.number()),
+    status: v.picklist(["READY", "STALE"]),
+});
+
+export const CoverSourceSchema = v.object({
+    track_id: v.string(),
+    url: v.string(),
+    quality: v.enum(TrackQuality),
+});
+
 export const ApiPostMediaSchema = v.object({
     id: v.pipe(v.string(), v.uuid()),
     eid: v.optional(v.string()),
@@ -76,6 +89,8 @@ export const ApiPostMediaSchema = v.object({
     ai_error: v.optional(v.nullable(v.string())),
     url: v.optional(v.nullable(v.string())),
     cover_url: v.optional(v.nullable(v.string())),
+    cover_source: v.optional(v.nullable(CoverSourceSchema)),
+    cover_variants: v.optional(v.record(v.string(), CoverVariantSchema)),
     tracks: v.array(TrackSchema),
 });
 export type ApiPostMedia = v.InferOutput<typeof ApiPostMediaSchema>;
@@ -102,6 +117,8 @@ export const ApiPostListItemMediaSchema = v.object({
     last_error: v.optional(v.nullable(v.string())),
     ai_status: v.optional(v.nullable(v.string())),
     ai_error: v.optional(v.nullable(v.string())),
+    cover_source: v.optional(v.nullable(CoverSourceSchema)),
+    cover_variants: v.optional(v.record(v.string(), CoverVariantSchema)),
     covers: v.nullish(v.array(PreviewItemSchema)),
     videos: v.nullish(v.array(PreviewItemSchema)),
     audios: v.nullish(v.array(PreviewItemSchema)),
