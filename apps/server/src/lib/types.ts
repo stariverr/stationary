@@ -2,7 +2,6 @@ export enum Quality {
     LOW = "LOW",
     MEDIUM = "MEDIUM",
     HIGH = "HIGH",
-    ORIGINAL = "ORIGINAL",
 }
 
 export enum Codec {
