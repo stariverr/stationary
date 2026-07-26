@@ -1,8 +1,6 @@
 import { Temporal } from "@js-temporal/polyfill";
 import { z } from "zod";
 
-export const nowDbTimestamp = () => Temporal.Now.instant();
-
 export const toIsoTimestamp = (value: Temporal.Instant | string | null | undefined) => {
     if (!value) return null;
     if (value instanceof Temporal.Instant) {

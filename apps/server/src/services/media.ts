@@ -1,7 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db, Transaction } from "@/global/db";
 import { Media, MediaTag } from "@/db/schema";
-import { nowDbTimestamp } from "@/lib/utils/time";
+
 import { Temporal } from "@js-temporal/polyfill";
 
 export async function replaceMediaTagsTx(tx: Transaction, mediaId: string, libraryId: string, tagIds: string[]) {
@@ -35,7 +35,7 @@ export const MediaService = {
         },
     ) {
         const updateFields: any = {
-            update_time: nowDbTimestamp(),
+            update_time: Temporal.Now.instant(),
         };
         if (fields.title !== undefined) updateFields.title = fields.title;
         if (fields.description !== undefined) updateFields.description = fields.description;

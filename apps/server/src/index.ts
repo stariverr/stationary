@@ -10,6 +10,12 @@ import search from "@/api/search";
 import tag from "@/api/tag";
 import authRouter from "@/api/auth";
 import importRouter from "@/api/import";
+import { jobsApp } from "@/api/jobs";
+import { JobSweeper } from "@/services/job_sweeper";
+import { initJobHandlers } from "@/services/handlers";
+
+initJobHandlers();
+JobSweeper.start(30000);
 
 const app = new Hono();
 
@@ -22,7 +28,7 @@ app.use(
     cors({
         origin: env.TRUSTED_ORIGINS,
         allowHeaders: ["Content-Type", "Authorization"],
-        allowMethods: ["POST", "GET", "OPTIONS"],
+        allowMethods: ["POST", "GET", "PUT", "OPTIONS"],
         exposeHeaders: ["Content-Length"],
         maxAge: 600,
         credentials: true,
@@ -54,6 +60,7 @@ app.route("/api/user", user);
 app.route("/api/library", library);
 app.route("/api/search", search);
 app.route("/api/tag", tag);
+app.route("/api/jobs", jobsApp);
 
 const port = 9400;
 console.log(`Server is running on port ${port}`);

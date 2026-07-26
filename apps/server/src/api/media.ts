@@ -22,9 +22,12 @@ import {
     DraftFile,
     DraftFileStatus,
     MediaType,
+    AsyncTaskType,
 } from "@/db/schema";
 import { s3 } from "@/global/s3";
 import { and, eq, ilike, SQL, count, asc, desc, or, isNull, inArray } from "drizzle-orm";
+
+import { Quality } from "@/lib/types";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { RecycleService } from "@/services/recycle";
 import { DeleteService } from "@/services/delete";
@@ -32,10 +35,9 @@ import { MediaService } from "@/services/media";
 import { TrackService } from "@/services/track";
 import { v7 as uuidv7 } from "uuid";
 import { env } from "@/global/env";
-import { VideoCoverService } from "@/services/video_cover";
+import { TaskManager } from "@/services/job_service";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { normalizeVariantKey } from "@/lib/utils/track";
-import { Quality } from "@/lib/types";
 import { consumeDraftFile, DraftFileUnavailableError } from "@/services/draft-file";
 import { FormTimestampSchema, toIsoTimestamp } from "@/lib/utils/time";
 import {
@@ -46,7 +48,7 @@ import {
 } from "@/lib/validation/media-composition";
 import { getAllowedTrackTypesForFile, getFileExtension, getMimeTypeByExt } from "@/lib/utils/file";
 import { validate } from "@/lib/validation/validator";
-import { getMediaCoversMap, formatListPreviews, getMediaTracks, formatMediaDetail } from "@/lib/utils/media_mapper";
+import { getMediaCoversMap, getMediaTracks, formatMediaDetail } from "@/lib/utils/media_mapper";
 
 function escapeXml(unsafe: string): string {
     return unsafe.replace(/[<>&'"]/g, (c) => {
@@ -178,9 +180,7 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
 
     const medias = rawMedia.map((m) => {
         const covers = coversByMediaId.get(m.id) || [];
-        const previews = formatListPreviews(covers);
         const aiMeta = aiMetadataMap.get(m.id);
-        const coverUrl = covers[0]?.url || null;
 
         return {
             id: m.id,
@@ -202,9 +202,7 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
             height: null,
             tracks: [],
             media_count: m.post_media_count || 1,
-            covers: previews.covers,
-            videos: previews.videos,
-            audios: previews.audios,
+            covers: covers,
         };
     });
 
@@ -217,7 +215,7 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
     return c.json(
         success(Code.SUCCESS, {
             list: medias,
-            total: totalResult[0].total,
+            total: totalResult[0]?.total ?? 0,
         }),
     );
 });
@@ -319,149 +317,158 @@ router.post("/delete/:id", requireAuth, async (c) => {
 
     return c.json(success(Code.SUCCESS, result));
 });
+export const SingleRegenerateCoverParamSchema = z.object({
+    id: z.uuid("Invalid media ID format"),
+});
 
-router.post("/:id/regenerate-cover", requireAuth, async (c) => {
-    const id = c.req.param("id");
-    if (!id) {
-        return c.json(error(Code.INVALID_PARAMETER, "media id is required"), 400);
+router.post("/:id/regenerate-cover", requireAuth, validate("param", SingleRegenerateCoverParamSchema), async (c) => {
+    const user = c.get("user");
+    if (!user) {
+        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
     }
+    const { id } = c.req.valid("param");
 
     const access = await checkMediaAccess(c, id);
-    if (access.errorResponse) return access.errorResponse;
-    const media = access.media!;
+    if (!access.media || access.errorResponse) return access.errorResponse;
+    const media = access.media;
 
-    if (media.type !== "VIDEO") {
-        return c.json(error(Code.INVALID_PARAMETER, "Media is not a video"), 400);
+    if (!media.library_id) {
+        return c.json(error(Code.INVALID_PARAMETER, "Media has no associated library"), 400);
     }
 
-    let body: { replace_external_cover?: boolean } = {};
-    try {
-        body = await c.req.json();
-    } catch {
-        // Safe fallback for empty body
+    if (media.type !== MediaType.IMAGE && media.type !== MediaType.LIVE_PHOTO && media.type !== MediaType.VIDEO) {
+        return c.json(error(Code.INVALID_PARAMETER, "Media type does not support cover photo generation"), 400);
     }
 
     const url = new URL(c.req.url);
-    const origin =
-        env.UPSTASH_WORKFLOW_URL ||
-        (c.req.header("x-forwarded-proto") ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}` : url.origin);
+    const requestOrigin = c.req.header("x-forwarded-proto") ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}` : url.origin;
+    const origin = env.UPSTASH_WORKFLOW_URL || requestOrigin;
 
-    const res = await VideoCoverService.requestForMedia(id, {
+    const libList = await db
+        .select()
+        .from(Library)
+        .where(and(eq(Library.id, media.library_id), eq(Library.delete_status, DeleteStatus.ACTIVE)))
+        .limit(1);
+    const library = libList[0];
+    if (!library || library.owner_id !== user.id) {
+        return c.json(error(Code.UNAUTHORIZED, "Library not found or access denied"), 403);
+    }
+
+    const qualities = (library.cover_qualities as Quality[]) || [Quality.LOW, Quality.MEDIUM];
+    const configVersion = library.cover_config_version || 1;
+
+    const job = await TaskManager.createTask({
+        type: AsyncTaskType.COVER_BATCH,
+        libraryId: media.library_id,
+        ownerId: user.id,
+        inputSnapshot: {
+            source_type: "MANUAL",
+            media_ids: [media.id],
+            qualities,
+        },
+        configVersion,
         originUrl: origin,
-        force: true,
-        replaceExternalCover: body.replace_external_cover ?? false,
     });
 
-    return c.json(success(Code.SUCCESS, res));
+    return c.json(
+        success(Code.SUCCESS, {
+            mediaId: media.id,
+            jobId: job.id,
+            status: job.status,
+        }),
+    );
 });
 
-router.post("/regenerate-covers", requireAuth, async (c) => {
+export const BatchRegenerateCoversSchema = z
+    .object({
+        library_id: z.uuid("Invalid library_id format"),
+        media_ids: z.array(z.uuid("Invalid media_id format")).optional(),
+        post_ids: z.array(z.uuid("Invalid post_id format")).optional(),
+        replace_external_cover: z.boolean().optional(),
+    })
+    .refine((data) => (data.media_ids?.length || 0) + (data.post_ids?.length || 0) > 0, {
+        message: "Either media_ids or post_ids must be provided and cannot be empty",
+        path: ["media_ids"],
+    });
+
+router.post("/regenerate-covers", requireAuth, validate("json", BatchRegenerateCoversSchema), async (c) => {
     const user = c.get("user");
     if (!user) {
         return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
     }
 
-    let body: { media_ids?: string[]; replace_external_cover?: boolean } = {};
-    try {
-        body = await c.req.json();
-    } catch {
-        return c.json(error(Code.INVALID_PARAMETER, "Invalid request body"), 400);
+    const { library_id, media_ids, post_ids } = c.req.valid("json");
+    const uniqueMediaIds = Array.from(new Set(media_ids || []));
+    const uniquePostIds = Array.from(new Set(post_ids || []));
+
+    if (uniqueMediaIds.length + uniquePostIds.length > 100) {
+        return c.json(error(Code.INVALID_PARAMETER, "Cannot process more than 100 media or post items at once"), 400);
     }
 
-    const mediaIds = Array.from(new Set(body.media_ids || []));
-    if (mediaIds.length === 0) {
-        return c.json(error(Code.INVALID_PARAMETER, "media_ids is required and cannot be empty"), 400);
+    // Validate target library
+    const libList = await db
+        .select()
+        .from(Library)
+        .where(and(eq(Library.id, library_id), eq(Library.delete_status, DeleteStatus.ACTIVE)))
+        .limit(1);
+    const library = libList[0];
+    if (!library || library.owner_id !== user.id) {
+        return c.json(error(Code.UNAUTHORIZED, "Library not found or access denied"), 403);
     }
 
-    if (mediaIds.length > 100) {
-        return c.json(error(Code.INVALID_PARAMETER, "Cannot process more than 100 media items at once"), 400);
+    const filters: SQL[] = [];
+    if (uniqueMediaIds.length > 0) {
+        filters.push(inArray(Media.id, uniqueMediaIds));
+    }
+    if (uniquePostIds.length > 0) {
+        filters.push(inArray(Media.post_id, uniquePostIds));
     }
 
     const mediaList = await db
         .select()
         .from(Media)
-        .where(and(inArray(Media.id, mediaIds), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)));
+        .where(
+            and(eq(Media.library_id, library_id), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time), or(...filters)),
+        );
 
     if (mediaList.length === 0) {
-        return c.json(error(Code.NOT_FOUND, "No matching media items found"), 404);
+        return c.json(error(Code.NOT_FOUND, "No matching media items found in the specified library"), 404);
     }
 
-    const uniqueLibraryIds = Array.from(new Set(mediaList.map((m) => m.library_id))).filter((libId): libId is string => !!libId);
-    const libraries = await db
-        .select()
-        .from(Library)
-        .where(and(inArray(Library.id, uniqueLibraryIds), eq(Library.delete_status, DeleteStatus.ACTIVE)));
-
-    const isAuthorized = libraries.every((lib) => lib.owner_id === user.id) && libraries.length === uniqueLibraryIds.length;
-    if (!isAuthorized) {
-        return c.json(error(Code.UNAUTHORIZED, "You do not have access to some of the selected libraries"), 403);
-    }
-
-    const url = new URL(c.req.url);
-    const origin =
-        env.UPSTASH_WORKFLOW_URL ||
-        (c.req.header("x-forwarded-proto") ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}` : url.origin);
-
-    const asyncResults = await Promise.allSettled(
-        mediaList.map(async (media) => {
-            if (media.type !== "VIDEO") {
-                return {
-                    mediaId: media.id,
-                    status: "skipped" as const,
-                    reason: "media_not_video",
-                };
-            }
-            const res = await VideoCoverService.requestForMedia(media.id, {
-                originUrl: origin,
-                force: true,
-                replaceExternalCover: body.replace_external_cover ?? false,
-            });
-            return {
-                mediaId: media.id,
-                status: res.status,
-                reason: res.status === "skipped" ? res.reason : undefined,
-            };
-        }),
-    );
-
-    let queued = 0;
-    let skipped = 0;
-    let alreadyPending = 0;
-    let failed = 0;
-    const results: Array<{
-        mediaId: string;
-        status: "queued" | "skipped" | "already_pending" | "failed";
-        reason?: string;
-        error?: string;
-    }> = [];
-
-    for (let i = 0; i < asyncResults.length; i++) {
-        const item = asyncResults[i];
-        const media = mediaList[i];
-        if (item.status === "fulfilled") {
-            const val = item.value;
-            if (val.status === "queued") queued++;
-            else if (val.status === "skipped") skipped++;
-            else if (val.status === "already_pending") alreadyPending++;
-            results.push(val);
-        } else {
-            failed++;
-            results.push({
-                mediaId: media.id,
-                status: "failed",
-                error: item.reason?.message || String(item.reason),
-            });
+    // Judge whether all media are found by id
+    if (uniqueMediaIds.length > 0) {
+        const foundMediaIds = new Set(mediaList.map((m) => m.id));
+        const missingExplicitMedia = uniqueMediaIds.some((id) => !foundMediaIds.has(id));
+        if (missingExplicitMedia) {
+            return c.json(error(Code.INVALID_PARAMETER, "All specified media items must belong to the specified library"), 400);
         }
     }
 
+    const url = new URL(c.req.url);
+    const requestOrigin = c.req.header("x-forwarded-proto") ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}` : url.origin;
+    const origin = env.UPSTASH_WORKFLOW_URL || requestOrigin;
+
+    const qualities = library.cover_qualities || [Quality.LOW, Quality.MEDIUM];
+    const configVersion = library.cover_config_version || 1;
+
+    const job = await TaskManager.createTask({
+        type: AsyncTaskType.COVER_BATCH,
+        libraryId: library_id,
+        ownerId: user.id,
+        inputSnapshot: {
+            source_type: "MANUAL",
+            media_ids: mediaList.map((m) => m.id),
+            qualities,
+        },
+        configVersion,
+        originUrl: origin,
+    });
+
     return c.json(
         success(Code.SUCCESS, {
-            requested: mediaIds.length,
-            queued,
-            skipped,
-            alreadyPending,
-            failed,
-            results,
+            queued_media_count: mediaList.length,
+            job_id: job.id,
+            status: job.status,
         }),
     );
 });

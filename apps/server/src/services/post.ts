@@ -1,7 +1,7 @@
 import { and, count, eq, isNull, inArray } from "drizzle-orm";
 import { db, Transaction } from "@/global/db";
 import { DeleteStatus, Media, Post, PostTag } from "@/db/schema";
-import { nowDbTimestamp } from "@/lib/utils/time";
+
 import { Temporal } from "@js-temporal/polyfill";
 
 /**
@@ -61,7 +61,7 @@ export const PostService = {
         },
     ) {
         const updateFields: any = {
-            update_time: nowDbTimestamp(),
+            update_time: Temporal.Now.instant(),
         };
         if (fields.title !== undefined) updateFields.title = fields.title;
         if (fields.description !== undefined) updateFields.description = fields.description;
@@ -166,7 +166,7 @@ export const PostService = {
                         .set({
                             post_id: postId,
                             sort_order: maxSortOrder,
-                            update_time: nowDbTimestamp(),
+                            update_time: Temporal.Now.instant(),
                         })
                         .where(eq(Media.id, mediaId));
                     attachedCount++;
@@ -185,7 +185,7 @@ export const PostService = {
                 .update(Post)
                 .set({
                     media_count: totalActiveCount,
-                    update_time: nowDbTimestamp(),
+                    update_time: Temporal.Now.instant(),
                 })
                 .where(eq(Post.id, postId));
 
@@ -241,7 +241,7 @@ export const PostService = {
                     .update(Media)
                     .set({
                         sort_order: i,
-                        update_time: nowDbTimestamp(),
+                        update_time: Temporal.Now.instant(),
                     })
                     .where(eq(Media.id, uniqueMediaIds[i]));
             }
@@ -289,7 +289,7 @@ export const PostService = {
                 .set({
                     post_id: null,
                     sort_order: 0,
-                    update_time: nowDbTimestamp(),
+                    update_time: Temporal.Now.instant(),
                 })
                 .where(eq(Media.id, mediaId));
 
@@ -314,7 +314,7 @@ export const PostService = {
                     .update(Media)
                     .set({
                         sort_order: i,
-                        update_time: nowDbTimestamp(),
+                        update_time: Temporal.Now.instant(),
                     })
                     .where(eq(Media.id, remainingMedias[i].id));
             }
@@ -331,7 +331,7 @@ export const PostService = {
                 .update(Post)
                 .set({
                     media_count: totalActiveCount,
-                    update_time: nowDbTimestamp(),
+                    update_time: Temporal.Now.instant(),
                 })
                 .where(eq(Post.id, postId));
 

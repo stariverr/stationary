@@ -8,8 +8,9 @@ import { DraftFile, DraftFileStatus, File as DbFile, Library, Media, PostSource,
 import { s3 } from "@/global/s3";
 import { and, eq, desc } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
-import { nowDbTimestamp } from "@/lib/utils/time";
+
 import { v7 as uuidv7 } from "uuid";
+import { Temporal } from "@js-temporal/polyfill";
 import { env } from "@/global/env";
 import crypto from "crypto";
 import { buildCdnUrl } from "@/lib/utils/cdn";
@@ -59,7 +60,8 @@ function verifyUploadToken(libraryId: string, path: string, token: string): bool
         if (!expiresAtStr || !signature) return false;
 
         const expiresAt = parseInt(expiresAtStr, 10);
-        if (Date.now() > expiresAt) return false; // Expired
+        const nowMs = Temporal.Now.instant().epochMilliseconds;
+        if (nowMs > expiresAt) return false; // Expired
 
         const data = `${libraryId}:${path}:${expiresAt}`;
         const hmac = crypto.createHmac("sha256", env.AUTH_SECRET);
@@ -110,7 +112,7 @@ router.post(
         });
 
         // Token expires in 1 hour
-        const expiresAt = Date.now() + 3600 * 1000;
+        const expiresAt = Temporal.Now.instant().add({ hours: 1 }).epochMilliseconds;
         const uploadToken = generateUploadToken(library_id, path, expiresAt);
 
         // Pre-create pending draft file and db file records
@@ -243,7 +245,7 @@ router.post(
                 .update(DraftFile)
                 .set({
                     status: DraftFileStatus.DRAFT,
-                    update_time: nowDbTimestamp(),
+                    update_time: Temporal.Now.instant(),
                 })
                 .where(eq(DraftFile.id, draftRow.id))
                 .returning();
@@ -390,7 +392,7 @@ router.post(
 
         try {
             await db.transaction(async (tx) => {
-                const now = nowDbTimestamp();
+                const now = Temporal.Now.instant();
 
                 for (const group of media_drafts) {
                     const mediaId = uuidv7();

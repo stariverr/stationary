@@ -111,3 +111,38 @@ describe("library item movement", () => {
         expect(clean(source)).toContain(clean("inArray(Media.post_id, body.post_ids)"));
     });
 });
+
+describe("cover config and jobs api", () => {
+    test("validates force option in cover jobs body schema", async () => {
+        const libraryApi = await import("../src/api/library");
+
+        const defaultParsed = libraryApi.LibraryCoverJobsBodySchema.parse({
+            type: "MANUAL",
+        });
+        expect(defaultParsed.force).toBe(false);
+
+        const forceParsed = libraryApi.LibraryCoverJobsBodySchema.parse({
+            type: "MANUAL",
+            force: true,
+        });
+        expect(forceParsed.force).toBe(true);
+    });
+
+    test("exposes decoupled cover-config and cover-jobs/active endpoints", async () => {
+        const source = await Bun.file("src/api/library.ts").text();
+        const clean = (str: string) => str.replace(/\s+/g, "");
+
+        expect(clean(source)).toContain(clean('router.get("/:id/cover-config"'));
+        expect(clean(source)).toContain(clean('router.get("/:id/cover-jobs/active"'));
+    });
+
+    test("LibraryCoverConfigBodySchema validates and orders qualities correctly", async () => {
+        const libraryApi = await import("../src/api/library");
+        const { Quality } = await import("../src/lib/types");
+
+        const parsed = libraryApi.LibraryCoverConfigBodySchema.parse({
+            qualities: ["MEDIUM", "LOW"],
+        });
+        expect(parsed.qualities).toEqual([Quality.LOW, Quality.MEDIUM]);
+    });
+});

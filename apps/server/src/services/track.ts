@@ -1,9 +1,10 @@
 import { and, eq, not, inArray } from "drizzle-orm";
 import { db, Transaction } from "@/global/db";
 import { DeleteStatus, File, Track, SyncStatus, Media, Post, TrackType, TrackPurpose } from "@/db/schema";
-import { nowDbTimestamp } from "@/lib/utils/time";
+
 import { generateDeterministicVariantKey } from "@/lib/utils/track";
 import { Quality } from "@/lib/types";
+import { Temporal } from "@js-temporal/polyfill";
 
 export interface FileData {
     path: string;
@@ -49,7 +50,7 @@ export const TrackService = {
         fileDataOrId: FileData | string,
         tx: Transaction,
     ) {
-        const now = nowDbTimestamp();
+        const now = Temporal.Now.instant();
 
         // 1. Resolve or insert physical File record
         let fileRecord: any;
@@ -154,8 +155,8 @@ export const TrackService = {
 
             // Merge and update metadata
             const mergedMetadata = {
-                ...(existingTrack.metadata || {}),
-                ...(trackInfo.metadata || {}),
+                ...existingTrack.metadata,
+                ...trackInfo.metadata,
                 width: fileRecord.width ?? existingTrack.metadata?.width,
                 height: fileRecord.height ?? existingTrack.metadata?.height,
                 duration: fileRecord.duration ? Math.round(fileRecord.duration) : existingTrack.metadata?.duration,
@@ -184,7 +185,7 @@ export const TrackService = {
         } else {
             // Insert new track
             const mergedMetadata = {
-                ...(trackInfo.metadata || {}),
+                ...trackInfo.metadata,
                 width: fileRecord.width,
                 height: fileRecord.height,
                 duration: fileRecord.duration ? Math.round(fileRecord.duration) : null,
@@ -274,7 +275,7 @@ export const TrackService = {
 
     async replaceFile(mediaId: string, trackId: string, fileData: FileData) {
         return db.transaction(async (tx) => {
-            const now = nowDbTimestamp();
+            const now = Temporal.Now.instant();
 
             // 1. Fetch existing track
             const [existingTrack] = await tx
@@ -306,7 +307,7 @@ export const TrackService = {
 
             // Merge metadata
             const mergedMetadata = {
-                ...(existingTrack.metadata || {}),
+                ...existingTrack.metadata,
                 width: newFile.width ?? existingTrack.metadata?.width,
                 height: newFile.height ?? existingTrack.metadata?.height,
                 duration: newFile.duration ? Math.round(newFile.duration) : existingTrack.metadata?.duration,
@@ -352,7 +353,7 @@ export const TrackService = {
 
     async deleteTrack(mediaId: string, trackId: string) {
         return db.transaction(async (tx) => {
-            const now = nowDbTimestamp();
+            const now = Temporal.Now.instant();
 
             const [trackRecord] = await tx
                 .select()
@@ -419,7 +420,7 @@ export const TrackService = {
         },
     ) {
         return db.transaction(async (tx) => {
-            const now = nowDbTimestamp();
+            const now = Temporal.Now.instant();
 
             // 1. Fetch current track
             const [trackRecord] = await tx
@@ -448,7 +449,7 @@ export const TrackService = {
 
             if (updates.metadata !== undefined) {
                 setParams.metadata = {
-                    ...(trackRecord.metadata || {}),
+                    ...trackRecord.metadata,
                     ...updates.metadata,
                 };
             }

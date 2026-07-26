@@ -39,38 +39,51 @@ function isValidAvifSignature(bytes: Uint8Array): boolean {
  */
 export async function extractVideoFrame(videoUrl: string, timeoutMs: number = 30000): Promise<Uint8Array> {
     const tempFilePath = join(tmpdir(), `cover-${crypto.randomUUID()}.avif`);
+    const isRemoteUrl = videoUrl.startsWith("http://") || videoUrl.startsWith("https://");
 
-    // Explicitly configure Bun.spawn with standard streams and native timeout option.
-    // Wrap spawn in try-catch to provide actionable error messages when FFmpeg is not found.
+    const cmd: string[] = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"];
+
+    if (isRemoteUrl) {
+        cmd.push(
+            "-user_agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "-reconnect",
+            "1",
+            "-reconnect_streamed",
+            "1",
+            "-reconnect_delay_max",
+            "5",
+        );
+    }
+
+    cmd.push(
+        "-ss",
+        "00:00:01", // seek to 1 second to avoid potential black frames at 00:00:00
+        "-i",
+        videoUrl,
+        "-filter_complex",
+        "[0:v:0]scale='min(1280,iw)':-2[outv]",
+        "-map",
+        "[outv]",
+        "-frames:v",
+        "1",
+        "-c:v",
+        "libsvtav1", // use SVT-AV1 encoder
+        "-svtav1-params",
+        "still-picture=1", // optimize SVT-AV1 for single still picture
+        "-f",
+        "avif", // output container format
+        "-y", // overwrite output files
+        tempFilePath,
+    );
+
     let process: Bun.Subprocess;
     try {
         process = Bun.spawn({
-            cmd: [
-                "ffmpeg",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-nostdin",
-                "-ss",
-                "00:00:01", // seek to 1 second to avoid potential black frames at 00:00:00
-                "-i",
-                videoUrl,
-                "-frames:v",
-                "1",
-                "-vf",
-                "scale='min(1280,iw)':-2", // scale width up to 1280 max, maintaining aspect ratio
-                "-c:v",
-                "libsvtav1", // use SVT-AV1 encoder
-                "-svtav1-params",
-                "still-picture=1", // optimize SVT-AV1 for single still picture
-                "-f",
-                "avif", // output container format
-                "-y", // overwrite output files
-                tempFilePath,
-            ],
+            cmd,
             stdout: "pipe",
             stderr: "pipe",
-            timeout: timeoutMs, // Native Bun timeout terminates process automatically
+            timeout: timeoutMs,
         });
     } catch (spawnErr) {
         throw new Error(
@@ -82,7 +95,6 @@ export async function extractVideoFrame(videoUrl: string, timeoutMs: number = 30
     try {
         const exitCode = await process.exited;
 
-        // Check if the process timed out or was terminated via signal.
         if (process.signalCode !== null) {
             throw new Error(`FFmpeg extraction timed out after ${timeoutMs}ms for URL: ${redactUrl(videoUrl)}`);
         }
@@ -112,7 +124,6 @@ export async function extractVideoFrame(videoUrl: string, timeoutMs: number = 30
 
         return bytes;
     } finally {
-        // Guarantee clean up of temporary AVIF file.
         try {
             const file = Bun.file(tempFilePath);
             if (await file.exists()) {

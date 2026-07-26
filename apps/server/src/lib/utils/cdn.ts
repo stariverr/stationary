@@ -41,13 +41,6 @@ const QUALITY_MAP: Record<
         fit: "scale-down",
         format: "avif",
     },
-    [Quality.ORIGINAL]: {
-        width: 3840,
-        height: 3840,
-        quality: 85,
-        fit: "scale-down",
-        format: "avif",
-    },
 };
 
 /**

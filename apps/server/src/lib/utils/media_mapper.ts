@@ -32,15 +32,8 @@ export interface MappedFileRow {
 
 export interface PreviewItem {
     url: string | null;
-    type: "VIDEO" | "IMAGE" | "AUDIO";
     quality: Quality;
     codec: string | null;
-}
-
-export interface MediaPreviews {
-    covers: PreviewItem[];
-    videos: null;
-    audios: null;
 }
 
 const buildUrl = (bucket: string | null | undefined, path: string | null | undefined) =>
@@ -71,24 +64,19 @@ export async function getMediaCoversMap(mediaIds: string[]): Promise<Map<string,
         const list = map.get(track.media_id) || [];
         list.push({
             url: buildUrl(file?.bucket, file?.path),
-            type: "IMAGE",
-            quality: track.quality as Quality,
+            quality: track.quality,
             codec: track.codec,
         });
+        // Sort list by LOW -> MEDIUM -> HIGH
+        const qualityOrder: Record<Quality, number> = {
+            [Quality.LOW]: 1,
+            [Quality.MEDIUM]: 2,
+            [Quality.HIGH]: 3,
+        };
+        list.sort((a, b) => (qualityOrder[a.quality] || 99) - (qualityOrder[b.quality] || 99));
         map.set(track.media_id, list);
     }
     return map;
-}
-
-/**
- * Formats preview collections (`covers`, `videos: null`, `audios: null`) for list responses.
- */
-export function formatListPreviews(covers: PreviewItem[] = []): MediaPreviews {
-    return {
-        covers,
-        videos: null,
-        audios: null,
-    };
 }
 
 /**
@@ -107,7 +95,7 @@ export async function getMediaTracks(mediaId: string): Promise<MappedFileRow[]> 
         type: track.type,
         purpose: track.purpose,
         is_original: track.is_original,
-        quality: track.quality as Quality,
+        quality: track.quality,
         priority: track.priority,
         metadata: track.metadata || {},
         variant_key: track.variant_key,
@@ -133,10 +121,42 @@ export async function getMediaTracks(mediaId: string): Promise<MappedFileRow[]> 
 export function formatMediaDetail(media: typeof Media.$inferSelect, files: MappedFileRow[]) {
     const sorted = [...files].sort((a, b) => a.priority - b.priority);
 
-    const coverFile = sorted.find((f) => f.purpose === TrackPurpose.COVER);
+    const coverFiles = sorted.filter((f) => f.purpose === TrackPurpose.COVER);
+
+    // Pick cover file by priority: LOW -> MEDIUM -> HIGH -> any COVER
+    const qualityOrder: Record<string, number> = {
+        [Quality.LOW]: 1,
+        [Quality.MEDIUM]: 2,
+        [Quality.HIGH]: 3,
+    };
+    const sortedCoverFiles = [...coverFiles].sort((a, b) => (qualityOrder[a.quality] || 99) - (qualityOrder[b.quality] || 99));
+
+    const coverFile = sortedCoverFiles[0];
     const primaryFile = sorted.find((f) => f.is_primary) || sorted.find((f) => f.purpose === TrackPurpose.CONTENT);
 
     const url = media.type === "VIDEO" ? `/api/media/${media.id}/manifest.mpd` : buildUrl(primaryFile?.file_bucket, primaryFile?.file_path);
+
+    const coverVariants: Record<string, any> = {};
+    for (const f of coverFiles) {
+        if (f.file_bucket && f.file_path && (f.quality === Quality.LOW || f.quality === Quality.MEDIUM || f.quality === Quality.HIGH)) {
+            coverVariants[f.quality] = {
+                track_id: f.track_id,
+                url: buildUrl(f.file_bucket, f.file_path),
+                width: f.width,
+                height: f.height,
+                status: f.is_stale ? "STALE" : "READY",
+            };
+        }
+    }
+
+    const externalCover = coverFiles.find((f) => !f.is_original);
+    const coverSource = externalCover
+        ? {
+              track_id: externalCover.track_id,
+              url: buildUrl(externalCover.file_bucket, externalCover.file_path),
+              quality: externalCover.quality,
+          }
+        : null;
 
     const tracks = sorted
         .filter((f) => f.file_path && f.file_bucket)
@@ -174,6 +194,8 @@ export function formatMediaDetail(media: typeof Media.$inferSelect, files: Mappe
         last_error: media.last_error,
         url,
         cover_url: buildUrl(coverFile?.file_bucket, coverFile?.file_path),
+        cover_source: coverSource,
+        cover_variants: coverVariants,
         width: primaryFile?.width ?? null,
         height: primaryFile?.height ?? null,
         tracks,

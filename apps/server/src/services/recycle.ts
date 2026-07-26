@@ -1,11 +1,11 @@
 import { and, count, eq, isNull, isNotNull } from "drizzle-orm";
 import { db } from "@/global/db";
 import { DeleteStatus, Media, Post } from "@/db/schema";
-import { nowDbTimestamp } from "@/lib/utils/time";
+import { Temporal } from "@js-temporal/polyfill";
 
 export const RecycleService = {
     async recyclePost(postId: string) {
-        const recycleTime = nowDbTimestamp();
+        const recycleTime = Temporal.Now.instant();
 
         return db.transaction(async (tx) => {
             const postRows = await tx
@@ -89,7 +89,7 @@ export const RecycleService = {
     },
 
     async recycleMedia(mediaId: string) {
-        const recycleTime = nowDbTimestamp();
+        const recycleTime = Temporal.Now.instant();
 
         return db.transaction(async (tx) => {
             const mediaRows = await tx
@@ -181,7 +181,7 @@ export const RecycleService = {
                 .update(Media)
                 .set({
                     recycle_time: null,
-                    update_time: nowDbTimestamp(),
+                    update_time: Temporal.Now.instant(),
                 })
                 .where(and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNotNull(Media.recycle_time)))
                 .returning({ id: Media.id });

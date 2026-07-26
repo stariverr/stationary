@@ -82,7 +82,7 @@ describe("manual media composition", () => {
             ],
         }));
 
-        expect(validateDraftMediaGroups(groups)).toContain("cannot be used more than once");
+        expect(validateDraftMediaGroups(groups)).toContain("Duplicate file reference detected for draft file");
     });
 
     test("assigns independent priorities per track group and continues existing groups", () => {
@@ -142,7 +142,7 @@ describe("draft file type constraints", () => {
         ];
         const files = new Map([[draftFileId, { name: "song.mp3", mime_type: "audio/mpeg" }]]);
 
-        expect(validateDraftTrackFileTypes(groups, files)).toContain("song.mp3 can only be used as AUDIO track");
+        expect(validateDraftTrackFileTypes(groups, files)).toContain("Track type IMAGE is not allowed for file song.mp3");
     });
 
     test.each([TrackType.VIDEO, TrackType.AUDIO])("accepts an MP4 declared as %s", (type) => {
@@ -205,10 +205,10 @@ describe("draft file atomic transitions", () => {
     const libraryId = "01900000-0000-7000-8000-000000000003";
 
     test("removes a draft and returns its physical file identity", async () => {
-        const { tx, deletes } = createFakeTransaction([[{ file_id: fileId }]]);
+        const { tx, updates } = createFakeTransaction([[{ file_id: fileId }]]);
 
         await expect(consumeDraftFile(tx as never, draftId, libraryId)).resolves.toBe(fileId);
-        expect(deletes).toHaveLength(1);
+        expect(updates).toHaveLength(1);
     });
 
     test("reports a conflict when another request already consumed the draft", async () => {

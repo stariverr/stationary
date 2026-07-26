@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { DraftFile, DraftFileStatus, File as DbFile, DeleteStatus } from "@/db/schema";
 import type { Transaction } from "@/global/db";
-import { nowDbTimestamp } from "@/lib/utils/time";
+import { Temporal } from "@js-temporal/polyfill";
 
 export class DraftFileUnavailableError extends Error {
     constructor(public readonly draftFileId: string) {
@@ -12,14 +12,12 @@ export class DraftFileUnavailableError extends Error {
 
 export async function consumeDraftFile(tx: Transaction, draftFileId: string, libraryId: string): Promise<string> {
     const [updatedDraft] = await tx
-        .delete(DraftFile)
-        .where(
-            and(
-                eq(DraftFile.id, draftFileId),
-                eq(DraftFile.library_id, libraryId),
-                eq(DraftFile.status, DraftFileStatus.DRAFT),
-            ),
-        )
+        .update(DraftFile)
+        .set({
+            status: DraftFileStatus.CONSUMED,
+            update_time: Temporal.Now.instant(),
+        })
+        .where(and(eq(DraftFile.id, draftFileId), eq(DraftFile.library_id, libraryId), eq(DraftFile.status, DraftFileStatus.DRAFT)))
         .returning({ file_id: DraftFile.file_id });
 
     if (!updatedDraft) {
@@ -30,7 +28,7 @@ export async function consumeDraftFile(tx: Transaction, draftFileId: string, lib
 }
 
 export async function deleteDraftFile(tx: Transaction, draftFileId: string, libraryId: string): Promise<boolean> {
-    const now = nowDbTimestamp();
+    const now = Temporal.Now.instant();
     const [updatedDraft] = await tx
         .update(DraftFile)
         .set({

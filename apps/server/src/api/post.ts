@@ -6,12 +6,10 @@ import { Code } from "@/lib/code";
 import { requireAuth } from "@/lib/auth/middleware";
 import {
     Media,
-    Track,
     Post,
     File as DbFile,
     DeleteStatus,
     PostSource,
-    TrackType,
     TrackPurpose,
     Author,
     SyncStatus,
@@ -30,7 +28,7 @@ import { DeleteService } from "@/services/delete";
 import { PostService, replacePostTagsTx } from "@/services/post";
 import { replaceMediaTagsTx } from "@/services/media";
 import { buildCdnUrl, buildImagePreviewCdnUrl } from "@/lib/utils/cdn";
-import { toIsoTimestamp, FormTimestampSchema, nowDbTimestamp } from "@/lib/utils/time";
+import { toIsoTimestamp, FormTimestampSchema } from "@/lib/utils/time";
 import { Quality } from "@/lib/types";
 import { v7 as uuidv7 } from "uuid";
 import { TrackService } from "@/services/track";
@@ -42,7 +40,8 @@ import {
     MediaDraftSchema,
 } from "@/lib/validation/media-composition";
 import { validate } from "@/lib/validation/validator";
-import { formatListPreviews, getMediaCoversMap, getMediaTracks, PreviewItem } from "@/lib/utils/media_mapper";
+import { getMediaCoversMap, getMediaTracks, PreviewItem } from "@/lib/utils/media_mapper";
+import { Temporal } from "@js-temporal/polyfill";
 
 const router = new Hono();
 const activePostFilter = and(eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time));
@@ -157,8 +156,6 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
 
     type MediaItem = Pick<typeof Media.$inferSelect, "id" | "post_id" | "type" | "sort_order"> & {
         covers: PreviewItem[];
-        videos: null;
-        audios: null;
     };
     const mediaByPostId = new Map<string, MediaItem[]>();
 
@@ -180,8 +177,7 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
         for (const row of mediaRows) {
             if (!row.post_id) continue;
 
-            const covers = coversByMediaId.get(row.id) || [];
-            const previews = formatListPreviews(covers);
+            const covers = coversByMediaId.get(row.id) ?? [];
 
             let mediaList = mediaByPostId.get(row.post_id);
             if (!mediaList) {
@@ -194,9 +190,7 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
                 post_id: row.post_id,
                 type: row.type,
                 sort_order: row.sort_order,
-                covers: previews.covers,
-                videos: previews.videos,
-                audios: previews.audios,
+                covers: covers,
             });
         }
     }
@@ -252,7 +246,7 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
     return c.json(
         success(Code.SUCCESS, {
             list: posts,
-            total: total[0].total,
+            total: total[0]?.total ?? 0,
         }),
     );
 });
@@ -814,7 +808,7 @@ router.post("/create", requireAuth, validate("json", CreatePostSchema), async (c
 
     try {
         await db.transaction(async (tx) => {
-            const now = nowDbTimestamp();
+            const now = Temporal.Now.instant();
             const totalMediaCount = body.media_items && body.media_items.length > 0 ? body.media_items.length : 0;
 
             await tx.insert(Post).values({
