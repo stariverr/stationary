@@ -101,7 +101,7 @@ export const TrackPurposeEnum = pgEnum("track_purpose", [
     TrackPurpose.PREVIEW,
 ]);
 
-export const TrackQualityEnum = pgEnum("track_quality", [Quality.ORIGINAL, Quality.HIGH, Quality.MEDIUM, Quality.LOW]);
+export const TrackQualityEnum = pgEnum("track_quality", [Quality.HIGH, Quality.MEDIUM, Quality.LOW]);
 
 export enum AccessRole {
     VIEWER = "VIEWER",
@@ -186,6 +186,9 @@ export const Library = pgTable("library", {
     openai_model_describe_image_map_to: text("openai_model_describe_image_map_to"),
     gemini_api_key: text("gemini_api_key"),
     gemini_base_url: text("gemini_base_url"),
+    /** Cover Qualities: cover qualities for the library */
+    cover_qualities: jsonb("cover_qualities").$type<Quality[]>().default([Quality.LOW, Quality.MEDIUM]).notNull(),
+    cover_config_version: integer("cover_config_version").default(1).notNull(),
     create_time: temporal("create_time")
         .default(sql`now()`)
         .notNull(),
@@ -452,12 +455,26 @@ export interface SubtitleTrackMetadata {
     format?: string;
 }
 
+export interface GeneratedCoverMetadata {
+    source_track_id: string;
+    source_file_id: string;
+    recipe_version: number;
+    generation_mode: "REUSE" | "TRANSCODE" | "VIDEO_FRAME";
+    seek_seconds?: number;
+    generated_width: number;
+    generated_height: number;
+}
+
 export interface CoverMetadata {
     primary_file_id?: string;
     seek_seconds?: number;
 }
 
-export type MediaFileMetadata = VideoTrackMetadata & AudioTrackMetadata & SubtitleTrackMetadata & CoverMetadata;
+export type MediaFileMetadata = VideoTrackMetadata &
+    AudioTrackMetadata &
+    SubtitleTrackMetadata &
+    CoverMetadata &
+    Partial<GeneratedCoverMetadata>;
 
 // Track Model
 export const Track = pgTable(
@@ -880,3 +897,227 @@ export const DraftFile = pgTable("draft_file", {
     expire_time: temporal("expire_time"),
     consume_time: temporal("consume_time"),
 });
+
+// ==== Cover & Derivative Async Task Tables: START ====
+
+/** High-level master task category/type */
+export enum AsyncTaskType {
+    COVER_RECONCILE = "COVER_RECONCILE",
+    COVER_BATCH = "COVER_BATCH",
+}
+export const AsyncTaskTypeEnum = pgEnum("async_task_type", [AsyncTaskType.COVER_RECONCILE, AsyncTaskType.COVER_BATCH]);
+
+/** Entity subject type for task units */
+export enum AsyncSubjectType {
+    MEDIA = "MEDIA",
+    POST = "POST",
+    FILE = "FILE",
+}
+export const AsyncSubjectTypeEnum = pgEnum("async_subject_type", [AsyncSubjectType.MEDIA, AsyncSubjectType.POST, AsyncSubjectType.FILE]);
+
+/** Physical category/kind of task execution unit */
+export enum AsyncTaskUnitKind {
+    COVER_DERIVATIVE = "COVER_DERIVATIVE",
+    VIDEO_TRANSCODE = "VIDEO_TRANSCODE",
+    AI_TAGGING = "AI_TAGGING",
+}
+export const AsyncTaskUnitKindEnum = pgEnum("async_task_unit_kind", [
+    AsyncTaskUnitKind.COVER_DERIVATIVE,
+    AsyncTaskUnitKind.VIDEO_TRANSCODE,
+    AsyncTaskUnitKind.AI_TAGGING,
+]);
+
+/** Status of master async task */
+export enum AsyncTaskStatus {
+    DISCOVERING = "DISCOVERING",
+    RUNNING = "RUNNING",
+    PAUSED = "PAUSED",
+    COMPLETED = "COMPLETED",
+    FAILED = "FAILED",
+    CANCELLED = "CANCELLED",
+}
+export const AsyncTaskStatusEnum = pgEnum("async_task_status", [
+    AsyncTaskStatus.DISCOVERING,
+    AsyncTaskStatus.RUNNING,
+    AsyncTaskStatus.PAUSED,
+    AsyncTaskStatus.COMPLETED,
+    AsyncTaskStatus.FAILED,
+    AsyncTaskStatus.CANCELLED,
+]);
+
+/** Requested control signal for master task lifecycle */
+export enum AsyncTaskControl {
+    NONE = "NONE",
+    PAUSE = "PAUSE",
+    CANCEL = "CANCEL",
+}
+export const AsyncTaskControlEnum = pgEnum("async_task_control", [AsyncTaskControl.NONE, AsyncTaskControl.PAUSE, AsyncTaskControl.CANCEL]);
+
+/** Execution status of individual task unit */
+export enum AsyncTaskUnitStatus {
+    PENDING = "PENDING",
+    RUNNING = "RUNNING",
+    SUCCEEDED = "SUCCEEDED",
+    FAILED = "FAILED",
+    CANCELLED = "CANCELLED",
+}
+export const AsyncTaskUnitStatusEnum = pgEnum("async_task_unit_status", [
+    AsyncTaskUnitStatus.PENDING,
+    AsyncTaskUnitStatus.RUNNING,
+    AsyncTaskUnitStatus.SUCCEEDED,
+    AsyncTaskUnitStatus.FAILED,
+    AsyncTaskUnitStatus.CANCELLED,
+]);
+
+/** Standard outcome codes for task units */
+export enum AsyncOutcomeCode {
+    EXECUTED = "EXECUTED",
+    SKIPPED = "SKIPPED",
+    CANCELLED_BY_USER = "CANCELLED_BY_USER",
+    MAX_ATTEMPTS_EXCEEDED = "MAX_ATTEMPTS_EXCEEDED",
+    LEASE_EXPIRED_EXHAUSTED = "LEASE_EXPIRED_EXHAUSTED",
+    UNHANDLED_EXCEPTION = "UNHANDLED_EXCEPTION",
+    SOURCE_CHANGED = "SOURCE_CHANGED",
+    MEDIA_NOT_FOUND = "MEDIA_NOT_FOUND",
+    INVALID_INPUT = "INVALID_INPUT",
+    RENDER_FAILED = "RENDER_FAILED",
+}
+
+/**
+ * AsyncTask Table (Master/Parent)
+ * Represents a high-level master task (e.g. library-wide cover reconciliation scan or batch re-indexing).
+ * Manages item discovery cursors, overall progress metrics, and control signals (Pause/Cancel).
+ */
+export const AsyncTask = pgTable(
+    "async_task",
+    {
+        /** Primary key (UUIDv7, time-sortable) */
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        /** Category or type of the master task */
+        type: AsyncTaskTypeEnum("type").notNull(),
+        /** High-level master task execution status */
+        status: AsyncTaskStatusEnum("status").default(AsyncTaskStatus.DISCOVERING).notNull(),
+        /** Target library ID scoped for this task */
+        library_id: uuid("library_id"),
+        /** User ID of the initiator who triggered this task */
+        owner_id: text("owner_id"),
+        /** Immutable snapshot of input parameters passed upon creation */
+        input_snapshot: jsonb("input_snapshot").$type<Record<string, unknown>>().default({}).notNull(),
+        /** Version of configuration used during generation */
+        config_version: integer("config_version").default(1).notNull(),
+        /** Detailed JSON cursor payload for item discovery state */
+        discovery_cursor: jsonb("discovery_cursor").$type<Record<string, unknown>>(),
+        /** Flag indicating whether discovery phase has finished scanning all candidate items */
+        discovery_complete: boolean("discovery_complete").default(false).notNull(),
+        /** Token for locking the active discovery scanner instance */
+        discovery_lease_token: uuid("discovery_lease_token"),
+        /** Expiration timestamp for the active discovery lease */
+        discovery_lease_expires_at: temporal("discovery_lease_expires_at"),
+        /** Total units discovered/scoped in this task */
+        total_units: integer("total_units").default(0).notNull(),
+        /** Number of task units executed and succeeded */
+        succeeded_units: integer("succeeded_units").default(0).notNull(),
+        /** Number of task units that permanently failed execution */
+        failed_units: integer("failed_units").default(0).notNull(),
+        /** Number of task units cancelled due to master task cancellation */
+        cancelled_units: integer("cancelled_units").default(0).notNull(),
+        /** Maximum allowed in-flight worker executions for this task */
+        max_in_flight: integer("max_in_flight").default(5).notNull(),
+        /** External control signal requested by user or admin (e.g. PAUSE, CANCEL) */
+        control_requested: AsyncTaskControlEnum("control_requested").default(AsyncTaskControl.NONE).notNull(),
+        /** Idempotency key to prevent duplicate master task creation */
+        idempotency_key: text("idempotency_key"),
+        /** Last error message recorded at the master task level */
+        last_error: text("last_error"),
+        /** Timestamp when this task was created */
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        /** Timestamp when this task record was last updated */
+        update_time: temporal("update_time")
+            .default(sql`now()`)
+            .notNull(),
+        /** Timestamp when this task reached terminal state (COMPLETED/FAILED/CANCELLED) */
+        complete_time: temporal("complete_time"),
+    },
+    (table) => [
+        index("async_task_type_status_idx").on(table.type, table.status),
+        index("async_task_library_status_idx").on(table.library_id, table.status),
+        index("async_task_owner_status_idx").on(table.owner_id, table.status),
+        uniqueIndex("async_task_idempotency_unique").on(table.idempotency_key),
+    ],
+);
+
+/**
+ * AsyncTaskUnit Table (Child/Detail)
+ * Represents an individual execution unit scoped to a parent AsyncTask.
+ * Also acts as the transactional queue with lease locking and available_at timestamps.
+ */
+export const AsyncTaskUnit = pgTable(
+    "async_task_unit",
+    {
+        /** Primary key (UUIDv7, time-sortable) */
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        /** Foreign key reference to parent AsyncTask */
+        task_id: uuid("task_id").notNull(),
+        /** Category of task unit */
+        kind: AsyncTaskUnitKindEnum("kind").notNull(),
+        /** Subject entity type ('MEDIA', 'POST', 'FILE') */
+        subject_type: AsyncSubjectTypeEnum("subject_type").notNull(),
+        /** Subject entity UUID */
+        subject_id: uuid("subject_id").notNull(),
+        /** Human-readable unit variant key (e.g. 'COVER:LOW', 'H264:1080P') */
+        unit_key: text("unit_key").notNull(),
+        /** Hash of normalized spec configuration parameters for exact specification matching */
+        spec_hash: text("spec_hash").default("").notNull(),
+        /** Execution status */
+        status: AsyncTaskUnitStatusEnum("status").default(AsyncTaskUnitStatus.PENDING).notNull(),
+        /** Detailed outcome code (e.g. EXECUTED, SKIPPED, RENDER_FAILED) */
+        outcome_code: text("outcome_code"),
+        /** Timestamp after which unit becomes eligible for dispatch/pickup */
+        available_at: temporal("available_at")
+            .default(sql`now()`)
+            .notNull(),
+        /** Active worker lease token for fencing lock validation */
+        lease_token: uuid("lease_token"),
+        /** Worker lease expiration timestamp */
+        lease_expires_at: temporal("lease_expires_at"),
+        /** Execution attempt counter */
+        attempt_count: integer("attempt_count").default(0).notNull(),
+        /** Maximum allowed execution attempts before marking FAILED */
+        max_attempts: integer("max_attempts").default(5).notNull(),
+        /** Snapshot of execution parameters */
+        input_snapshot: jsonb("input_snapshot")
+            .$type<Record<string, unknown>>()
+            .default(sql`'{}'::jsonb`)
+            .notNull(),
+        /** Output result references and metadata */
+        result_ref: jsonb("result_ref").$type<Record<string, unknown>>(),
+        /** Last execution error message */
+        last_error: text("last_error"),
+        /** Timestamp when unit was created */
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        /** Timestamp when unit was last updated */
+        update_time: temporal("update_time")
+            .default(sql`now()`)
+            .notNull(),
+        /** Timestamp when unit reached terminal state (SUCCEEDED/FAILED/CANCELLED) */
+        complete_time: temporal("complete_time"),
+    },
+    (table) => [
+        uniqueIndex("async_task_unit_task_unit_key_unique").on(table.task_id, table.unit_key),
+        index("async_task_unit_task_status_idx").on(table.task_id, table.status),
+        index("async_task_unit_status_available_idx").on(table.status, table.available_at),
+        index("async_task_unit_status_lease_idx").on(table.status, table.lease_expires_at),
+    ],
+);
+
+// ==== Cover & Derivative Async Task Tables: END ====
