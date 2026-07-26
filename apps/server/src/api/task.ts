@@ -6,7 +6,6 @@ import { Client } from "@upstash/workflow";
 import { env } from "@/global/env";
 import { Temporal } from "@js-temporal/polyfill";
 import { TaskService } from "@/services/task";
-import { VideoCoverService } from "@/services/video_cover";
 import { Code } from "@/lib/code";
 import { error, success } from "@/lib/response";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
@@ -28,9 +27,19 @@ import {
     Track,
     DraftFile,
     DraftFileStatus,
+    AsyncTask,
+    AsyncTaskUnit,
+    AsyncTaskStatus,
+    AsyncTaskUnitStatus,
+    AsyncTaskType,
 } from "@/db/schema";
 import { eq, and, lt, inArray, sql } from "drizzle-orm";
 import { DeleteService } from "@/services/delete";
+import { JobSweeper } from "@/services/job_sweeper";
+import { TaskManager } from "@/services/job_service";
+import { AiService } from "@/services/ai/service";
+import { AiEnrichmentService } from "@/services/ai/enrich";
+import { sweepOrphanTags } from "@/scripts/sweep_orphans";
 import { s3 } from "@/global/s3";
 import { Quality } from "@/lib/types";
 
@@ -118,7 +127,7 @@ const TrackSchema = z.object({
     type: z.enum(TrackType),
     purpose: z.enum(TrackPurpose).default(TrackPurpose.CONTENT),
     is_original: z.boolean().default(true),
-    quality: z.enum(Quality).default(Quality.ORIGINAL),
+    quality: z.enum(Quality).default(Quality.HIGH),
     priority: z.number().default(0),
     metadata: TrackMetadataSchema.nullish().transform((v) => v ?? {}),
 });
@@ -428,106 +437,81 @@ taskApp.post("/purge-stale-pending-drafts", async (c) => {
     );
 });
 
-const CoverWorkflowPayloadSchema = z.object({
-    mediaId: z.uuid(),
-    force: z.boolean().optional(),
-    replaceExternalCover: z.boolean().optional(),
+const DerivativeTaskWorkflowPayloadSchema = z.object({
+    taskId: z.uuid(),
 });
 
 export const coverWorkflowHandler = serve(
     async (context) => {
-        const { mediaId, force, replaceExternalCover } = CoverWorkflowPayloadSchema.parse(context.requestPayload);
+        const payload = (context.requestPayload as Record<string, any>) || {};
 
-        await context.run(`generate-cover-${mediaId}`, async () => {
-            await VideoCoverService.generateForMedia(mediaId, { force, replaceExternalCover });
+        const itemId = payload.itemId || payload.taskId;
+        const leaseToken = payload.leaseToken || context.workflowRunId;
+        if (!itemId) {
+            throw new Error("Invalid cover workflow payload: missing itemId or taskId");
+        }
+
+        await context.run(`generate-cover-task-${itemId}`, async () => {
+            await TaskManager.executeUnit(itemId, leaseToken);
         });
     },
     {
         failureFunction: async ({ context, failResponse }) => {
-            console.error(`[VIDEO COVER WORKFLOW FAILED] Workflow Run: ${context.workflowRunId}. Reason: ${failResponse}`);
-            const { mediaId } = CoverWorkflowPayloadSchema.parse(context.requestPayload);
+            console.error(`[COVER WORKFLOW FAILED] Workflow Run: ${context.workflowRunId}. Reason: ${failResponse}`);
+            const { taskId } = DerivativeTaskWorkflowPayloadSchema.parse(context.requestPayload);
             try {
                 await db
-                    .insert(Track)
-                    .values({
-                        media_id: mediaId,
-                        type: TrackType.IMAGE,
-                        purpose: TrackPurpose.COVER,
-                        quality: Quality.ORIGINAL,
-                        priority: 0,
-                        sync_status: SyncStatus.FAILED,
+                    .update(AsyncTaskUnit)
+                    .set({
+                        status: AsyncTaskUnitStatus.FAILED,
                         last_error: failResponse || "Workflow retries exhausted.",
+                        lease_expires_at: null,
+                        update_time: Temporal.Now.instant(),
                     })
-                    .onConflictDoUpdate({
-                        target: [Track.media_id, Track.type, Track.purpose, Track.variant_key],
-                        targetWhere: sql`delete_status = 'ACTIVE'`,
-                        set: {
-                            sync_status: SyncStatus.FAILED,
-                            last_error: failResponse || "Workflow retries exhausted.",
-                            delete_status: DeleteStatus.ACTIVE,
-                            delete_time: null,
-                        },
-                    });
+                    .where(eq(AsyncTaskUnit.id, taskId));
             } catch (dbErr) {
-                console.error(`[VIDEO COVER WORKFLOW] Failed to write failure status to DB:`, dbErr);
+                console.error(`[COVER WORKFLOW] Failed to write failure status to DB:`, dbErr);
             }
         },
     },
 );
 
-taskApp.post("/scan-missing-covers", async (c) => {
-    // Auth Check:
-    // If CRON_SECRET is configured, validate authorization
-    const cronSecret = env.CRON_SECRET;
-    if (cronSecret) {
-        const authHeader = c.req.header("Authorization");
-        const internalHeader = c.req.header("X-Internal-Token");
-
-        let token = "";
-        if (authHeader && authHeader.startsWith("Bearer ")) {
-            token = authHeader.substring(7);
-        } else if (internalHeader) {
-            token = internalHeader;
-        }
-
-        if (token !== cronSecret) {
-            return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
-        }
-    } else {
-        // If CRON_SECRET is missing in production, reject for security
-        if (process.env.NODE_ENV === "production") {
-            return c.json(error(Code.SERVICE_UNAVAILABLE, "CRON_SECRET is not configured in production"), 500);
-        }
-    }
-
-    let body: { library_id?: string; limit?: number; stale_minutes?: number } = {};
-    try {
-        body = await c.req.json();
-    } catch {
-        // Safe fallback for empty body
-    }
-
-    // Get the base URL from request
-    const url = new URL(c.req.url);
-    const origin =
-        env.UPSTASH_WORKFLOW_URL ||
-        (c.req.header("x-forwarded-proto") ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}` : url.origin);
-
-    try {
-        const result = await VideoCoverService.scanAndQueueMissingCovers({
-            libraryId: body.library_id,
-            limit: body.limit,
-            staleMinutes: body.stale_minutes,
-            originUrl: origin,
-        });
-
-        return c.json(success(Code.SUCCESS, result));
-    } catch (e: any) {
-        const errorMsg = e instanceof Error ? e.message : String(e);
-        console.error(`[task] Failed to run scanAndQueueMissingCovers: ${errorMsg}`);
-        return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
-    }
+const CoverReconcileWorkflowPayloadSchema = z.object({
+    libraryId: z.uuid(),
+    configVersion: z.number(),
 });
+
+export const workflowCoverReconcileHandler = serve(
+    async (context) => {
+        const { libraryId, configVersion } = CoverReconcileWorkflowPayloadSchema.parse(context.requestPayload);
+
+        let hasMore = true;
+        let stepIndex = 0;
+        while (hasMore) {
+            hasMore = await context.run(`reconcile-step-${stepIndex++}`, async () => {
+                return await TaskManager.discoverTaskBatch(libraryId);
+            });
+        }
+    },
+    {
+        failureFunction: async ({ context, failResponse }) => {
+            console.error(`[COVER RECONCILE WORKFLOW FAILED] Run: ${context.workflowRunId}. Reason: ${failResponse}`);
+            const { libraryId, configVersion } = CoverReconcileWorkflowPayloadSchema.parse(context.requestPayload);
+            try {
+                await db
+                    .update(AsyncTask)
+                    .set({
+                        status: AsyncTaskStatus.FAILED,
+                        last_error: failResponse || "Reconcile workflow failed.",
+                        update_time: Temporal.Now.instant(),
+                    })
+                    .where(and(eq(AsyncTask.library_id, libraryId), eq(AsyncTask.type, AsyncTaskType.COVER_RECONCILE)));
+            } catch (err) {
+                console.error(`[COVER RECONCILE WORKFLOW] Failed to write failure status:`, err);
+            }
+        },
+    },
+);
 
 // Endpoint to retry sync for failed items
 const RetrySyncSchema = z.object({
@@ -591,7 +575,14 @@ taskApp.post("/retry-sync", requireAuth, zValidator("json", RetrySyncSchema), as
     }
 });
 
-// Endpoint to sweep tasks stuck in IN_PROGRESS for too long
+/**
+ * Universal endpoint to sweep stuck background processes and jobs.
+ *
+ * Performs a two-tier cleanup:
+ * 1. Entity-level sync timeout sweep: Marks legacy entity records (Post, Media, Track) stuck in IN_PROGRESS as FAILED.
+ * 2. Generic async job system sweep (JobSweeper): Reclaims expired task unit leases, dispatches pending units,
+ *    reconciles completed tasks, and purges obsolete job records across all registered AsyncTask types automatically.
+ */
 taskApp.post("/sweep-stuck-tasks", async (c) => {
     // Auth Check: Validate cron secret
     const cronSecret = env.CRON_SECRET;
@@ -626,11 +617,44 @@ taskApp.post("/sweep-stuck-tasks", async (c) => {
     }
 
     try {
-        const result = await TaskService.sweepStuckTasks(thresholdMinutes);
-        return c.json(success(Code.SUCCESS, result));
+        // Step 1: Sweep legacy entity sync statuses (Post / Media / Track)
+        const entityResult = await TaskService.sweepStuckTasks(thresholdMinutes);
+        // Step 2: Execute full generic sweep across all registered AsyncTask job handlers
+        const jobResult = await JobSweeper.runSweep();
+
+        return c.json(
+            success(Code.SUCCESS, {
+                stuck_entities_swept: entityResult.sweptCount,
+                async_job_sweep: jobResult,
+            }),
+        );
     } catch (e: any) {
         const errorMsg = e instanceof Error ? e.message : String(e);
         console.error(`[task] Failed to sweep stuck tasks: ${errorMsg}`);
+        return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
+    }
+});
+
+/**
+ * Endpoint to retry failed units for a specific master AsyncTask.
+ */
+taskApp.post("/tasks/:id/retry-failed", async (c) => {
+    const taskId = c.req.param("id");
+    if (!taskId) {
+        return c.json(error(Code.INVALID_PARAMETER, "Task ID is required"), 400);
+    }
+
+    try {
+        const retriedCount = await TaskManager.retryFailedUnits(taskId);
+        return c.json(
+            success(Code.SUCCESS, {
+                task_id: taskId,
+                retried_count: retriedCount,
+            }),
+        );
+    } catch (e: any) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        console.error(`[task] Failed to retry failed units for task ${taskId}: ${errorMsg}`);
         return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
     }
 });
@@ -659,7 +683,6 @@ taskApp.post("/sweep-orphan-tags", async (c) => {
     }
 
     try {
-        const { sweepOrphanTags } = await import("@/scripts/sweep_orphans");
         const result = await sweepOrphanTags();
         return c.json(success(Code.SUCCESS, result));
     } catch (e: any) {
@@ -724,7 +747,6 @@ taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async 
     }
 
     // 1. Initialize AssetAiMetadata status to PENDING
-    const { AiService } = await import("@/services/ai/service");
     for (const media of mediaList) {
         const aiService = await AiService.forLibrary(media.library_id);
         const metadataPipelineId = aiService?.metadataPipelineId || "default";
@@ -801,7 +823,6 @@ const AiWorkflowPayloadSchema = z.object({
 export const aiWorkflowHandler = serve(
     async (context) => {
         const { mediaIds } = AiWorkflowPayloadSchema.parse(context.requestPayload);
-        const { AiEnrichmentService } = await import("@/services/ai/enrich");
 
         for (const mediaId of mediaIds) {
             await context.run(`ai-enrich-${mediaId}`, async () => {
@@ -879,6 +900,34 @@ export const copyAvatarWorkflowHandler = serve(async (context) => {
     });
 });
 
+const JobItemWorkflowPayloadSchema = z.object({
+    itemId: z.uuid(),
+    leaseToken: z.uuid(),
+});
+
+export const workflowJobItemHandler = serve(async (context) => {
+    const { itemId, leaseToken } = JobItemWorkflowPayloadSchema.parse(context.requestPayload);
+    await context.run(`job-item-${itemId}`, async () => {
+        await TaskManager.executeUnit(itemId, leaseToken);
+    });
+});
+
+const JobDiscoverWorkflowPayloadSchema = z.object({
+    jobId: z.uuid(),
+});
+
+export const workflowJobDiscoverHandler = serve(async (context) => {
+    const { jobId } = JobDiscoverWorkflowPayloadSchema.parse(context.requestPayload);
+
+    let hasMore = true;
+    let stepIndex = 0;
+    while (hasMore) {
+        hasMore = await context.run(`job-discover-step-${stepIndex++}`, async () => {
+            return await TaskManager.discoverTaskBatch(jobId, 50);
+        });
+    }
+});
+
 taskApp.all(
     "/workflow",
     async (c, next) => {
@@ -913,6 +962,24 @@ taskApp.all(
         return next();
     },
     copyAvatarWorkflowHandler,
+);
+
+taskApp.all(
+    "/workflow-job-item",
+    async (c, next) => {
+        console.log(`[DEBUG] Incoming request to /api/task/workflow-job-item`);
+        return next();
+    },
+    workflowJobItemHandler,
+);
+
+taskApp.all(
+    "/workflow-job-discover",
+    async (c, next) => {
+        console.log(`[DEBUG] Incoming request to /api/task/workflow-job-discover`);
+        return next();
+    },
+    workflowJobDiscoverHandler,
 );
 
 export default taskApp;

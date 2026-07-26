@@ -14,15 +14,18 @@ import {
     MediaTag,
     TagStatus,
     TagSource,
+    MediaType,
+    AsyncTaskType,
 } from "@/db/schema";
 import { eq, and, not, notInArray, inArray, gte, isNull, isNotNull, or, lt } from "drizzle-orm";
 import { downloadStream, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
-import { VideoCoverService } from "@/services/video_cover";
 import { withLock } from "@/lib/utils/lock";
 import { env } from "@/global/env";
+import { s3 } from "@/global/s3";
+import { TaskManager } from "@/services/job_service";
 import { Client } from "@upstash/workflow";
 import type { PostItemData, MediaItemData } from "@/api/task";
-import { nowDbTimestamp } from "@/lib/utils/time";
+
 import { Temporal } from "@js-temporal/polyfill";
 import { sanitizeTags } from "@/lib/utils/tag_sanitizer";
 import { generateDeterministicVariantKey } from "@/lib/utils/track";
@@ -404,7 +407,7 @@ export const TaskService = {
 
         if (mediaToDelete.length > 0) {
             const deletedMediaIds = mediaToDelete.map((m) => m.id);
-            const deleteTime = nowDbTimestamp();
+            const deleteTime = Temporal.Now.instant();
             await db.transaction(async (tx) => {
                 await tx
                     .update(Media)
@@ -609,7 +612,7 @@ export const TaskService = {
             // Clean up obsolete Track records across all partitions first
             for (const t of existingTracks) {
                 if (t.delete_status === DeleteStatus.ACTIVE && !processedTrackKeys.has(t.variant_key)) {
-                    const deleteTime = nowDbTimestamp();
+                    const deleteTime = Temporal.Now.instant();
                     if (t.file_id) {
                         await db
                             .update(File)
@@ -743,7 +746,7 @@ export const TaskService = {
                                     .update(File)
                                     .set({
                                         delete_status: DeleteStatus.DELETED,
-                                        delete_time: nowDbTimestamp(),
+                                        delete_time: Temporal.Now.instant(),
                                     })
                                     .where(eq(File.id, existing.file_id));
                             }
@@ -979,12 +982,19 @@ export const TaskService = {
                     if (allCompleted) {
                         await db.update(Media).set({ sync_status: SyncStatus.COMPLETED, last_error: null }).where(eq(Media.id, m.id));
 
-                        // Trigger video cover generation asynchronously after main video completed
-                        if (m.type === "VIDEO") {
+                        // Trigger cover generation asynchronously after main media file completed
+                        if (m.type === MediaType.IMAGE || m.type === MediaType.LIVE_PHOTO || m.type === MediaType.VIDEO) {
                             try {
-                                await VideoCoverService.requestForMedia(m.id);
+                                await TaskManager.createTask({
+                                    type: AsyncTaskType.COVER_BATCH,
+                                    libraryId: m.library_id,
+                                    inputSnapshot: {
+                                        source_type: "MANUAL",
+                                        media_ids: [m.id],
+                                    },
+                                });
                             } catch (coverErr) {
-                                console.error(`[VIDEO COVER] Failed to schedule cover extraction for media ${m.id}:`, coverErr);
+                                console.error(`[COVER_SERVICE] Failed to schedule cover job for media ${m.id}:`, coverErr);
                             }
                         }
                     } else {
@@ -1229,7 +1239,7 @@ export const TaskService = {
                             type: primaryType,
                             purpose: TrackPurpose.CONTENT,
                             is_original: true,
-                            quality: Quality.ORIGINAL,
+                            quality: Quality.HIGH,
                             priority: 0,
                             metadata: {},
                         });
@@ -1240,7 +1250,7 @@ export const TaskService = {
                             type: TrackType.IMAGE,
                             purpose: TrackPurpose.COVER,
                             is_original: false,
-                            quality: Quality.ORIGINAL,
+                            quality: Quality.HIGH,
                             priority: 0,
                             metadata: {},
                         });
@@ -1265,7 +1275,7 @@ export const TaskService = {
                             type: TrackType.VIDEO,
                             purpose: TrackPurpose.CONTENT,
                             is_original: true,
-                            quality: Quality.ORIGINAL,
+                            quality: Quality.HIGH,
                             priority: 0,
                             metadata: {},
                         });
@@ -1441,7 +1451,6 @@ export const TaskService = {
                     const targetPath = `v2/a/${targetAuthorId.slice(-2)}/${targetAuthorId}/${prefix}.${sourceFile.extension}`;
 
                     // Perform S3 copy
-                    const { s3 } = await import("@/global/s3");
                     try {
                         await s3.copy(sourceFile.path, targetPath, { bucket: sourceFile.bucket });
                     } catch (s3Err: any) {
