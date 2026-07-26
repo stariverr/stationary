@@ -291,7 +291,7 @@ const TrackSchema = z.object({
     type: z.enum(TrackType),
     purpose: z.enum(TrackPurpose).default(TrackPurpose.CONTENT),
     is_original: z.boolean().default(true),
-    quality: z.enum(Quality).default(Quality.ORIGINAL),
+    quality: z.enum(Quality).default(Quality.HIGH),
     priority: z.number().default(0),
     metadata: TrackMetadataSchema.nullish(),
 });
@@ -843,7 +843,12 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Batch regenerate video covers",
         tags: ["Media"],
-        bodySchema: z.object({ media_ids: z.array(z.uuid()), replace_external_cover: z.boolean().optional() }),
+        bodySchema: z.object({
+            library_id: z.uuid(),
+            media_ids: z.array(z.uuid()).optional(),
+            post_ids: z.array(z.uuid()).optional(),
+            replace_external_cover: z.boolean().optional(),
+        }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
