@@ -39,8 +39,17 @@ export async function sweepOrphanTags() {
     return { sweptCount: tagIds.length };
 }
 
-// If run directly as a script
-if (require.main === module || process.argv[1] === import.meta.filename) {
+// Detect if this file is being executed directly as a standalone CLI script.
+// NOTE: Avoid using `process.argv[1] === import.meta.filename` or `require.main === module` here!
+// When bundled into single-file `dist/index.js` via `bun build`, `import.meta.filename` and `process.argv[1]`
+// both resolve to `dist/index.js`, which would falsely trigger `sweepOrphanTags()` and `process.exit(0)` on server boot,
+// causing the Docker container to crash-restart endlessly.
+const isDirectRun =
+    typeof process !== "undefined" &&
+    Boolean(process.argv[1]) &&
+    (process.argv[1].endsWith("sweep_orphans.ts") || process.argv[1].endsWith("sweep_orphans.js"));
+
+if (isDirectRun) {
     sweepOrphanTags()
         .then(() => process.exit(0))
         .catch((err) => {
