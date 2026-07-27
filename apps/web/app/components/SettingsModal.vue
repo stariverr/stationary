@@ -562,7 +562,7 @@ watch(
 
 <template>
     <Dialog :open="isOpen" @update:open="isOpen = $event">
-        <DialogContent class="sm:max-w-[600px] flex flex-col p-0 overflow-hidden bg-white">
+        <DialogContent class="sm:max-w-150 flex flex-col p-0 overflow-hidden bg-white">
             <DialogHeader class="px-6 py-4 border-b shrink-0">
                 <DialogTitle class="text-xl font-bold">{{ $t("settings.title") }}</DialogTitle>
                 <DialogDescription>
@@ -618,7 +618,7 @@ watch(
                                             </p>
                                         </div>
                                         <Select :model-value="locale" @update:model-value="handleLocaleChange">
-                                            <SelectTrigger class="w-[200px]">
+                                            <SelectTrigger class="w-50">
                                                 <SelectValue placeholder="Select a language" />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1029,7 +1029,7 @@ watch(
                                                         >
                                                             <Check
                                                                 v-if="selectedCoverQualities.includes(item.key)"
-                                                                class="w-2.5 h-2.5 stroke-[3]"
+                                                                class="w-2.5 h-2.5 stroke-3"
                                                             />
                                                         </div>
                                                     </div>
