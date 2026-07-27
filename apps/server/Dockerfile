@@ -19,9 +19,9 @@ RUN bun run build
 FROM base AS release
 ENV NODE_ENV=production
 
-# Install FFmpeg for video cover frame extraction
+# Install FFmpeg and ImageMagick for media cover frame extraction
 USER root
-RUN apk add --no-cache ffmpeg
+RUN apk add --no-cache ffmpeg imagemagick
 USER bun
 
 COPY --from=build /app/apps/server/dist/index.js index.js

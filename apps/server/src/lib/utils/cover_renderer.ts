@@ -42,7 +42,10 @@ export function detectFormatStrategy(sourceUrl: string, mediaType: MediaType): M
         };
     }
 
-    if (["jpeg", "jpg", "png", "webp", "avif", "gif"].includes(ext) || (mediaType === MediaType.IMAGE && ext !== "mp4" && ext !== "mov")) {
+    if (
+        ["jpeg", "jpg", "png", "webp", "avif", "gif", "jxl"].includes(ext) ||
+        (mediaType === MediaType.IMAGE && ext !== "mp4" && ext !== "mov")
+    ) {
         return {
             category: "STANDARD_IMAGE",
             extension: ext,
@@ -97,11 +100,21 @@ export async function renderCoverFrame(
             effectiveSource = tempSourcePath;
         }
 
+        // 1. Direct ImageMagick / HEIC CLI rendering for static image formats (HEIC, HEIF, JPEG, PNG, WEBP, AVIF, GIF)
+        if (strategy.category === "HEIF_IMAGE" || strategy.category === "STANDARD_IMAGE") {
+            const ok = await tryImageMagickCover(effectiveSource, profile, tempFilePath);
+            if (ok) {
+                const buffer = await readAndValidateAvif(tempFilePath);
+                const { width, height } = await probeImageDimensions(tempFilePath);
+                return { buffer, width, height, size: buffer.length };
+            }
+        }
+
+        // 2. FFmpeg execution (for VIDEO_CONTAINER or fallback for images if ImageMagick is missing)
         try {
             const cmd = buildFFmpegCommand(effectiveSource, strategy, profile, tempFilePath);
             await executeFFmpeg(cmd, timeoutMs, sourceUrl);
         } catch (err) {
-            // Fallback for remote video streams or unexpected remote HTTP errors
             if (isRemoteUrl && !tempSourcePath) {
                 console.warn(
                     `[COVER_RENDERER] Direct remote FFmpeg execution failed for ${strategy.category} (${redactUrl(sourceUrl)}), downloading local temp file fallback...`,
@@ -129,6 +142,41 @@ export async function renderCoverFrame(
             await safeDeleteFile(tempSourcePath);
         }
     }
+}
+
+/**
+ * Attempts to render a resized AVIF cover image directly from a static image file (HEIC, JPEG, PNG, WEBP, etc.)
+ * using ImageMagick (`magick` / `convert`) or `heif-enc`.
+ * Handles EXIF auto-rotation (-auto-orient) and aspect-ratio bounds directly.
+ */
+async function tryImageMagickCover(inputPath: string, profile: CoverProfile, outputPath: string): Promise<boolean> {
+    const maxDim = `${profile.maxEdge}x${profile.maxEdge}>`;
+    const cliCandidates = [
+        ["magick", inputPath, "-auto-orient", "-resize", maxDim, "-quality", String(profile.quality), outputPath],
+        ["heif-enc", inputPath, "-t", String(profile.maxEdge), "-q", String(profile.quality), "-o", outputPath],
+        ["heif-enc", inputPath, "-q", String(profile.quality), "-o", outputPath],
+    ];
+
+    for (const cmd of cliCandidates) {
+        try {
+            const process = Bun.spawn({
+                cmd,
+                stdout: "pipe",
+                stderr: "pipe",
+            });
+            const exitCode = await process.exited;
+            if (exitCode === 0 && (await Bun.file(outputPath).exists())) {
+                const bytes = await Bun.file(outputPath).bytes();
+                if (bytes.byteLength > 0 && isValidAvifSignature(bytes)) {
+                    return true;
+                }
+            }
+        } catch {
+            // Binary not installed or failed, try next candidate
+        }
+    }
+
+    return false;
 }
 
 /**
