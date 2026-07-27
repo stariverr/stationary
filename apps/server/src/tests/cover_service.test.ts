@@ -139,4 +139,37 @@ describe("Cover Photo Multi-Quality Service Tests", () => {
 
         expect(candidates[0].file.extension).toBe("jpg");
     });
+
+    test("renderCoverFrame renders local HEIC files without throwing moov atom errors", async () => {
+        const { renderCoverFrame } = require("@/lib/utils/cover_renderer");
+        const heicSample = "/Users/kazuha/sec/XHS-Downloader/Download_1/67c191ef000000000603d16e_8.heic";
+
+        if (await Bun.file(heicSample).exists()) {
+            const result = await renderCoverFrame(heicSample, MediaType.IMAGE, Quality.LOW);
+            expect(result.buffer).toBeDefined();
+            expect(result.buffer.length).toBeGreaterThan(0);
+            expect(result.width).toBeGreaterThan(0);
+            expect(result.height).toBeGreaterThan(0);
+        }
+    });
+
+    test("detectFormatStrategy classifies formats into distinct strategies", () => {
+        const { detectFormatStrategy } = require("@/lib/utils/cover_renderer");
+
+        const heic = detectFormatStrategy("https://example.com/photo.heic", MediaType.IMAGE);
+        expect(heic.category).toBe("HEIF_IMAGE");
+        expect(heic.requiresLocalDownload).toBe(true);
+
+        const jpeg = detectFormatStrategy("https://example.com/image.jpg", MediaType.IMAGE);
+        expect(jpeg.category).toBe("STANDARD_IMAGE");
+        expect(jpeg.requiresLocalDownload).toBe(false);
+
+        const mp4 = detectFormatStrategy("https://example.com/video.mp4", MediaType.VIDEO);
+        expect(mp4.category).toBe("VIDEO_CONTAINER");
+        expect(mp4.seekOptions).toEqual(["-ss", "00:00:00.500"]);
+
+        const mov = detectFormatStrategy("https://example.com/clip.mov", MediaType.VIDEO);
+        expect(mov.category).toBe("VIDEO_CONTAINER");
+        expect(mov.seekOptions).toEqual(["-ss", "00:00:00.500"]);
+    });
 });

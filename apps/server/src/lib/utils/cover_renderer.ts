@@ -14,6 +14,60 @@ export interface RenderedCoverResult {
     size: number;
 }
 
+export type MediaFormatCategory = "HEIF_IMAGE" | "STANDARD_IMAGE" | "VIDEO_CONTAINER" | "UNKNOWN";
+
+export interface MediaFormatStrategy {
+    category: MediaFormatCategory;
+    extension: string;
+    requiresLocalDownload: boolean;
+    seekOptions: string[];
+}
+
+/**
+ * Detects format category and returns format-specific rendering strategy.
+ * Different formats require distinct FFmpeg input flags and network download behaviors:
+ * - HEIF/HEIC (ISOBMFF): Requires local download to allow FFmpeg's mov/heif demuxer to seek into metadata atoms.
+ * - STANDARD_IMAGE (JPEG, PNG, WEBP, AVIF, GIF): Direct image decoding without video seeking flags.
+ * - VIDEO_CONTAINER (MP4, MOV, WEBM, MKV with AV1/HEVC/AVC): Fast video stream seeking (-ss 00:00:00.500) before -i.
+ */
+export function detectFormatStrategy(sourceUrl: string, mediaType: MediaType): MediaFormatStrategy {
+    const ext = extractExtensionFromUrl(sourceUrl);
+
+    if (ext === "heic" || ext === "heif") {
+        return {
+            category: "HEIF_IMAGE",
+            extension: ext,
+            requiresLocalDownload: true,
+            seekOptions: [],
+        };
+    }
+
+    if (["jpeg", "jpg", "png", "webp", "avif", "gif"].includes(ext) || (mediaType === MediaType.IMAGE && ext !== "mp4" && ext !== "mov")) {
+        return {
+            category: "STANDARD_IMAGE",
+            extension: ext,
+            requiresLocalDownload: false,
+            seekOptions: [],
+        };
+    }
+
+    if (["mp4", "mov", "m4v", "webm", "mkv", "avi"].includes(ext) || mediaType === MediaType.VIDEO) {
+        return {
+            category: "VIDEO_CONTAINER",
+            extension: ext,
+            requiresLocalDownload: false,
+            seekOptions: ["-ss", "00:00:00.500"],
+        };
+    }
+
+    return {
+        category: "UNKNOWN",
+        extension: ext,
+        requiresLocalDownload: mediaType === MediaType.IMAGE,
+        seekOptions: [],
+    };
+}
+
 /**
  * Renders an AVIF cover image for an IMAGE, LIVE_PHOTO, or VIDEO media item,
  * enforcing aspect-ratio-preserving max-edge bounds for both landscape and portrait orientations.
@@ -29,11 +83,36 @@ export async function renderCoverFrame(
         throw new Error(`Unsupported cover quality: ${targetQuality}`);
     }
 
+    const strategy = detectFormatStrategy(sourceUrl, mediaType);
     const tempFilePath = join(tmpdir(), `cover-${targetQuality.toLowerCase()}-${crypto.randomUUID()}.avif`);
+    let tempSourcePath: string | null = null;
 
     try {
-        const cmd = buildFFmpegCommand(sourceUrl, mediaType, profile, tempFilePath);
-        await executeFFmpeg(cmd, timeoutMs, sourceUrl);
+        const isRemoteUrl = sourceUrl.startsWith("http://") || sourceUrl.startsWith("https://");
+        let effectiveSource = sourceUrl;
+
+        // Format-specific pre-downloading (e.g. HEIC/HEIF container images require local random seeking)
+        if (isRemoteUrl && strategy.requiresLocalDownload) {
+            tempSourcePath = await downloadRemoteToTempFile(sourceUrl);
+            effectiveSource = tempSourcePath;
+        }
+
+        try {
+            const cmd = buildFFmpegCommand(effectiveSource, strategy, profile, tempFilePath);
+            await executeFFmpeg(cmd, timeoutMs, sourceUrl);
+        } catch (err) {
+            // Fallback for remote video streams or unexpected remote HTTP errors
+            if (isRemoteUrl && !tempSourcePath) {
+                console.warn(
+                    `[COVER_RENDERER] Direct remote FFmpeg execution failed for ${strategy.category} (${redactUrl(sourceUrl)}), downloading local temp file fallback...`,
+                );
+                tempSourcePath = await downloadRemoteToTempFile(sourceUrl);
+                const cmd = buildFFmpegCommand(tempSourcePath, strategy, profile, tempFilePath);
+                await executeFFmpeg(cmd, timeoutMs, sourceUrl);
+            } else {
+                throw err;
+            }
+        }
 
         const buffer = await readAndValidateAvif(tempFilePath);
         const { width, height } = await probeImageDimensions(tempFilePath);
@@ -46,36 +125,72 @@ export async function renderCoverFrame(
         };
     } finally {
         await safeDeleteFile(tempFilePath);
+        if (tempSourcePath) {
+            await safeDeleteFile(tempSourcePath);
+        }
     }
 }
 
 /**
- * Constructs structured FFmpeg command-line arguments grouped by domain logic.
+ * Downloads a remote file to a temporary file on disk using Bun's native streaming write.
  */
-function buildFFmpegCommand(sourceUrl: string, mediaType: MediaType, profile: CoverProfile, outputPath: string): string[] {
-    const isRemoteUrl = sourceUrl.startsWith("http://") || sourceUrl.startsWith("https://");
+async function downloadRemoteToTempFile(url: string): Promise<string> {
+    const ext = extractExtensionFromUrl(url);
+    const tempPath = join(tmpdir(), `source-${crypto.randomUUID()}.${ext}`);
+    const response = await fetch(url, {
+        headers: {
+            "User-Agent": DEFAULT_USER_AGENT,
+        },
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to download remote media for cover rendering: HTTP ${response.status} ${response.statusText}`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    await Bun.write(tempPath, arrayBuffer);
+    return tempPath;
+}
+
+/**
+ * Extracts sanitized file extension from a URL path.
+ */
+function extractExtensionFromUrl(url: string): string {
+    try {
+        const parsed = new URL(url);
+        const pathname = parsed.pathname;
+        const lastDot = pathname.lastIndexOf(".");
+        if (lastDot !== -1) {
+            const ext = pathname.slice(lastDot + 1).toLowerCase();
+            if (/^[a-z0-9]+$/.test(ext)) {
+                return ext;
+            }
+        }
+    } catch {}
+    return "tmp";
+}
+
+/**
+ * Constructs structured FFmpeg command-line arguments grouped by format strategy logic.
+ */
+function buildFFmpegCommand(sourcePath: string, strategy: MediaFormatStrategy, profile: CoverProfile, outputPath: string): string[] {
+    const isRemoteUrl = sourcePath.startsWith("http://") || sourcePath.startsWith("https://");
 
     // 1. Global options: Executable name, suppress banners, log errors only, disable stdin interaction
     const globalOptions = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"];
 
-    // 2. Network resilience: Disguise User-Agent and enable auto-reconnect for remote S3/R2 presigned URLs
+    // 2. Network resilience: Disguise User-Agent and enable auto-reconnect for remote S3/R2 presigned URLs.
+    // NOTE: -reconnect_streamed 1 is intentionally omitted as it forces HTTP streams to be marked non-seekable,
+    // breaking ISOBMFF/MOV/MP4/HEIC demuxing.
     const networkOptions = isRemoteUrl
-        ? ["-user_agent", DEFAULT_USER_AGENT, "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
+        ? ["-user_agent", DEFAULT_USER_AGENT, "-reconnect", "1", "-reconnect_at_eof", "1", "-reconnect_delay_max", "5"]
         : [];
 
-    // 3. Fast video seeking: Placed before `-i` to perform HTTP Range requests (samples frame at 0.5s without full download)
-    const seekOptions = mediaType === MediaType.VIDEO ? ["-ss", "00:00:00.500"] : [];
+    // 3. Format-specific seek options (e.g. -ss 00:00:00.500 for VIDEO_CONTAINER)
+    const seekOptions = strategy.seekOptions;
 
     // 4. Input file source
-    const inputOptions = ["-i", sourceUrl];
+    const inputOptions = ["-i", sourcePath];
 
-    // 5. Video filter: Uses `-filter_complex` instead of `-vf` (simple filtergraph) with an explicit stream map.
-    // RATIONALE:
-    // For HEIC, HEIF, Live Photo MOV, or videos with EXIF/DisplayMatrix rotation metadata, FFmpeg's internal
-    // decoders automatically construct an internal complex filtergraph for tile decoding and auto-rotation.
-    // FFmpeg 7+ / 8+ strictly forbids combining simple `-vf` and complex filtergraphs on the same stream,
-    // throwing exit status 234: "Simple and complex filtering cannot be used together for the same stream."
-    // Using `-filter_complex "[0:v]<scale_filter>[outv]" -map "[outv]"` ensures full compatibility across all media formats.
+    // 5. Video filter: Uses -filter_complex instead of -vf with explicit stream map for tile decoding and auto-rotation
     const filterOptions = ["-filter_complex", `[0:v]${buildScaleFilter(profile.maxEdge)}[outv]`, "-map", "[outv]"];
 
     // 6. Encoder settings: Capture a single frame using SVT-AV1 still-picture mode
