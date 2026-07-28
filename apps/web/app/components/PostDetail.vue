@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
+    AlertTriangle,
     ChevronDown,
     ChevronLeft,
     ChevronRight,
@@ -19,8 +20,10 @@ import {
     ZoomIn,
     ZoomOut,
     Maximize,
+    CircleDotDashed,
     PanelRight,
 } from "@lucide/vue";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { storeToRefs } from "pinia";
 import { useQueryClient } from "@tanstack/vue-query";
 import { toast } from "vue-sonner";
@@ -68,6 +71,7 @@ const canNext = computed(
     () => postMediaList.value.length > 1 || currentIndex.value < postMediaList.value.length - 1 || mediaPage.value < mediaTotalPages.value,
 );
 const platformLabel = computed(() => t(`platforms.${selectedPost.value?.platform || "UNKNOWN"}`));
+const formatMediaType = (type?: string | null) => getMediaTypeLabel(type, t);
 
 const isEditingTracks = ref(false);
 const trackEditMediaId = ref<string | undefined>(undefined);
@@ -387,6 +391,41 @@ const handleTrashMedia = async (mediaId: string) => {
         toast.error(t("post_detail.toasts.trash_failed"), { description: error.message || String(error) });
     }
 };
+
+const pendingUnlinkMediaId = ref<string | null>(null);
+const pendingTrashMediaId = ref<string | null>(null);
+const isUnlinking = ref(false);
+const isTrashing = ref(false);
+
+const requestUnlinkMedia = (mediaId: string) => {
+    pendingUnlinkMediaId.value = mediaId;
+};
+
+const requestTrashMedia = (mediaId: string) => {
+    pendingTrashMediaId.value = mediaId;
+};
+
+const confirmUnlinkMedia = async () => {
+    if (!pendingUnlinkMediaId.value) return;
+    isUnlinking.value = true;
+    try {
+        await handleUnlinkMedia(pendingUnlinkMediaId.value);
+    } finally {
+        isUnlinking.value = false;
+        pendingUnlinkMediaId.value = null;
+    }
+};
+
+const confirmTrashMedia = async () => {
+    if (!pendingTrashMediaId.value) return;
+    isTrashing.value = true;
+    try {
+        await handleTrashMedia(pendingTrashMediaId.value);
+    } finally {
+        isTrashing.value = false;
+        pendingTrashMediaId.value = null;
+    }
+};
 </script>
 
 <template>
@@ -403,81 +442,102 @@ const handleTrashMedia = async (mediaId: string) => {
     >
         <!-- Full-screen media stage -->
         <section v-if="isOverlay" class="relative flex min-w-0 flex-1 flex-col bg-zinc-950 group/fullscreen">
-            <!-- Floating Nav Arrows for Fullscreen on Hover -->
+            <!-- Floating Nav Arrows for Fullscreen -->
             <button
                 v-if="postMediaList.length > 1 && canPrevious && !isUiHidden"
                 type="button"
                 @click.stop="previousMedia"
-                class="absolute left-6 top-1/2 -translate-y-1/2 flex h-12 w-12 items-center justify-center rounded-full bg-black/35 text-white border border-white/10 backdrop-blur-md hover:bg-white/10 hover:text-white hover:scale-105 active:scale-95 transition-all duration-300 opacity-0 -translate-x-3 group-hover/fullscreen:opacity-100 group-hover/fullscreen:translate-x-0 z-30 cursor-pointer"
-                title="Previous media"
+                class="absolute left-3 md:left-6 top-1/2 -translate-y-1/2 flex h-10 w-10 md:h-12 md:w-12 items-center justify-center rounded-full bg-black/40 text-white border border-white/10 backdrop-blur-md hover:bg-white/20 hover:text-white hover:scale-105 active:scale-95 transition-all duration-300 opacity-80 md:opacity-0 md:-translate-x-3 md:group-hover/fullscreen:opacity-100 md:group-hover/fullscreen:translate-x-0 z-30 cursor-pointer"
+                :title="$t('post_detail.previous_media')"
             >
-                <ChevronLeft class="h-6 w-6" />
+                <ChevronLeft class="h-5 w-5 md:h-6 md:w-6" />
             </button>
             <button
                 v-if="postMediaList.length > 1 && canNext && !isUiHidden"
                 type="button"
                 @click.stop="nextMedia"
-                class="absolute right-6 top-1/2 -translate-y-1/2 flex h-12 w-12 items-center justify-center rounded-full bg-black/35 text-white border border-white/10 backdrop-blur-md hover:bg-white/10 hover:text-white hover:scale-105 active:scale-95 transition-all duration-300 opacity-0 translate-x-3 group-hover/fullscreen:opacity-100 group-hover/fullscreen:translate-x-0 z-30 cursor-pointer"
-                title="Next media"
+                class="absolute right-3 md:right-6 top-1/2 -translate-y-1/2 flex h-10 w-10 md:h-12 md:w-12 items-center justify-center rounded-full bg-black/40 text-white border border-white/10 backdrop-blur-md hover:bg-white/20 hover:text-white hover:scale-105 active:scale-95 transition-all duration-300 opacity-80 md:opacity-0 md:translate-x-3 md:group-hover/fullscreen:opacity-100 md:group-hover/fullscreen:translate-x-0 z-30 cursor-pointer"
+                :title="$t('post_detail.next_media')"
             >
-                <ChevronRight class="h-6 w-6" />
+                <ChevronRight class="h-5 w-5 md:h-6 md:w-6" />
             </button>
 
             <div
                 v-if="!isUiHidden"
-                class="absolute inset-x-0 top-0 z-20 flex items-center justify-between px-6 pt-4 pb-12 bg-gradient-to-b from-black/70 via-black/25 to-transparent pointer-events-none"
+                class="absolute inset-x-0 top-0 z-40 flex h-18 items-center justify-between px-4 md:px-6 pointer-events-none select-none"
             >
-                <!-- Left: Title & Counter -->
-                <div class="flex items-center gap-2.5 pointer-events-auto select-none">
-                    <span
+                <!-- Left: Media Title & Counter Pill -->
+                <div class="flex items-center pointer-events-auto">
+                    <div
                         v-if="currentMedia"
-                        class="max-w-[30vw] truncate text-[13px] font-medium text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]"
+                        class="flex h-10 items-center gap-2.5 rounded-full border border-white/15 bg-zinc-950/80 px-4 backdrop-blur-xl shadow-2xl"
                     >
-                        {{ currentMediaTitle }}
-                    </span>
-                    <span v-if="currentMedia" class="text-white/25 text-xs">·</span>
-                    <span
-                        v-if="currentMedia"
-                        class="font-mono text-[11px] text-white/50 font-semibold tabular-nums drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]"
-                        >{{ mediaCounter }}</span
-                    >
+                        <component
+                            :is="
+                                currentMedia.type === 'LIVE_PHOTO'
+                                    ? CircleDotDashed
+                                    : currentMedia.type === 'VIDEO'
+                                      ? Film
+                                      : currentMedia.type === 'AUDIO'
+                                        ? Music
+                                        : FileImage
+                            "
+                            class="h-4 w-4 text-emerald-400 shrink-0"
+                        />
+                        <span
+                            v-if="currentMedia.type === 'LIVE_PHOTO'"
+                            class="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-[10px] font-bold text-emerald-300 uppercase tracking-wider select-none leading-none shrink-0"
+                        >
+                            {{ $t("media.live") }}
+                        </span>
+                        <span class="max-w-[140px] sm:max-w-[200px] md:max-w-[280px] truncate text-xs font-semibold text-white/95">
+                            {{ currentMediaTitle }}
+                        </span>
+                        <span class="h-3.5 w-px bg-white/20"></span>
+                        <span class="font-mono text-xs font-bold tabular-nums text-white/80 bg-white/10 px-2 py-0.5 rounded-full">
+                            {{ mediaCounter }}
+                        </span>
+                    </div>
                 </div>
 
-                <!-- Center: Image Inspection Tools -->
-                <div v-if="currentMedia?.type === 'IMAGE'" class="hidden md:flex items-center gap-0.5 pointer-events-auto select-none">
+                <!-- Center: Floating Glassmorphism Inspection Toolbar -->
+                <div
+                    v-if="currentMedia?.type === 'IMAGE' || currentMedia?.type === 'VIDEO'"
+                    class="hidden sm:flex h-10 items-center gap-1 rounded-full border border-white/15 bg-zinc-950/80 px-3 backdrop-blur-xl shadow-2xl pointer-events-auto"
+                >
                     <!-- Rotate Left -->
                     <button
                         type="button"
                         @click="rotateLeft"
-                        class="flex h-8 w-8 items-center justify-center rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-all duration-150 cursor-pointer"
+                        class="flex h-8 w-8 items-center justify-center rounded-full text-white/75 hover:bg-white/15 hover:text-white transition-all cursor-pointer active:scale-95"
                         :title="$t('post_detail.viewer.rotate_left')"
                         :aria-label="$t('post_detail.viewer.rotate_left')"
                     >
-                        <RotateCcw class="w-4 h-4" />
+                        <RotateCcw class="h-4 w-4" />
                     </button>
                     <!-- Rotate Right -->
                     <button
                         type="button"
                         @click="rotateRight"
-                        class="flex h-8 w-8 items-center justify-center rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-all duration-150 cursor-pointer"
+                        class="flex h-8 w-8 items-center justify-center rounded-full text-white/75 hover:bg-white/15 hover:text-white transition-all cursor-pointer active:scale-95"
                         :title="$t('post_detail.viewer.rotate_right')"
                         :aria-label="$t('post_detail.viewer.rotate_right')"
                     >
-                        <RotateCw class="w-4 h-4" />
+                        <RotateCw class="h-4 w-4" />
                     </button>
 
-                    <div class="h-4 w-px bg-white/15 mx-1.5" />
+                    <span class="h-4 w-px bg-white/15 mx-1"></span>
 
                     <!-- Zoom Out -->
                     <button
                         type="button"
                         @click="zoomOut"
                         :disabled="zoomLevel <= MIN_ZOOM"
-                        class="flex h-8 w-8 items-center justify-center rounded-full text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-20 disabled:cursor-default disabled:hover:bg-transparent transition-all duration-150 cursor-pointer"
+                        class="flex h-8 w-8 items-center justify-center rounded-full text-white/75 hover:bg-white/15 hover:text-white disabled:opacity-20 disabled:cursor-default disabled:hover:bg-transparent transition-all cursor-pointer active:scale-95"
                         :title="$t('post_detail.viewer.zoom_out')"
                         :aria-label="$t('post_detail.viewer.zoom_out')"
                     >
-                        <ZoomOut class="w-4 h-4" />
+                        <ZoomOut class="h-4 w-4" />
                     </button>
 
                     <!-- Zoom Slider -->
@@ -487,7 +547,7 @@ const handleTrashMedia = async (mediaId: string) => {
                         :max="MAX_ZOOM"
                         step="0.05"
                         v-model.number="zoomLevel"
-                        class="w-24 h-1 rounded-full appearance-none cursor-pointer focus:outline-none mx-1 bg-white/12 hover:bg-white/20 transition-colors [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white/85 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:transition-all [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:hover:bg-white [&::-webkit-slider-thumb]:hover:scale-115 [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white/85 [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:shadow-md"
+                        class="w-20 md:w-24 h-1 rounded-full appearance-none cursor-pointer focus:outline-none mx-1.5 bg-white/20 hover:bg-white/30 transition-colors [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:shadow-md"
                     />
 
                     <!-- Zoom In -->
@@ -495,20 +555,20 @@ const handleTrashMedia = async (mediaId: string) => {
                         type="button"
                         @click="zoomIn"
                         :disabled="zoomLevel >= MAX_ZOOM"
-                        class="flex h-8 w-8 items-center justify-center rounded-full text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-20 disabled:cursor-default disabled:hover:bg-transparent transition-all duration-150 cursor-pointer"
+                        class="flex h-8 w-8 items-center justify-center rounded-full text-white/75 hover:bg-white/15 hover:text-white disabled:opacity-20 disabled:cursor-default disabled:hover:bg-transparent transition-all cursor-pointer active:scale-95"
                         :title="$t('post_detail.viewer.zoom_in')"
                         :aria-label="$t('post_detail.viewer.zoom_in')"
                     >
-                        <ZoomIn class="w-4 h-4" />
+                        <ZoomIn class="h-4 w-4" />
                     </button>
 
-                    <div class="h-4 w-px bg-white/15 mx-1.5" />
+                    <span class="h-4 w-px bg-white/15 mx-1"></span>
 
                     <!-- 1:1 Size -->
                     <button
                         type="button"
                         @click="zoomTo(1)"
-                        class="h-8 px-2 flex items-center justify-center rounded-full text-[10px] font-bold text-white/60 hover:text-white hover:bg-white/10 transition-all duration-150 cursor-pointer"
+                        class="h-8 px-2.5 flex items-center justify-center rounded-full text-[11px] font-mono font-bold text-white/75 hover:bg-white/15 hover:text-white transition-all cursor-pointer active:scale-95"
                         :title="$t('post_detail.viewer.zoom_reset_original')"
                     >
                         1:1
@@ -517,34 +577,34 @@ const handleTrashMedia = async (mediaId: string) => {
                     <button
                         type="button"
                         @click="resetZoomRotate"
-                        class="flex h-8 w-8 items-center justify-center rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-all duration-150 cursor-pointer"
+                        class="flex h-8 w-8 items-center justify-center rounded-full text-white/75 hover:bg-white/15 hover:text-white transition-all cursor-pointer active:scale-95"
                         :title="$t('post_detail.viewer.zoom_reset_fit')"
                         :aria-label="$t('post_detail.viewer.zoom_reset_fit')"
                     >
-                        <Maximize class="w-4 h-4" />
+                        <Maximize class="h-4 w-4" />
                     </button>
                 </div>
 
-                <!-- Right: Close Button (when Media Only mode is active) -->
+                <!-- Right: Close Button -->
                 <div class="flex items-center pointer-events-auto">
                     <button
-                        v-if="isMediaOnly"
                         type="button"
-                        class="flex h-8 w-8 items-center justify-center rounded-full text-white/60 hover:text-white hover:bg-white/10 transition-all duration-200 cursor-pointer"
+                        class="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-950/80 hover:bg-white/20 border border-white/15 text-white/80 hover:text-white backdrop-blur-xl shadow-2xl transition-all duration-150 cursor-pointer active:scale-95"
                         :title="$t('post_detail.close')"
                         :aria-label="$t('post_detail.close')"
                         @click="closeDetail"
                     >
-                        <X class="w-[18px] h-[18px]" />
+                        <X class="h-4 w-4" />
                     </button>
                 </div>
             </div>
 
-            <div class="flex min-h-0 flex-1 items-center justify-center px-2 pb-2 pt-12 md:px-4">
+            <div class="flex min-h-0 flex-1 items-center justify-center p-0 overflow-hidden">
                 <UniversalMediaViewer
                     :media="currentMedia"
                     :is-loading="isLoadingMediaList"
-                    :interactive="currentMedia?.type === 'IMAGE'"
+                    :interactive="['IMAGE', 'LIVE_PHOTO', 'VIDEO'].includes(currentMedia?.type || '')"
+                    :hide-badge="isOverlay"
                     :zoom="zoomLevel"
                     :rotation="rotationAngle"
                     @zoom-change="zoomLevel = $event"
@@ -645,18 +705,18 @@ const handleTrashMedia = async (mediaId: string) => {
                 <UniversalMediaViewer
                     :media="currentMedia"
                     :is-loading="isLoadingMediaList"
-                    :interactive="currentMedia?.type === 'IMAGE'"
+                    :interactive="['IMAGE', 'LIVE_PHOTO', 'VIDEO'].includes(currentMedia?.type || '')"
                     @click-media="handleMediaClick"
                     class="h-full w-full"
                 />
 
-                <!-- Nav Arrows for Standard Player on Hover -->
+                <!-- Nav Arrows for Standard Player -->
                 <button
                     v-if="postMediaList.length > 1 && canPrevious"
                     type="button"
                     @click.stop="previousMedia"
-                    class="absolute left-3 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-xs hover:bg-black/80 transition-opacity opacity-0 group-hover/player:opacity-100 z-10 cursor-pointer"
-                    title="Previous media"
+                    class="absolute left-3 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-xs hover:bg-black/80 transition-opacity opacity-80 md:opacity-0 md:group-hover/player:opacity-100 z-10 cursor-pointer"
+                    :title="$t('post_detail.previous_media')"
                 >
                     <ChevronLeft class="h-4.5 w-4.5" />
                 </button>
@@ -664,8 +724,8 @@ const handleTrashMedia = async (mediaId: string) => {
                     v-if="postMediaList.length > 1 && canNext"
                     type="button"
                     @click.stop="nextMedia"
-                    class="absolute right-3 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-xs hover:bg-black/80 transition-opacity opacity-0 group-hover/player:opacity-100 z-10 cursor-pointer"
-                    title="Next media"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-xs hover:bg-black/80 transition-opacity opacity-80 md:opacity-0 md:group-hover/player:opacity-100 z-10 cursor-pointer"
+                    :title="$t('post_detail.next_media')"
                 >
                     <ChevronRight class="h-4.5 w-4.5" />
                 </button>
@@ -690,7 +750,7 @@ const handleTrashMedia = async (mediaId: string) => {
                 <div class="min-w-0 flex-1 mr-3 flex items-center gap-2">
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
                     <h4 class="text-xs font-semibold text-zinc-800 dark:text-zinc-200 truncate" :title="currentMediaTitle">
-                        {{ currentMediaTitle || `Media #${currentPosition + 1}` }}
+                        {{ currentMediaTitle || $t("post_detail.media_item", { number: currentPosition + 1 }) }}
                     </h4>
                 </div>
                 <span class="font-mono text-[11px] tabular-nums font-semibold text-zinc-600 dark:text-zinc-300 shrink-0">
@@ -825,14 +885,14 @@ const handleTrashMedia = async (mediaId: string) => {
                                             : 'text-zinc-900 dark:text-zinc-100',
                                     ]"
                                 >
-                                    {{ item.title || `Media #${item.position + 1}` }}
+                                    {{ item.title || $t("post_detail.media_item", { number: item.position + 1 }) }}
                                 </h5>
                                 <div
                                     class="flex items-center justify-between text-[10px] font-mono text-zinc-500 dark:text-zinc-400 font-medium"
                                 >
                                     <span>#{{ item.position + 1 }}</span>
-                                    <span class="text-[9px] uppercase font-bold text-zinc-600 dark:text-zinc-400">
-                                        {{ item.type }}
+                                    <span class="text-[9px] font-bold text-zinc-600 dark:text-zinc-400">
+                                        {{ formatMediaType(item.type) }}
                                     </span>
                                 </div>
                             </div>
@@ -872,8 +932,8 @@ const handleTrashMedia = async (mediaId: string) => {
                     @upload-media="isCreateMediaOpen = true"
                     @link-orphan="isOrphanPickerOpen = true"
                     @shift-media="handleShiftMedia"
-                    @unlink-media="handleUnlinkMedia"
-                    @trash-media="handleTrashMedia"
+                    @unlink-media="requestUnlinkMedia"
+                    @trash-media="requestTrashMedia"
                     @manage-tracks="openTrackEditor"
                 />
             </div>
@@ -901,4 +961,82 @@ const handleTrashMedia = async (mediaId: string) => {
         @update:open="isCreateMediaOpen = $event"
         @created="handleUploadMediaCreated"
     />
+
+    <!-- Unlink Media Confirmation Dialog -->
+    <Dialog
+        :open="!!pendingUnlinkMediaId"
+        @update:open="
+            (val) => {
+                if (!val) pendingUnlinkMediaId = null;
+            }
+        "
+    >
+        <DialogContent class="sm:max-w-md p-6 bg-white dark:bg-zinc-900 rounded-lg">
+            <DialogHeader class="gap-2">
+                <DialogTitle class="text-base font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                    <AlertTriangle class="w-5 h-5 text-amber-500 shrink-0" />
+                    {{ $t("post_detail.manage.unlink_confirm_title") }}
+                </DialogTitle>
+                <DialogDescription class="text-xs text-zinc-600 dark:text-zinc-400">
+                    {{ $t("post_detail.manage.unlink_confirm_desc") }}
+                </DialogDescription>
+            </DialogHeader>
+            <div class="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                <button
+                    type="button"
+                    class="px-4 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-semibold hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer transition-colors"
+                    @click="pendingUnlinkMediaId = null"
+                >
+                    {{ $t("common.cancel") }}
+                </button>
+                <button
+                    type="button"
+                    :disabled="isUnlinking"
+                    class="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-semibold cursor-pointer transition-colors shadow-xs"
+                    @click="confirmUnlinkMedia"
+                >
+                    {{ $t("post_detail.manage.unlink_button") }}
+                </button>
+            </div>
+        </DialogContent>
+    </Dialog>
+
+    <!-- Trash Media Confirmation Dialog -->
+    <Dialog
+        :open="!!pendingTrashMediaId"
+        @update:open="
+            (val) => {
+                if (!val) pendingTrashMediaId = null;
+            }
+        "
+    >
+        <DialogContent class="sm:max-w-md p-6 bg-white dark:bg-zinc-900 rounded-lg">
+            <DialogHeader class="gap-2">
+                <DialogTitle class="text-base font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+                    <AlertTriangle class="w-5 h-5 text-red-500 shrink-0" />
+                    {{ $t("post_detail.manage.trash_confirm_title") }}
+                </DialogTitle>
+                <DialogDescription class="text-xs text-zinc-600 dark:text-zinc-400">
+                    {{ $t("post_detail.manage.trash_confirm_desc") }}
+                </DialogDescription>
+            </DialogHeader>
+            <div class="flex items-center justify-end gap-2 mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                <button
+                    type="button"
+                    class="px-4 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-semibold hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer transition-colors"
+                    @click="pendingTrashMediaId = null"
+                >
+                    {{ $t("common.cancel") }}
+                </button>
+                <button
+                    type="button"
+                    :disabled="isTrashing"
+                    class="px-4 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-semibold cursor-pointer transition-colors shadow-xs"
+                    @click="confirmTrashMedia"
+                >
+                    {{ $t("post_detail.manage.trash_button") }}
+                </button>
+            </div>
+        </DialogContent>
+    </Dialog>
 </template>
