@@ -113,3 +113,60 @@ erDiagram
   - `VIEWER`：只读权限，可以浏览、搜索和检索资产。
   - `EDITOR`：编辑权限，可以创建/更新 Post、Media 并进行资产移动归档。
   - `ADMIN`：管理权限，除编辑外还可以执行媒体库删除、授权分享管理等高风险操作。
+
+---
+
+## 6. 任务队列引擎与 JobRunner 架构 (Task Queue Engine & JobRunner Architecture)
+
+Stationary 采用**自研的基于 PostgreSQL 数据库轻量级异步任务队列**与进程内 `JobRunner`，完全消除了对外部集中式消息中间件（如 Redis / BullMQ）的强依赖。任务状态、分片发现、租约锁、指数退避重试与状态对账逻辑全部由 PostgreSQL 原生支撑。
+
+```mermaid
+flowchart TD
+    A[API / 业务发起] -->|createTask| B[(async_task 主任务)]
+    B -->|流式分批扫描| C[(async_task_unit 执行单元)]
+    D[JobRunner 调度器] -->|claimUnits FOR UPDATE SKIP LOCKED| C
+    D -->|executeUnit| E[TaskHandler 策略处理器]
+    E -->|定时心跳续租| F[renewUnitLease]
+    E -->|结算执行结果| G[settleTaskUnit]
+    G -->|更新计数并校验终态| H[reconcileTask]
+    I[JobSweeper 定时扫尾 process] -.-|清理死锁租约/恢复中断发现| C
+```
+
+### 6.1 主任务与执行单元数据模型
+
+- **`AsyncTask` (主任务表)**：代表大粒度异步业务操作（如 `COVER_RECONCILE`、`COVER_BATCH`、`AI_ENRICH`、`POST_PROCESS`、`AVATAR_COPY`）。维护流式发现游标 (`discovery_cursor` / `discovery_complete`)、外部控制信号 (`PAUSE` / `CANCEL`)、全局并发度上限 (`max_in_flight`) 以及四项进度计数 (`total_units`, `succeeded_units`, `failed_units`, `cancelled_units`)。
+- **`AsyncTaskUnit` (执行单元表)**：代表最小原子执行单位（如具体单张图片的 `COVER_DERIVATIVE` 缩略图生成或单条媒体的 AI 打标）。记录实体映射 (`subject_type` / `subject_id`)、全局唯一业务键 (`unit_key`)、执行状态 (`PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED`) 以及抢占租约锁 (`lease_token` / `lease_expires_at`)。
+
+### 6.2 任务生命周期与安全机制
+
+1. **流式分批发现 (Chunked Discovery)**：主任务启动后通过游标增量扫描候选数据，避免单次大表查询造成 DB 性能抖动。
+2. **原子抢占与租约锁 (Lease Locking)**：`JobRunner` 利用 PostgreSQL `FOR UPDATE SKIP LOCKED` 语法 (`claimUnits`) 安全抢占就绪的 `PENDING` 单元，并授予 60 秒的租约。
+3. **心跳续租与异常中断 (Heartbeat & Cancellation)**：执行阶段由后台定时器每 20 秒发起 `renewUnitLease` 自动续期。若租约丢失或主任务收到取消信号，系统将通过 `AbortController` 协同中断当前 Handler 的物理执行。
+4. **指数退避与随机抖动 (Exponential Backoff with Jitter)**：对于可重试失败，系统根据重试次数自动计算下一次可执行时间 (`available_at`)：
+   $$\text{延迟时间} = \min\left(300, 5 \times 2^{\text{attempt}-1} \times \text{jitter}\right) \text{ 秒}$$
+5. **状态对账与终态收敛 (Reconciliation)**：单元结算时更新原子计数。当所有单元消费完毕且 `discovery_complete = true`，主任务自动收敛至 `COMPLETED` 或 `FAILED` 并触发 `finalizeTask` 回调。
+
+### 6.3 容错与自动修复 (`JobSweeper`)
+
+后台定时巡检器 `JobSweeper` 每 30 秒自动执行自我修复：
+- **`reclaimExpiredLeases`**：回收已崩溃 Worker 留下的死锁租约，重置为 `PENDING` 或标记超限失败。
+- **`recoverInterruptedDiscovery`**：自动拉起服务重启前未完成的流式数据扫描。
+- **`reconcileReadyTasks`**：审计并修复状态未对齐的主任务。
+- **`purgeOldTasks`**：清理 7 天前已处于终态的历史任务与单元数据，防止数据库膨胀。
+
+### 6.4 封面生成与调和行为规范 (Cover Generation & Reconciliation Specification)
+
+媒体封面的生成、更新与调和逻辑由 `CoverJobHandler` 与 `CoverService` 共同维护，遵循以下行为规范：
+
+1. **手动重新生成与同规格覆盖**：
+   - 当对已有封面的媒体手动触发生成某规格（如 `LOW` + `MEDIUM`）时，系统会重新提取渲染源媒体帧，将渲染出的 AVIF 文件上传至 S3 **覆盖原有 S3 路径**。
+   - 数据库中的 `File` 记录（大小、尺寸、更新时间）与 `Track` 记录（`file_id`、`update_time`、`sync_status = COMPLETED`）会被同步更新。
+2. **多规格独立并存**：
+   - 若媒体已存在 `LOW` + `MEDIUM` + `HIGH` 三种规格，而任务仅派发了 `LOW` + `MEDIUM`，系统仅渲染并更新 `LOW` 与 `MEDIUM` 规格。
+   - 已存在的 `HIGH` 规格 `Track` 记录与 S3 文件完全保留（保持 `ACTIVE` 状态），不会受到影响。
+3. **`COVER_RECONCILE` 调和规则**：
+   - **增量调和 (Incremental Reconcile)**：调和任务仅负责补齐当前媒体库配置（`library.cover_qualities`）所要求的规格。
+   - **配置缩减不裁切**：若媒体库配置由 `[LOW, MEDIUM, HIGH]` 缩减为 `[LOW, MEDIUM]`，`COVER_RECONCILE` **绝不清理或删除**已有的 `HIGH` 封面。
+   - **配置恢复免重复计算**：若后续重新将配置改回 `[LOW, MEDIUM, HIGH]`，再次运行 `COVER_RECONCILE` 时，系统会识别到 `HIGH` 封面已存在且关联源文件未变，自动标记 `isAlreadyCompleted = true` 跳过渲染。
+
+

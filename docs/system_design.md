@@ -112,3 +112,60 @@ The system supports group collaboration using fine-grained permissions:
   - `VIEWER`: Read-only access to browse and retrieve assets.
   - `EDITOR`: Read and write access to upload, move, or edit posts and media.
   - `ADMIN`: Full administrative control, including library deletion and permission management.
+
+---
+
+## 6. Task Queue Engine & JobRunner Architecture
+
+Stationary implements an **in-house, PostgreSQL-backed asynchronous task queue** and in-process `JobRunner`, eliminating external message broker dependencies (e.g., Redis/BullMQ). Task state, chunked discovery, lease locking, exponential backoff retries, and progress reconciliation are managed directly within PostgreSQL.
+
+```mermaid
+flowchart TD
+    A[API / Client] -->|createTask| B[(async_task Master)]
+    B -->|Stream Discovery| C[(async_task_unit Children)]
+    D[JobRunner Worker] -->|claimUnits FOR UPDATE SKIP LOCKED| C
+    D -->|executeUnit| E[TaskHandler Strategy]
+    E -->|Heartbeat Lease Renewal| F[renewUnitLease]
+    E -->|Success / Failure| G[settleTaskUnit]
+    G -->|Update Counters & Terminal Check| H[reconcileTask]
+    I[JobSweeper Background Process] -.-|Reclaim Dead Leases & Purge| C
+```
+
+### 6.1 Master-Child Data Model
+
+- **`AsyncTask` (Master Table)**: Represents high-level asynchronous operations (`COVER_RECONCILE`, `COVER_BATCH`, `AI_ENRICH`, `POST_PROCESS`, `AVATAR_COPY`). Tracks stream discovery state (`discovery_cursor`, `discovery_complete`), user control signals (`PAUSE`, `CANCEL`), concurrency limit (`max_in_flight`), and atomic counters (`succeeded_units`, `failed_units`, `cancelled_units`).
+- **`AsyncTaskUnit` (Child Table)**: Represents atomic execution units scoped to a master task (e.g., generating a `COVER_DERIVATIVE` thumbnail or calling AI for a single media item). Maintains entity references (`subject_type`, `subject_id`), idempotent key (`unit_key`), execution status (`PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED`), lease token (`lease_token`), and lease expiry timestamp (`lease_expires_at`).
+
+### 6.2 Execution Lifecycle & Safety
+
+1. **Chunked Stream Discovery**: Master tasks scan candidate items incrementally using cursor payloads (`discoverTaskBatch`), preventing massive query memory overhead.
+2. **Atomic Lease Locking & Claiming**: `JobRunner` retrieves eligible `PENDING` units using PostgreSQL `FOR UPDATE SKIP LOCKED` (`claimUnits`), acquiring a 60-second execution lease (`lease_token`).
+3. **Heartbeat Lease Renewal**: During execution (`executeUnit`), a 20-second background heartbeat interval continuously extends active leases (`renewUnitLease`). Loss of lease or parent task cancellation aborts execution via `AbortController`.
+4. **Exponential Backoff Retries**: Failed units with retry eligibility recalculate next availability (`available_at`) using jittered exponential backoff:
+   $$\text{Delay} = \min\left(300, 5 \times 2^{\text{attempt}-1} \times \text{jitter}\right) \text{ seconds}$$
+5. **Reconciliation & Finalization**: Upon unit completion, progress counters update atomically. Once all units finish and `discovery_complete = true`, the master task auto-converges to `COMPLETED` or `FAILED` and invokes `finalizeTask`.
+
+### 6.3 Recovery & Maintenance (`JobSweeper`)
+
+An automated background sweeper (`JobSweeper`) runs every 30 seconds to handle edge cases:
+- **`reclaimExpiredLeases`**: Recovers abandoned `RUNNING` units from crashed workers.
+- **`recoverInterruptedDiscovery`**: Resumes interrupted stream discovery scans following server restarts.
+- **`reconcileReadyTasks`**: Audits and aligns state for completed task units.
+- **`purgeOldTasks`**: Hard purges terminal task records older than 7 days to prevent database bloat.
+
+### 6.4 Cover Generation & Reconciliation Specification
+
+Cover generation, updating, and reconciliation workflows are governed by `CoverJobHandler` and `CoverService` following these specification rules:
+
+1. **Manual Re-generation & Same-Quality Overwrite**:
+   - Manually triggering cover generation for an existing quality (e.g. `LOW` + `MEDIUM`) re-renders the cover frame from source media and uploads the output AVIF to S3, **overwriting the existing S3 key**.
+   - Database `File` metadata (size, dimensions, update time) and `Track` records (`file_id`, `update_time`, `sync_status = COMPLETED`) are updated synchronously.
+2. **Coexistence of Un-targeted Qualities**:
+   - If a media item already possesses `LOW` + `MEDIUM` + `HIGH` cover tracks and a task dispatches only `LOW` + `MEDIUM`, only `LOW` and `MEDIUM` covers are rendered and updated.
+   - The existing `HIGH` cover `Track` and S3 file remain **fully active** (`ACTIVE` state) and are not pruned or mutated.
+3. **`COVER_RECONCILE` Rules**:
+   - **Incremental Reconciliation**: Reconciliation tasks only ensure that media items possess cover tracks matching the currently configured library qualities (`library.cover_qualities`).
+   - **No Pruning on Configuration Reduction**: Reducing library cover quality config from `[LOW, MEDIUM, HIGH]` to `[LOW, MEDIUM]` will **never delete** existing `HIGH` cover tracks or S3 files.
+   - **Skip Re-rendering on Config Restoration**: Restoring configuration back to `[LOW, MEDIUM, HIGH]` and running `COVER_RECONCILE` recognizes existing `HIGH` cover tracks whose source file is unchanged, automatically setting `isAlreadyCompleted = true` to skip redundant rendering.
+
+

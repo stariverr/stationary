@@ -43,21 +43,17 @@ The config resides in `drizzle.config.ts`.
 
 ---
 
-## 🔄 Distributed Workflows (Upstash Workflow & QStash)
+## 🔄 Durable Background Job Engine (PostgreSQL Queue & JobRunner)
 
-Because downloading media assets (such as high-definition videos and images) is I/O intensive and time-consuming, the system delegates downloads to `@upstash/workflow` with QStash.
+Because downloading media assets and generating video covers is I/O intensive, the system manages background execution using PostgreSQL as the single source of truth (`AsyncTask` / `AsyncTaskUnit`) driven by an in-process Bun `JobRunner`.
 
-### 1. Workflow Endpoints
-- **Task Creation**: `POST /api/task/create` - synchronously records metadata in the database and triggers the background workflow.
-- **Workflow Executor**: `/api/task/workflow` - called by the Upstash scheduler to execute state machine steps.
+### 1. Key Principles
+- **PostgreSQL Single Source of Truth**: All tasks and units are transactionally committed to DB prior to execution.
+- **Leases and Fencing**: Claims use `SELECT ... FOR UPDATE SKIP LOCKED`, database-clock leases, and fencing tokens so stale workers cannot commit queue state.
+- **At-Least-Once Execution**: A worker can crash after producing an external side effect but before committing its result, so handlers must make business side effects idempotent.
+- **Automatic Recovery**: The sweeper reclaims expired unit leases, resumes discovery through a separate fenced lease, and reconciles unfinished terminal transitions.
 
-### 2. Local Tunneling (Important)
-Because Upstash needs to invoke your local `/api/task/workflow` callback endpoint, you must expose your local port `9400` to the internet during development:
-1. Start a tunnel (e.g. `ngrok` or `cloudflared`):
-   ```bash
-   ngrok http 9400
-   ```
-2. Copy the public URL generated (e.g., `https://xxxxxx.ngrok-free.app`) and configure it as `UPSTASH_WORKFLOW_URL` in your `.env` file.
+> 📖 **Task Engine & Cover Reconciliation Specification**: For architecture details, task engine rules, and cover generation/reconciliation policies (`COVER_RECONCILE`, multi-quality coexistence and overwriting), refer to the [System Design Document](../../docs/system_design.md#64-cover-generation--reconciliation-specification) and [Task Engine Extension Guide](../../docs/task_engine_extension.md).
 
 ---
 

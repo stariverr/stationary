@@ -72,7 +72,7 @@ bun install
 
 ### 2. 环境变量配置
 在以下目录中分别创建并配置 `.env` 文件：
-* **后端 (Server)**：复制 `apps/server/.env.example` 为 `apps/server/.env`，重点填写 PostgreSQL 数据库连接串、S3 凭证、Upstash QStash Token 和 Redis 缓存配置。
+* **后端 (Server)**：复制 `apps/server/.env.example` 为 `apps/server/.env`，重点填写 PostgreSQL 数据库连接串、S3 凭证和 Redis 缓存配置。
 * **前端 (Web)**：复制 `apps/web/.env.example` 为 `apps/web/.env`，设置 `NUXT_PUBLIC_API_BASE_URL` 指向后端服务地址（开发环境通常为 `http://localhost:9400`）。
 
 ### 3. 初始化数据库
@@ -82,16 +82,7 @@ cd apps/server
 bun run db:migrate
 ```
 
-### 4. 配置本地开发隧道 (非常重要)
-由于后台长耗时下载任务由 Upstash Workflow 协调驱动，Upstash 服务器必须能够回调您本地运行的 API 端点。
-1. 在本地使用 `ngrok` 或 `cloudflared` 隧道工具将端口 `9400` 映射到公网：
-   ```bash
-   ngrok http 9400
-   ```
-2. 复制生成的公网 URL（例如 `https://xxxx.ngrok-free.app`）。
-3. 将该 URL 填入 `apps/server/.env` 的 `UPSTASH_WORKFLOW_URL` 字段中。
-
-### 5. 启动开发服务器
+### 4. 启动开发服务器
 在项目根目录下，执行并行启动指令：
 ```bash
 bun run dev
@@ -103,11 +94,12 @@ bun run dev
 
 项目采用 **Bun Workspace Monorepo** 进行模块化开发：
 
-* **[apps/server](file:///Users/kazuha/dev/stationary/apps/server)**：后端 API。基于 Bun 运行环境，Hono Web 框架，Drizzle ORM (PostgreSQL) 与 Upstash Workflows 异步编排服务。
-* **[apps/web](file:///Users/kazuha/dev/stationary/apps/web)**：前端 Web 应用。基于 Nuxt 4, Vue 3, Pinia 状态管理，Vue Query 异步请求管理，Tailwind CSS v4，以及 Plyr (播放器) 与 Swiper (轮播图)。
-* **[docs](file:///Users/kazuha/dev/stationary/docs)**：系统架构规约与核心流转文档。
-  * [系统设计与数据库规范说明](file:///Users/kazuha/dev/stationary/docs/system_design.zh-Hans.md)
-  * [媒体元数据同步工作流 & API 契约](file:///Users/kazuha/dev/stationary/docs/external_api.contract.zh-Hans.md)
-  * [Metadata 物理保存与清理流程详细说明](file:///Users/kazuha/dev/stationary/docs/save_metadata_flow.zh-Hans.md)
-  * [TypeScript 编写规范与避坑指南](file:///Users/kazuha/dev/stationary/docs/code.rule.zh-Hans.md)
-  * [系统架构设计取舍与 Trade-offs](file:///Users/kazuha/dev/stationary/docs/trade-offs.zh-Hans.md)
+* **[apps/server](../apps/server)**：后端 API。基于 Bun 运行环境，Hono Web 框架，Drizzle ORM (PostgreSQL) 与 Upstash Workflows 异步编排服务。
+* **[apps/web](../apps/web)**：前端 Web 应用。基于 Nuxt 4, Vue 3, Pinia 状态管理，Vue Query 异步请求管理，Tailwind CSS v4，以及 Plyr (播放器) 与 Swiper (轮播图)。
+* **[docs](./)**：系统架构规约与核心流转文档。
+  * [系统设计与数据库规范说明](./system_design.zh-Hans.md)
+  * [媒体元数据同步工作流 & API 契约](./external_api.contract.zh-Hans.md)
+  * [Metadata 物理保存与清理流程详细说明](./save_metadata_flow.zh-Hans.md)
+  * [TypeScript 编写规范与避坑指南](./code.rule.zh-Hans.md)
+  * [系统架构设计取舍与 Trade-offs](./trade-offs.zh-Hans.md)
+  * [任务执行引擎接入指南：新增任务类型](./task_engine_extension.zh-Hans.md)

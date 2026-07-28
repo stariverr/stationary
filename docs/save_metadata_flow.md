@@ -10,7 +10,7 @@ This document describes the execution logic and state rules of the `TaskService.
 
 When an external synchronization payload is sent to `/api/task/create`, the backend executes `saveMetadata` for each post **synchronously and atomically**.
 
-By comparing the incoming payload with existing database states, the method determines if it needs to trigger background download tasks (via Upstash QStash/Workflow). If all media URLs and metadata match the database exactly, the method returns `skipUpdate: true`, skipping the background task queue and reducing network overhead.
+By comparing the incoming payload with existing database states, the method determines if it needs to trigger background download tasks (via the PostgreSQL DB Queue engine and in-process JobRunner). If all media URLs and metadata match the database exactly, the method returns `skipUpdate: true`, skipping background unit enqueueing and reducing network overhead.
 
 ---
 
@@ -25,7 +25,7 @@ graph TD
     Step3_1 --> Step3_2[3.2 Sync Tracks & File URL Diff Checks]
     Step3_2 --> Step3_3[3.3 Relational Tag Mapping]
     Step3_3 --> Step4[4. Author Avatar Check]
-    Step4 --> Step5[5. Schedule Background Workflow if hasPendingTasks]
+    Step4 --> Step5[5. Enqueue POST_PROCESS Task & Units]
     Step5 --> End([Return postId, authorId, skipUpdate])
 ```
 
@@ -75,6 +75,7 @@ For each active or new media item:
 ### 5. Finalize Ingestion & Response
 - If `hasPendingTasks` is `true`:
   - If the post already existed, sets its status to `IN_PROGRESS` and clears previous errors.
-  - Returns `{ postId, authorId, skipUpdate: false }` to trigger the QStash background downloader.
+  - Atomically enqueues a `POST_PROCESS` `AsyncTask` and its `AsyncTaskUnit`s inside the database transaction, then wakes `jobRunner`.
+  - Returns `{ postId, authorId, skipUpdate: false }`.
 - If `hasPendingTasks` is `false`:
-  - Returns `{ postId, authorId, skipUpdate: true }`. The caller skips queueing the background downloader, avoiding redundant network queries and API execution cycles.
+  - Returns `{ postId, authorId, skipUpdate: true }`. The caller skips task enqueueing, avoiding redundant network queries and execution cycles.

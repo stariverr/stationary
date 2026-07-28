@@ -43,21 +43,17 @@ bun run db:migrate
 
 ---
 
-## 🔄 分布式后台任务 (Upstash Workflow & QStash)
+## 🔄 持久化后台任务引擎 (PostgreSQL Queue & JobRunner)
 
-由于媒体下载（特别是高清视频、大图）非常消耗 network I/O 且耗时长，平台使用 `@upstash/workflow` 配合 QStash 进行了**状态机式的后台异步流水线调度**。
+由于媒体下载与封面生成非常消耗 network I/O 与 CPU，系统基于 PostgreSQL `AsyncTask` / `AsyncTaskUnit` 作为唯一事实来源，并在 Bun 进程内通过轻量 `JobRunner` 进行调度。
 
-### 1. 异步任务接口
-- **任务创建**：`POST /api/task/create`。接收外部数据源同步来的元数据后，**同步**写入数据库，返回 `skipUpdate` 状态，并触发异步 Workflow。
-- **任务执行回调**：`/api/task/workflow`。由 Upstash 服务根据状态节点逐步回调执行。
+### 1. 核心设计原则
+- **PostgreSQL 唯一事实来源**：所有任务与单元均在业务事务提交时原子写入 DB。
+- **租约与 Fencing**：采用 `SELECT ... FOR UPDATE SKIP LOCKED`、数据库时钟租约与 fencing token，阻止过期 worker 提交队列状态。
+- **至少一次执行**：worker 可能在产生外部副作用后、提交执行结果前崩溃，因此 handler 的业务副作用必须保持幂等。
+- **自动异常恢复**：Sweeper 会回收过期 unit 租约、通过独立的 fenced lease 恢复 Discovery，并收敛未完成的终态转换。
 
-### 2. 本地开发内网穿透 (重要)
-因为 Upstash 平台需要反向调用后端的 `/api/task/workflow` 端点以驱动步骤执行，在**本地开发**时必须将本地的 `localhost:9400` 暴露给外网：
-1. 使用穿透工具（如 `ngrok` 或 `cloudflared`）：
-   ```bash
-   ngrok http 9400
-   ```
-2. 将穿透后生成的公网 URL（例如 `https://xxxxxx.ngrok-free.app`）配置到 `.env` 中的 `UPSTASH_WORKFLOW_URL`。
+> 📖 **任务引擎与封面调和规范**：关于任务引擎扩展与封面生成/调和规则（`COVER_RECONCILE`、多规格并存与覆盖机制），请参阅 [系统设计与数据库规范](../../docs/system_design.zh-Hans.md#64-封面生成与调和行为规范-cover-generation--reconciliation-specification) 及 [任务引擎接入指南](../../docs/task_engine_extension.zh-Hans.md)。
 
 ---
 

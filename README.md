@@ -72,7 +72,7 @@ bun install
 
 ### 2. Environment Configurations
 Create `.env` files in the directories:
-* **Backend**: Copy `apps/server/.env.example` to `apps/server/.env` and fill out database connections, S3 credentials, Upstash QStash tokens, and Redis details.
+* **Backend**: Copy `apps/server/.env.example` to `apps/server/.env` and fill out database connections, S3 credentials, and Redis details.
 * **Frontend**: Copy `apps/web/.env.example` to `apps/web/.env` and set `NUXT_PUBLIC_API_BASE_URL` (usually `http://localhost:9400`).
 
 ### 3. Initialize the Database
@@ -82,16 +82,7 @@ cd apps/server
 bun run db:migrate
 ```
 
-### 4. Setup Local Development Tunneling (Important)
-Because asynchronous download tasks are orchestrated via Upstash Workflow, the Upstash servers must be able to hit your local server callback URL.
-1. Run a tunnel tool like `ngrok` or `cloudflared` pointing to port `9400`:
-   ```bash
-   ngrok http 9400
-   ```
-2. Copy the generated URL (e.g. `https://xxxx.ngrok-free.app`).
-3. Set this URL as the `UPSTASH_WORKFLOW_URL` in your `apps/server/.env` file.
-
-### 5. Launch Development Servers
+### 4. Launch Development Servers
 From the root directory, start both applications concurrently:
 ```bash
 bun run dev
@@ -103,11 +94,12 @@ bun run dev
 
 The project is structured as a **Bun Workspace Monorepo**:
 
-* **[apps/server](file:///Users/kazuha/dev/stationary/apps/server)**: Backend API built on Bun, Hono framework, Drizzle ORM (PostgreSQL), and Upstash Workflows.
-* **[apps/web](file:///Users/kazuha/dev/stationary/apps/web)**: Frontend SPA/SSR built on Nuxt 4, Vue 3, Pinia, Vue Query, Tailwind CSS v4, Plyr, and Swiper.
-* **[docs](file:///Users/kazuha/dev/stationary/docs)**: Architectural specs and contract designs.
-  * [System Architecture Specification](file:///Users/kazuha/dev/stationary/docs/system_design.md)
-  * [Metadata Sync & API Contracts](file:///Users/kazuha/dev/stationary/docs/external_api.contract.md)
-  * [Metadata Ingestion Pipelines](file:///Users/kazuha/dev/stationary/docs/save_metadata_flow.md)
-  * [TypeScript Guidelines](file:///Users/kazuha/dev/stationary/docs/code.rule.md)
-  * [Architectural Trade-offs](file:///Users/kazuha/dev/stationary/docs/trade-offs.md)
+* **[apps/server](./apps/server)**: Backend API built on Bun, Hono framework, Drizzle ORM (PostgreSQL), and self-hosted DB Task Queue + in-process JobRunner.
+* **[apps/web](./apps/web)**: Frontend SPA/SSR built on Nuxt 4, Vue 3, Pinia, Vue Query, Tailwind CSS v4, Plyr, and Swiper.
+* **[docs](./docs)**: Architectural specs and contract designs.
+  * [System Architecture Specification](./docs/system_design.md)
+  * [Metadata Sync & API Contracts](./docs/external_api.contract.md)
+  * [Metadata Ingestion Pipelines](./docs/save_metadata_flow.md)
+  * [TypeScript Guidelines](./docs/code.rule.md)
+  * [Architectural Trade-offs](./docs/trade-offs.md)
+  * [Task Engine Extension Guide](./docs/task_engine_extension.md)
