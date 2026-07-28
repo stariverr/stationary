@@ -5,6 +5,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2 } from "@lucide/vue";
 import { useApi } from "@/composables/useApi";
 import { toast } from "vue-sonner";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
+const formatMediaType = (type?: string | null) => getMediaTypeLabel(type, t);
 
 const props = defineProps<{
     open: boolean;
@@ -99,8 +103,8 @@ const handleAttachOrphans = async () => {
                                 {{ orphan.title || $t("post_detail.manage.untitled_media") }}
                             </span>
                         </div>
-                        <span class="font-mono text-[10px] text-zinc-400 uppercase bg-zinc-50 px-1.5 py-0.5 rounded">
-                            {{ orphan.type }}
+                        <span class="font-mono text-[10px] text-zinc-400 bg-zinc-50 px-1.5 py-0.5 rounded">
+                            {{ formatMediaType(orphan.type) }}
                         </span>
                     </div>
                 </template>

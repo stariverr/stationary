@@ -91,7 +91,7 @@ const displayRange = computed(() => {
     });
 });
 
-const mediaTypeLabel = (type: string) => t(`common.media_type_${type.toLowerCase()}`);
+const mediaTypeLabel = (type: string) => getMediaTypeLabel(type, t);
 const fallbackTitle = (position: number) => t("post_detail.media_item", { number: position + 1 });
 </script>
 

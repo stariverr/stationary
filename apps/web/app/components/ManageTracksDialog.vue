@@ -34,6 +34,22 @@ watch(
         }
     },
 );
+
+const { t } = useI18n();
+const formatMediaType = (type?: string | null) => getMediaTypeLabel(type, t);
+const getMediaThumb = (med: any) => {
+    if (!med) return null;
+    return (
+        med.cover_url ||
+        med.thumbnail_url ||
+        med.url ||
+        med.preview_url ||
+        med.tracks?.[0]?.url ||
+        med.tracks?.[0]?.file?.url ||
+        med.file?.url ||
+        null
+    );
+};
 </script>
 
 <template>
@@ -74,8 +90,8 @@ watch(
                         "
                     >
                         <img
-                            v-if="med.thumbnail_url || med.preview_url"
-                            :src="(med.thumbnail_url || med.preview_url) ?? undefined"
+                            v-if="getMediaThumb(med)"
+                            :src="getMediaThumb(med)"
                             class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
                         />
                         <div
@@ -88,7 +104,7 @@ watch(
                         <div
                             class="absolute bottom-1 right-1 bg-black/60 backdrop-blur-xs text-[8px] font-bold text-white px-1 py-0.2 rounded-md font-mono scale-90 origin-bottom-right"
                         >
-                                {{ $t(`common.media_type_${med.type.toLowerCase()}`) }}
+                                {{ formatMediaType(med.type) }}
                         </div>
                         <div
                             v-if="trackEditMediaId === med.id"

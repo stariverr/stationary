@@ -43,8 +43,9 @@ import { useTagStore } from "@/stores/tag";
 
 const libraryStore = useLibraryStore();
 const importStore = useImportStore();
-const tagStore = useTagStore();
 const { t } = useI18n();
+const formatMediaType = (type?: string | null) => getMediaTypeLabel(type, t);
+const tagStore = useTagStore();
 const libraryId = computed(() => libraryStore.activeLibraryId);
 
 const title = ref("");
@@ -809,7 +810,7 @@ async function handleSubmit() {
                                         {{ media.title || $t("media.untitled") }}
                                     </div>
                                     <div class="text-[10px] text-slate-400 mt-0.5">
-                                        {{ media.type }} • {{ $t("media.tracks_count", { count: media.tracks?.length || 0 }) }}
+                                        {{ formatMediaType(media.type) }} • {{ $t("media.tracks_count", { count: media.tracks?.length || 0 }) }}
                                     </div>
                                 </div>
                             </div>
