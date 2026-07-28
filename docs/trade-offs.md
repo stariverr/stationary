@@ -7,9 +7,9 @@ This document details the architectural decisions, structural trade-offs, and pr
 ## 1. Multi-Track Representation Model (`Track` and `File` separation)
 
 ### Context & Decision
-A media asset synced from social media can be physically complex. For example, Bilibili or YouTube videos are often served as split video and audio tracks (fragmented MP4). Live Photos consist of a static cover image and a short video clip. A video also needs a static cover frame and multiple subtitle files.
+A media asset can be physically complex. For example, videos are often served as split video and audio tracks (fragmented MP4). Live Photos consist of a static cover image and a short video clip. A video also needs a static cover frame and subtitle files.
 
-Rather than storing direct URLs as columns in the `Media` table (such as `primary_url`, `alternative_url`, `cover_url`, which are now deprecated), we introduced a **Multi-Track model**:
+Stationary uses a **Multi-Track model**:
 - `Media` represents the logical asset container.
 - `Track` represents a specific component or variant of that media (e.g. `IMAGE`, `VIDEO`, `AUDIO`, `SUBTITLE` under purpose `CONTENT`, `COVER`, `THUMBNAIL`, `PREVIEW`).
 - `File` represents the physical file stored in S3, keyed by UUID.
@@ -26,7 +26,7 @@ Rather than storing direct URLs as columns in the `Media` table (such as `primar
 ### Context & Decision
 To play separate audio and video tracks synchronously without combining them into a single file on the server, Stationary uses the DASH protocol (`dash.js` player). For single-file DASH tracks, the player needs the `SegmentBase` metadata (the byte ranges for `Initialization` and `Index` boxes) to request segments on demand using HTTP Range requests.
 
-Rather than requiring the scraper clients to compute these ranges or downloading the entire file to the server's disk to parse it, we use an **online dynamic streaming extraction** approach in the `TaskService.processMedia` workflow.
+Rather than requiring the external sync clients to compute these ranges or downloading the entire file to the server's disk to parse it, we use an **online dynamic streaming extraction** approach in the `TaskService.processMedia` workflow.
 
 ### Rationales & Trade-offs
 - **Fixed Memory Buffering**: During stream piping from source to S3, we intercept and buffer only the **first 32KB of data** in memory. This is enough to parse the `sidx` box structure and extract the initialization and index ranges, storing them in `Track.metadata.segment_base`. Once parsed, the stream is reconstructed and written to S3.
@@ -39,7 +39,7 @@ Rather than requiring the scraper clients to compute these ranges or downloading
 ## 3. Automated Subtitle WebVTT Conversion
 
 ### Context & Decision
-Platform scrapers frequently retrieve subtitles in platform-specific formats (such as Bilibili JSON). Browsers cannot play these subtitles natively.
+External integration agents frequently retrieve subtitles in platform-specific formats (such as custom JSON subtitle payloads). Browsers cannot play these subtitles natively.
 
 During the synchronization pipeline in `TaskService.processMedia`, when a track of type `SUBTITLE` with metadata format `json` is fetched, the backend automatically intercepts and converts it to standard **WebVTT format (`.vtt`)** in-memory before uploading it to S3 as a WebVTT track.
 
@@ -61,27 +61,14 @@ We index and embed search documents at the `Media` level (`entity_type: EntityTy
 
 ---
 
-## 5. Four-Tier Clarity Architecture & Transcoding Specifications
+## 5. Server-Side Cover & Thumbnail Generation
 
-### Core Decision: The Four-Tier Schema
-To support the diverse layouts and bandwidth conditions of Stationary, the platform establishes a unified **Four-Tier Clarity Schema** for all media:
+### Context & Decision
+To support different display layouts (board covers, masonry grid scrolling, lightboxes, and video playback), Stationary uses a lightweight **cover and thumbnail generation architecture**:
 
-| Tier | Role Name | Video Specification | Image Specification | Core Use Case & Objective |
-| :--- | :--- | :--- | :--- | :--- |
-| **Tier 1** | **Original / Master** | Original source video | Original photo file | **Lossless archiving and master downloading.** Playback compatibility is not strictly enforced. |
-| **Tier 2** | **HD / Preview** | 1080p H.264 MP4 | 1600px width AVIF / WebP | **Primary display in details view & lightbox.** Balances fidelity with web performance. |
-| **Tier 3** | **LD / Mobile Stream** | 480p H.264 MP4 | 800px width AVIF / WebP | **Default mobile player and previews** on weak network profiles. |
-| **Tier 4** | **Thumbnail / Cover** | Video frame AVIF / WebP | 400px width AVIF / WebP | **Board card covers and masonry grids.** Highly compressed to ensure fast page loads. |
+- **Tier 1 (Original Master)**: Original photo or video file, preserved for lossless archiving and downloads.
+- **Tier 2 (Cover / Thumbnail)**: The backend automatically extracts video keyframes or resizes photos into compressed AVIF/WebP covers (e.g., 400px thumbnails) for responsive grid rendering.
 
----
-
-### Implementation Trade-offs: Two Technical Paths
-
-#### Path 1: CDN On-Demand Dynamic Resizing (Current Platform Default)
-* **Storage Footprint**: S3 physically stores only **Tier 1 (Original / Master)**. For videos, it also stores an asynchronously captured frame for **Tier 4 (Video Cover)**.
-* **Clarity Generation**: Resizing and format translation (AVIF/WebP) are handled dynamically at the CDN edge (e.g. Cloudflare Images) using query parameters, saving massive storage costs and batch conversion runs.
-
-#### Path 2: Server-Side Offline Post-Transcoding (Self-Hosted / LAN / NAS Environments)
-* **Dual-Tier Configuration**: In LAN or home NAS environments where local network speed is high but computational power is low, the platform condenses the 4-tier schema to **two tiers**:
-  1. **Tier 1: Original (Master)**: Used for lossless viewing and downloads.
-  2. **Tier 2: Thumbnail (Preview/Thumbnail)**: A single 400px image thumbnail for grid view scrolling, and a video cover frame. Video playback streams the original file directly via HTTP Range requests, keeping NAS CPU usage at absolute zero.
+### Rationales
+* **Asynchronous Local Generation**: The background job engine (`CoverJobHandler`) extracts cover frames and generates derivative tracks asynchronously, uploading them to S3.
+* **Minimal Computational Overhead**: Video playback streams the Tier 1 master file directly using HTTP Range requests, eliminating full video re-encoding costs.
