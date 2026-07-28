@@ -34,6 +34,7 @@ const store = useMediaStore();
 const { selectedMediaId, selectedMedia, medias, displayMode } = storeToRefs(store);
 
 const { t } = useI18n();
+const formatMediaType = (type?: string | null) => getMediaTypeLabel(type, t);
 const regeneratingCoverMediaId = ref<string | null>(null);
 const isSidebarOpen = ref(true);
 
@@ -153,14 +154,14 @@ const onSlideChange = (swiper: unknown) => {
 const mapMediaWithSubtitles = (m: MediaInputForSubtitles): MappedSiblingMedia | null => {
     if (!m) return null;
     const subtitleTracks = (m.tracks || []).filter((t: Track) => t.type === "SUBTITLE");
-    const liveTrack =
-        m.type === "LIVE_PHOTO" ? (m.tracks || []).find((t) => t.type === "VIDEO" && t.purpose === "CONTENT" && t.priority === 0) : null;
+    const liveTrack = m.type === "LIVE_PHOTO" ? (m.tracks || []).find((t) => t.type === "VIDEO" && t.purpose === "CONTENT") : null;
+    const imageTrack = (m.tracks || []).find((t) => t.type === "IMAGE" && t.purpose === "CONTENT");
     return {
         ...m,
         id: String(m.id || ""),
         type: String(m.type || "IMAGE"),
-        url: m.url || m.primary_file_url || m.media_url || null,
-        live_url: liveTrack?.url || null,
+        url: m.url || m.primary_file_url || m.media_url || imageTrack?.url || null,
+        live_url: m.live_url || liveTrack?.url || null,
         subtitles: subtitleTracks.map((sub: Track) => ({
             url: sub.url,
             language: (sub.metadata?.language as string) || "unknown",
@@ -673,6 +674,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                             :mime-type="media.mime_type || media.mimeType || undefined"
                                             :width="media.width"
                                             :height="media.height"
+                                            badge-position="top-left-below-header"
                                             class="max-h-full max-w-full object-contain drop-shadow-2xl rounded-sm"
                                         />
                                         <HeicImage
@@ -829,7 +831,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                             class="flex items-center gap-1.5 text-xs font-medium text-zinc-200 bg-zinc-900 border border-zinc-800 w-fit px-2.5 py-0.5 rounded-md"
                                         >
                                             <FileImage class="w-3.5 h-3.5 text-zinc-400" />
-                                            <span class="capitalize">{{ currentMediaItem?.type || "Image" }}</span>
+                                            <span class="capitalize">{{ formatMediaType(currentMediaItem?.type) }}</span>
                                         </div>
                                     </div>
                                     <div>

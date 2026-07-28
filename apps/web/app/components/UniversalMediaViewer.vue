@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch, onUnmounted } from "vue";
 import { Music, FileText, FileImage, ShieldAlert } from "@lucide/vue";
 import VideoPlayer from "./VideoPlayer.vue";
 import LivePhotoPlayer from "./LivePhotoPlayer.vue";
@@ -15,9 +15,11 @@ interface MediaItem {
     id: string;
     type: "IMAGE" | "VIDEO" | "LIVE_PHOTO" | "AUDIO" | "PDF";
     title?: string | null;
+    url?: string | null;
     cover_url?: string | null;
     thumbnail_url?: string | null;
     preview_url?: string | null;
+    live_url?: string | null;
     tracks?: Array<{
         id?: string;
         url: string;
@@ -36,12 +38,14 @@ const props = withDefaults(
         media: MediaItem | null;
         isLoading?: boolean;
         interactive?: boolean;
+        hideBadge?: boolean;
         zoom?: number;
         rotation?: number;
     }>(),
     {
         isLoading: false,
         interactive: false,
+        hideBadge: false,
         zoom: 1,
         rotation: 0,
     },
@@ -54,12 +58,21 @@ const emit = defineEmits<{
 
 const absolutePreviewUrl = computed(() => {
     if (!props.media) return "";
+    if (props.media.url) return props.media.url;
     if (props.media.preview_url) return props.media.preview_url;
-    const contentTrack =
-        props.media.tracks?.find((t) => t.purpose === "CONTENT" && t.is_default) ||
-        props.media.tracks?.find((t) => t.purpose === "CONTENT");
-    if (contentTrack?.url) return contentTrack.url;
+    const imageContentTrack =
+        props.media.tracks?.find((t) => t.type === "IMAGE" && t.purpose === "CONTENT" && t.is_default) ||
+        props.media.tracks?.find((t) => t.type === "IMAGE" && t.purpose === "CONTENT");
+    if (imageContentTrack?.url) return imageContentTrack.url;
     return props.media.cover_url || props.media.thumbnail_url || "";
+});
+
+const absoluteLiveUrl = computed(() => {
+    if (!props.media) return "";
+    if (props.media.live_url) return props.media.live_url;
+    const liveVideoTrack = props.media.tracks?.find((t) => t.type === "VIDEO" && t.purpose === "CONTENT");
+    if (liveVideoTrack?.url) return liveVideoTrack.url;
+    return "";
 });
 
 const absoluteThumbnailUrl = computed(() => {
@@ -69,6 +82,57 @@ const absoluteThumbnailUrl = computed(() => {
     const coverTrack = props.media.tracks?.find((t) => t.purpose === "COVER");
     if (coverTrack?.url) return coverTrack.url;
     return absolutePreviewUrl.value;
+});
+
+// Image Loading State (with 200ms delay to prevent flicker on fast loads)
+const isImageLoading = ref(false);
+const showLoadingSpinner = ref(false);
+let loadingTimer: ReturnType<typeof setTimeout> | null = null;
+
+const clearLoadingTimer = () => {
+    if (loadingTimer) {
+        clearTimeout(loadingTimer);
+        loadingTimer = null;
+    }
+};
+
+watch(
+    () => [props.media?.id, absolutePreviewUrl.value, absoluteThumbnailUrl.value],
+    ([newId, newPreview, newThumb]) => {
+        clearLoadingTimer();
+        if (
+            newId &&
+            (newPreview || newThumb) &&
+            (props.media?.type === "IMAGE" || props.media?.type === "VIDEO" || props.media?.type === "LIVE_PHOTO")
+        ) {
+            isImageLoading.value = true;
+            loadingTimer = setTimeout(() => {
+                if (isImageLoading.value) {
+                    showLoadingSpinner.value = true;
+                }
+            }, 200);
+        } else {
+            isImageLoading.value = false;
+            showLoadingSpinner.value = false;
+        }
+    },
+    { immediate: true },
+);
+
+const handleImageLoaded = () => {
+    clearLoadingTimer();
+    isImageLoading.value = false;
+    showLoadingSpinner.value = false;
+};
+
+const handleImageError = () => {
+    clearLoadingTimer();
+    isImageLoading.value = false;
+    showLoadingSpinner.value = false;
+};
+
+onUnmounted(() => {
+    clearLoadingTimer();
 });
 
 // Panning State
@@ -244,46 +308,96 @@ const handleImageClick = (e: MouseEvent) => {
         :class="{ 'cursor-zoom-in': props.interactive }"
         @click="props.interactive && emit('click-media')"
     >
-        <!-- Loading State -->
-        <div v-if="isLoading" class="absolute inset-0 flex items-center justify-center bg-zinc-950/80 z-20">
-            <div class="flex flex-col items-center gap-3">
-                <div class="w-8 h-8 rounded-full border-4 border-indigo-600/30 border-t-indigo-600 animate-spin"></div>
-                <span class="text-xs font-medium text-zinc-400">{{ $t("post_detail.viewer.loading") }}</span>
+        <!-- Floating Glassmorphism Loading Indicator (Only shown after 200ms delay for slow loads) -->
+        <div
+            v-if="isLoading || showLoadingSpinner"
+            class="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-xs z-30 pointer-events-none transition-opacity duration-300"
+        >
+            <div class="flex items-center gap-2.5 px-4 py-2 rounded-full bg-zinc-950/85 border border-white/15 shadow-2xl backdrop-blur-xl">
+                <div class="w-4 h-4 rounded-full border-2 border-emerald-400/30 border-t-emerald-400 animate-spin shrink-0"></div>
+                <span class="text-xs font-semibold text-white/90">{{ $t("post_detail.viewer.loading") }}</span>
             </div>
         </div>
 
         <!-- No Media Selected / Empty State -->
-        <div v-else-if="!media" class="text-zinc-500 flex flex-col items-center gap-2 p-8">
+        <div v-if="!media" class="text-zinc-500 flex flex-col items-center gap-2 p-8">
             <FileImage class="w-12 h-12 text-zinc-700" />
             <p class="text-sm font-medium">{{ $t("post_detail.viewer.empty") }}</p>
         </div>
 
-        <!-- Content Players -->
-        <div v-else class="w-full h-full flex items-center justify-center overflow-hidden">
-            <!-- 1. VIDEO -->
+        <!-- Content Players (Rendered whenever media exists so <img> tags mount & trigger @load) -->
+        <div v-else :key="media.id" class="w-full h-full flex items-center justify-center overflow-hidden">
+            <!-- 1. VIDEO (Cover Only) -->
             <template v-if="media.type === 'VIDEO'">
-                <div class="w-full h-full max-w-full max-h-full flex items-center justify-center">
-                    <VideoPlayer
-                        v-if="absolutePreviewUrl"
-                        :src="absolutePreviewUrl"
-                        :poster="absoluteThumbnailUrl"
-                        :subtitles="media.subtitles || []"
-                        class="max-w-full max-h-full"
+                <div
+                    class="w-full h-full flex items-center justify-center relative overflow-hidden touch-none"
+                    @pointerdown="handlePointerDown"
+                    @pointermove="handlePointerMove"
+                    @pointerup="handlePointerUp"
+                    @pointercancel="handlePointerUp"
+                    @wheel="handleWheel"
+                    @dblclick="handleDoubleClick"
+                    @click="handleImageClick"
+                >
+                    <!-- Ambient Blur Backdrop -->
+                    <img
+                        v-if="absoluteThumbnailUrl || absolutePreviewUrl"
+                        :src="absoluteThumbnailUrl || absolutePreviewUrl"
+                        class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
+                        aria-hidden="true"
+                    />
+                    <img
+                        v-if="absoluteThumbnailUrl || absolutePreviewUrl"
+                        :src="absoluteThumbnailUrl || absolutePreviewUrl"
+                        :alt="media.title || $t('post_detail.viewer.preview')"
+                        class="relative z-10 max-w-full max-h-full object-contain shadow-2xl select-none pointer-events-none"
+                        :style="{
+                            transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
+                            transformOrigin: 'center center',
+                            transition: isDragging ? 'none' : 'transform 0.15s ease-out',
+                        }"
+                        @load="handleImageLoaded"
+                        @error="handleImageError"
+                        draggable="false"
                     />
                     <div v-else class="text-zinc-500 flex flex-col items-center gap-2">
-                        <ShieldAlert class="w-10 h-10 text-red-500" />
-                        <p class="text-xs">{{ $t("post_detail.viewer.video_missing") }}</p>
+                        <FileImage class="w-10 h-10 text-zinc-600" />
+                        <p class="text-xs">{{ $t("post_detail.viewer.empty") }}</p>
                     </div>
                 </div>
             </template>
 
             <!-- 2. LIVE PHOTO -->
             <template v-else-if="media.type === 'LIVE_PHOTO'">
-                <div class="w-full h-full flex items-center justify-center p-4">
+                <div
+                    class="w-full h-full flex items-center justify-center relative overflow-hidden touch-none"
+                    @pointerdown="handlePointerDown"
+                    @pointermove="handlePointerMove"
+                    @pointerup="handlePointerUp"
+                    @pointercancel="handlePointerUp"
+                    @wheel="handleWheel"
+                    @dblclick="handleDoubleClick"
+                    @click="handleImageClick"
+                >
+                    <!-- Ambient Blur Backdrop -->
+                    <img
+                        v-if="absoluteThumbnailUrl || absolutePreviewUrl"
+                        :src="absoluteThumbnailUrl || absolutePreviewUrl"
+                        class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
+                        aria-hidden="true"
+                    />
                     <LivePhotoPlayer
-                        :src="absoluteThumbnailUrl"
-                        :live-src="absolutePreviewUrl"
-                        class="max-w-full max-h-full object-contain rounded-lg shadow-lg"
+                        :src="absolutePreviewUrl || absoluteThumbnailUrl"
+                        :live-src="absoluteLiveUrl"
+                        :hide-badge="props.hideBadge"
+                        class="relative z-10 max-w-full max-h-full object-contain shadow-2xl"
+                        :style="{
+                            transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
+                            transformOrigin: 'center center',
+                            transition: isDragging ? 'none' : 'transform 0.15s ease-out',
+                        }"
+                        @load="handleImageLoaded"
+                        @error="handleImageError"
                     />
                 </div>
             </template>
@@ -300,15 +414,24 @@ const handleImageClick = (e: MouseEvent) => {
                     @dblclick="handleDoubleClick"
                     @click="handleImageClick"
                 >
+                    <!-- Ambient Blur Backdrop -->
+                    <img
+                        v-if="absolutePreviewUrl || absoluteThumbnailUrl"
+                        :src="absolutePreviewUrl || absoluteThumbnailUrl"
+                        class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
+                        aria-hidden="true"
+                    />
                     <img
                         :src="absolutePreviewUrl || absoluteThumbnailUrl"
                         :alt="media.title || $t('post_detail.viewer.preview')"
-                        class="max-w-full max-h-full object-contain shadow-xl select-none pointer-events-none"
+                        class="relative z-10 max-w-full max-h-full object-contain shadow-2xl select-none pointer-events-none"
                         :style="{
                             transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
                             transformOrigin: 'center center',
                             transition: isDragging ? 'none' : 'transform 0.15s ease-out',
                         }"
+                        @load="handleImageLoaded"
+                        @error="handleImageError"
                         draggable="false"
                     />
                 </div>

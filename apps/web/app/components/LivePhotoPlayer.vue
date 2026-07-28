@@ -6,16 +6,39 @@ defineOptions({
     inheritAttrs: false,
 });
 
-const props = defineProps<{
-    src: string;
-    liveSrc: string;
-    mimeType?: string;
-    width?: number | string;
-    height?: number | string;
-    alt?: string;
+const props = withDefaults(
+    defineProps<{
+        src: string;
+        liveSrc: string;
+        mimeType?: string;
+        width?: number | string;
+        height?: number | string;
+        alt?: string;
+        hideBadge?: boolean;
+        badgePosition?: "top-left" | "top-left-below-header" | "bottom-left";
+    }>(),
+    {
+        hideBadge: false,
+        badgePosition: "top-left",
+    },
+);
+
+const emit = defineEmits<{
+    (e: "load"): void;
+    (e: "error"): void;
 }>();
 
 const attrs = useAttrs();
+
+const badgeClass = computed(() => {
+    if (props.badgePosition === "top-left-below-header") {
+        return "top-16 left-4 md:left-6";
+    }
+    if (props.badgePosition === "bottom-left") {
+        return "bottom-4 left-4";
+    }
+    return "top-3 left-3";
+});
 
 const videoRef = ref<HTMLVideoElement | null>(null);
 const videoPlaying = ref(false);
@@ -25,6 +48,7 @@ let stopTimeout: ReturnType<typeof setTimeout> | null = null;
 let playPromise: Promise<void> | null = null;
 
 const startPlayback = () => {
+    if (!props.liveSrc) return;
     isInteracting.value = true;
     isVideoVisible.value = true; // Show video element immediately for transition
     if (stopTimeout) {
@@ -127,6 +151,15 @@ const hasClass = (classVal: any, target: string): boolean => {
     return false;
 };
 
+const objectFitClass = computed(() => {
+    const className = attrs.class;
+    if (hasClass(className, "object-cover")) return "object-cover";
+    if (hasClass(className, "object-fill")) return "object-fill";
+    if (hasClass(className, "object-none")) return "object-none";
+    if (hasClass(className, "object-scale-down")) return "object-scale-down";
+    return "object-contain";
+});
+
 // Check if the component is being rendered in cover/fill layout mode to prevent circular sizing dependencies
 const isCover = computed(() => {
     const className = attrs.class;
@@ -170,12 +203,14 @@ const innerContainerClass = computed(() => {
         <div class="relative flex items-center justify-center" :class="innerContainerClass" :style="aspectRatioStyle">
             <!-- iOS style Live badge in the top-left corner of the actual image -->
             <div
-                class="absolute top-3 left-3 flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full bg-black/30 text-white select-none backdrop-blur-xl z-20 cursor-pointer transition-all duration-300 ease-out active:scale-95 group/live-photo-badge live-badge"
-                :class="
+                v-if="!props.hideBadge"
+                class="absolute flex items-center gap-1.5 pl-2 pr-2.5 py-1 rounded-full bg-black/30 text-white select-none backdrop-blur-xl z-20 cursor-pointer transition-all duration-300 ease-out active:scale-95 group/live-photo-badge live-badge"
+                :class="[
+                    badgeClass,
                     videoPlaying
                         ? 'opacity-95 scale-105 bg-black/40 live-badge-playing'
-                        : 'opacity-80 hover:opacity-100 hover:scale-105 hover:bg-black/40'
-                "
+                        : 'opacity-80 hover:opacity-100 hover:scale-105 hover:bg-black/40',
+                ]"
                 @click.stop="togglePlay"
             >
                 <CircleDotDashed class="w-3.5 h-3.5 text-white select-none live-photo-icon" :class="{ 'is-playing': videoPlaying }" />
@@ -187,23 +222,26 @@ const innerContainerClass = computed(() => {
             <!-- Static Cover Image (Supports HEIC via HeicImage wrapper, inherits dimensions/fit from parent) -->
             <!-- We keep the static image at opacity-100 always to prevent transparency gaps/flashes during cross-fades -->
             <HeicImage
-                v-bind="attrs"
                 :src="props.src"
                 :mime-type="props.mimeType"
                 :alt="props.alt"
-                class="select-none opacity-100 block live-photo-image"
+                class="select-none opacity-100 block live-photo-image max-w-full max-h-full"
+                :class="[objectFitClass]"
+                @load="emit('load')"
+                @error="emit('error')"
             />
 
             <!-- Live Video Element overlaid (pixel-perfectly covers the static image) -->
             <video
+                v-if="props.liveSrc"
                 v-show="isVideoVisible"
                 ref="videoRef"
-                :src="props.liveSrc"
+                :src="props.liveSrc || undefined"
                 muted
                 playsinline
                 preload="auto"
                 class="absolute inset-0 w-full h-full pointer-events-none live-video-player bg-transparent"
-                :class="[videoPlaying ? 'opacity-100 visible' : 'opacity-0 invisible', attrs.class]"
+                :class="[videoPlaying ? 'opacity-100 visible' : 'opacity-0 invisible', objectFitClass]"
                 @playing="onVideoPlaying"
                 @timeupdate="onVideoTimeUpdate"
                 @pause="onVideoPause"
