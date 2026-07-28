@@ -4,8 +4,8 @@ import { eq } from "drizzle-orm";
 
 import { Quality } from "@/lib/types";
 import { Temporal } from "@js-temporal/polyfill";
-import { TaskManager } from "@/services/job_service";
-import { initJobHandlers } from "@/services/handlers";
+import { JobManager } from "@/infra/jobs/manager";
+import { initJobHandlers } from "@/services/job_handlers";
 
 export async function backfillCoverConfig() {
     console.log("[MIGRATION] Starting backfill of Library cover configuration...");
@@ -30,7 +30,7 @@ export async function backfillCoverConfig() {
                 .where(eq(Library.id, lib.id));
 
             initJobHandlers();
-            await TaskManager.createTask({
+            await JobManager.createTask({
                 type: AsyncTaskType.COVER_RECONCILE,
                 libraryId: lib.id,
                 configVersion: 1,

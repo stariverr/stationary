@@ -2,8 +2,6 @@ import { db } from "@/global/db";
 import {
     Post,
     Media,
-    Track,
-    File,
     AssetSearchDocument,
     AssetAiMetadata,
     AssetEmbedding,
@@ -27,6 +25,10 @@ import { AiService } from "./service";
 import { computeSha256 } from "./utils";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { env } from "@/global/env";
+
+type EnrichmentPost = Omit<Pick<typeof Post.$inferSelect, "id" | "source" | "title" | "description" | "author_name">, "id"> & {
+    id: string | null;
+};
 
 export const AiEnrichmentService = {
     /**
@@ -65,7 +67,7 @@ export const AiEnrichmentService = {
     /**
      * Enrich a single Media item (Image or Video Cover)
      */
-    async enrichMediaItem(media: typeof Media.$inferSelect, post: typeof Post.$inferSelect): Promise<void> {
+    async enrichMediaItem(media: typeof Media.$inferSelect, post: EnrichmentPost): Promise<void> {
         // 1. Resolve targeted Track (COVER for Videos, CONTENT IMAGE for others)
         const isVideo = media.type === MediaType.VIDEO;
         const trackType = TrackType.IMAGE;
@@ -119,15 +121,17 @@ export const AiEnrichmentService = {
         const contentHash = await computeSha256(sourceHashInput);
 
         // Fetch relational tags of the post for search document indexing
-        const postTagsList = await db
-            .select({
-                id: Tag.id,
-                name: Tag.name,
-                canonical_tag_id: Tag.canonical_tag_id,
-            })
-            .from(PostTag)
-            .innerJoin(Tag, eq(PostTag.tag_id, Tag.id))
-            .where(and(eq(PostTag.post_id, post.id), eq(Tag.status, TagStatus.ACTIVE)));
+        const postTagsList = post.id
+            ? await db
+                  .select({
+                      id: Tag.id,
+                      name: Tag.name,
+                      canonical_tag_id: Tag.canonical_tag_id,
+                  })
+                  .from(PostTag)
+                  .innerJoin(Tag, eq(PostTag.tag_id, Tag.id))
+                  .where(and(eq(PostTag.post_id, post.id), eq(Tag.status, TagStatus.ACTIVE)))
+            : [];
         const postTags = postTagsList.map((pt) => pt.name);
 
         const canonicalTagIds = new Set<string>();

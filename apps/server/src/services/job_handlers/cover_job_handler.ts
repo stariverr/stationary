@@ -5,18 +5,18 @@ import {
     File as DbFile,
     DeleteStatus,
     SyncStatus,
-    TrackType,
     TrackPurpose,
     AsyncTaskUnitKind,
     AsyncSubjectType,
+    AsyncOutcomeCode,
     type GeneratedCoverMetadata,
 } from "@/db/schema";
-import { and, eq, gt, asc, inArray } from "drizzle-orm";
+import { and, eq, gt, asc, inArray, type SQL } from "drizzle-orm";
 import { RECIPE_VERSION } from "@/lib/utils/cover_profiles";
 import { z } from "zod";
 import { Quality } from "@/lib/types";
 import { CoverService, rankCoverCandidateTrack, type ResolvedCoverSource } from "@/services/cover";
-import type { TaskHandler, TaskUnitContext, TaskResult, DiscoveredUnitSpec } from "@/services/job_types";
+import type { TaskHandler, TaskUnitContext, TaskResult, DiscoveredUnitSpec } from "@/infra/jobs/types";
 
 const CoverTaskInputSchema = z.object({
     qualities: z.array(z.enum(Quality)).nullable().optional(),
@@ -41,6 +41,12 @@ const CoverUnitInputSchema = z.object({
 
 /**
  * Helper to build DiscoveredUnitSpec array for a single media item.
+ *
+ * Reconcile & Batch Rules:
+ * 1. Incremental Dispatch: Only dispatches units for qualities present in targetQualities.
+ *    Non-targeted qualities (e.g. HIGH if config is LOW+MEDIUM) are NOT dispatched, deleted, or pruned.
+ * 2. Completion Check: If !isForce, checks if an active cover Track already exists for the expected
+ *    variant_key and matching source_file_id. If so, marks isAlreadyCompleted = true to avoid re-rendering.
  */
 function buildUnitsForMedia(
     media: typeof Media.$inferSelect,
@@ -121,6 +127,10 @@ function resolveSourceTrackInBatch(
 }
 
 export const CoverJobHandler: TaskHandler = {
+    validateInput(input) {
+        return CoverTaskInputSchema.parse(input);
+    },
+
     async discoverUnits(task, discoveryCursor, batchSize) {
         if (!task.library_id) {
             return { units: [], nextCursor: null, hasMore: false };
@@ -142,16 +152,20 @@ export const CoverJobHandler: TaskHandler = {
         let nextCursor: Record<string, unknown> | null = null;
 
         if (inputSnapshot.media_ids && inputSnapshot.media_ids.length > 0 && sourceType === "MANUAL") {
-            const mediaItems = await db
+            mediaBatch = await db
                 .select()
                 .from(Media)
-                .where(and(eq(Media.library_id, task.library_id), eq(Media.delete_status, DeleteStatus.ACTIVE)));
-
-            mediaBatch = mediaItems.filter((m) => inputSnapshot.media_ids!.includes(m.id));
+                .where(
+                    and(
+                        eq(Media.library_id, task.library_id),
+                        eq(Media.delete_status, DeleteStatus.ACTIVE),
+                        inArray(Media.id, inputSnapshot.media_ids),
+                    ),
+                );
         } else {
             // RECONCILE mode with JSONB discovery cursor
             const lastMediaId = (discoveryCursor?.lastMediaId as string) || null;
-            const queryConditions: any[] = [eq(Media.library_id, task.library_id), eq(Media.delete_status, DeleteStatus.ACTIVE)];
+            const queryConditions: SQL[] = [eq(Media.library_id, task.library_id), eq(Media.delete_status, DeleteStatus.ACTIVE)];
             if (lastMediaId) {
                 queryConditions.push(gt(Media.id, lastMediaId));
             }
@@ -220,10 +234,16 @@ export const CoverJobHandler: TaskHandler = {
         return { units, nextCursor, hasMore };
     },
 
-    async execute({ task, unit }: TaskUnitContext): Promise<TaskResult> {
+    async execute({ unit, signal }: TaskUnitContext): Promise<TaskResult> {
+        signal.throwIfAborted();
         const parseResult = CoverUnitInputSchema.safeParse(unit.input_snapshot || {});
         if (!parseResult.success) {
-            return { success: false, outcomeCode: "INVALID_INPUT", error: "Missing or invalid required item input parameters" };
+            return {
+                success: false,
+                retryable: false,
+                outcomeCode: AsyncOutcomeCode.INVALID_INPUT,
+                error: "Missing or invalid required item input parameters",
+            };
         }
         const input = parseResult.data;
 
@@ -234,14 +254,20 @@ export const CoverJobHandler: TaskHandler = {
             .limit(1);
         const media = mediaList[0];
         if (!media) {
-            return { success: false, outcomeCode: "MEDIA_NOT_FOUND", error: `Media ${unit.subject_id} not found` };
+            return {
+                success: false,
+                retryable: false,
+                outcomeCode: AsyncOutcomeCode.MEDIA_NOT_FOUND,
+                error: `Media ${unit.subject_id} not found`,
+            };
         }
 
         const source = await CoverService.resolveSourceTrack(media);
         if (!source || source.fileId !== input.sourceFileId) {
-            return { success: false, skipped: true, outcomeCode: "SOURCE_CHANGED", error: "Source file changed" };
+            return { success: false, skipped: true, outcomeCode: AsyncOutcomeCode.SOURCE_CHANGED, error: "Source file changed" };
         }
 
+        signal.throwIfAborted();
         const res = await CoverService.generateCover({
             media,
             quality: input.quality,

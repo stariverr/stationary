@@ -1,5 +1,5 @@
 import { and, count, eq, inArray, or } from "drizzle-orm";
-import { db } from "@/global/db";
+import { db, Transaction } from "@/global/db";
 import { Post, Media, Track, File, Library, Author, DeleteStatus, PostTag, MediaTag } from "@/db/schema";
 
 import { RecycleService } from "./recycle";
@@ -101,12 +101,14 @@ export const DeleteService = {
      */
     async deleteLibrary(libraryId: string) {
         const deleteTime = Temporal.Now.instant();
-        // Check if empty of active posts/media
+
+        // 1. Fast-fail check outside transaction
         const hasContent = await RecycleService.libraryHasContent(libraryId);
         if (hasContent) {
             throw new Error("Library is not empty");
         }
 
+        // 2. Perform soft-delete in lightweight transaction
         return db.transaction(async (tx) => {
             const libs = await tx
                 .select({ id: Library.id, cover_file_id: Library.cover_file_id })
@@ -164,9 +166,10 @@ export const DeleteService = {
     },
 
     /** Check if File can be purged (it is not referenced by any active entity) */
-    async canPurgeFile(fileId: string): Promise<boolean> {
+    async canPurgeFile(fileId: string, tx?: Transaction): Promise<boolean> {
+        const executor = tx || db;
         const [authorCount, libraryCount, mediaFileCount] = await Promise.all([
-            db
+            executor
                 .select({ count: count() })
                 .from(Author)
                 .where(
@@ -175,11 +178,11 @@ export const DeleteService = {
                         eq(Author.delete_status, DeleteStatus.ACTIVE),
                     ),
                 ),
-            db
+            executor
                 .select({ count: count() })
                 .from(Library)
                 .where(and(eq(Library.cover_file_id, fileId), eq(Library.delete_status, DeleteStatus.ACTIVE))),
-            db
+            executor
                 .select({ count: count() })
                 .from(Track)
                 .where(and(eq(Track.file_id, fileId), eq(Track.delete_status, DeleteStatus.ACTIVE))),

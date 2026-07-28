@@ -76,12 +76,17 @@ export const ApiTokenService = {
             return null;
         }
 
-        // 5. Asynchronously update last_use_time
-        db.update(ExternalApiToken)
-            .set({ last_use_time: Temporal.Now.instant() })
-            .where(eq(ExternalApiToken.id, token.id))
-            .execute()
-            .catch((err) => console.error("[ApiTokenService] Failed to update last_use_time:", err));
+        // 5. Asynchronously update last_use_time (throttled to once per 5 minutes)
+        const now = Temporal.Now.instant();
+        const shouldUpdateLastUse = !token.last_use_time || Temporal.Instant.compare(token.last_use_time.add({ minutes: 5 }), now) < 0;
+
+        if (shouldUpdateLastUse) {
+            db.update(ExternalApiToken)
+                .set({ last_use_time: now })
+                .where(eq(ExternalApiToken.id, token.id))
+                .execute()
+                .catch((err) => console.error("[ApiTokenService] Failed to update last_use_time:", err));
+        }
 
         return token;
     },

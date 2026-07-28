@@ -1,5 +1,5 @@
 import { and, count, eq, isNull, isNotNull } from "drizzle-orm";
-import { db } from "@/global/db";
+import { db, Transaction } from "@/global/db";
 import { DeleteStatus, Media, Post } from "@/db/schema";
 import { Temporal } from "@js-temporal/polyfill";
 
@@ -194,14 +194,15 @@ export const RecycleService = {
      *
      * Only when the library is empty, can it be deleted.
      */
-    async libraryHasContent(libraryId: string) {
+    async libraryHasContent(libraryId: string, tx?: Transaction) {
+        const executor = tx || db;
         const [postRows, mediaRows] = await Promise.all([
-            db
+            executor
                 .select({ total: count() })
                 .from(Post)
                 .where(and(eq(Post.library_id, libraryId), eq(Post.delete_status, DeleteStatus.ACTIVE)))
                 .limit(1),
-            db
+            executor
                 .select({ total: count() })
                 .from(Media)
                 .where(and(eq(Media.library_id, libraryId), eq(Media.delete_status, DeleteStatus.ACTIVE)))

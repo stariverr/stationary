@@ -10,7 +10,7 @@ import {
     MediaType,
     type GeneratedCoverMetadata,
 } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { renderCoverFrame } from "@/lib/utils/cover_renderer";
 import { RECIPE_VERSION } from "@/lib/utils/cover_profiles";
 import { uploadToS3 } from "@/lib/utils/media";
@@ -137,8 +137,12 @@ export const CoverService = {
      * Generate, render, and persist cover image for a media item.
      * 1. Presign internal S3 source file URL
      * 2. Render target frame with FFmpeg
-     * 3. Upload generated AVIF to S3
-     * 4. Upsert DbFile & Track records in database
+     * 3. Upload generated AVIF to S3 (overwrites existing S3 file if key matches)
+     * 4. Upsert DbFile & Track records in database:
+     *    - If an active cover Track with matching variant_key exists, updates file_id & metadata.
+     *    - If missing or inactive, inserts/upserts Track. Note: onConflictDoUpdate requires
+     *      targetWhere: sql`delete_status = 'ACTIVE'` to match partial unique index.
+     *    - Non-targeted cover tracks (e.g. HIGH when only LOW+MEDIUM are generated) remain intact.
      * 5. Clean up superseded old cover files safely
      */
     async generateCover(params: GenerateCoverParams): Promise<GenerateCoverResult> {
@@ -175,97 +179,120 @@ export const CoverService = {
 
         await uploadToS3(s3Key, renderResult.buffer, "image/avif", env.S3_BUCKET, renderResult.size);
 
-        const fileResults = await db
-            .insert(DbFile)
-            .values({
-                path: s3Key,
-                mime_type: "image/avif",
-                extension: "avif",
-                bucket: env.S3_BUCKET,
-                size: renderResult.size,
-                width: renderResult.width,
-                height: renderResult.height,
-            })
-            .onConflictDoUpdate({
-                target: DbFile.path,
-                set: {
+        const newFileId = await db.transaction(async (tx) => {
+            const fileResults = await tx
+                .insert(DbFile)
+                .values({
+                    path: s3Key,
                     mime_type: "image/avif",
                     extension: "avif",
+                    bucket: env.S3_BUCKET,
                     size: renderResult.size,
                     width: renderResult.width,
                     height: renderResult.height,
-                    delete_status: DeleteStatus.ACTIVE,
-                    delete_time: null,
-                },
-            })
-            .returning({ id: DbFile.id });
-
-        const newFileId = fileResults[0]!.id;
-        const variantKey = `cover:${qualityLower}:recipe:${RECIPE_VERSION}`;
-        const metadata: GeneratedCoverMetadata = {
-            source_track_id: params.sourceTrackId || source.track.id,
-            source_file_id: sourceFileId,
-            recipe_version: RECIPE_VERSION,
-            generation_mode: source.track.type === TrackType.VIDEO ? "VIDEO_FRAME" : "TRANSCODE",
-            generated_width: renderResult.width,
-            generated_height: renderResult.height,
-        };
-
-        const existingTracks = await db
-            .select()
-            .from(Track)
-            .where(and(eq(Track.media_id, media.id), eq(Track.delete_status, DeleteStatus.ACTIVE)));
-        const existingCoverTrack = existingTracks.find((t) => t.purpose === TrackPurpose.COVER && t.variant_key === variantKey);
-
-        const completedNow = Temporal.Now.instant();
-        let oldFileIdToDelete: string | null = null;
-
-        if (existingCoverTrack) {
-            if (existingCoverTrack.file_id && existingCoverTrack.file_id !== newFileId) {
-                oldFileIdToDelete = existingCoverTrack.file_id;
-            }
-            await db
-                .update(Track)
-                .set({
-                    file_id: newFileId,
-                    sync_status: SyncStatus.COMPLETED,
-                    last_error: null,
-                    metadata,
-                    is_generated: true,
-                    is_original: false,
-                    source_track_id: source.track.id,
-                    update_time: completedNow,
                 })
-                .where(eq(Track.id, existingCoverTrack.id));
-        } else {
-            await db.insert(Track).values({
-                media_id: media.id,
-                type: TrackType.IMAGE,
-                purpose: TrackPurpose.COVER,
-                quality: quality as any,
-                priority: quality === Quality.LOW ? 10 : quality === Quality.MEDIUM ? 20 : 30,
-                file_id: newFileId,
-                sync_status: SyncStatus.COMPLETED,
-                last_error: null,
-                metadata,
-                variant_key: variantKey,
-                is_generated: true,
-                is_original: false,
-                source_track_id: source.track.id,
-                create_time: completedNow,
-                update_time: completedNow,
-            });
-        }
+                .onConflictDoUpdate({
+                    target: DbFile.path,
+                    set: {
+                        mime_type: "image/avif",
+                        extension: "avif",
+                        size: renderResult.size,
+                        width: renderResult.width,
+                        height: renderResult.height,
+                        delete_status: DeleteStatus.ACTIVE,
+                        delete_time: null,
+                    },
+                })
+                .returning({ id: DbFile.id });
 
-        if (oldFileIdToDelete) {
-            const canPurge = await DeleteService.canPurgeFile(oldFileIdToDelete);
-            if (canPurge) {
-                await db
-                    .update(DbFile)
-                    .set({ delete_status: DeleteStatus.DELETED, delete_time: completedNow })
-                    .where(eq(DbFile.id, oldFileIdToDelete));
+            const createdFileId = fileResults[0].id;
+            const variantKey = `cover:${qualityLower}:recipe:${RECIPE_VERSION}`;
+            const metadata: GeneratedCoverMetadata = {
+                source_track_id: params.sourceTrackId || source.track.id,
+                source_file_id: sourceFileId,
+                recipe_version: RECIPE_VERSION,
+                generation_mode: source.track.type === TrackType.VIDEO ? "VIDEO_FRAME" : "TRANSCODE",
+                generated_width: renderResult.width,
+                generated_height: renderResult.height,
+            };
+
+            const existingTracks = await tx
+                .select()
+                .from(Track)
+                .where(and(eq(Track.media_id, media.id), eq(Track.delete_status, DeleteStatus.ACTIVE)))
+                .for("update");
+            const existingCoverTrack = existingTracks.find((t) => t.purpose === TrackPurpose.COVER && t.variant_key === variantKey);
+
+            const completedNow = Temporal.Now.instant();
+            let oldFileIdToDelete: string | null = null;
+
+            if (existingCoverTrack) {
+                if (existingCoverTrack.file_id && existingCoverTrack.file_id !== createdFileId) {
+                    oldFileIdToDelete = existingCoverTrack.file_id;
+                }
+                await tx
+                    .update(Track)
+                    .set({
+                        file_id: createdFileId,
+                        sync_status: SyncStatus.COMPLETED,
+                        last_error: null,
+                        metadata,
+                        is_generated: true,
+                        is_original: false,
+                        source_track_id: source.track.id,
+                        update_time: completedNow,
+                    })
+                    .where(eq(Track.id, existingCoverTrack.id));
+            } else {
+                await tx
+                    .insert(Track)
+                    .values({
+                        media_id: media.id,
+                        type: TrackType.IMAGE,
+                        purpose: TrackPurpose.COVER,
+                        quality: quality as any,
+                        priority: quality === Quality.LOW ? 10 : quality === Quality.MEDIUM ? 20 : 30,
+                        file_id: createdFileId,
+                        sync_status: SyncStatus.COMPLETED,
+                        last_error: null,
+                        metadata,
+                        variant_key: variantKey,
+                        is_generated: true,
+                        is_original: false,
+                        source_track_id: source.track.id,
+                        create_time: completedNow,
+                        update_time: completedNow,
+                    })
+                    .onConflictDoUpdate({
+                        target: [Track.media_id, Track.type, Track.purpose, Track.variant_key],
+                        targetWhere: sql`delete_status = 'ACTIVE'`,
+                        set: {
+                            file_id: createdFileId,
+                            sync_status: SyncStatus.COMPLETED,
+                            last_error: null,
+                            metadata,
+                            is_generated: true,
+                            is_original: false,
+                            source_track_id: source.track.id,
+                            update_time: completedNow,
+                            delete_status: DeleteStatus.ACTIVE,
+                            delete_time: null,
+                        },
+                    });
             }
-        }
+
+            if (oldFileIdToDelete) {
+                const canPurge = await DeleteService.canPurgeFile(oldFileIdToDelete, tx);
+                if (canPurge) {
+                    await tx
+                        .update(DbFile)
+                        .set({ delete_status: DeleteStatus.DELETED, delete_time: completedNow })
+                        .where(eq(DbFile.id, oldFileIdToDelete));
+                }
+            }
+
+            return createdFileId;
+        });
 
         return { success: true, outcomeCode: "SUCCESS", fileId: newFileId };
     },
