@@ -6,6 +6,8 @@ export const UNIT_LEASE_SECONDS = 60;
 export const DISCOVERY_LEASE_SECONDS = 120;
 export const HEARTBEAT_INTERVAL_MS = 20_000;
 export const MAX_RETRY_DELAY_SECONDS = 300;
+export const JOB_WAKE_CHANNEL = "jobs:wake_channel";
+
 
 type TaskProgress = Pick<
     typeof AsyncTask.$inferSelect,

@@ -145,6 +145,7 @@ flowchart TD
 4. **指数退避与随机抖动 (Exponential Backoff with Jitter)**：对于可重试失败，系统根据重试次数自动计算下一次可执行时间 (`available_at`)：
    $$\text{延迟时间} = \min\left(300, 5 \times 2^{\text{attempt}-1} \times \text{jitter}\right) \text{ 秒}$$
 5. **状态对账与终态收敛 (Reconciliation)**：单元结算时更新原子计数。当所有单元消费完毕且 `discovery_complete = true`，主任务自动收敛至 `COMPLETED` 或 `FAILED` 并触发 `finalizeTask` 回调。
+6. **跨节点实时唤醒与兜底机制 (Redis Pub/Sub & Fallback)**：当新任务创建、恢复或流式发现时，系统通过 Redis Pub/Sub 广播频道 (`jobs:wake_channel`) 实时发布唤醒信号（`notifyJobsAvailable`），驱动多节点集群下的 `JobRunner` 立即抢占执行。为保证高可用与强容错，`JobRunner` 保留了 5 秒 `setInterval` 定时轮询与 `JobSweeper` 后台巡检作为兜底机制，即使 Redis 发生闪断或 Pub/Sub 丢包，任务依然能确保在 5 秒内被正确拉起执行。
 
 ### 6.3 容错与自动修复 (`JobSweeper`)
 

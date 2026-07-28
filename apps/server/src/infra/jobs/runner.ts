@@ -1,5 +1,7 @@
 import { executeUnit } from "@/infra/jobs/executor";
 import { claimUnits, onJobsAvailable } from "@/infra/jobs/store";
+import { JOB_WAKE_CHANNEL } from "@/infra/jobs/policy";
+import { kv } from "@/global/kv";
 import { getErrorMessage } from "@/lib/utils/error";
 
 export class JobRunner {
@@ -37,6 +39,14 @@ export class JobRunner {
         this.isRunning = true;
         this.pollTimer = setInterval(() => this.wake(), pollIntervalMs);
         this.pollTimer.unref?.();
+
+        // Subscribe to Redis Pub/Sub channel for multi-node real-time wake signals
+        kv.subscribe(JOB_WAKE_CHANNEL, () => {
+            this.wake();
+        }).catch((error) => {
+            console.error("[JobRunner] Failed to subscribe to Redis Pub/Sub wake channel:", error);
+        });
+
         this.wake();
     }
 

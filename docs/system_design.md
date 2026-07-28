@@ -144,6 +144,7 @@ flowchart TD
 4. **Exponential Backoff Retries**: Failed units with retry eligibility recalculate next availability (`available_at`) using jittered exponential backoff:
    $$\text{Delay} = \min\left(300, 5 \times 2^{\text{attempt}-1} \times \text{jitter}\right) \text{ seconds}$$
 5. **Reconciliation & Finalization**: Upon unit completion, progress counters update atomically. Once all units finish and `discovery_complete = true`, the master task auto-converges to `COMPLETED` or `FAILED` and invokes `finalizeTask`.
+6. **Multi-Node Real-Time Wake & Fallback (Redis Pub/Sub)**: When new jobs are enqueued, resumed, or discovered, a lightweight broadcast signal is published via Redis Pub/Sub (`jobs:wake_channel`), instantly triggering `JobRunner.wake()` across all worker instances in a horizontally scaled cluster. To guarantee absolute execution reliability, `JobRunner` maintains a 5-second periodic polling fallback (`setInterval`) alongside `JobSweeper` background audits, ensuring jobs are picked up within 5 seconds even if Redis connectivity fails or messages are missed.
 
 ### 6.3 Recovery & Maintenance (`JobSweeper`)
 

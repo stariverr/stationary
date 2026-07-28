@@ -4,12 +4,14 @@ import { v7 as uuidv7 } from "uuid";
 import { and, asc, count, eq, gt, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { AsyncOutcomeCode, AsyncTask, AsyncTaskControl, AsyncTaskStatus, AsyncTaskUnit, AsyncTaskUnitStatus } from "@/db/schema";
 import { db, type Transaction } from "@/global/db";
+import { kv } from "@/global/kv";
 import { getErrorMessage } from "@/lib/utils/error";
 import { getTaskHandler } from "@/infra/jobs/registry";
 import {
     DEFAULT_TASK_CONCURRENCY,
     DEFAULT_UNIT_MAX_ATTEMPTS,
     DISCOVERY_LEASE_SECONDS,
+    JOB_WAKE_CHANNEL,
     UNIT_LEASE_SECONDS,
     requirePositiveInteger,
     retryDelaySeconds,
@@ -21,6 +23,7 @@ import type { CreateTaskParams, DiscoveredUnitSpec, TaskResult } from "@/infra/j
 type TaskRow = typeof AsyncTask.$inferSelect;
 type TaskUnitRow = typeof AsyncTaskUnit.$inferSelect;
 type WakeCallback = () => void;
+type DeadLetterCallback = (unit: TaskUnitRow, error: string) => void;
 
 interface PreparedTaskParams {
     type: CreateTaskParams["type"];
@@ -33,11 +36,28 @@ interface PreparedTaskParams {
 }
 
 const wakeCallbacks = new Set<WakeCallback>();
+const deadLetterCallbacks = new Set<DeadLetterCallback>();
 const activeDiscoveryTasks = new Set<string>();
 
 export function onJobsAvailable(callback: WakeCallback): () => void {
     wakeCallbacks.add(callback);
     return () => wakeCallbacks.delete(callback);
+}
+
+export function onDeadLetter(callback: DeadLetterCallback): () => void {
+    deadLetterCallbacks.add(callback);
+    return () => deadLetterCallbacks.delete(callback);
+}
+
+function notifyDeadLetter(unit: TaskUnitRow, error: string): void {
+    console.error(`[JobStore] Dead letter unit ${unit.id} (task ${unit.task_id}): ${error}`);
+    for (const callback of deadLetterCallbacks) {
+        try {
+            callback(unit, error);
+        } catch (err) {
+            console.error("[JobStore] Dead letter callback failed:", err);
+        }
+    }
 }
 
 export function notifyJobsAvailable(): void {
@@ -48,6 +68,11 @@ export function notifyJobsAvailable(): void {
             console.error("[JobStore] Job wake callback failed:", error);
         }
     }
+
+    // Broadcast wake signal across multi-node cluster via Redis Pub/Sub
+    kv.publish(JOB_WAKE_CHANNEL, "wake").catch((error) => {
+        console.error("[JobStore] Redis Pub/Sub wake publish failed:", error);
+    });
 }
 
 function prepareTaskParams(params: CreateTaskParams): PreparedTaskParams {
@@ -680,6 +705,9 @@ export async function settleTaskUnit(unit: TaskUnitRow, leaseToken: string, resu
     });
 
     if (settlement === "succeeded" || settlement === "failed") {
+        if (settlement === "failed") {
+            notifyDeadLetter(unit, result.error ?? "Task unit retries exhausted");
+        }
         await reconcileTask(unit.task_id);
     } else if (settlement === "retrying") {
         notifyJobsAvailable();
@@ -861,3 +889,113 @@ export async function retryFailedUnits(taskId: string): Promise<number> {
     if (resetCount > 0) notifyJobsAvailable();
     return resetCount;
 }
+
+export async function retrySingleFailedUnit(unitId: string): Promise<boolean> {
+    const now = Temporal.Now.instant();
+    const result = await db.transaction(async (tx) => {
+        const units = await tx.select().from(AsyncTaskUnit).where(eq(AsyncTaskUnit.id, unitId)).for("update").limit(1);
+        const unit = units[0];
+        if (!unit || unit.status !== AsyncTaskUnitStatus.FAILED) return false;
+
+        const tasks = await tx.select().from(AsyncTask).where(eq(AsyncTask.id, unit.task_id)).for("update").limit(1);
+        const task = tasks[0];
+
+        await tx
+            .update(AsyncTaskUnit)
+            .set({
+                status: AsyncTaskUnitStatus.PENDING,
+                outcome_code: null,
+                last_error: null,
+                available_at: now,
+                lease_token: null,
+                lease_expires_at: null,
+                attempt_count: 0,
+                update_time: now,
+                complete_time: null,
+            })
+            .where(eq(AsyncTaskUnit.id, unitId));
+
+        if (task) {
+            const nextStatus = task.status === AsyncTaskStatus.FAILED ? AsyncTaskStatus.RUNNING : task.status;
+            await tx
+                .update(AsyncTask)
+                .set({
+                    status: nextStatus,
+                    control_requested: AsyncTaskControl.NONE,
+                    failed_units: Math.max(0, task.failed_units - 1),
+                    last_error: null,
+                    update_time: now,
+                    complete_time: null,
+                })
+                .where(eq(AsyncTask.id, task.id));
+        }
+
+        return true;
+    });
+
+    if (result) notifyJobsAvailable();
+    return result;
+}
+
+export async function batchRetryFailedUnits(params: { unitIds?: string[]; taskIds?: string[] }): Promise<number> {
+    const now = Temporal.Now.instant();
+    const { unitIds, taskIds } = params;
+    if ((!unitIds || unitIds.length === 0) && (!taskIds || taskIds.length === 0)) {
+        return 0;
+    }
+
+    const resetCount = await db.transaction(async (tx) => {
+        const conditions = [eq(AsyncTaskUnit.status, AsyncTaskUnitStatus.FAILED)];
+        if (unitIds && unitIds.length > 0) {
+            conditions.push(inArray(AsyncTaskUnit.id, unitIds));
+        }
+        if (taskIds && taskIds.length > 0) {
+            conditions.push(inArray(AsyncTaskUnit.task_id, taskIds));
+        }
+
+        const resetUnits = await tx
+            .update(AsyncTaskUnit)
+            .set({
+                status: AsyncTaskUnitStatus.PENDING,
+                outcome_code: null,
+                last_error: null,
+                available_at: now,
+                lease_token: null,
+                lease_expires_at: null,
+                attempt_count: 0,
+                update_time: now,
+                complete_time: null,
+            })
+            .where(and(...conditions))
+            .returning({ id: AsyncTaskUnit.id, taskId: AsyncTaskUnit.task_id });
+
+        if (resetUnits.length === 0) return 0;
+
+        const affectedTaskIds = Array.from(new Set(resetUnits.map((u) => u.taskId)));
+        for (const taskId of affectedTaskIds) {
+            const taskUnits = resetUnits.filter((u) => u.taskId === taskId).length;
+            const tasks = await tx.select().from(AsyncTask).where(eq(AsyncTask.id, taskId)).for("update").limit(1);
+            const task = tasks[0];
+            if (task) {
+                const nextStatus = task.status === AsyncTaskStatus.FAILED ? AsyncTaskStatus.RUNNING : task.status;
+                await tx
+                    .update(AsyncTask)
+                    .set({
+                        status: nextStatus,
+                        control_requested: AsyncTaskControl.NONE,
+                        failed_units: Math.max(0, task.failed_units - taskUnits),
+                        last_error: null,
+                        update_time: now,
+                        complete_time: null,
+                    })
+                    .where(eq(AsyncTask.id, taskId));
+            }
+        }
+
+        return resetUnits.length;
+    });
+
+    if (resetCount > 0) notifyJobsAvailable();
+    return resetCount;
+}
+
