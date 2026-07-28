@@ -40,7 +40,7 @@ import {
     MediaDraftSchema,
 } from "@/lib/validation/media-composition";
 import { validate } from "@/lib/validation/validator";
-import { getMediaCoversMap, getMediaTracks, PreviewItem } from "@/lib/utils/media_mapper";
+import { getMediaCoversMap, getMediaVideosMap, getMediaTracks, PreviewItem } from "@/lib/utils/media_mapper";
 import { Temporal } from "@js-temporal/polyfill";
 
 const router = new Hono();
@@ -156,6 +156,7 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
 
     type MediaItem = Pick<typeof Media.$inferSelect, "id" | "post_id" | "type" | "sort_order"> & {
         covers: PreviewItem[];
+        videos: PreviewItem[];
     };
     const mediaByPostId = new Map<string, MediaItem[]>();
 
@@ -172,12 +173,13 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
             .orderBy(asc(Media.sort_order));
 
         const allMediaIds = mediaRows.map((mr) => mr.id);
-        const coversByMediaId = await getMediaCoversMap(allMediaIds);
+        const [coversByMediaId, videosByMediaId] = await Promise.all([getMediaCoversMap(allMediaIds), getMediaVideosMap(allMediaIds)]);
 
         for (const row of mediaRows) {
             if (!row.post_id) continue;
 
             const covers = coversByMediaId.get(row.id) ?? [];
+            const videos = videosByMediaId.get(row.id) ?? [];
 
             let mediaList = mediaByPostId.get(row.post_id);
             if (!mediaList) {
@@ -191,6 +193,7 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
                 type: row.type,
                 sort_order: row.sort_order,
                 covers: covers,
+                videos: videos,
             });
         }
     }

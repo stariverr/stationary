@@ -405,9 +405,7 @@ export const usePostStore = defineStore("posts", () => {
                         );
                         const coverTrack = m.tracks.find((t) => t.purpose === "COVER");
                         const liveTrack =
-                            m.type === "LIVE_PHOTO"
-                                ? m.tracks.find((t) => t.type === "VIDEO" && t.purpose === "CONTENT" && t.priority === 0)
-                                : null;
+                            m.type === "LIVE_PHOTO" ? m.tracks.find((t) => t.type === "VIDEO" && t.purpose === "CONTENT") : null;
                         const subtitleTracks = m.tracks.filter((t) => t.type === "SUBTITLE");
 
                         let url = m.url || primaryTrack?.url || null;

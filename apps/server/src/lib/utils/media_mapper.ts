@@ -80,6 +80,40 @@ export async function getMediaCoversMap(mediaIds: string[]): Promise<Map<string,
 }
 
 /**
+ * Batch-fetches CONTENT VIDEO tracks for given media IDs in list queries.
+ */
+export async function getMediaVideosMap(mediaIds: string[]): Promise<Map<string, PreviewItem[]>> {
+    const map = new Map<string, PreviewItem[]>();
+    if (!mediaIds.length) return map;
+
+    const rows = await db
+        .select()
+        .from(Track)
+        .leftJoin(DbFile, eq(Track.file_id, DbFile.id))
+        .where(
+            and(
+                inArray(Track.media_id, mediaIds),
+                eq(Track.delete_status, DeleteStatus.ACTIVE),
+                eq(Track.sync_status, SyncStatus.COMPLETED),
+                eq(Track.type, TrackType.VIDEO),
+                eq(Track.purpose, TrackPurpose.CONTENT),
+            ),
+        );
+
+    for (const { track, file } of rows) {
+        if (!track.media_id) continue;
+        const list = map.get(track.media_id) || [];
+        list.push({
+            url: buildUrl(file?.bucket, file?.path),
+            quality: track.quality,
+            codec: track.codec,
+        });
+        map.set(track.media_id, list);
+    }
+    return map;
+}
+
+/**
  * Fetches all active & completed tracks for a single media item in detail mode.
  */
 export async function getMediaTracks(mediaId: string): Promise<MappedFileRow[]> {
