@@ -1,41 +1,92 @@
 import { describe, expect, test } from "bun:test";
-import { getTaskHandler } from "@/services/job_service";
-import { initJobHandlers } from "@/services/handlers";
-import { Quality } from "@/lib/types";
+import { AsyncTaskStatus, AsyncTaskType } from "@/db/schema";
+import { getTaskHandler } from "@/infra/jobs/registry";
+import {
+    MAX_RETRY_DELAY_SECONDS,
+    requirePositiveInteger,
+    retryDelaySeconds,
+    taskStatusAfterDiscovery,
+    terminalTaskStatus,
+} from "@/infra/jobs/policy";
+import { createIdempotencyKey } from "@/lib/utils/hash";
+import { initJobHandlers } from "@/services/job_handlers";
 
-describe("Job System & Lease Fencing Contracts", () => {
-    test("Progress math formula remains strictly consistent", () => {
-        const job = {
-            total_units: 180,
-            completed_units: 130,
-            cancelled_units: 5,
-            succeeded_units: 50,
-            skipped_units: 75,
-            failed_units: 5,
-            running_units: 5,
-        };
-
-        const processed = job.completed_units + job.cancelled_units;
-        const succeeded = job.succeeded_units + job.skipped_units;
-        const failed = job.failed_units;
-        const percent = Math.min(100, Math.floor((processed / job.total_units) * 100));
-
-        expect(processed).toBe(135);
-        expect(succeeded).toBe(125);
-        expect(failed).toBe(5);
-        expect(percent).toBe(75);
-    });
-
-    test("Quality ordering and config boundary validation", () => {
-        const activeQualities = [Quality.LOW, Quality.MEDIUM];
-        const isHighConfigured = activeQualities.includes(Quality.HIGH);
-        expect(isHighConfigured).toBe(false);
-        expect(activeQualities.includes(Quality.LOW)).toBe(true);
-    });
-
-    test("Decoupled JobHandlers initialize and register successfully", () => {
+describe("Job engine contracts", () => {
+    test("all persisted task types have a registered handler", () => {
         initJobHandlers();
-        expect(getTaskHandler("COVER_BATCH")).toBeDefined();
-        expect(getTaskHandler("COVER_RECONCILE")).toBeDefined();
+
+        for (const taskType of Object.values(AsyncTaskType)) {
+            expect(getTaskHandler(taskType), `Missing handler for ${taskType}`).toBeDefined();
+        }
+    });
+
+    test("a completed discovery always makes units dispatchable", () => {
+        expect(taskStatusAfterDiscovery(AsyncTaskStatus.DISCOVERING, false)).toBe(AsyncTaskStatus.DISCOVERING);
+        expect(taskStatusAfterDiscovery(AsyncTaskStatus.DISCOVERING, true)).toBe(AsyncTaskStatus.RUNNING);
+        expect(taskStatusAfterDiscovery(AsyncTaskStatus.RUNNING, false)).toBe(AsyncTaskStatus.RUNNING);
+    });
+
+    test("task finalization depends on discovery and all unit counters", () => {
+        expect(
+            terminalTaskStatus({
+                discovery_complete: false,
+                total_units: 0,
+                succeeded_units: 0,
+                failed_units: 0,
+                cancelled_units: 0,
+            }),
+        ).toBeNull();
+        expect(
+            terminalTaskStatus({
+                discovery_complete: true,
+                total_units: 2,
+                succeeded_units: 1,
+                failed_units: 0,
+                cancelled_units: 0,
+            }),
+        ).toBeNull();
+        expect(
+            terminalTaskStatus({
+                discovery_complete: true,
+                total_units: 2,
+                succeeded_units: 2,
+                failed_units: 0,
+                cancelled_units: 0,
+            }),
+        ).toBe(AsyncTaskStatus.COMPLETED);
+        expect(
+            terminalTaskStatus({
+                discovery_complete: true,
+                total_units: 2,
+                succeeded_units: 1,
+                failed_units: 1,
+                cancelled_units: 0,
+            }),
+        ).toBe(AsyncTaskStatus.FAILED);
+        expect(() =>
+            terminalTaskStatus({
+                discovery_complete: true,
+                total_units: 1,
+                succeeded_units: 1,
+                failed_units: 1,
+                cancelled_units: 0,
+            }),
+        ).toThrow("processed units exceeds total");
+    });
+
+    test("retry policy uses bounded exponential backoff with jitter", () => {
+        expect(retryDelaySeconds(1, () => 0)).toBe(4);
+        expect(retryDelaySeconds(1, () => 1)).toBe(6);
+        expect(retryDelaySeconds(20, () => 1)).toBe(MAX_RETRY_DELAY_SECONDS);
+        expect(() => requirePositiveInteger(0, "attempts")).toThrow("attempts must be a positive integer");
+    });
+
+    test("idempotency hashing is stable across object key order", () => {
+        const first = createIdempotencyKey("post", { postId: "p1", options: { force: true, quality: "high" } });
+        const reordered = createIdempotencyKey("post", { options: { quality: "high", force: true }, postId: "p1" });
+        const different = createIdempotencyKey("post", { postId: "p2", options: { force: true, quality: "high" } });
+
+        expect(first).toBe(reordered);
+        expect(first).not.toBe(different);
     });
 });
