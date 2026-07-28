@@ -5,8 +5,7 @@ import { eq, and, desc, count } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
-import { TaskManager } from "@/services/job_service";
-import { env } from "@/global/env";
+import { JobManager } from "@/infra/jobs/manager";
 
 export const jobsApp = new Hono<AuthEnv>();
 
@@ -20,13 +19,6 @@ async function checkTaskAccess(userId: string, task: typeof AsyncTask.$inferSele
         return lib?.owner_id === userId;
     }
     return false;
-}
-
-function resolveOrigin(c: any): string {
-    const requestOrigin = c.req.header("x-forwarded-proto")
-        ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
-        : new URL(c.req.url).origin;
-    return env.UPSTASH_WORKFLOW_URL || requestOrigin;
 }
 
 // GET /api/jobs/:id - Master task status & progress detail
@@ -46,7 +38,8 @@ jobsApp.get("/:id", requireAuth, async (c) => {
     if (!isAuthorized) return c.json(error(Code.UNAUTHORIZED, "Forbidden access to background task"), 403);
 
     const processedUnits = task.succeeded_units + task.failed_units + task.cancelled_units;
-    const percentage = task.total_units > 0 ? Math.min(100, Math.floor((processedUnits / task.total_units) * 100)) : 0;
+    const isTerminal = [AsyncTaskStatus.COMPLETED, AsyncTaskStatus.FAILED, AsyncTaskStatus.CANCELLED].includes(task.status);
+    const percentage = task.total_units > 0 ? Math.min(100, Math.floor((processedUnits / task.total_units) * 100)) : isTerminal ? 100 : 0;
 
     return c.json(
         success(Code.SUCCESS, {
@@ -91,7 +84,10 @@ jobsApp.post("/:id/pause", requireAuth, async (c) => {
     const isAuthorized = await checkTaskAccess(user.id, task);
     if (!isAuthorized) return c.json(error(Code.UNAUTHORIZED, "Forbidden access to background task"), 403);
 
-    await TaskManager.pauseTask(id);
+    const paused = await JobManager.pauseTask(id);
+    if (!paused) {
+        return c.json(error(Code.INVALID_PARAMETER, `Task cannot be paused from status '${task.status}'`), 409);
+    }
     return c.json(success(Code.SUCCESS, { status: AsyncTaskStatus.PAUSED }));
 });
 
@@ -111,8 +107,10 @@ jobsApp.post("/:id/resume", requireAuth, async (c) => {
     const isAuthorized = await checkTaskAccess(user.id, task);
     if (!isAuthorized) return c.json(error(Code.UNAUTHORIZED, "Forbidden access to background task"), 403);
 
-    const origin = resolveOrigin(c);
-    await TaskManager.resumeTask(id, origin);
+    const resumed = await JobManager.resumeTask(id);
+    if (!resumed) {
+        return c.json(error(Code.INVALID_PARAMETER, `Task cannot be resumed from status '${task.status}'`), 409);
+    }
     return c.json(success(Code.SUCCESS, { status: AsyncTaskStatus.RUNNING }));
 });
 
@@ -132,7 +130,10 @@ jobsApp.post("/:id/cancel", requireAuth, async (c) => {
     const isAuthorized = await checkTaskAccess(user.id, task);
     if (!isAuthorized) return c.json(error(Code.UNAUTHORIZED, "Forbidden access to background task"), 403);
 
-    await TaskManager.cancelTask(id);
+    const cancelled = await JobManager.cancelTask(id);
+    if (!cancelled) {
+        return c.json(error(Code.INVALID_PARAMETER, `Task cannot be cancelled from status '${task.status}'`), 409);
+    }
     return c.json(success(Code.SUCCESS, { status: AsyncTaskStatus.CANCELLED }));
 });
 
@@ -152,8 +153,10 @@ jobsApp.post("/:id/retry-failed", requireAuth, async (c) => {
     const isAuthorized = await checkTaskAccess(user.id, task);
     if (!isAuthorized) return c.json(error(Code.UNAUTHORIZED, "Forbidden access to background task"), 403);
 
-    const origin = resolveOrigin(c);
-    const retriedCount = await TaskManager.retryFailedUnits(id, origin);
+    const retriedCount = await JobManager.retryFailedUnits(id);
+    if (retriedCount === 0) {
+        return c.json(error(Code.INVALID_PARAMETER, "Task has no retryable failed units"), 409);
+    }
     return c.json(success(Code.SUCCESS, { status: AsyncTaskStatus.RUNNING, retried_count: retriedCount }));
 });
 

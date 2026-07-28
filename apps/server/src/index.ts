@@ -11,11 +11,37 @@ import tag from "@/api/tag";
 import authRouter from "@/api/auth";
 import importRouter from "@/api/import";
 import { jobsApp } from "@/api/jobs";
-import { JobSweeper } from "@/services/job_sweeper";
-import { initJobHandlers } from "@/services/handlers";
+import { jobRunner } from "@/infra/jobs/runner";
+import { JobSweeper } from "@/infra/jobs/sweeper";
+import { initJobHandlers } from "@/services/job_handlers";
 
+// 1. Initialize Task Handlers Strategy Registry
 initJobHandlers();
+
+// 2. Start In-Process Task JobRunner & Sweeper
+jobRunner.start();
 JobSweeper.start(30000);
+
+// 3. Graceful Shutdown Handlers
+let isShuttingDown = false;
+const shutdown = async (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`[Server] Received ${signal}, starting graceful shutdown...`);
+
+    try {
+        JobSweeper.stop();
+        await jobRunner.drain(15000);
+        console.log("[Server] Graceful shutdown completed.");
+    } catch (err) {
+        console.error("[Server] Error during graceful shutdown:", err);
+    } finally {
+        process.exit(0);
+    }
+};
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 const app = new Hono();
 
@@ -35,22 +61,21 @@ app.use(
     }),
 );
 
-// 自定义日志中间件：记录请求并监控响应
+// Custom logging middleware
 app.use("*", async (c, next) => {
     const { method, path } = c.req;
     console.log(`[Request] ${method} ${path}`);
 
-    await next(); // 执行后续处理器
+    await next();
 
     const status = c.res.status;
-    // 检查重定向 Location 头
     if (status >= 300 && status < 400) {
         const redirectUrl = c.res.headers.get("Location");
         console.log(`[Redirect] -> ${redirectUrl}`);
     }
 });
 
-// Mount all routes to the app
+// Mount all routes
 app.route("/api/auth", authRouter);
 app.route("/api/post", post);
 app.route("/api/media", media);
@@ -68,5 +93,6 @@ console.log(`Server is running on port ${port}`);
 export default {
     port,
     hostname: "0.0.0.0",
+    idleTimeout: 60,
     fetch: app.fetch,
 };

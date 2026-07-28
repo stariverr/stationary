@@ -8,6 +8,7 @@ import { requireAuth } from "@/lib/auth/middleware";
 import { Tag, PostTag, MediaTag, TagStatus, TagSource } from "@/db/schema";
 import { and, eq, sql, inArray } from "drizzle-orm";
 import { normalizeTagName } from "@/lib/utils/tag_sanitizer";
+import { Temporal } from "@js-temporal/polyfill";
 
 const router = new Hono();
 
@@ -271,47 +272,64 @@ router.post("/delete/:id", requireAuth, async (c) => {
     }
 });
 
+class TagMergeError extends Error {
+    constructor(
+        public readonly code: Code,
+        message: string,
+        public readonly status: 400 | 404 | 500 = 400,
+    ) {
+        super(message);
+        this.name = "TagMergeError";
+    }
+}
+
 // POST /api/tag/merge
 router.post("/merge", requireAuth, zValidator("json", TagMergeBodySchema), async (c) => {
     const { library_id, source_tag_id, target_tag_id, retain_as_alias } = c.req.valid("json");
 
+    if (source_tag_id === target_tag_id) {
+        return c.json(error(Code.INVALID_PARAMETER, "Source and target tag cannot be the same"), 400);
+    }
+
     try {
-        // Verify both tags exist
-        const sourceTags = await db.select().from(Tag).where(eq(Tag.id, source_tag_id)).limit(1);
-        const targetTags = await db.select().from(Tag).where(eq(Tag.id, target_tag_id)).limit(1);
-
-        if (sourceTags.length === 0 || targetTags.length === 0) {
-            return c.json(error(Code.NOT_FOUND, "Source or target tag not found"), 404);
-        }
-
-        const sourceTag = sourceTags[0];
-        const targetTag = targetTags[0];
-
-        if (sourceTag.canonical_tag_id !== null) {
-            return c.json(error(Code.INVALID_PARAMETER, "Source tag is already an alias tag"), 400);
-        }
-        if (targetTag.canonical_tag_id !== null) {
-            return c.json(error(Code.INVALID_PARAMETER, "Target tag is an alias tag and cannot be a master tag"), 400);
-        }
-
-        // Fetch source aliases & target aliases
-        const sourceAliases = await db.select().from(Tag).where(eq(Tag.canonical_tag_id, source_tag_id));
-        const targetAliases = await db.select().from(Tag).where(eq(Tag.canonical_tag_id, target_tag_id));
+        const now = Temporal.Now.instant();
 
         await db.transaction(async (tx) => {
+            // Lock both tags in deterministic order to prevent deadlocks (e.g. A->B vs B->A)
+            const tagIdsToLock = [source_tag_id, target_tag_id].sort();
+            const lockedTags = await tx.select().from(Tag).where(inArray(Tag.id, tagIdsToLock)).for("update");
+
+            const sourceTag = lockedTags.find((t) => t.id === source_tag_id);
+            const targetTag = lockedTags.find((t) => t.id === target_tag_id);
+
+            if (!sourceTag || !targetTag) {
+                throw new TagMergeError(Code.NOT_FOUND, "Source or target tag not found", 404);
+            }
+
+            if (sourceTag.library_id !== library_id || targetTag.library_id !== library_id) {
+                throw new TagMergeError(Code.INVALID_PARAMETER, "Tags do not belong to the specified library", 400);
+            }
+
+            if (sourceTag.canonical_tag_id !== null) {
+                throw new TagMergeError(Code.INVALID_PARAMETER, "Source tag is already an alias tag", 400);
+            }
+            if (targetTag.canonical_tag_id !== null) {
+                throw new TagMergeError(Code.INVALID_PARAMETER, "Target tag is an alias tag and cannot be a master tag", 400);
+            }
+
             if (!retain_as_alias) {
-                // Find existing target links to prevent unique key violation
+                // Find existing target links to prevent unique key constraint violations
                 const targetPostLinks = await tx
                     .select({ post_id: PostTag.post_id })
                     .from(PostTag)
                     .where(eq(PostTag.tag_id, target_tag_id));
-                const targetPostIds = targetPostLinks.map((l: any) => l.post_id);
+                const targetPostIds = targetPostLinks.map((l) => l.post_id);
 
                 const targetMediaLinks = await tx
                     .select({ media_id: MediaTag.media_id })
                     .from(MediaTag)
                     .where(eq(MediaTag.tag_id, target_tag_id));
-                const targetMediaIds = targetMediaLinks.map((l: any) => l.media_id);
+                const targetMediaIds = targetMediaLinks.map((l) => l.media_id);
 
                 // De-duplicate: if post has both tags, delete link to source tag
                 if (targetPostIds.length > 0) {
@@ -328,33 +346,32 @@ router.post("/merge", requireAuth, zValidator("json", TagMergeBodySchema), async
             }
 
             if (retain_as_alias) {
-                // Set as Alias mode: Keep A and turn it into B's alias
-                // 1. Reparent source tag to become an alias of target tag
+                // Set as Alias mode: Keep source tag and turn it into target tag's alias
                 await tx
                     .update(Tag)
                     .set({
                         canonical_tag_id: target_tag_id,
                         status: TagStatus.ACTIVE,
-                        update_time: sql`now()`,
+                        update_time: now,
                     })
                     .where(eq(Tag.id, source_tag_id));
 
-                // 2. Reparent any existing child aliases of source tag to target tag directly (maintain flat structure)
+                // Reparent any existing child aliases of source tag directly to target tag (maintain flat hierarchy)
                 await tx
                     .update(Tag)
                     .set({
                         canonical_tag_id: target_tag_id,
-                        update_time: sql`now()`,
+                        update_time: now,
                     })
                     .where(eq(Tag.canonical_tag_id, source_tag_id));
             } else {
                 // Merge & Delete mode:
-                // 1. Reparent any existing child aliases of sourceTag to targetTag directly to maintain flat hierarchy
+                // 1. Reparent any existing child aliases of source tag directly to target tag to maintain flat hierarchy
                 await tx
                     .update(Tag)
                     .set({
                         canonical_tag_id: target_tag_id,
-                        update_time: sql`now()`,
+                        update_time: now,
                     })
                     .where(eq(Tag.canonical_tag_id, source_tag_id));
 
@@ -364,8 +381,12 @@ router.post("/merge", requireAuth, zValidator("json", TagMergeBodySchema), async
         });
 
         return c.json(success(Code.SUCCESS, null, "Tags merged successfully"));
-    } catch (e: any) {
-        return c.json(error(Code.INTERNAL_SERVER_ERROR, e.message || String(e)), 500);
+    } catch (e: unknown) {
+        if (e instanceof TagMergeError) {
+            return c.json(error(e.code, e.message), e.status);
+        }
+        const message = e instanceof Error ? e.message : String(e);
+        return c.json(error(Code.INTERNAL_SERVER_ERROR, message), 500);
     }
 });
 

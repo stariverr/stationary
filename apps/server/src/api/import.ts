@@ -247,8 +247,12 @@ router.post(
                     status: DraftFileStatus.DRAFT,
                     update_time: Temporal.Now.instant(),
                 })
-                .where(eq(DraftFile.id, draftRow.id))
+                .where(and(eq(DraftFile.id, draftRow.id), eq(DraftFile.status, DraftFileStatus.PENDING)))
                 .returning();
+
+            if (!updatedDraft) {
+                throw new Error("Draft file was modified or already confirmed by another request");
+            }
 
             return {
                 id: updatedDraft.id,

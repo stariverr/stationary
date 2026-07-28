@@ -4,15 +4,27 @@ import { z } from "zod";
 import { validate } from "@/lib/validation/validator";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
-import { DeleteStatus, Library, Media, Post, Tag, PostTag, MediaTag, Author, AsyncTask, AsyncTaskType, AsyncTaskStatus } from "@/db/schema";
+import {
+    DeleteStatus,
+    Library,
+    Media,
+    Post,
+    Tag,
+    PostTag,
+    MediaTag,
+    Author,
+    AsyncTask,
+    AsyncTaskType,
+    AsyncTaskStatus,
+    AsyncTaskUnitKind,
+    AsyncSubjectType,
+} from "@/db/schema";
 import { Quality } from "@/lib/types";
 
 import { and, eq, ilike, SQL, count, inArray, isNull, sql, desc } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { DeleteService } from "@/services/delete";
-import { Client } from "@upstash/workflow";
-import { env } from "@/global/env";
-import { TaskManager } from "@/services/job_service";
+import { JobManager } from "@/infra/jobs/manager";
 import { Temporal } from "@js-temporal/polyfill";
 
 const router = new Hono<AuthEnv>();
@@ -183,6 +195,8 @@ router.post("/delete/:id", requireAuth, validate("param", LibraryIdParamSchema),
 });
 
 router.post("/move-items", requireAuth, validate("json", LibraryMoveItemsBodySchema), async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
     const body = c.req.valid("json");
 
     const targetLibraries = await db
@@ -195,46 +209,46 @@ router.post("/move-items", requireAuth, validate("json", LibraryMoveItemsBodySch
         return c.json(error(Code.NOT_FOUND, "Target library not found"));
     }
 
-    const selectedPosts =
-        body.post_ids.length > 0
-            ? await db
-                  .select({ id: Post.id, author_id: Post.author_id })
-                  .from(Post)
-                  .where(and(inArray(Post.id, body.post_ids), eq(Post.delete_status, DeleteStatus.ACTIVE)))
-            : [];
-
-    if (selectedPosts.length !== body.post_ids.length) {
-        return c.json(error(Code.NOT_FOUND, "One or more posts were not found"));
-    }
-
-    const selectedMedia =
-        body.media_ids.length > 0
-            ? await db
-                  .select({ id: Media.id, post_id: Media.post_id })
-                  .from(Media)
-                  .where(and(inArray(Media.id, body.media_ids), eq(Media.delete_status, DeleteStatus.ACTIVE)))
-            : [];
-
-    if (selectedMedia.length !== body.media_ids.length) {
-        return c.json(error(Code.NOT_FOUND, "One or more media items were not found"));
-    }
-
-    const attachedMediaIds = getAttachedMediaIds(selectedMedia);
-    if (attachedMediaIds.length > 0) {
-        return c.json(error(Code.INVALID_PARAMETER, "Only independent media can be moved directly"));
-    }
-
-    const sourceAuthorIds = uniqueIds(selectedPosts.map((p) => p.author_id).filter((id): id is string => !!id));
-
-    const sourceAuthors =
-        sourceAuthorIds.length > 0
-            ? await db
-                  .select()
-                  .from(Author)
-                  .where(and(inArray(Author.id, sourceAuthorIds), eq(Author.delete_status, DeleteStatus.ACTIVE)))
-            : [];
-
     const moved = await db.transaction(async (tx) => {
+        const selectedPosts =
+            body.post_ids.length > 0
+                ? await tx
+                      .select({ id: Post.id, author_id: Post.author_id })
+                      .from(Post)
+                      .where(and(inArray(Post.id, body.post_ids), eq(Post.delete_status, DeleteStatus.ACTIVE)))
+                : [];
+
+        if (selectedPosts.length !== body.post_ids.length) {
+            throw new Error("One or more posts were not found or not active");
+        }
+
+        const selectedMedia =
+            body.media_ids.length > 0
+                ? await tx
+                      .select({ id: Media.id, post_id: Media.post_id })
+                      .from(Media)
+                      .where(and(inArray(Media.id, body.media_ids), eq(Media.delete_status, DeleteStatus.ACTIVE)))
+                : [];
+
+        if (selectedMedia.length !== body.media_ids.length) {
+            throw new Error("One or more media items were not found or not active");
+        }
+
+        const attachedMediaIds = getAttachedMediaIds(selectedMedia);
+        if (attachedMediaIds.length > 0) {
+            throw new Error("Only independent media can be moved directly");
+        }
+
+        const sourceAuthorIds = uniqueIds(selectedPosts.map((p) => p.author_id).filter((id): id is string => !!id));
+
+        const sourceAuthors =
+            sourceAuthorIds.length > 0
+                ? await tx
+                      .select()
+                      .from(Author)
+                      .where(and(inArray(Author.id, sourceAuthorIds), eq(Author.delete_status, DeleteStatus.ACTIVE)))
+                : [];
+
         // Match or clone authors in target library
         const authorMap = new Map<string, string>();
         const avatarCopyJobs: Array<{ sourceAuthorId: string; targetAuthorId: string }> = [];
@@ -445,31 +459,27 @@ router.post("/move-items", requireAuth, validate("json", LibraryMoveItemsBodySch
         return { posts, media, post_media: postMedia, avatarCopyJobs };
     });
 
-    // Trigger background workflow to copy avatars asynchronously outside of the long DB transaction
-    if (moved.avatarCopyJobs.length > 0 && env.QSTASH_TOKEN) {
-        const client = new Client({ token: env.QSTASH_TOKEN });
-        const url = new URL(c.req.url);
-        const origin =
-            env.UPSTASH_WORKFLOW_URL ||
-            (c.req.header("x-forwarded-proto") ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}` : url.origin);
-        const workflowUrl = `${origin.replace(/\/$/, "")}/api/task/workflow-copy-avatar`;
+    // Trigger background DB task to copy avatars asynchronously outside of the long DB transaction
+    if (moved.avatarCopyJobs.length > 0) {
+        const uniqueAvatarCopyJobs = Array.from(
+            new Map(moved.avatarCopyJobs.map((job) => [`${job.sourceAuthorId}:${job.targetAuthorId}`, job])).values(),
+        );
+        const unitSpecs = uniqueAvatarCopyJobs.map((job) => ({
+            unitKey: `avatar_copy:${job.sourceAuthorId}:${job.targetAuthorId}`,
+            kind: AsyncTaskUnitKind.AVATAR_COPY,
+            subjectType: AsyncSubjectType.AUTHOR,
+            subjectId: job.targetAuthorId,
+            inputSnapshot: { sourceAuthorId: job.sourceAuthorId, targetAuthorId: job.targetAuthorId },
+        }));
 
-        for (const job of moved.avatarCopyJobs) {
-            try {
-                await client.trigger({
-                    url: workflowUrl,
-                    body: {
-                        sourceAuthorId: job.sourceAuthorId,
-                        targetAuthorId: job.targetAuthorId,
-                    },
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                });
-            } catch (err) {
-                console.error(`Failed to trigger copy avatar workflow for target author ${job.targetAuthorId}:`, err);
-            }
-        }
+        await JobManager.enqueueTaskWithUnits(
+            {
+                type: AsyncTaskType.AVATAR_COPY,
+                ownerId: user.id,
+                inputSnapshot: { count: uniqueAvatarCopyJobs.length },
+            },
+            unitSpecs,
+        );
     }
 
     return c.json(
@@ -573,13 +583,7 @@ router.post(
         const sourceType = body.type === "MANUAL" ? "MANUAL" : "RECONCILE";
         const qualities = body.qualities || (library.cover_qualities as Quality[]) || [Quality.LOW, Quality.MEDIUM];
 
-        const url = new URL(c.req.url);
-        const requestOrigin = c.req.header("x-forwarded-proto")
-            ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
-            : url.origin;
-        const origin = env.UPSTASH_WORKFLOW_URL || requestOrigin;
-
-        const task = await TaskManager.createTask({
+        const task = await JobManager.createTask({
             type: sourceType === "MANUAL" ? AsyncTaskType.COVER_BATCH : AsyncTaskType.COVER_RECONCILE,
             libraryId: library.id,
             ownerId: user.id,
@@ -590,7 +594,6 @@ router.post(
                 force: body.force ?? false,
             },
             configVersion: library.cover_config_version,
-            originUrl: origin,
         });
 
         return c.json(
@@ -711,13 +714,7 @@ router.put(
                 })
                 .where(eq(Library.id, id));
 
-            const url = new URL(c.req.url);
-            const requestOrigin = c.req.header("x-forwarded-proto")
-                ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}`
-                : url.origin;
-            const origin = env.UPSTASH_WORKFLOW_URL || requestOrigin;
-
-            createdTask = await TaskManager.createTask({
+            createdTask = await JobManager.createTask({
                 type: AsyncTaskType.COVER_RECONCILE,
                 libraryId: id,
                 ownerId: user.id,
@@ -726,7 +723,6 @@ router.put(
                     qualities: body.qualities,
                 },
                 configVersion: newVersion,
-                originUrl: origin,
             });
         }
 

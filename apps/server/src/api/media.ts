@@ -35,7 +35,7 @@ import { MediaService } from "@/services/media";
 import { TrackService } from "@/services/track";
 import { v7 as uuidv7 } from "uuid";
 import { env } from "@/global/env";
-import { TaskManager } from "@/services/job_service";
+import { JobManager } from "@/infra/jobs/manager";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { normalizeVariantKey } from "@/lib/utils/track";
 import { consumeDraftFile, DraftFileUnavailableError } from "@/services/draft-file";
@@ -340,10 +340,6 @@ router.post("/:id/regenerate-cover", requireAuth, validate("param", SingleRegene
         return c.json(error(Code.INVALID_PARAMETER, "Media type does not support cover photo generation"), 400);
     }
 
-    const url = new URL(c.req.url);
-    const requestOrigin = c.req.header("x-forwarded-proto") ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}` : url.origin;
-    const origin = env.UPSTASH_WORKFLOW_URL || requestOrigin;
-
     const libList = await db
         .select()
         .from(Library)
@@ -357,7 +353,7 @@ router.post("/:id/regenerate-cover", requireAuth, validate("param", SingleRegene
     const qualities = (library.cover_qualities as Quality[]) || [Quality.LOW, Quality.MEDIUM];
     const configVersion = library.cover_config_version || 1;
 
-    const job = await TaskManager.createTask({
+    const job = await JobManager.createTask({
         type: AsyncTaskType.COVER_BATCH,
         libraryId: media.library_id,
         ownerId: user.id,
@@ -367,7 +363,6 @@ router.post("/:id/regenerate-cover", requireAuth, validate("param", SingleRegene
             qualities,
         },
         configVersion,
-        originUrl: origin,
     });
 
     return c.json(
@@ -444,14 +439,10 @@ router.post("/regenerate-covers", requireAuth, validate("json", BatchRegenerateC
         }
     }
 
-    const url = new URL(c.req.url);
-    const requestOrigin = c.req.header("x-forwarded-proto") ? `${c.req.header("x-forwarded-proto")}://${c.req.header("host")}` : url.origin;
-    const origin = env.UPSTASH_WORKFLOW_URL || requestOrigin;
-
     const qualities = library.cover_qualities || [Quality.LOW, Quality.MEDIUM];
     const configVersion = library.cover_config_version || 1;
 
-    const job = await TaskManager.createTask({
+    const job = await JobManager.createTask({
         type: AsyncTaskType.COVER_BATCH,
         libraryId: library_id,
         ownerId: user.id,
@@ -461,7 +452,6 @@ router.post("/regenerate-covers", requireAuth, validate("json", BatchRegenerateC
             qualities,
         },
         configVersion,
-        originUrl: origin,
     });
 
     return c.json(
@@ -480,8 +470,8 @@ const GetMpdRequestSchema = z.object({
 router.get("/:id/manifest.mpd", requireAuth, validate("param", GetMpdRequestSchema), async (c) => {
     const mediaId = c.req.valid("param").id;
     const access = await checkMediaAccess(c, mediaId);
-    if (access.errorResponse) return access.errorResponse;
-    const media = access.media!;
+    if (!access.media || access.errorResponse) return access.errorResponse;
+    const media = access.media;
 
     const tracks = await db
         .select()

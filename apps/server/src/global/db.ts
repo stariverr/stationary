@@ -10,10 +10,52 @@ if (!env.DB_URL) {
 
 const pool = new Pool({
     connectionString: env.DB_URL,
+    keepAlive: true,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
+    max: 20,
+});
+
+pool.on("connect", (client) => {
+    client.on("error", (err) => {
+        const msg = err.message || String(err);
+        const code = (err as { code?: string }).code;
+        const isDisconnect =
+            msg.includes("Connection terminated") ||
+            msg.includes("connection closed") ||
+            code === "ECONNRESET" ||
+            code === "EPIPE" ||
+            code === "ENOTFOUND" ||
+            code === "57P01" ||
+            code === "57P02" ||
+            code === "57P03";
+
+        if (isDisconnect) {
+            console.warn(`[DB Client] Database client connection reset/terminated: ${msg}`);
+        } else {
+            console.error("[DB Client] Unexpected error on database client connection:", err);
+        }
+    });
 });
 
 pool.on("error", (err) => {
-    console.error("Unexpected error on idle database client", err);
+    const msg = err.message || String(err);
+    const code = (err as { code?: string }).code;
+    const isDisconnect =
+        msg.includes("Connection terminated") ||
+        msg.includes("connection closed") ||
+        code === "ECONNRESET" ||
+        code === "EPIPE" ||
+        code === "ENOTFOUND" ||
+        code === "57P01" ||
+        code === "57P02" ||
+        code === "57P03";
+
+    if (isDisconnect) {
+        console.warn(`[DB Pool] Idle database client disconnected: ${msg}`);
+    } else {
+        console.error("[DB Pool] Unexpected error on idle database client:", err);
+    }
 });
 
 export const db = drizzle({

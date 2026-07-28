@@ -45,11 +45,6 @@ const envSchema = z.object({
         .default("false")
         .transform((v) => v === "true"),
 
-    QSTASH_URL: z.string().optional(),
-    QSTASH_TOKEN: z.string().nonempty("QSTASH_TOKEN is required"),
-    QSTASH_CURRENT_SIGNING_KEY: z.string().optional(),
-    QSTASH_NEXT_SIGNING_KEY: z.string().optional(),
-    UPSTASH_WORKFLOW_URL: z.string().optional(),
     POST_UPDATE_THRESHOLD_HOURS: z
         .string()
         .default("24")

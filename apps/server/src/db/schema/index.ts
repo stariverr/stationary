@@ -9,6 +9,7 @@ import {
     boolean,
     uniqueIndex,
     index,
+    check,
     customType,
     timestamp,
     varchar,
@@ -904,27 +905,50 @@ export const DraftFile = pgTable("draft_file", {
 export enum AsyncTaskType {
     COVER_RECONCILE = "COVER_RECONCILE",
     COVER_BATCH = "COVER_BATCH",
+    POST_PROCESS = "POST_PROCESS",
+    AI_ENRICH = "AI_ENRICH",
+    AVATAR_COPY = "AVATAR_COPY",
 }
-export const AsyncTaskTypeEnum = pgEnum("async_task_type", [AsyncTaskType.COVER_RECONCILE, AsyncTaskType.COVER_BATCH]);
+export const AsyncTaskTypeEnum = pgEnum("async_task_type", [
+    AsyncTaskType.COVER_RECONCILE,
+    AsyncTaskType.COVER_BATCH,
+    AsyncTaskType.POST_PROCESS,
+    AsyncTaskType.AI_ENRICH,
+    AsyncTaskType.AVATAR_COPY,
+]);
 
 /** Entity subject type for task units */
 export enum AsyncSubjectType {
     MEDIA = "MEDIA",
     POST = "POST",
     FILE = "FILE",
+    AUTHOR = "AUTHOR",
 }
-export const AsyncSubjectTypeEnum = pgEnum("async_subject_type", [AsyncSubjectType.MEDIA, AsyncSubjectType.POST, AsyncSubjectType.FILE]);
+export const AsyncSubjectTypeEnum = pgEnum("async_subject_type", [
+    AsyncSubjectType.MEDIA,
+    AsyncSubjectType.POST,
+    AsyncSubjectType.FILE,
+    AsyncSubjectType.AUTHOR,
+]);
 
 /** Physical category/kind of task execution unit */
 export enum AsyncTaskUnitKind {
     COVER_DERIVATIVE = "COVER_DERIVATIVE",
     VIDEO_TRANSCODE = "VIDEO_TRANSCODE",
     AI_TAGGING = "AI_TAGGING",
+    MEDIA_DOWNLOAD = "MEDIA_DOWNLOAD",
+    AVATAR_DOWNLOAD = "AVATAR_DOWNLOAD",
+    AI_ENRICHMENT = "AI_ENRICHMENT",
+    AVATAR_COPY = "AVATAR_COPY",
 }
 export const AsyncTaskUnitKindEnum = pgEnum("async_task_unit_kind", [
     AsyncTaskUnitKind.COVER_DERIVATIVE,
     AsyncTaskUnitKind.VIDEO_TRANSCODE,
     AsyncTaskUnitKind.AI_TAGGING,
+    AsyncTaskUnitKind.MEDIA_DOWNLOAD,
+    AsyncTaskUnitKind.AVATAR_DOWNLOAD,
+    AsyncTaskUnitKind.AI_ENRICHMENT,
+    AsyncTaskUnitKind.AVATAR_COPY,
 ]);
 
 /** Status of master async task */
@@ -1047,7 +1071,14 @@ export const AsyncTask = pgTable(
         index("async_task_type_status_idx").on(table.type, table.status),
         index("async_task_library_status_idx").on(table.library_id, table.status),
         index("async_task_owner_status_idx").on(table.owner_id, table.status),
+        index("async_task_discovery_recovery_idx").on(table.status, table.discovery_complete, table.discovery_lease_expires_at),
+        index("async_task_terminal_cleanup_idx").on(table.status, table.complete_time),
         uniqueIndex("async_task_idempotency_unique").on(table.idempotency_key),
+        check("async_task_max_in_flight_positive", sql`${table.max_in_flight} > 0`),
+        check(
+            "async_task_counter_bounds",
+            sql`${table.total_units} >= 0 AND ${table.succeeded_units} >= 0 AND ${table.failed_units} >= 0 AND ${table.cancelled_units} >= 0 AND ${table.succeeded_units} + ${table.failed_units} + ${table.cancelled_units} <= ${table.total_units}`,
+        ),
     ],
 );
 
@@ -1117,6 +1148,8 @@ export const AsyncTaskUnit = pgTable(
         index("async_task_unit_task_status_idx").on(table.task_id, table.status),
         index("async_task_unit_status_available_idx").on(table.status, table.available_at),
         index("async_task_unit_status_lease_idx").on(table.status, table.lease_expires_at),
+        check("async_task_unit_attempt_count_nonnegative", sql`${table.attempt_count} >= 0`),
+        check("async_task_unit_max_attempts_positive", sql`${table.max_attempts} > 0`),
     ],
 );
 
