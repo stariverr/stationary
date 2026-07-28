@@ -657,5 +657,79 @@
             "add_tag_failed": "Could not add tag",
             "remove_tag_failed": "Could not remove tag"
         }
+    },
+    "jobs": {
+        "title": "Background Task Center",
+        "subtitle": "Track task execution progress, view details, and repair stuck items",
+        "nav_title": "Background Tasks",
+        "tabs": {
+            "tasks": "Background Tasks Queue",
+            "units": "Task Execution Details",
+            "all": "All Statuses",
+            "failed": "Failed / Attention",
+            "running": "Processing",
+            "pending": "Pending",
+            "succeeded": "Succeeded",
+            "discovering": "Scanning",
+            "paused": "Paused",
+            "completed": "Completed",
+            "cancelled": "Cancelled"
+        },
+        "metrics": {
+            "active_tasks": "Running Master Tasks",
+            "failed_tasks": "Failed Master Tasks",
+            "completed_tasks": "Completed Master Tasks",
+            "total_tasks": "Total Master Tasks",
+            "active_units": "Pending & Processing Items",
+            "succeeded_units": "Successfully Processed",
+            "failed_units": "Failed Items"
+        },
+        "actions": {
+            "auto_refresh_on": "Auto-Refresh ON (5s)",
+            "auto_refresh_off": "Auto-Refresh OFF",
+            "refresh": "Refresh",
+            "sweep": "Fix Stuck Tasks",
+            "retry_selected": "Retry Selected ({count})",
+            "retry": "Retry",
+            "pause": "Pause",
+            "resume": "Resume",
+            "cancel": "Cancel",
+            "view_details": "View Details"
+        },
+        "task_types": {
+            "all": "All Task Types",
+            "COVER_BATCH": "Batch Cover Generation",
+            "COVER_RECONCILE": "Cover Auto Sync",
+            "AI_ENRICH": "AI Smart Analysis",
+            "POST_PROCESS": "Data Post-Processing",
+            "AVATAR_COPY": "Avatar Backup Sync"
+        },
+        "table": {
+            "id": "Task ID",
+            "type": "Task Type",
+            "status": "Status",
+            "progress": "Progress",
+            "breakdown": "Units Summary",
+            "updated_at": "Last Updated",
+            "actions": "Actions",
+            "unit_id": "Unit ID",
+            "attempts": "Attempts",
+            "error": "Error Message"
+        },
+        "modal": {
+            "title": "Task Execution Details & Error Trace",
+            "last_error": "Last Error Log",
+            "input_snapshot": "Task Parameters",
+            "re_enqueue": "Re-enqueue for Retry",
+            "close": "Close"
+        },
+        "empty": {
+            "no_tasks": "No background tasks found matching criteria",
+            "no_units": "All background tasks are running smoothly"
+        },
+        "pagination": {
+            "showing": "Showing {current} of {total}",
+            "page": "Page {page} of {pages}"
+        }
     }
 }

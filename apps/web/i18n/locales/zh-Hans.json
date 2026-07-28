@@ -657,5 +657,79 @@
             "add_tag_failed": "无法添加标签",
             "remove_tag_failed": "无法移除标签"
         }
+    },
+    "jobs": {
+        "title": "后台任务中心",
+        "subtitle": "查看系统后台任务进度、处理明细与一键修复",
+        "nav_title": "后台任务",
+        "tabs": {
+            "tasks": "后台任务队列",
+            "units": "任务处理明细",
+            "all": "全部状态",
+            "failed": "异常/需关注",
+            "running": "处理中",
+            "pending": "等待处理",
+            "succeeded": "处理成功",
+            "discovering": "扫描中",
+            "paused": "已暂停",
+            "completed": "已完成",
+            "cancelled": "已取消"
+        },
+        "metrics": {
+            "active_tasks": "处理中的主任务",
+            "failed_tasks": "需关注的失败主任务",
+            "completed_tasks": "已完成的主任务",
+            "total_tasks": "主任务总量",
+            "active_units": "等待/处理中的子项",
+            "succeeded_units": "已成功处理",
+            "failed_units": "处理异常的子项"
+        },
+        "actions": {
+            "auto_refresh_on": "自动刷新开 (5s)",
+            "auto_refresh_off": "自动刷新关",
+            "refresh": "刷新",
+            "sweep": "一键修复卡住的任务",
+            "retry_selected": "重试选中的 {count} 项",
+            "retry": "重试",
+            "pause": "暂停",
+            "resume": "继续",
+            "cancel": "取消",
+            "view_details": "查看明细"
+        },
+        "task_types": {
+            "all": "全部任务类型",
+            "COVER_BATCH": "封面批量生成",
+            "COVER_RECONCILE": "封面自动补全",
+            "AI_ENRICH": "AI 智能分析",
+            "POST_PROCESS": "数据整理同步",
+            "AVATAR_COPY": "头像备份同步"
+        },
+        "table": {
+            "id": "任务 ID",
+            "type": "任务类型",
+            "status": "当前状态",
+            "progress": "处理进度",
+            "breakdown": "执行统计",
+            "updated_at": "最后更新时间",
+            "actions": "操作",
+            "unit_id": "子项 ID",
+            "attempts": "重试次数",
+            "error": "错误信息"
+        },
+        "modal": {
+            "title": "任务处理明细与错误记录",
+            "last_error": "最近一次错误日志",
+            "input_snapshot": "任务参数快照",
+            "re_enqueue": "重新放入队列重试",
+            "close": "关闭"
+        },
+        "empty": {
+            "no_tasks": "暂无匹配的后台任务",
+            "no_units": "所有后台任务处理正常，暂无异常项"
+        },
+        "pagination": {
+            "showing": "显示 {current} 条，共 {total} 条",
+            "page": "第 {page} 页，共 {pages} 页"
+        }
     }
 }

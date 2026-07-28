@@ -807,7 +807,7 @@ export async function cancelTask(taskId: string): Promise<boolean> {
     return db.transaction(async (tx) => {
         const tasks = await tx.select().from(AsyncTask).where(eq(AsyncTask.id, taskId)).for("update").limit(1);
         const task = tasks[0];
-        if (!task || ![AsyncTaskStatus.DISCOVERING, AsyncTaskStatus.RUNNING, AsyncTaskStatus.PAUSED].includes(task.status)) {
+        if (!task || ![AsyncTaskStatus.DISCOVERING, AsyncTaskStatus.RUNNING, AsyncTaskStatus.PAUSED, AsyncTaskStatus.FAILED].includes(task.status)) {
             return false;
         }
 

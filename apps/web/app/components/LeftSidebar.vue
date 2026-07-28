@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { FileText, Clock, Tag, Trash2, Globe, Folder, Box, Settings, Sidebar, FolderPlus, Plus, Upload } from "@lucide/vue";
+import { FileText, Clock, Tag, Trash2, Globe, Folder, Box, Settings, Sidebar, FolderPlus, Plus, Upload, Activity } from "@lucide/vue";
 import { useImportStore } from "@/stores/import";
 import { useLayoutStore } from "@/stores/layout";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ const menuItems = computed(() => [
     { icon: Tag, label: "common.tags", path: "/tags" },
     { icon: Trash2, label: "common.trash", path: "/trash" },
     { icon: Globe, label: "common.browser", path: "/browser" },
+    { icon: Activity, label: "jobs.nav_title", path: "/jobs", active: route.path.startsWith("/jobs") },
 ]);
 
 const importStore = useImportStore();
@@ -79,7 +80,7 @@ const folders = [{ icon: Folder, label: "2D", count: 5 }];
             >
                 <div class="flex items-center gap-2">
                     <component :is="item.icon" class="w-4 h-4 opacity-70" />
-                    <span>{{ item.label.includes("common.") ? $t(item.label) : item.label }}</span>
+                    <span>{{ item.label.includes(".") ? $t(item.label) : item.label }}</span>
                 </div>
                 <span v-if="item.count" class="text-xs opacity-50">{{ item.count }}</span>
             </NuxtLink>
