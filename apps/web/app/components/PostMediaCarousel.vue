@@ -2,9 +2,7 @@
 import { ref, computed, watch } from "vue";
 import { ChevronLeft, ChevronRight } from "@lucide/vue";
 import { Swiper, SwiperSlide } from "swiper/vue";
-import type { Swiper as SwiperClass } from "swiper";
 import "swiper/css";
-import { getOptimizedImageUrl, getOptimizedSrcset } from "@/utils/image";
 import { type Post, type Track } from "@/types/post";
 
 const props = defineProps<{
@@ -207,12 +205,7 @@ const scrollNext = () => swiperInstance.value?.slideNext();
                     />
                     <LivePhotoPlayer
                         v-else-if="media.type === 'LIVE_PHOTO'"
-                        :src="
-                            getOptimizedImageUrl(media.url || '', {
-                                width: 960,
-                                fit: 'scale-down',
-                            })
-                        "
+                        :src="media.url || ''"
                         :live-src="media.live_url || ''"
                         :mime-type="media.mime_type || undefined"
                         :width="media.width"
@@ -221,13 +214,7 @@ const scrollNext = () => swiperInstance.value?.slideNext();
                     />
                     <HeicImage
                         v-else
-                        :src="
-                            getOptimizedImageUrl(media.url || '', {
-                                width: 960,
-                                fit: 'scale-down',
-                            })
-                        "
-                        :srcset="getOptimizedSrcset(media.url || '', 'detail')"
+                        :src="media.url || ''"
                         sizes="(max-width: 768px) 100vw, 480px"
                         :mime-type="media.mime_type || undefined"
                         class="w-full h-full object-cover"

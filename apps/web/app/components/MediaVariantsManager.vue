@@ -18,7 +18,6 @@ import {
 import { useMediaStore } from "@/stores/media";
 import { toast } from "vue-sonner";
 import { useApi } from "@/composables/useApi";
-import { getOptimizedImageUrl } from "@/utils/image";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -560,7 +559,7 @@ const handleVideoMouseLeave = (e: Event) => {
                                     >
                                         <HeicImage
                                             v-if="item.type === 'IMAGE' && item.file?.url"
-                                            :src="getOptimizedImageUrl(item.file.url, { width: 120, height: 120, fit: 'cover' })"
+                                            :src="item.file.url"
                                             :mime-type="item.file.mime_type"
                                             class="w-full h-full object-cover"
                                         />

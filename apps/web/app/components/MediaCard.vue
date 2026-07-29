@@ -3,8 +3,8 @@ import { ref, watch, nextTick } from "vue";
 import type { MediaListItem, MappedMediaItem } from "@/stores/media";
 import { Play, Layers, Loader2, FileImage, Trash, Clock, CheckCircle2, AlertCircle, Sparkles, RefreshCw } from "@lucide/vue";
 import { Checkbox } from "@/components/ui/checkbox";
-import { getOptimizedImageUrl, getOptimizedSrcset } from "@/utils/image";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
+
 import { toast } from "vue-sonner";
 import { useApi } from "@/composables/useApi";
 import { useMediaStore } from "@/stores/media";
@@ -160,16 +160,7 @@ const handleQueueAi = async () => {
                     <!-- Image Card -->
                     <img
                         v-if="media.type?.toLowerCase() === 'image' || media.type?.toLowerCase() === 'live_photo' || !media.type"
-                        :src="
-                            getOptimizedImageUrl(media.url, {
-                                width: 480,
-                                height: 360,
-                                fit: 'cover',
-                                gravity: 'auto',
-                            })
-                        "
-                        :srcset="getOptimizedSrcset(media.url, 'list')"
-                        sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                        :src="media.url || ''"
                         :alt="media.title || 'Image'"
                         class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                         loading="lazy"
@@ -191,16 +182,7 @@ const handleQueueAi = async () => {
 
                         <img
                             v-if="media.poster && !isHovered"
-                            :src="
-                                getOptimizedImageUrl(media.poster, {
-                                    width: 480,
-                                    height: 360,
-                                    fit: 'cover',
-                                    gravity: 'auto',
-                                })
-                            "
-                            :srcset="getOptimizedSrcset(media.poster, 'list')"
-                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                            :src="media.poster"
                             :alt="media.title || 'Video Cover'"
                             class="absolute inset-0 w-full h-full object-cover transition-all duration-300 group-hover:scale-105 pointer-events-none"
                             loading="lazy"

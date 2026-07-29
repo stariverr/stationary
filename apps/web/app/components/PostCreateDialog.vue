@@ -26,7 +26,6 @@ import {
     MoreHorizontal,
 } from "@lucide/vue";
 import { TooltipProvider, TooltipRoot, TooltipTrigger, TooltipContent, TooltipPortal } from "reka-ui";
-import { getOptimizedImageUrl } from "@/utils/image";
 import CreateMediaForm from "./CreateMediaForm.vue";
 import TagEditor from "./TagEditor.vue";
 
@@ -627,13 +626,7 @@ async function handleSubmit() {
                                             >
                                                 <img
                                                     v-if="getStagedItemThumbnail(item)"
-                                                    :src="
-                                                        getOptimizedImageUrl(getStagedItemThumbnail(item)!, {
-                                                            width: 96,
-                                                            height: 96,
-                                                            fit: 'cover',
-                                                        })
-                                                    "
+                                                    :src="getStagedItemThumbnail(item)!"
                                                     class="w-full h-full object-cover"
                                                 />
                                                 <Video
@@ -798,7 +791,7 @@ async function handleSubmit() {
                                 >
                                     <img
                                         v-if="media.cover_url || (media.type === 'IMAGE' && media.url)"
-                                        :src="getOptimizedImageUrl(media.cover_url || media.url, { width: 80, height: 80, fit: 'cover' })"
+                                        :src="media.cover_url || media.url || ''"
                                         class="w-full h-full object-cover"
                                     />
                                     <Video v-else-if="media.type === 'VIDEO'" class="w-4 h-4 text-slate-400 dark:text-zinc-500" />

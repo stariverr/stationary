@@ -27,9 +27,8 @@ import { RecycleService } from "@/services/recycle";
 import { DeleteService } from "@/services/delete";
 import { PostService, replacePostTagsTx } from "@/services/post";
 import { replaceMediaTagsTx } from "@/services/media";
-import { buildCdnUrl, buildImagePreviewCdnUrl } from "@/lib/utils/cdn";
+import { buildCdnUrl } from "@/lib/utils/cdn";
 import { toIsoTimestamp, FormTimestampSchema } from "@/lib/utils/time";
-import { Quality } from "@/lib/types";
 import { v7 as uuidv7 } from "uuid";
 import { TrackService } from "@/services/track";
 import { consumeDraftFile, DraftFileUnavailableError } from "@/services/draft-file";
@@ -232,7 +231,7 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
             source: post.source,
             tags: postTags,
             author_name: post.author_name,
-            author_avatar_url: buildImagePreviewCdnUrl(post.author_avatar_bucket, post.author_avatar_path, Quality.LOW),
+            author_avatar_url: buildCdnUrl(post.author_avatar_bucket, post.author_avatar_path),
             create_time: toIsoTimestamp(post.create_time),
             published_time: toIsoTimestamp(post.published_time),
             sync_status: post.sync_status,
@@ -308,7 +307,7 @@ router.get("/authors", requireAuth, validate("query", PostAuthorsQuerySchema), a
         id: auth.id,
         nickname: auth.nickname,
         platform: auth.platform,
-        avatar_url: auth.avatar_path ? buildImagePreviewCdnUrl(auth.avatar_bucket, auth.avatar_path, Quality.LOW) : null,
+        avatar_url: auth.avatar_path ? buildCdnUrl(auth.avatar_bucket, auth.avatar_path) : null,
     }));
 
     return c.json(success(Code.SUCCESS, result));
@@ -411,7 +410,7 @@ router.get("/detail/:id", requireAuth, validate("param", PostDetailRequestPathPa
         description: postData.description,
         tags: postTags,
         author_name: postData.author_name,
-        author_avatar_url: avatar ? buildImagePreviewCdnUrl(avatar.author_avatar_bucket, avatar.author_avatar_path, Quality.LOW) : null,
+        author_avatar_url: avatar ? buildCdnUrl(avatar.author_avatar_bucket, avatar.author_avatar_path) : null,
         author_external_id: postData.author_external_id,
         create_time: toIsoTimestamp(postData.create_time) ?? undefined,
         published_time: toIsoTimestamp(postData.published_time),

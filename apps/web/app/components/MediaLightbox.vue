@@ -28,7 +28,7 @@ import { Swiper, SwiperSlide } from "swiper/vue";
 import "swiper/css";
 import { Temporal } from "@js-temporal/polyfill";
 import { useApi } from "@/composables/useApi";
-import { getOptimizedImageUrl } from "@/utils/image";
+
 
 const store = useMediaStore();
 const { selectedMediaId, selectedMedia, medias, displayMode } = storeToRefs(store);
@@ -664,12 +664,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                         />
                                         <LivePhotoPlayer
                                             v-else-if="media.type?.toLowerCase() === 'live_photo'"
-                                            :src="
-                                                getOptimizedImageUrl(media.url || media.media_url || '', {
-                                                    width: 1920,
-                                                    fit: 'scale-down',
-                                                })
-                                            "
+                                            :src="media.url || media.media_url || ''"
                                             :live-src="media.live_url || ''"
                                             :mime-type="media.mime_type || media.mimeType || undefined"
                                             :width="media.width"
@@ -725,14 +720,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                 </div>
                                 <HeicImage
                                     v-else-if="media.type?.toLowerCase() !== 'video'"
-                                    :src="
-                                        getOptimizedImageUrl(media.url || media.media_url || '', {
-                                            width: 320,
-                                            height: 240,
-                                            fit: 'cover',
-                                            gravity: 'auto',
-                                        })
-                                    "
+                                    :src="media.url || media.media_url || ''"
                                     :mime-type="media.mime_type || media.mimeType || undefined"
                                     class="w-full h-full object-cover"
                                 />
