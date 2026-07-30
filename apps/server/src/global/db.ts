@@ -1,61 +1,23 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { env } from "@/global/env";
-import * as schema from "../db/schema";
-import { Pool } from "pg";
 import { relations } from "@/db/schema/relations";
+import { Pool } from "pg";
 
 if (!env.DB_URL) {
     throw new Error("DB_URL is not set");
 }
 
-const pool = new Pool({
+export const pool = new Pool({
     connectionString: env.DB_URL,
     keepAlive: true,
-    idleTimeoutMillis: 30_000,
+    max: env.DB_POOL_MAX,
+    idleTimeoutMillis: env.DB_IDLE_TIMEOUT_MS,
     connectionTimeoutMillis: 10_000,
-    max: 20,
 });
 
-pool.on("connect", (client) => {
-    client.on("error", (err) => {
-        const msg = err.message || String(err);
-        const code = (err as { code?: string }).code;
-        const isDisconnect =
-            msg.includes("Connection terminated") ||
-            msg.includes("connection closed") ||
-            code === "ECONNRESET" ||
-            code === "EPIPE" ||
-            code === "ENOTFOUND" ||
-            code === "57P01" ||
-            code === "57P02" ||
-            code === "57P03";
-
-        if (isDisconnect) {
-            console.warn(`[DB Client] Database client connection reset/terminated: ${msg}`);
-        } else {
-            console.error("[DB Client] Unexpected error on database client connection:", err);
-        }
-    });
-});
-
+// Essential: Prevent idle client disconnect errors from crashing the Bun process
 pool.on("error", (err) => {
-    const msg = err.message || String(err);
-    const code = (err as { code?: string }).code;
-    const isDisconnect =
-        msg.includes("Connection terminated") ||
-        msg.includes("connection closed") ||
-        code === "ECONNRESET" ||
-        code === "EPIPE" ||
-        code === "ENOTFOUND" ||
-        code === "57P01" ||
-        code === "57P02" ||
-        code === "57P03";
-
-    if (isDisconnect) {
-        console.warn(`[DB Pool] Idle database client disconnected: ${msg}`);
-    } else {
-        console.error("[DB Pool] Unexpected error on idle database client:", err);
-    }
+    console.warn(`[DB Pool] Idle client connection disconnected/error: ${err.message}`);
 });
 
 export const db = drizzle({

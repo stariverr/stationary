@@ -1,8 +1,22 @@
 import { z } from "zod";
 
 const envSchema = z.object({
+    SERVER_ENV: z.enum(["development", "production", "test"]).default("development"),
+
     /** PostgreSQL URL */
     DB_URL: z.string(),
+
+    /** DB Connection Pool Max Connections */
+    DB_POOL_MAX: z
+        .string()
+        .default("10")
+        .transform((v) => parseInt(v, 10)),
+
+    /** DB Connection Pool Idle Timeout (ms) */
+    DB_IDLE_TIMEOUT_MS: z
+        .string()
+        .default("15000")
+        .transform((v) => parseInt(v, 10)),
 
     /** Redis URL */
     REDIS_URL: z.string().default("redis://localhost:6379"),

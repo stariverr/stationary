@@ -41,7 +41,7 @@ jobsApp.get("/list", requireAuth, async (c) => {
         conditions.push(eq(AsyncTask.status, statusFilter as AsyncTaskStatus));
     }
     if (typeFilter && typeFilter !== "ALL" && typeFilter !== "undefined" && typeFilter.trim() !== "") {
-        conditions.push(eq(AsyncTask.type, typeFilter));
+        conditions.push(eq(AsyncTask.type, typeFilter as any));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -146,7 +146,7 @@ jobsApp.get("/units", requireAuth, async (c) => {
         conditions.push(eq(AsyncTaskUnit.status, statusFilter as AsyncTaskUnitStatus));
     }
     if (taskTypeFilter && taskTypeFilter !== "ALL" && taskTypeFilter !== "undefined" && taskTypeFilter.trim() !== "") {
-        conditions.push(eq(AsyncTask.type, taskTypeFilter));
+        conditions.push(eq(AsyncTask.type, taskTypeFilter as any));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

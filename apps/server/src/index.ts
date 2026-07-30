@@ -14,7 +14,6 @@ import { jobsApp } from "@/api/jobs";
 import { jobRunner } from "@/infra/jobs/runner";
 import { JobSweeper } from "@/infra/jobs/sweeper";
 import { initJobHandlers } from "@/services/job_handlers";
-
 // 1. Initialize Task Handlers Strategy Registry
 initJobHandlers();
 

@@ -2,7 +2,7 @@
     "name": "@stationary/server",
     "type": "module",
     "scripts": {
-        "dev": "bun run --hot src/index.ts",
+        "dev": "bun --watch src/index.ts",
         "typecheck": "bun run tsc --noEmit",
         "test:jobs": "bun test src/tests/job_system*.test.ts",
         "test:jobs:db": "RUN_JOB_DB_TESTS=1 bun test src/tests/job_system_db.test.ts",
