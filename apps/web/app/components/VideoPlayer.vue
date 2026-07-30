@@ -11,9 +11,22 @@ interface Subtitle {
     format: string;
 }
 
+interface VideoTrackItem {
+    id?: string;
+    url: string;
+    type: string;
+    purpose?: string;
+    quality?: string;
+    priority?: number;
+    codec?: string;
+    display_name?: string;
+    mime_type?: string;
+}
+
 interface Props {
     src: string;
     poster?: string;
+    tracks?: VideoTrackItem[];
     subtitles?: Subtitle[];
     width?: number | string;
     height?: number | string;
@@ -26,6 +39,7 @@ let dashPlayer: MediaPlayerClass | null = null;
 const props = withDefaults(defineProps<Props>(), {
     src: "",
     poster: "",
+    tracks: () => [],
     subtitles: () => [],
     width: undefined,
     height: undefined,
@@ -120,6 +134,13 @@ const destroyPlayer = () => {
 
 let plyrInitializingPromise: Promise<void> | null = null;
 
+const fullscreenContainerSelectors = [".group\\/fullscreen", ".group\\/player"] as const;
+
+const getFullscreenContainerSelector = () => {
+    if (!videoRef.value) return undefined;
+    return fullscreenContainerSelectors.find((selector) => videoRef.value?.closest(selector));
+};
+
 const initPlyr = async () => {
     if (player.value) return;
     if (plyrInitializingPromise) return plyrInitializingPromise;
@@ -128,8 +149,15 @@ const initPlyr = async () => {
         try {
             const Plyr = (await import("plyr")).default;
             if (videoRef.value && !player.value) {
+                const fullscreenContainer = getFullscreenContainerSelector();
                 player.value = new Plyr(videoRef.value, {
                     captions: { update: true },
+                    fullscreen: {
+                        enabled: true,
+                        fallback: true,
+                        iosNative: true,
+                        container: fullscreenContainer,
+                    },
                 });
             }
         } catch (error) {
@@ -164,6 +192,13 @@ const areSubtitlesEqual = (a: Subtitle[], b: Subtitle[]) => {
 let activeSrc = "";
 let activePoster = "";
 let activeSubtitles: Subtitle[] = [];
+let activeTracksSignature = "";
+
+const tracksSignature = computed(() =>
+    props.tracks
+        .map((track) => [track.id, track.url, track.type, track.purpose, track.quality, track.codec, track.mime_type].join(":"))
+        .join("|"),
+);
 
 const updateSource = async () => {
     if (!videoRef.value) return;
@@ -171,14 +206,16 @@ const updateSource = async () => {
     const srcChanged = absoluteSrc.value !== activeSrc;
     const posterChanged = props.poster !== activePoster;
     const subtitlesChanged = !areSubtitlesEqual(props.subtitles, activeSubtitles);
+    const tracksChanged = tracksSignature.value !== activeTracksSignature;
 
-    if (!srcChanged && !posterChanged && !subtitlesChanged && player.value) {
+    if (!srcChanged && !posterChanged && !subtitlesChanged && !tracksChanged && player.value) {
         return; // No change, do not reload
     }
 
     activeSrc = absoluteSrc.value;
     activePoster = props.poster;
     activeSubtitles = [...props.subtitles];
+    activeTracksSignature = tracksSignature.value;
 
     // 1. Load subtitles first
     await loadSubtitles();
@@ -234,30 +271,55 @@ const updateSource = async () => {
             dashPlayer = null;
         }
 
+        const qualityToSizeMap: Record<string, number> = {
+            "1080p": 1080,
+            "720p": 720,
+            "480p": 480,
+            "360p": 360,
+            HIGH: 1080,
+            MEDIUM: 720,
+            LOW: 480,
+        };
+
+        const videoTracks = (props.tracks || []).filter(
+            (t) => (t.type as string)?.toUpperCase() === "VIDEO" && (t.purpose as string)?.toUpperCase() !== "COVER",
+        );
+        const plyrSources =
+            videoTracks.length > 0
+                ? videoTracks.map((t) => ({
+                      src: t.url,
+                      type: t.mime_type || "video/mp4",
+                      size: qualityToSizeMap[t.quality || ""] || undefined,
+                  }))
+                : [
+                      {
+                          src: absoluteSrc.value,
+                          type: "video/mp4",
+                      },
+                  ];
+
         // Update Plyr source directly
         player.value.source = {
             type: "video",
-            sources: [
-                {
-                    src: absoluteSrc.value,
-                    type: "video/mp4",
-                },
-            ],
+            sources: plyrSources,
             poster: props.poster,
             tracks: plyrTracks,
         };
     }
 };
 
-// Watch element and properties to update source reactively
+onMounted(async () => {
+    await nextTick();
+    await updateSource();
+});
+
+// Watch properties to update source reactively
 watch(
-    [videoRef, () => props.src, () => props.poster, () => props.subtitles],
-    async ([el]) => {
-        if (el) {
-            await updateSource();
-        }
+    [() => props.src, () => props.poster, () => props.subtitles, () => props.tracks],
+    async () => {
+        await updateSource();
     },
-    { deep: true, immediate: true },
+    { deep: true },
 );
 
 onBeforeUnmount(() => {
@@ -276,8 +338,13 @@ onBeforeUnmount(() => {
         :style="aspectStyle"
     >
         <ClientOnly>
-            <!-- Do not use native 'controls' when using Plyr to avoid layering issues -->
-            <video ref="videoRef" playsinline class="plyr-video w-full h-auto max-h-full" :poster="props.poster">
+            <video
+                ref="videoRef"
+                :src="absoluteSrc"
+                playsinline
+                class="plyr-video w-full h-auto max-h-full"
+                :poster="props.poster"
+            >
                 <track
                     v-for="track in processedSubtitles"
                     :key="track.url"

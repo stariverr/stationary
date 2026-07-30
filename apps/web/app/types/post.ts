@@ -235,23 +235,11 @@ export const PostMediaSummarySchema = v.object({
     title: v.nullish(v.string()),
     sort_order: v.number(),
     cover_url: v.optional(v.string()),
-    thumbnail_url: v.optional(v.string()),
-    preview_url: v.optional(v.string()),
     width: v.optional(v.nullable(v.number())),
     height: v.optional(v.nullable(v.number())),
     duration: v.optional(v.number()),
     page_count: v.optional(v.number()),
     position: v.optional(v.number()),
     tracks: v.optional(v.array(TrackSchema)),
-    subtitles: v.optional(
-        v.array(
-            v.object({
-                url: v.string(),
-                language: v.string(),
-                label: v.string(),
-                format: v.string(),
-            }),
-        ),
-    ),
 });
 export type PostMediaSummary = v.InferOutput<typeof PostMediaSummarySchema>;

@@ -11,6 +11,23 @@ interface Subtitle {
     format: string;
 }
 
+interface PreviewItem {
+    url?: string | null;
+}
+
+interface MediaTrack {
+    id?: string;
+    url: string;
+    type: string;
+    purpose: string;
+    is_default?: boolean;
+    priority?: number;
+    quality?: string;
+    mime_type?: string;
+    codec?: string;
+    metadata?: Record<string, any>;
+}
+
 interface MediaItem {
     id: string;
     type: "IMAGE" | "VIDEO" | "LIVE_PHOTO" | "AUDIO" | "PDF";
@@ -20,14 +37,10 @@ interface MediaItem {
     thumbnail_url?: string | null;
     preview_url?: string | null;
     live_url?: string | null;
-    tracks?: Array<{
-        id?: string;
-        url: string;
-        type: string;
-        purpose: string;
-        is_default?: boolean;
-        metadata?: Record<string, any>;
-    }>;
+    tracks?: MediaTrack[];
+    covers?: PreviewItem[] | null;
+    videos?: PreviewItem[] | null;
+    audios?: PreviewItem[] | null;
     width?: number;
     height?: number;
     subtitles?: Subtitle[];
@@ -56,32 +69,99 @@ const emit = defineEmits<{
     (e: "zoom-change", zoom: number): void;
 }>();
 
-const absolutePreviewUrl = computed(() => {
-    if (!props.media) return "";
-    if (props.media.url) return props.media.url;
-    if (props.media.preview_url) return props.media.preview_url;
-    const imageContentTrack =
-        props.media.tracks?.find((t) => t.type === "IMAGE" && t.purpose === "CONTENT" && t.is_default) ||
-        props.media.tracks?.find((t) => t.type === "IMAGE" && t.purpose === "CONTENT");
-    if (imageContentTrack?.url) return imageContentTrack.url;
-    return props.media.cover_url || props.media.thumbnail_url || "";
-});
+const qualityOrder: Record<string, number> = {
+    HIGH: 3,
+    MEDIUM: 2,
+    LOW: 1,
+};
 
-const absoluteLiveUrl = computed(() => {
-    if (!props.media) return "";
-    if (props.media.live_url) return props.media.live_url;
-    const liveVideoTrack = props.media.tracks?.find((t) => t.type === "VIDEO" && t.purpose === "CONTENT");
-    if (liveVideoTrack?.url) return liveVideoTrack.url;
-    return "";
-});
+function sortTracks<T extends { priority?: number; quality?: string }>(tracks: T[]): T[] {
+    return [...tracks].sort((a, b) => {
+        const priorityA = a.priority ?? 999;
+        const priorityB = b.priority ?? 999;
+        if (priorityA !== priorityB) return priorityA - priorityB;
+        const qualA = qualityOrder[a.quality || ""] || 0;
+        const qualB = qualityOrder[b.quality || ""] || 0;
+        return qualB - qualA;
+    });
+}
 
-const absoluteThumbnailUrl = computed(() => {
+function selectContentTrack(tracks: MediaTrack[] | undefined, type: string): MediaTrack | undefined {
+    const candidates = sortTracks(
+        (tracks || []).filter(
+            (track) => track.type.toUpperCase() === type && track.purpose.toUpperCase() !== "COVER",
+        ),
+    );
+    return candidates.find((track) => track.is_default) || candidates.find((track) => track.purpose.toUpperCase() === "CONTENT") || candidates[0];
+}
+
+function firstPreviewUrl(items: PreviewItem[] | null | undefined): string {
+    return items?.find((item) => item.url)?.url || "";
+}
+
+// 1. Cover / Poster Track
+const defaultPosterUrl = computed(() => {
     if (!props.media) return "";
     if (props.media.cover_url) return props.media.cover_url;
     if (props.media.thumbnail_url) return props.media.thumbnail_url;
-    const coverTrack = props.media.tracks?.find((t) => t.purpose === "COVER");
-    if (coverTrack?.url) return coverTrack.url;
-    return absolutePreviewUrl.value;
+
+    const previewCover = firstPreviewUrl(props.media.covers);
+    if (previewCover) return previewCover;
+
+    const coverTracks = (props.media.tracks || []).filter((t) => (t.purpose as string)?.toUpperCase() === "COVER");
+    const sorted = sortTracks(coverTracks);
+    return sorted[0]?.url || "";
+});
+
+// 2. VIDEO
+const defaultVideoSrc = computed(() => {
+    if (!props.media || props.media.type !== "VIDEO") return "";
+    if (props.media.url) return props.media.url;
+    if (props.media.preview_url) return props.media.preview_url;
+
+    const previewVideo = firstPreviewUrl(props.media.videos);
+    if (previewVideo) return previewVideo;
+    return selectContentTrack(props.media.tracks, "VIDEO")?.url || "";
+});
+
+// 3. LIVE PHOTO
+const livePhotoImageSrc = computed(() => {
+    if (!props.media || props.media.type !== "LIVE_PHOTO") return "";
+    const bestImage = selectContentTrack(props.media.tracks, "IMAGE");
+    if (bestImage?.url) return bestImage.url;
+    if (props.media.url) return props.media.url;
+    if (props.media.preview_url) return props.media.preview_url;
+    return defaultPosterUrl.value;
+});
+
+const livePhotoVideoSrc = computed(() => {
+    if (!props.media || props.media.type !== "LIVE_PHOTO") return "";
+    if (props.media.live_url) return props.media.live_url;
+
+    const previewVideo = firstPreviewUrl(props.media.videos);
+    if (previewVideo) return previewVideo;
+    return selectContentTrack(props.media.tracks, "VIDEO")?.url || "";
+});
+
+// 4. IMAGE
+const imageSrcUrl = computed(() => {
+    if (!props.media || props.media.type !== "IMAGE") return "";
+    const bestImage = selectContentTrack(props.media.tracks, "IMAGE");
+    if (bestImage?.url) return bestImage.url;
+    if (props.media.url) return props.media.url;
+    if (props.media.preview_url) return props.media.preview_url;
+    return defaultPosterUrl.value;
+});
+
+const contentAssetUrl = computed(() => {
+    if (!props.media) return "";
+    if (props.media.url) return props.media.url;
+    if (props.media.preview_url) return props.media.preview_url;
+    if (props.media.type === "AUDIO") {
+        const previewAudio = firstPreviewUrl(props.media.audios);
+        if (previewAudio) return previewAudio;
+    }
+    return selectContentTrack(props.media.tracks, props.media.type)?.url || "";
 });
 
 // Image Loading State (with 200ms delay to prevent flicker on fast loads)
@@ -97,14 +177,10 @@ const clearLoadingTimer = () => {
 };
 
 watch(
-    () => [props.media?.id, absolutePreviewUrl.value, absoluteThumbnailUrl.value],
-    ([newId, newPreview, newThumb]) => {
+    () => [props.media?.id, imageSrcUrl.value, livePhotoImageSrc.value, defaultPosterUrl.value],
+    ([newId]) => {
         clearLoadingTimer();
-        if (
-            newId &&
-            (newPreview || newThumb) &&
-            (props.media?.type === "IMAGE" || props.media?.type === "VIDEO" || props.media?.type === "LIVE_PHOTO")
-        ) {
+        if (newId && (props.media?.type === "IMAGE" || props.media?.type === "LIVE_PHOTO")) {
             isImageLoading.value = true;
             loadingTimer = setTimeout(() => {
                 if (isImageLoading.value) {
@@ -327,42 +403,22 @@ const handleImageClick = (e: MouseEvent) => {
 
         <!-- Content Players (Rendered whenever media exists so <img> tags mount & trigger @load) -->
         <div v-else :key="media.id" class="w-full h-full flex items-center justify-center overflow-hidden">
-            <!-- 1. VIDEO (Cover Only) -->
+            <!-- 1. VIDEO -->
             <template v-if="media.type === 'VIDEO'">
-                <div
-                    class="w-full h-full flex items-center justify-center relative overflow-hidden touch-none"
-                    @pointerdown="handlePointerDown"
-                    @pointermove="handlePointerMove"
-                    @pointerup="handlePointerUp"
-                    @pointercancel="handlePointerUp"
-                    @wheel="handleWheel"
-                    @dblclick="handleDoubleClick"
-                    @click="handleImageClick"
-                >
-                    <!-- Ambient Blur Backdrop -->
-                    <img
-                        v-if="absoluteThumbnailUrl || absolutePreviewUrl"
-                        :src="absoluteThumbnailUrl || absolutePreviewUrl"
-                        class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
-                        aria-hidden="true"
-                    />
-                    <img
-                        v-if="absoluteThumbnailUrl || absolutePreviewUrl"
-                        :src="absoluteThumbnailUrl || absolutePreviewUrl"
-                        :alt="media.title || $t('post_detail.viewer.preview')"
-                        class="relative z-10 max-w-full max-h-full object-contain shadow-2xl select-none pointer-events-none"
-                        :style="{
-                            transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
-                            transformOrigin: 'center center',
-                            transition: isDragging ? 'none' : 'transform 0.15s ease-out',
-                        }"
-                        @load="handleImageLoaded"
-                        @error="handleImageError"
-                        draggable="false"
+                <div class="w-full h-full max-w-full max-h-full flex items-center justify-center p-0">
+                    <VideoPlayer
+                        v-if="defaultVideoSrc"
+                        :src="defaultVideoSrc"
+                        :poster="defaultPosterUrl"
+                        :tracks="media.tracks"
+                        :subtitles="media.subtitles || []"
+                        :width="media.width"
+                        :height="media.height"
+                        class="w-full h-full"
                     />
                     <div v-else class="text-zinc-500 flex flex-col items-center gap-2">
-                        <FileImage class="w-10 h-10 text-zinc-600" />
-                        <p class="text-xs">{{ $t("post_detail.viewer.empty") }}</p>
+                        <ShieldAlert class="w-10 h-10 text-red-500" />
+                        <p class="text-xs">{{ $t("post_detail.viewer.video_missing") }}</p>
                     </div>
                 </div>
             </template>
@@ -381,14 +437,14 @@ const handleImageClick = (e: MouseEvent) => {
                 >
                     <!-- Ambient Blur Backdrop -->
                     <img
-                        v-if="absoluteThumbnailUrl || absolutePreviewUrl"
-                        :src="absoluteThumbnailUrl || absolutePreviewUrl"
+                        v-if="defaultPosterUrl || livePhotoImageSrc"
+                        :src="defaultPosterUrl || livePhotoImageSrc"
                         class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
                         aria-hidden="true"
                     />
                     <LivePhotoPlayer
-                        :src="absolutePreviewUrl || absoluteThumbnailUrl"
-                        :live-src="absoluteLiveUrl"
+                        :src="livePhotoImageSrc || defaultPosterUrl"
+                        :live-src="livePhotoVideoSrc"
                         :hide-badge="props.hideBadge"
                         class="relative z-10 max-w-full max-h-full object-contain shadow-2xl"
                         :style="{
@@ -416,13 +472,13 @@ const handleImageClick = (e: MouseEvent) => {
                 >
                     <!-- Ambient Blur Backdrop -->
                     <img
-                        v-if="absolutePreviewUrl || absoluteThumbnailUrl"
-                        :src="absolutePreviewUrl || absoluteThumbnailUrl"
+                        v-if="imageSrcUrl || defaultPosterUrl"
+                        :src="imageSrcUrl || defaultPosterUrl"
                         class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
                         aria-hidden="true"
                     />
                     <img
-                        :src="absolutePreviewUrl || absoluteThumbnailUrl"
+                        :src="imageSrcUrl || defaultPosterUrl"
                         :alt="media.title || $t('post_detail.viewer.preview')"
                         class="relative z-10 max-w-full max-h-full object-contain shadow-2xl select-none pointer-events-none"
                         :style="{
@@ -452,8 +508,8 @@ const handleImageClick = (e: MouseEvent) => {
                         <p class="mt-0.5 text-[10px] uppercase tracking-wider text-zinc-500">{{ $t("post_detail.viewer.audio_asset") }}</p>
                     </div>
                     <audio
-                        v-if="absolutePreviewUrl"
-                        :src="absolutePreviewUrl"
+                        v-if="contentAssetUrl"
+                        :src="contentAssetUrl"
                         controls
                         class="w-full mt-2 accent-indigo-600 outline-none"
                     />
@@ -475,8 +531,8 @@ const handleImageClick = (e: MouseEvent) => {
                         <p class="mt-0.5 text-[10px] uppercase tracking-wider text-zinc-500">{{ $t("post_detail.viewer.pdf_document") }}</p>
                     </div>
                     <a
-                        v-if="absolutePreviewUrl"
-                        :href="absolutePreviewUrl"
+                        v-if="contentAssetUrl"
+                        :href="contentAssetUrl"
                         target="_blank"
                         class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 transition-colors text-white font-medium text-xs rounded-lg shadow-sm"
                     >

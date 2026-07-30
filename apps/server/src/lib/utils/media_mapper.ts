@@ -1,6 +1,6 @@
 import { db } from "@/global/db";
 import { Media, Track, File as DbFile, DeleteStatus, SyncStatus, TrackPurpose, TrackType, type MediaFileMetadata } from "@/db/schema";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { toIsoTimestamp } from "@/lib/utils/time";
 import { Quality } from "@/lib/types";
@@ -193,7 +193,7 @@ export function formatMediaDetail(media: typeof Media.$inferSelect, files: Mappe
         : null;
 
     const tracks = sorted
-        .filter((f) => f.file_path && f.file_bucket)
+        .filter((f) => Boolean(f.file_path))
         .map((f) => ({
             id: f.track_id,
             file_id: f.file_id || "",

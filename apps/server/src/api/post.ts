@@ -481,11 +481,11 @@ router.get(
                 const sortedFiles = [...files].sort((a, b) => a.priority - b.priority);
 
                 const tracks = sortedFiles
-                    .filter((f) => f.file_path && f.file_bucket)
+                    .filter((f) => Boolean(f.file_path))
                     .map((f) => ({
                         id: f.track_id,
-                        file_id: f.file_id || "",
-                        url: buildCdnUrl(f.file_bucket!, f.file_path!) || "",
+                        file_id: f.file_id,
+                        url: buildCdnUrl(f.file_bucket, f.file_path),
                         type: f.type,
                         purpose: f.purpose,
                         is_original: f.is_original,
@@ -499,6 +499,7 @@ router.get(
                         codec: f.codec,
                     }));
 
+                // TODO: change cover field to an array, with different resolution variants
                 const coverTrack = tracks.find((t) => t.purpose === TrackPurpose.COVER);
 
                 return {

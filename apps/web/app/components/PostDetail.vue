@@ -231,6 +231,9 @@ const enterImmersiveView = () => {
 };
 
 const leaveImmersiveView = () => {
+    if (typeof document !== "undefined" && document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+    }
     isMediaOnly.value = false;
     isImmersiveView.value = false;
     isUiHidden.value = false;
@@ -258,6 +261,9 @@ const leaveMediaOnly = () => {
 };
 
 const closeDetail = () => {
+    if (typeof document !== "undefined" && document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+    }
     selectedPostId.value = null;
     isMediaOnly.value = false;
     isImmersiveView.value = false;
@@ -502,7 +508,7 @@ const confirmTrashMedia = async () => {
 
                 <!-- Center: Floating Glassmorphism Inspection Toolbar -->
                 <div
-                    v-if="currentMedia?.type === 'IMAGE' || currentMedia?.type === 'VIDEO'"
+                    v-if="currentMedia?.type === 'IMAGE' || currentMedia?.type === 'LIVE_PHOTO'"
                     class="hidden sm:flex h-10 items-center gap-1 rounded-full border border-white/15 bg-zinc-950/80 px-3 backdrop-blur-xl shadow-2xl pointer-events-auto"
                 >
                     <!-- Rotate Left -->
@@ -603,7 +609,7 @@ const confirmTrashMedia = async () => {
                 <UniversalMediaViewer
                     :media="currentMedia"
                     :is-loading="isLoadingMediaList"
-                    :interactive="['IMAGE', 'LIVE_PHOTO', 'VIDEO'].includes(currentMedia?.type || '')"
+                    :interactive="['IMAGE', 'LIVE_PHOTO'].includes(currentMedia?.type || '')"
                     :hide-badge="isOverlay"
                     :zoom="zoomLevel"
                     :rotation="rotationAngle"
@@ -705,7 +711,7 @@ const confirmTrashMedia = async () => {
                 <UniversalMediaViewer
                     :media="currentMedia"
                     :is-loading="isLoadingMediaList"
-                    :interactive="['IMAGE', 'LIVE_PHOTO', 'VIDEO'].includes(currentMedia?.type || '')"
+                    :interactive="['IMAGE', 'LIVE_PHOTO'].includes(currentMedia?.type || '')"
                     @click-media="handleMediaClick"
                     class="h-full w-full"
                 />

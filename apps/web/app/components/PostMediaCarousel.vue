@@ -24,13 +24,28 @@ watch(
             return;
         }
         mappedMedia.value = newMedia.map((m) => {
+            const tracks = m.tracks || [];
+            const liveVideoTrack = m.type === "LIVE_PHOTO" ? tracks.find((t: any) => t.type === "VIDEO" && t.purpose === "CONTENT") : null;
+            const imageTrack = tracks.find((t: any) => t.type === "IMAGE" && t.purpose === "CONTENT");
+            const videoTrack = tracks.find((t: any) => t.type === "VIDEO" && t.purpose === "CONTENT");
+
+            const mediaUrl =
+                m.url ||
+                m.preview_url ||
+                (m.type === "VIDEO" ? videoTrack?.url : imageTrack?.url) ||
+                m.cover_url ||
+                m.thumbnail_url ||
+                null;
+            const liveUrl = liveVideoTrack?.url || m.live_url || null;
+
             if (props.mediaList) {
                 // If it is from the paginated summary, subtitles are already processed
                 const subtitles = m.subtitles || [];
                 return {
                     ...m,
-                    url: m.preview_url || m.thumbnail_url || null,
-                    thumbnail: m.thumbnail_url || null,
+                    url: mediaUrl,
+                    live_url: liveUrl,
+                    thumbnail: m.thumbnail_url || m.cover_url || null,
                     subtitles: subtitles.map((sub: any) => ({
                         url: sub.url,
                         language: sub.language || "unknown",
@@ -42,6 +57,9 @@ watch(
                 const subtitleTracks = (m.tracks || []).filter((t: Track) => t.type === "SUBTITLE");
                 return {
                     ...m,
+                    url: mediaUrl,
+                    live_url: liveUrl,
+                    thumbnail: m.thumbnail_url || m.cover_url || null,
                     subtitles: subtitleTracks.map((sub: Track) => ({
                         url: sub.url,
                         language: (sub.metadata?.language as string) || "unknown",
