@@ -99,7 +99,12 @@ const emit = defineEmits<{
 
 const handleMediaClick = (event: MouseEvent) => {
     const target = event.target as HTMLElement;
-    if (target.closest(".plyr__controls") || target.closest("button") || target.closest("a")) {
+    if (
+        target.closest(".vds-controls") ||
+        target.closest(".vds-time-slider") ||
+        target.closest("button") ||
+        target.closest("a")
+    ) {
         return;
     }
     emit("click-media");

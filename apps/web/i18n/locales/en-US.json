@@ -693,7 +693,28 @@
             "zoom_reset_fit": "Fit to screen",
             "zoom_reset_original": "Original size (1:1)",
             "rotate_left": "Rotate counterclockwise",
-            "rotate_right": "Rotate clockwise"
+            "rotate_right": "Rotate clockwise",
+            "player": {
+                "play": "Play",
+                "pause": "Pause",
+                "rewind": "Rewind 5s",
+                "forward": "Forward 5s",
+                "mute": "Mute",
+                "unmute": "Unmute",
+                "speed": "Speed",
+                "quality": "Quality",
+                "subtitles": "Subtitles",
+                "subtitles_off": "Off",
+                "auto_quality": "Auto",
+                "quality_high": "High",
+                "quality_medium": "Medium",
+                "quality_low": "Low",
+                "pip": "Picture in Picture",
+                "fullscreen": "Fullscreen",
+                "exit_fullscreen": "Exit Fullscreen",
+                "normal_speed": "Normal",
+                "loading": "Loading video..."
+            }
         },
         "toasts": {
             "copy_success": "Post link copied",

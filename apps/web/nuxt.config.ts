@@ -10,6 +10,11 @@ export default defineNuxtConfig({
     },
     compatibilityDate: "2026-05-18",
     ssr: true,
+    vue: {
+        compilerOptions: {
+            isCustomElement: (tag) => tag.startsWith("media-"),
+        },
+    },
     devtools: { enabled: false },
     devServer: {
         port: 4000,
@@ -40,7 +45,7 @@ export default defineNuxtConfig({
     vite: {
         plugins: [tailwindcss()],
         optimizeDeps: {
-            include: ["@vueuse/core", "@tanstack/vue-query", "@lucide/vue", "swiper/vue", "@js-temporal/polyfill", "plyr"],
+            include: ["@vueuse/core", "@tanstack/vue-query", "@lucide/vue", "swiper/vue", "@js-temporal/polyfill", "vidstack"],
         },
     },
     css: ["@/assets/css/main.css"],
