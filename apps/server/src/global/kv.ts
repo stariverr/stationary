@@ -20,6 +20,8 @@ export interface KVStore {
     // Redis-specific operations
     setNx(key: string, value: string, expirationTtl?: number): Promise<boolean>;
     expire(key: string, seconds: number): Promise<boolean>;
+    renewLock(key: string, ownerToken: string, expirationTtl: number): Promise<boolean>;
+    releaseLock(key: string, ownerToken: string): Promise<boolean>;
     setWithExpiration(key: string, value: string, seconds: number): Promise<void>;
     increment(key: string): Promise<number>;
     hset(key: string, field: string, value: string): Promise<void>;
@@ -249,6 +251,44 @@ class PooledRedisKVStore implements KVStore {
         } catch (error) {
             console.error(`Error in expire for key ${key}:`, error);
             throw error;
+        } finally {
+            this.pool.returnClient(client);
+        }
+    }
+
+    async renewLock(key: string, ownerToken: string, expirationTtl: number): Promise<boolean> {
+        const client = await this.pool.getClient();
+        try {
+            const result = await client.eval(
+                `if redis.call('get', KEYS[1]) == ARGV[1] then
+                    return redis.call('expire', KEYS[1], ARGV[2])
+                 end
+                 return 0`,
+                {
+                    keys: [key],
+                    arguments: [ownerToken, expirationTtl.toString()],
+                },
+            );
+            return result === 1;
+        } finally {
+            this.pool.returnClient(client);
+        }
+    }
+
+    async releaseLock(key: string, ownerToken: string): Promise<boolean> {
+        const client = await this.pool.getClient();
+        try {
+            const result = await client.eval(
+                `if redis.call('get', KEYS[1]) == ARGV[1] then
+                    return redis.call('del', KEYS[1])
+                 end
+                 return 0`,
+                {
+                    keys: [key],
+                    arguments: [ownerToken],
+                },
+            );
+            return result === 1;
         } finally {
             this.pool.returnClient(client);
         }

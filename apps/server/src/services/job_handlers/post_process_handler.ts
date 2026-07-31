@@ -1,8 +1,9 @@
-import type { TaskHandler, TaskUnitContext, TaskResult, TaskExecutionSummary } from "@/infra/jobs/types";
+import { TaskRetryReason, type TaskHandler, type TaskUnitContext, type TaskResult, type TaskExecutionSummary } from "@/infra/jobs/types";
 import { TaskService } from "@/services/task";
-import { Post, SyncStatus, AsyncTaskUnitKind } from "@/db/schema";
+import { AsyncOutcomeCode, Post, SyncStatus, AsyncTaskUnitKind } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { getErrorMessage } from "@/lib/utils/error";
+import { isLockAcquisitionError } from "@/lib/utils/lock";
 
 type SubTaskExecutor = (context: TaskUnitContext) => Promise<TaskResult | void>;
 
@@ -12,7 +13,7 @@ type SubTaskExecutor = (context: TaskUnitContext) => Promise<TaskResult | void>;
 const subTaskExecutors: Partial<Record<AsyncTaskUnitKind, SubTaskExecutor>> = {
     MEDIA_DOWNLOAD: async (context) => {
         context.signal.throwIfAborted();
-        await TaskService.processMediaById(context.unit.subject_id);
+        await TaskService.processMediaById(context.unit.subject_id, context.signal);
         context.signal.throwIfAborted();
         return { success: true };
     },
@@ -22,7 +23,7 @@ const subTaskExecutors: Partial<Record<AsyncTaskUnitKind, SubTaskExecutor>> = {
             return { success: true, skipped: true };
         }
         context.signal.throwIfAborted();
-        await TaskService.processAvatar(context.unit.subject_id, avatarUrl);
+        await TaskService.processAvatar(context.unit.subject_id, avatarUrl, context.signal);
         context.signal.throwIfAborted();
         return { success: true };
     },
@@ -41,10 +42,13 @@ export const PostProcessHandler: TaskHandler = {
             const result = await executor(context);
             return result ?? { success: true };
         } catch (error) {
+            const lockContention = isLockAcquisitionError(error);
             return {
                 success: false,
                 error: getErrorMessage(error),
                 retryable: true,
+                retryReason: lockContention ? TaskRetryReason.LOCK_CONTENTION : undefined,
+                outcomeCode: lockContention ? AsyncOutcomeCode.LOCKED_CONCURRENT_EXECUTION : AsyncOutcomeCode.UNHANDLED_EXCEPTION,
             };
         }
     },

@@ -2,13 +2,17 @@ import { describe, expect, test } from "bun:test";
 import { AsyncTaskStatus, AsyncTaskType } from "@/db/schema";
 import { getTaskHandler } from "@/infra/jobs/registry";
 import {
+    MAX_LOCK_CONTENTION_DELAY_SECONDS,
     MAX_RETRY_DELAY_SECONDS,
+    MIN_LOCK_CONTENTION_DELAY_SECONDS,
+    lockContentionDelaySeconds,
     requirePositiveInteger,
     retryDelaySeconds,
     taskStatusAfterDiscovery,
     terminalTaskStatus,
 } from "@/infra/jobs/policy";
 import { createIdempotencyKey } from "@/lib/utils/hash";
+import { LockAcquisitionError, isLockAcquisitionError } from "@/lib/utils/lock";
 import { initJobHandlers } from "@/services/job_handlers";
 
 describe("Job engine contracts", () => {
@@ -78,6 +82,8 @@ describe("Job engine contracts", () => {
         expect(retryDelaySeconds(1, () => 0)).toBe(4);
         expect(retryDelaySeconds(1, () => 1)).toBe(6);
         expect(retryDelaySeconds(20, () => 1)).toBe(MAX_RETRY_DELAY_SECONDS);
+        expect(lockContentionDelaySeconds(() => 0)).toBe(MIN_LOCK_CONTENTION_DELAY_SECONDS);
+        expect(lockContentionDelaySeconds(() => 1)).toBe(MAX_LOCK_CONTENTION_DELAY_SECONDS);
         expect(() => requirePositiveInteger(0, "attempts")).toThrow("attempts must be a positive integer");
     });
 
@@ -88,5 +94,14 @@ describe("Job engine contracts", () => {
 
         expect(first).toBe(reordered);
         expect(first).not.toBe(different);
+    });
+
+    test("LockAcquisitionError is identified as lock contention", () => {
+        const lockErr = new LockAcquisitionError("lock:media:123");
+        expect(isLockAcquisitionError(lockErr)).toBeTrue();
+        expect(lockErr.code).toBe("LOCKED_CONCURRENT_EXECUTION");
+        expect(isLockAcquisitionError({ code: "LOCKED_CONCURRENT_EXECUTION" })).toBeTrue();
+        expect(isLockAcquisitionError(new Error("LOCKED_CONCURRENT_EXECUTION"))).toBeFalse();
+        expect(isLockAcquisitionError(new Error("Random DB failure"))).toBeFalse();
     });
 });

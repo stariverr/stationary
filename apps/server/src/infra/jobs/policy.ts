@@ -6,8 +6,9 @@ export const UNIT_LEASE_SECONDS = 60;
 export const DISCOVERY_LEASE_SECONDS = 120;
 export const HEARTBEAT_INTERVAL_MS = 20_000;
 export const MAX_RETRY_DELAY_SECONDS = 300;
+export const MIN_LOCK_CONTENTION_DELAY_SECONDS = 30;
+export const MAX_LOCK_CONTENTION_DELAY_SECONDS = 60;
 export const JOB_WAKE_CHANNEL = "jobs:wake_channel";
-
 
 type TaskProgress = Pick<
     typeof AsyncTask.$inferSelect,
@@ -36,6 +37,13 @@ export function retryDelaySeconds(attemptCount: number, random = Math.random): n
     const exponentialDelay = Math.min(MAX_RETRY_DELAY_SECONDS, 5 * 2 ** (normalizedAttempt - 1));
     const jitterMultiplier = 0.75 + Math.min(1, Math.max(0, random())) * 0.5;
     return Math.min(MAX_RETRY_DELAY_SECONDS, Math.max(1, Math.round(exponentialDelay * jitterMultiplier)));
+}
+
+export function lockContentionDelaySeconds(random = Math.random): number {
+    const normalizedRandom = Math.min(1, Math.max(0, random()));
+    return Math.round(
+        MIN_LOCK_CONTENTION_DELAY_SECONDS + normalizedRandom * (MAX_LOCK_CONTENTION_DELAY_SECONDS - MIN_LOCK_CONTENTION_DELAY_SECONDS),
+    );
 }
 
 export function requirePositiveInteger(value: number, name: string): number {

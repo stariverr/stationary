@@ -4,6 +4,32 @@ import { v7 as createUuidV7 } from "uuid";
 
 const uuidv7 = { generate: createUuidV7 };
 
+function createRequestSignal(
+    parentSignal: AbortSignal | undefined,
+    timeoutMs: number | false,
+): { signal: AbortSignal | undefined; cleanup: () => void } {
+    if (timeoutMs === false) {
+        return { signal: parentSignal, cleanup: () => {} };
+    }
+
+    const controller = new AbortController();
+    const abortFromParent = () => controller.abort(parentSignal?.reason);
+    parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+    if (parentSignal?.aborted) abortFromParent();
+
+    const timeoutId = setTimeout(() => {
+        controller.abort(new DOMException(`Request timed out after ${timeoutMs}ms`, "TimeoutError"));
+    }, timeoutMs);
+
+    return {
+        signal: controller.signal,
+        cleanup: () => {
+            clearTimeout(timeoutId);
+            parentSignal?.removeEventListener("abort", abortFromParent);
+        },
+    };
+}
+
 /**
  * Resolves appropriate Referer and User-Agent headers to bypass anti-hotlinking.
  */
@@ -30,15 +56,37 @@ function createResumableStream(
     initialRes: Response,
     requestHeaders: Record<string, string>,
     timeout: number | false,
+    signal?: AbortSignal,
 ): ReadableStream<Uint8Array> {
     let offset = 0;
     let reader: any = initialRes.body!.getReader();
     let attempt = 0;
     const maxRetries = 3;
     const readTimeoutMs = 30_000; // 30 seconds idle read timeout
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+
+    const abortStream = () => {
+        const activeReader = reader;
+        reader = null;
+        if (activeReader) void activeReader.cancel(signal?.reason).catch(() => {});
+        if (streamController) {
+            try {
+                streamController.error(signal?.reason ?? new DOMException("The operation was aborted", "AbortError"));
+            } catch {}
+        }
+    };
+
+    const removeAbortListener = () => signal?.removeEventListener("abort", abortStream);
 
     return new ReadableStream<Uint8Array>({
+        start(controller) {
+            streamController = controller;
+            signal?.addEventListener("abort", abortStream, { once: true });
+            if (signal?.aborted) abortStream();
+        },
         async pull(controller) {
+            if (signal?.aborted) return;
+
             while (true) {
                 if (!reader) {
                     try {
@@ -56,24 +104,17 @@ function createResumableStream(
                             Range: `bytes=${offset}-`,
                         };
 
+                        const requestControl = createRequestSignal(signal, timeout);
                         let res: Response;
-                        if (timeout !== false) {
-                            const retryController = new AbortController();
-                            const retryTimeoutId = setTimeout(() => retryController.abort(), timeout);
-
+                        try {
                             res = await ky(url, {
                                 headers: retryHeaders,
                                 timeout: false,
-                                signal: retryController.signal,
+                                signal: requestControl.signal,
                                 throwHttpErrors: false,
                             });
-                            clearTimeout(retryTimeoutId);
-                        } else {
-                            res = await ky(url, {
-                                headers: retryHeaders,
-                                timeout: false,
-                                throwHttpErrors: false,
-                            });
+                        } finally {
+                            requestControl.cleanup();
                         }
 
                         if (res.status !== 206) {
@@ -86,8 +127,10 @@ function createResumableStream(
 
                         reader = res.body.getReader();
                     } catch (err: any) {
+                        if (signal?.aborted) return;
                         console.error(`[ResumableStream] Failed to resume stream at attempt ${attempt}:`, err);
                         controller.error(err);
+                        removeAbortListener();
                         return;
                     }
                 }
@@ -107,10 +150,18 @@ function createResumableStream(
                     });
 
                     const readPromise = activeReader.read();
-                    const { done, value } = await Promise.race([readPromise, timeoutPromise]);
-                    clearTimeout(timeoutId);
+                    let readResult;
+                    try {
+                        readResult = await Promise.race([readPromise, timeoutPromise]);
+                    } finally {
+                        clearTimeout(timeoutId);
+                    }
+
+                    if (signal?.aborted) return;
+                    const { done, value } = readResult;
 
                     if (done) {
+                        removeAbortListener();
                         controller.close();
                         return;
                     }
@@ -119,6 +170,7 @@ function createResumableStream(
                     controller.enqueue(value);
                     return;
                 } catch (err: any) {
+                    if (signal?.aborted) return;
                     console.warn(`[ResumableStream] Stream read interrupted/timeout at offset ${offset}:`, err.message || err);
 
                     if (reader) {
@@ -132,10 +184,12 @@ function createResumableStream(
                 }
             }
         },
-        cancel() {
+        cancel(reason) {
+            removeAbortListener();
             const activeReader = reader;
+            reader = null;
             if (activeReader) {
-                activeReader.cancel().catch(() => {});
+                activeReader.cancel(reason).catch(() => {});
             }
         },
     });
@@ -149,9 +203,11 @@ export async function downloadStream(
     options: {
         timeout?: number | false;
         headers?: Record<string, string>;
+        signal?: AbortSignal;
     } = {},
 ): Promise<Response | null> {
     try {
+        options.signal?.throwIfAborted();
         const targetUrl = url.startsWith("//") ? `https:${url}` : url;
         const refererHeaders = getRefererHeaders(targetUrl);
         const requestHeaders = {
@@ -162,15 +218,13 @@ export async function downloadStream(
         // Default to 30s handshake timeout if not specified
         const handshakeTimeout = options.timeout !== undefined ? options.timeout : 30_000;
 
+        const requestControl = createRequestSignal(options.signal, handshakeTimeout);
         let initialRes: Response;
-        if (handshakeTimeout !== false) {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), handshakeTimeout);
-
+        try {
             initialRes = await ky(targetUrl, {
                 headers: requestHeaders,
                 timeout: false,
-                signal: controller.signal,
+                signal: requestControl.signal,
                 throwHttpErrors: false,
                 retry: {
                     limit: 3,
@@ -178,18 +232,8 @@ export async function downloadStream(
                     statusCodes: [408, 413, 429, 500, 502, 503, 504],
                 },
             });
-            clearTimeout(timeoutId);
-        } else {
-            initialRes = await ky(targetUrl, {
-                headers: requestHeaders,
-                timeout: false,
-                throwHttpErrors: false,
-                retry: {
-                    limit: 3,
-                    methods: ["get"],
-                    statusCodes: [408, 413, 429, 500, 502, 503, 504],
-                },
-            });
+        } finally {
+            requestControl.cleanup();
         }
 
         if (!initialRes.ok) {
@@ -203,7 +247,7 @@ export async function downloadStream(
         }
 
         // 2. Wrap body in custom resumable stream
-        const resumableStream = createResumableStream(targetUrl, initialRes, requestHeaders, handshakeTimeout);
+        const resumableStream = createResumableStream(targetUrl, initialRes, requestHeaders, handshakeTimeout, options.signal);
 
         // 3. Return a standard Web Response containing our custom stream
         return new Response(resumableStream, {
@@ -331,12 +375,15 @@ export async function uploadToS3(
     contentType: string,
     bucket: string,
     contentLength?: number,
+    signal?: AbortSignal,
 ): Promise<boolean> {
     try {
+        signal?.throwIfAborted();
         await s3.write(path, data, {
             bucket,
             type: contentType,
             contentLength,
+            signal,
         });
         return true;
     } catch (error) {

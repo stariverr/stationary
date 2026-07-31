@@ -13,12 +13,13 @@ import {
     DISCOVERY_LEASE_SECONDS,
     JOB_WAKE_CHANNEL,
     UNIT_LEASE_SECONDS,
+    lockContentionDelaySeconds,
     requirePositiveInteger,
     retryDelaySeconds,
     taskStatusAfterDiscovery,
     terminalTaskStatus,
 } from "@/infra/jobs/policy";
-import type { CreateTaskParams, DiscoveredUnitSpec, TaskResult } from "@/infra/jobs/types";
+import { TaskRetryReason, type CreateTaskParams, type DiscoveredUnitSpec, type TaskResult } from "@/infra/jobs/types";
 
 type TaskRow = typeof AsyncTask.$inferSelect;
 type TaskUnitRow = typeof AsyncTaskUnit.$inferSelect;
@@ -642,6 +643,37 @@ export async function settleTaskUnit(unit: TaskUnitRow, leaseToken: string, resu
             return "succeeded";
         }
 
+        if (result.retryReason === TaskRetryReason.LOCK_CONTENTION && !exhausted) {
+            const lockBackoffSeconds = lockContentionDelaySeconds();
+            const updated = await tx
+                .update(AsyncTaskUnit)
+                .set({
+                    status: AsyncTaskUnitStatus.PENDING,
+                    outcome_code: AsyncOutcomeCode.LOCKED_CONCURRENT_EXECUTION,
+                    last_error: result.error ?? "LOCKED_CONCURRENT_EXECUTION",
+                    available_at: sql`now() + (${lockBackoffSeconds} * interval '1 second')`,
+                    lease_token: null,
+                    lease_expires_at: null,
+                    update_time: now,
+                    complete_time: null,
+                })
+                .where(
+                    and(
+                        eq(AsyncTaskUnit.id, unit.id),
+                        eq(AsyncTaskUnit.lease_token, leaseToken),
+                        eq(AsyncTaskUnit.status, AsyncTaskUnitStatus.RUNNING),
+                    ),
+                )
+                .returning({ id: AsyncTaskUnit.id });
+            if (updated.length === 0) return "lease-lost";
+
+            await tx
+                .update(AsyncTask)
+                .set({ last_error: "Subtask waiting on concurrent execution lock", update_time: now })
+                .where(eq(AsyncTask.id, task.id));
+            return "retrying";
+        }
+
         if (!exhausted) {
             const updated = await tx
                 .update(AsyncTaskUnit)
@@ -807,7 +839,10 @@ export async function cancelTask(taskId: string): Promise<boolean> {
     return db.transaction(async (tx) => {
         const tasks = await tx.select().from(AsyncTask).where(eq(AsyncTask.id, taskId)).for("update").limit(1);
         const task = tasks[0];
-        if (!task || ![AsyncTaskStatus.DISCOVERING, AsyncTaskStatus.RUNNING, AsyncTaskStatus.PAUSED, AsyncTaskStatus.FAILED].includes(task.status)) {
+        if (
+            !task ||
+            ![AsyncTaskStatus.DISCOVERING, AsyncTaskStatus.RUNNING, AsyncTaskStatus.PAUSED, AsyncTaskStatus.FAILED].includes(task.status)
+        ) {
             return false;
         }
 
@@ -998,4 +1033,3 @@ export async function batchRetryFailedUnits(params: { unitIds?: string[]; taskId
     if (resetCount > 0) notifyJobsAvailable();
     return resetCount;
 }
-

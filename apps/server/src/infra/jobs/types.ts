@@ -8,11 +8,18 @@ export interface TaskUnitContext {
     readonly renewLease: (extendSeconds?: number) => Promise<boolean>;
 }
 
+export const TaskRetryReason = {
+    LOCK_CONTENTION: "LOCK_CONTENTION",
+} as const;
+
+export type TaskRetryReason = (typeof TaskRetryReason)[keyof typeof TaskRetryReason];
+
 export interface TaskResult {
     success: boolean;
     skipped?: boolean;
     outcomeCode?: AsyncOutcomeCode | string;
     retryable?: boolean;
+    retryReason?: TaskRetryReason;
     data?: Record<string, unknown> | null;
     error?: string;
 }

@@ -824,7 +824,8 @@ export const TaskService = {
     /**
      * Process individual media by media ID directly
      */
-    async processMediaById(mediaId: string) {
+    async processMediaById(mediaId: string, signal?: AbortSignal) {
+        signal?.throwIfAborted();
         const mediaRecords = await db
             .select()
             .from(Media)
@@ -832,13 +833,14 @@ export const TaskService = {
             .limit(1);
         const m = mediaRecords[0];
         if (!m || !m.post_id) return;
-        return this.processMedia(m.post_id, m.sort_order, { external_id: m.eid } as any);
+        return this.processMedia(m.post_id, m.sort_order, { external_id: m.eid } as any, signal);
     },
 
     /**
      * Step 2: Process individual media
      */
-    async processMedia(postId: string, index: number, mediaData: MediaItemData) {
+    async processMedia(postId: string, index: number, mediaData: MediaItemData, signal?: AbortSignal) {
+        signal?.throwIfAborted();
         const mediaRecords = await db
             .select()
             .from(Media)
@@ -852,12 +854,13 @@ export const TaskService = {
         const m = mediaRecords[0];
         if (!m) return;
 
-        const lockKey = `lock:media:${postId}:${index}`;
+        const lockKey = `lock:media:${m.id}`;
 
         await withLock(
             lockKey,
-            async () => {
+            async (lockSignal) => {
                 try {
+                    lockSignal.throwIfAborted();
                     await db.update(Media).set({ sync_status: SyncStatus.IN_PROGRESS }).where(eq(Media.id, m.id));
 
                     // Fetch again to ensure we get latest active tracks
@@ -869,6 +872,7 @@ export const TaskService = {
                     let allCompleted = true;
 
                     for (const mf of tracks) {
+                        lockSignal.throwIfAborted();
                         // Already completed or no source url, skipping
                         if (mf.sync_status === SyncStatus.COMPLETED || !mf.source_url) continue;
 
@@ -876,8 +880,9 @@ export const TaskService = {
                         await db.update(Track).set({ sync_status: SyncStatus.IN_PROGRESS }).where(eq(Track.id, mf.id));
 
                         try {
-                            const response = await downloadStream(mf.source_url);
+                            const response = await downloadStream(mf.source_url, { signal: lockSignal });
                             if (response) {
+                                lockSignal.throwIfAborted();
                                 let contentType = response.headers.get("Content-Type");
                                 let contentLength = response.headers.get("Content-Length");
                                 let ext = getExtensionFromContentType(contentType, mf.source_url);
@@ -937,7 +942,9 @@ export const TaskService = {
                                     contentType || "application/octet-stream",
                                     env.S3_BUCKET,
                                     contentLength ? parseInt(contentLength) : undefined,
+                                    lockSignal,
                                 );
+                                lockSignal.throwIfAborted();
 
                                 const width = mf.metadata?.width ?? null;
                                 const height = mf.metadata?.height ?? null;
@@ -989,6 +996,7 @@ export const TaskService = {
                                     .where(eq(Track.id, mf.id));
                             }
                         } catch (e) {
+                            if (lockSignal.aborted) throw e;
                             const errorMsg = e instanceof Error ? e.message : String(e);
                             await db.update(Track).set({ sync_status: SyncStatus.FAILED, last_error: errorMsg }).where(eq(Track.id, mf.id));
                             allCompleted = false;
@@ -997,6 +1005,7 @@ export const TaskService = {
                     }
 
                     if (allCompleted) {
+                        lockSignal.throwIfAborted();
                         await db.update(Media).set({ sync_status: SyncStatus.COMPLETED, last_error: null }).where(eq(Media.id, m.id));
 
                         // Trigger cover generation asynchronously after main media file completed
@@ -1032,6 +1041,7 @@ export const TaskService = {
                             .where(eq(Post.id, postId));
                     }
                 } catch (e) {
+                    if (lockSignal.aborted) throw e;
                     const errorMsg = e instanceof Error ? e.message : String(e);
                     await db.update(Media).set({ sync_status: SyncStatus.FAILED, last_error: errorMsg }).where(eq(Media.id, m.id));
 
@@ -1046,25 +1056,27 @@ export const TaskService = {
                     throw e; // Re-throw to trigger upstream retry
                 }
             },
-            { ttl: 300 },
+            { ttl: 300, signal },
         ); // 5 minutes TTL, auto-renews every 2.5 minutes!
     },
 
     /**
      * Step 3: Process author avatar
      */
-    async processAvatar(authorId: string, avatarUrl: string) {
+    async processAvatar(authorId: string, avatarUrl: string, signal?: AbortSignal) {
         const lockKey = `lock:avatar:${authorId}`;
 
         await withLock(
             lockKey,
-            async () => {
+            async (lockSignal) => {
+                lockSignal.throwIfAborted();
                 const authorData = await db.select().from(Author).where(eq(Author.id, authorId));
                 const currentAuthor = authorData[0];
 
                 if (currentAuthor && !currentAuthor.avatar_file_id) {
-                    const avatarResponse = await downloadStream(avatarUrl);
+                    const avatarResponse = await downloadStream(avatarUrl, { signal: lockSignal });
                     if (avatarResponse && avatarResponse.body) {
+                        lockSignal.throwIfAborted();
                         const avatarContentType = avatarResponse.headers.get("Content-Type");
                         const avatarContentLength = avatarResponse.headers.get("Content-Length");
                         const ext = getExtensionFromContentType(avatarContentType, avatarUrl);
@@ -1076,7 +1088,9 @@ export const TaskService = {
                             avatarContentType || "application/octet-stream",
                             env.S3_BUCKET,
                             avatarContentLength ? parseInt(avatarContentLength) : undefined,
+                            lockSignal,
                         );
+                        lockSignal.throwIfAborted();
 
                         const fileResults = await db
                             .insert(File)
@@ -1101,7 +1115,7 @@ export const TaskService = {
                     }
                 }
             },
-            { ttl: 120 },
+            { ttl: 120, signal },
         ); // 2 minutes TTL, auto-renews every 1 minute
     },
 
@@ -1303,12 +1317,13 @@ export const TaskService = {
     /**
      * Copy author avatar and thumb files asynchronously
      */
-    async copyAuthorAvatar(sourceAuthorId: string, targetAuthorId: string) {
+    async copyAuthorAvatar(sourceAuthorId: string, targetAuthorId: string, signal?: AbortSignal) {
         const lockKey = `lock:avatar-copy:${targetAuthorId}`;
 
         await withLock(
             lockKey,
-            async () => {
+            async (lockSignal) => {
+                lockSignal.throwIfAborted();
                 // 1. Fetch target author and check if avatar is already set
                 const targetAuthors = await db.select().from(Author).where(eq(Author.id, targetAuthorId)).limit(1);
                 const targetAuthor = targetAuthors[0];
@@ -1336,6 +1351,7 @@ export const TaskService = {
                 const files = await db.select().from(File).where(inArray(File.id, fileIds));
 
                 const copyFile = async (sourceFileId: string, isThumb: boolean) => {
+                    lockSignal.throwIfAborted();
                     const sourceFile = files.find((f) => f.id === sourceFileId);
                     if (!sourceFile) return null;
 
@@ -1345,14 +1361,16 @@ export const TaskService = {
 
                     // Perform S3 copy
                     try {
-                        await s3.copy(sourceFile.path, targetPath, { bucket: sourceFile.bucket });
+                        await s3.copy(sourceFile.path, targetPath, { bucket: sourceFile.bucket, signal: lockSignal });
                     } catch (s3Err: any) {
+                        if (lockSignal.aborted) throw s3Err;
                         console.error(`S3 copy error from ${sourceFile.path} to ${targetPath}:`, s3Err);
-                        const exists = await s3.exists(targetPath, { bucket: sourceFile.bucket });
+                        const exists = await s3.exists(targetPath, { bucket: sourceFile.bucket, signal: lockSignal });
                         if (!exists) {
                             throw s3Err;
                         }
                     }
+                    lockSignal.throwIfAborted();
 
                     // Insert or update File record in DB
                     const fileResults = await db
@@ -1392,6 +1410,7 @@ export const TaskService = {
                 }
 
                 // Update target author in database
+                lockSignal.throwIfAborted();
                 await db
                     .update(Author)
                     .set({
@@ -1400,7 +1419,7 @@ export const TaskService = {
                     })
                     .where(eq(Author.id, targetAuthorId));
             },
-            { ttl: 120 },
+            { ttl: 120, signal },
         );
     },
 };

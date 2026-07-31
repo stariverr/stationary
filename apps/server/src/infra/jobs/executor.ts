@@ -2,10 +2,11 @@ import { eq } from "drizzle-orm";
 import { AsyncOutcomeCode, AsyncTask, AsyncTaskControl, AsyncTaskStatus, type AsyncTaskUnit } from "@/db/schema";
 import { db } from "@/global/db";
 import { getErrorMessage } from "@/lib/utils/error";
+import { isLockAcquisitionError } from "@/lib/utils/lock";
 import { getTaskHandler } from "@/infra/jobs/registry";
 import { HEARTBEAT_INTERVAL_MS, UNIT_LEASE_SECONDS } from "@/infra/jobs/policy";
 import { failOrphanedUnit, renewUnitLease, settleTaskUnit } from "@/infra/jobs/store";
-import type { TaskResult, TaskUnitContext } from "@/infra/jobs/types";
+import { TaskRetryReason, type TaskResult, type TaskUnitContext } from "@/infra/jobs/types";
 
 type TaskUnitRow = typeof AsyncTaskUnit.$inferSelect;
 
@@ -116,10 +117,12 @@ export async function executeUnit(unit: TaskUnitRow): Promise<TaskResult> {
     try {
         result = await handler.execute(context);
     } catch (error) {
+        const lockContention = isLockAcquisitionError(error);
         result = {
             success: false,
             retryable: true,
-            outcomeCode: AsyncOutcomeCode.UNHANDLED_EXCEPTION,
+            retryReason: lockContention ? TaskRetryReason.LOCK_CONTENTION : undefined,
+            outcomeCode: lockContention ? AsyncOutcomeCode.LOCKED_CONCURRENT_EXECUTION : AsyncOutcomeCode.UNHANDLED_EXCEPTION,
             error: getErrorMessage(error),
         };
     } finally {
