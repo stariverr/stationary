@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "@/global/db";
-import { AsyncTask, AsyncTaskStatus, AsyncTaskUnit, AsyncTaskUnitStatus } from "@/db/schema";
+import { AsyncTask, AsyncTaskStatus, AsyncTaskType, AsyncTaskUnit, AsyncTaskUnitStatus } from "@/db/schema";
 import { eq, and, desc, count } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { success, error } from "@/lib/response";
@@ -37,34 +37,36 @@ jobsApp.get("/list", requireAuth, async (c) => {
     const offset = (page - 1) * limit;
 
     const conditions = [];
-    if (statusFilter && statusFilter !== "ALL" && statusFilter !== "undefined" && Object.values(AsyncTaskStatus).includes(statusFilter as AsyncTaskStatus)) {
+    if (
+        statusFilter &&
+        statusFilter !== "ALL" &&
+        statusFilter !== "undefined" &&
+        Object.values(AsyncTaskStatus).includes(statusFilter as AsyncTaskStatus)
+    ) {
         conditions.push(eq(AsyncTask.status, statusFilter as AsyncTaskStatus));
     }
-    if (typeFilter && typeFilter !== "ALL" && typeFilter !== "undefined" && typeFilter.trim() !== "") {
-        conditions.push(eq(AsyncTask.type, typeFilter as any));
+    if (
+        typeFilter &&
+        typeFilter !== "ALL" &&
+        typeFilter !== "undefined" &&
+        Object.values(AsyncTaskType).includes(typeFilter as AsyncTaskType)
+    ) {
+        conditions.push(eq(AsyncTask.type, typeFilter as AsyncTaskType));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const totalResult = await db
-        .select({ count: count() })
-        .from(AsyncTask)
-        .where(whereClause);
+    const totalResult = await db.select({ count: count() }).from(AsyncTask).where(whereClause);
 
     const total = Number(totalResult[0]?.count || 0);
 
-    const tasks = await db
-        .select()
-        .from(AsyncTask)
-        .where(whereClause)
-        .orderBy(desc(AsyncTask.update_time))
-        .limit(limit)
-        .offset(offset);
+    const tasks = await db.select().from(AsyncTask).where(whereClause).orderBy(desc(AsyncTask.update_time)).limit(limit).offset(offset);
 
     const formattedTasks = tasks.map((task) => {
         const processedUnits = task.succeeded_units + task.failed_units + task.cancelled_units;
         const isTerminal = [AsyncTaskStatus.COMPLETED, AsyncTaskStatus.FAILED, AsyncTaskStatus.CANCELLED].includes(task.status);
-        const percentage = task.total_units > 0 ? Math.min(100, Math.floor((processedUnits / task.total_units) * 100)) : isTerminal ? 100 : 0;
+        const percentage =
+            task.total_units > 0 ? Math.min(100, Math.floor((processedUnits / task.total_units) * 100)) : isTerminal ? 100 : 0;
 
         return {
             ...task,
@@ -106,10 +108,22 @@ jobsApp.get("/stats", requireAuth, async (c) => {
     const [completedTasks] = await db.select({ count: count() }).from(AsyncTask).where(eq(AsyncTask.status, AsyncTaskStatus.COMPLETED));
 
     const [unitsSummary] = await db.select({ total: count() }).from(AsyncTaskUnit);
-    const [runningUnits] = await db.select({ count: count() }).from(AsyncTaskUnit).where(eq(AsyncTaskUnit.status, AsyncTaskUnitStatus.RUNNING));
-    const [pendingUnits] = await db.select({ count: count() }).from(AsyncTaskUnit).where(eq(AsyncTaskUnit.status, AsyncTaskUnitStatus.PENDING));
-    const [succeededUnits] = await db.select({ count: count() }).from(AsyncTaskUnit).where(eq(AsyncTaskUnit.status, AsyncTaskUnitStatus.SUCCEEDED));
-    const [failedUnits] = await db.select({ count: count() }).from(AsyncTaskUnit).where(eq(AsyncTaskUnit.status, AsyncTaskUnitStatus.FAILED));
+    const [runningUnits] = await db
+        .select({ count: count() })
+        .from(AsyncTaskUnit)
+        .where(eq(AsyncTaskUnit.status, AsyncTaskUnitStatus.RUNNING));
+    const [pendingUnits] = await db
+        .select({ count: count() })
+        .from(AsyncTaskUnit)
+        .where(eq(AsyncTaskUnit.status, AsyncTaskUnitStatus.PENDING));
+    const [succeededUnits] = await db
+        .select({ count: count() })
+        .from(AsyncTaskUnit)
+        .where(eq(AsyncTaskUnit.status, AsyncTaskUnitStatus.SUCCEEDED));
+    const [failedUnits] = await db
+        .select({ count: count() })
+        .from(AsyncTaskUnit)
+        .where(eq(AsyncTaskUnit.status, AsyncTaskUnitStatus.FAILED));
 
     return c.json(
         success(Code.SUCCESS, {
@@ -142,11 +156,21 @@ jobsApp.get("/units", requireAuth, async (c) => {
     const offset = (page - 1) * limit;
 
     const conditions = [];
-    if (statusFilter && statusFilter !== "ALL" && statusFilter !== "undefined" && Object.values(AsyncTaskUnitStatus).includes(statusFilter as AsyncTaskUnitStatus)) {
+    if (
+        statusFilter &&
+        statusFilter !== "ALL" &&
+        statusFilter !== "undefined" &&
+        Object.values(AsyncTaskUnitStatus).includes(statusFilter as AsyncTaskUnitStatus)
+    ) {
         conditions.push(eq(AsyncTaskUnit.status, statusFilter as AsyncTaskUnitStatus));
     }
-    if (taskTypeFilter && taskTypeFilter !== "ALL" && taskTypeFilter !== "undefined" && taskTypeFilter.trim() !== "") {
-        conditions.push(eq(AsyncTask.type, taskTypeFilter as any));
+    if (
+        taskTypeFilter &&
+        taskTypeFilter !== "ALL" &&
+        taskTypeFilter !== "undefined" &&
+        Object.values(AsyncTaskType).includes(taskTypeFilter as AsyncTaskType)
+    ) {
+        conditions.push(eq(AsyncTask.type, taskTypeFilter as AsyncTaskType));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;

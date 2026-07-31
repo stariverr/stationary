@@ -59,7 +59,7 @@ router.get("/list", requireAuth, zValidator("query", TagListQuerySchema), async 
     try {
         const conditions = [eq(Tag.library_id, library_id)];
         if (status) {
-            conditions.push(eq(Tag.status, status as any));
+            conditions.push(eq(Tag.status, status));
         }
 
         const allTags = await db

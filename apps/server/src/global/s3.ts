@@ -28,7 +28,7 @@ class S3 {
             Bucket: options.bucket,
             Key: key.startsWith("/") ? key.slice(1) : key,
         });
-        return getSignedUrl(s3Client as any, command, {
+        return getSignedUrl(s3Client, command, {
             expiresIn: options.expiresInSeconds ?? 900,
         });
     }
@@ -42,7 +42,7 @@ class S3 {
             Key: key.startsWith("/") ? key.slice(1) : key,
             ContentType: options.contentType,
         });
-        return getSignedUrl(s3Client as any, command, {
+        return getSignedUrl(s3Client, command, {
             expiresIn: options.expiresInSeconds ?? 900,
         });
     }
@@ -119,7 +119,7 @@ class S3 {
             await s3Client.send(command, { abortSignal: options.signal });
             return true;
         } catch (error) {
-            if (error instanceof NotFound || (error as any).name === "NotFound") {
+            if (error instanceof NotFound || (error instanceof Error && error.name === "NotFound")) {
                 return false;
             }
             throw error;

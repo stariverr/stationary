@@ -250,7 +250,7 @@ export const CoverService = {
                         media_id: media.id,
                         type: TrackType.IMAGE,
                         purpose: TrackPurpose.COVER,
-                        quality: quality as any,
+                        quality: quality,
                         priority: quality === Quality.LOW ? 10 : quality === Quality.MEDIUM ? 20 : 30,
                         file_id: createdFileId,
                         sync_status: SyncStatus.COMPLETED,
