@@ -25,7 +25,10 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { PostMediaSummary } from "@/types/post";
+import { MediaType, TrackPurpose, type PostMediaSummary } from "@/types/post";
+
+type MediaTypeFilter = MediaType | "";
+type MediaTypeSelection = MediaType | "ALL";
 
 const props = defineProps<{
     list: PostMediaSummary[];
@@ -41,7 +44,7 @@ const emit = defineEmits<{
     (event: "prev-page"): void;
     (event: "next-page"): void;
     (event: "search-change", value: string): void;
-    (event: "type-change", value: string): void;
+    (event: "type-change", value: MediaTypeFilter): void;
     (event: "upload-media"): void;
     (event: "link-orphan"): void;
     (event: "shift-media", mediaId: string, direction: "left" | "right"): void;
@@ -52,7 +55,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n();
 const searchValue = ref("");
-const selectedType = ref("ALL");
+const selectedType = ref<MediaTypeSelection>("ALL");
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 watch(searchValue, (value) => {
@@ -68,19 +71,19 @@ const clearSearch = () => {
     searchValue.value = "";
 };
 
-const selectType = (type: string) => {
+const selectType = (type: MediaTypeSelection) => {
     selectedType.value = type;
     emit("type-change", type === "ALL" ? "" : type);
 };
 
 const mediaTypes = [
     { labelKey: "common.all_media_types", value: "ALL" },
-    { labelKey: "common.media_type_video", value: "VIDEO", icon: Film },
-    { labelKey: "common.media_type_image", value: "IMAGE", icon: FileImage },
-    { labelKey: "common.media_type_live_photo", value: "LIVE_PHOTO", icon: FileImage },
-    { labelKey: "common.media_type_audio", value: "AUDIO", icon: Music },
-    { labelKey: "common.media_type_pdf", value: "PDF", icon: FileText },
-];
+    { labelKey: "common.media_type_video", value: MediaType.VIDEO, icon: Film },
+    { labelKey: "common.media_type_image", value: MediaType.IMAGE, icon: FileImage },
+    { labelKey: "common.media_type_live_photo", value: MediaType.LIVE_PHOTO, icon: FileImage },
+    { labelKey: "common.media_type_audio", value: MediaType.AUDIO, icon: Music },
+    { labelKey: "common.media_type_pdf", value: MediaType.PDF, icon: FileText },
+] as const;
 
 const displayRange = computed(() => {
     if (props.list.length === 0) return t("post_detail.manage.items_empty");
@@ -91,8 +94,16 @@ const displayRange = computed(() => {
     });
 });
 
-const mediaTypeLabel = (type: string) => getMediaTypeLabel(type, t);
+const mediaTypeLabel = (type: MediaType) => getMediaTypeLabel(type, t);
 const fallbackTitle = (position: number) => t("post_detail.media_item", { number: position + 1 });
+const mediaPreviewUrl = (media: PostMediaSummary): string | null => {
+    if (media.cover_url) return media.cover_url;
+
+    const coverTrack = media.tracks.find((track) => track.purpose === TrackPurpose.COVER);
+    if (coverTrack?.url) return coverTrack.url;
+
+    return media.tracks.find((track) => track.purpose === TrackPurpose.CONTENT)?.url ?? null;
+};
 </script>
 
 <template>
@@ -201,8 +212,8 @@ const fallbackTitle = (position: number) => t("post_detail.media_item", { number
                         class="relative flex h-10 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-950"
                     >
                         <img
-                            v-if="item.cover_url || item.thumbnail_url || item.tracks?.[0]?.url"
-                            :src="item.cover_url || item.thumbnail_url || item.tracks?.[0]?.url"
+                            v-if="mediaPreviewUrl(item)"
+                            :src="mediaPreviewUrl(item)"
                             :alt="item.title || fallbackTitle(item.position)"
                             class="h-full w-full object-cover"
                             loading="lazy"
@@ -212,16 +223,6 @@ const fallbackTitle = (position: number) => t("post_detail.media_item", { number
                             :is="item.type === 'VIDEO' ? Film : item.type === 'AUDIO' ? Music : FileImage"
                             class="h-4 w-4 text-zinc-400"
                         />
-                        <span
-                            v-if="item.duration || item.page_count"
-                            class="absolute bottom-0.5 right-0.5 rounded-sm bg-black/75 px-1 font-mono text-[8px] text-white"
-                        >
-                            {{
-                                item.duration
-                                    ? `${Math.floor(item.duration / 60)}:${String(Math.round(item.duration % 60)).padStart(2, "0")}`
-                                    : `${item.page_count}p`
-                            }}
-                        </span>
                     </span>
 
                     <span class="min-w-0 flex-1">
@@ -235,9 +236,6 @@ const fallbackTitle = (position: number) => t("post_detail.media_item", { number
                             <span class="rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 font-medium text-zinc-600 dark:text-zinc-300">{{
                                 mediaTypeLabel(item.type)
                             }}</span>
-                            <span v-if="item.width && item.height" class="font-mono text-zinc-400 dark:text-zinc-500"
-                                >{{ item.width }} × {{ item.height }}</span
-                            >
                         </span>
                     </span>
 

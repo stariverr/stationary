@@ -3,48 +3,10 @@ import { computed, ref, watch, onUnmounted } from "vue";
 import { Music, FileText, FileImage, ShieldAlert } from "@lucide/vue";
 import VideoPlayer from "./VideoPlayer.vue";
 import LivePhotoPlayer from "./LivePhotoPlayer.vue";
+import type { MediaViewerItem, MediaViewerTrack } from "@/types/post";
 
-interface Subtitle {
-    url: string;
-    language: string;
-    label: string;
-    format: string;
-}
-
-interface PreviewItem {
-    url?: string | null;
-}
-
-interface MediaTrack {
-    id?: string;
-    url: string;
-    type: string;
-    purpose: string;
-    is_default?: boolean;
-    priority?: number;
-    quality?: string;
-    mime_type?: string;
-    codec?: string;
-    metadata?: Record<string, any>;
-}
-
-interface MediaItem {
-    id: string;
-    type: "IMAGE" | "VIDEO" | "LIVE_PHOTO" | "AUDIO" | "PDF";
-    title?: string | null;
-    url?: string | null;
-    cover_url?: string | null;
-    thumbnail_url?: string | null;
-    preview_url?: string | null;
-    live_url?: string | null;
-    tracks?: MediaTrack[];
-    covers?: PreviewItem[] | null;
-    videos?: PreviewItem[] | null;
-    audios?: PreviewItem[] | null;
-    width?: number;
-    height?: number;
-    subtitles?: Subtitle[];
-}
+type MediaTrack = MediaViewerTrack;
+type MediaItem = MediaViewerItem;
 
 const props = withDefaults(
     defineProps<{
@@ -95,20 +57,12 @@ function selectContentTrack(tracks: MediaTrack[] | undefined, type: string): Med
     return candidates.find((track) => track.is_default) || candidates.find((track) => track.purpose.toUpperCase() === "CONTENT") || candidates[0];
 }
 
-function firstPreviewUrl(items: PreviewItem[] | null | undefined): string {
-    return items?.find((item) => item.url)?.url || "";
-}
-
 // 1. Cover / Poster Track
 const defaultPosterUrl = computed(() => {
     if (!props.media) return "";
     if (props.media.cover_url) return props.media.cover_url;
-    if (props.media.thumbnail_url) return props.media.thumbnail_url;
 
-    const previewCover = firstPreviewUrl(props.media.covers);
-    if (previewCover) return previewCover;
-
-    const coverTracks = (props.media.tracks || []).filter((t) => (t.purpose as string)?.toUpperCase() === "COVER");
+    const coverTracks = (props.media.tracks || []).filter((track) => track.purpose.toUpperCase() === "COVER");
     const sorted = sortTracks(coverTracks);
     return sorted[0]?.url || "";
 });
@@ -117,10 +71,6 @@ const defaultPosterUrl = computed(() => {
 const defaultVideoSrc = computed(() => {
     if (!props.media || props.media.type !== "VIDEO") return "";
     if (props.media.url) return props.media.url;
-    if (props.media.preview_url) return props.media.preview_url;
-
-    const previewVideo = firstPreviewUrl(props.media.videos);
-    if (previewVideo) return previewVideo;
     return selectContentTrack(props.media.tracks, "VIDEO")?.url || "";
 });
 
@@ -130,16 +80,12 @@ const livePhotoImageSrc = computed(() => {
     const bestImage = selectContentTrack(props.media.tracks, "IMAGE");
     if (bestImage?.url) return bestImage.url;
     if (props.media.url) return props.media.url;
-    if (props.media.preview_url) return props.media.preview_url;
     return defaultPosterUrl.value;
 });
 
 const livePhotoVideoSrc = computed(() => {
     if (!props.media || props.media.type !== "LIVE_PHOTO") return "";
     if (props.media.live_url) return props.media.live_url;
-
-    const previewVideo = firstPreviewUrl(props.media.videos);
-    if (previewVideo) return previewVideo;
     return selectContentTrack(props.media.tracks, "VIDEO")?.url || "";
 });
 
@@ -149,18 +95,12 @@ const imageSrcUrl = computed(() => {
     const bestImage = selectContentTrack(props.media.tracks, "IMAGE");
     if (bestImage?.url) return bestImage.url;
     if (props.media.url) return props.media.url;
-    if (props.media.preview_url) return props.media.preview_url;
     return defaultPosterUrl.value;
 });
 
 const contentAssetUrl = computed(() => {
     if (!props.media) return "";
     if (props.media.url) return props.media.url;
-    if (props.media.preview_url) return props.media.preview_url;
-    if (props.media.type === "AUDIO") {
-        const previewAudio = firstPreviewUrl(props.media.audios);
-        if (previewAudio) return previewAudio;
-    }
     return selectContentTrack(props.media.tracks, props.media.type)?.url || "";
 });
 

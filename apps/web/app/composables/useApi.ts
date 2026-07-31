@@ -1,10 +1,10 @@
-import type { FetchOptions } from "ofetch";
+type ApiFetchOptions = NonNullable<Parameters<typeof $fetch>[1]>;
 
 /**
  * A wrapper around $fetch that automatically prepends the API base URL
  * and forwards the session cookies during SSR.
  */
-export const useApi = async <T>(request: string, opts?: FetchOptions | any) => {
+export const useApi = async <T>(request: string, opts?: ApiFetchOptions) => {
     // 关键：在 SSR 环境下手动透传 Cookie
     const headers = useRequestHeaders(["cookie"]) as HeadersInit;
 

@@ -41,7 +41,8 @@ export enum TrackQuality {
 }
 
 export const TrackSchema = v.object({
-    id: v.optional(v.string()),
+    id: v.string(),
+    file_id: v.nullish(v.string()),
     url: v.string(),
     type: v.enum(TrackType),
     purpose: v.enum(TrackPurpose),
@@ -49,9 +50,10 @@ export const TrackSchema = v.object({
     quality: v.enum(TrackQuality),
     priority: v.number(),
     metadata: v.record(v.string(), v.unknown()),
-    mime_type: v.optional(v.nullable(v.string())),
+    mime_type: v.nullish(v.string()),
     variant_key: v.optional(v.string()),
     is_default: v.optional(v.boolean()),
+    is_primary: v.optional(v.boolean()),
     display_name: v.optional(v.nullable(v.string())),
     language: v.optional(v.nullable(v.string())),
     codec: v.optional(v.nullable(v.string())),
@@ -102,6 +104,39 @@ export const PreviewItemSchema = v.object({
     codec: v.nullable(v.string()),
 });
 export type PreviewItem = v.InferOutput<typeof PreviewItemSchema>;
+
+export interface MediaViewerSubtitle {
+    url: string;
+    language: string;
+    label: string;
+    format: string;
+}
+
+export interface MediaViewerTrack {
+    id?: string;
+    url: string;
+    type: string;
+    purpose: string;
+    is_default?: boolean;
+    priority?: number;
+    quality?: string;
+    mime_type?: string | null;
+    codec?: string | null;
+    metadata?: Record<string, unknown>;
+}
+
+export interface MediaViewerItem {
+    id: string;
+    type: MediaType;
+    title?: string | null;
+    url?: string | null;
+    cover_url?: string | null;
+    live_url?: string | null;
+    tracks?: MediaViewerTrack[];
+    width?: number;
+    height?: number;
+    subtitles?: MediaViewerSubtitle[];
+}
 
 export const ApiPostListItemMediaSchema = v.object({
     id: v.pipe(v.string(), v.uuid()),
@@ -234,12 +269,36 @@ export const PostMediaSummarySchema = v.object({
     type: v.enum(MediaType),
     title: v.nullish(v.string()),
     sort_order: v.number(),
-    cover_url: v.optional(v.string()),
-    width: v.optional(v.nullable(v.number())),
-    height: v.optional(v.nullable(v.number())),
-    duration: v.optional(v.number()),
-    page_count: v.optional(v.number()),
-    position: v.optional(v.number()),
-    tracks: v.optional(v.array(TrackSchema)),
+    position: v.number(),
+    cover_url: v.string(),
+    tracks: v.array(TrackSchema),
 });
 export type PostMediaSummary = v.InferOutput<typeof PostMediaSummarySchema>;
+
+export const PostMediaPageSchema = v.object({
+    list: v.array(PostMediaSummarySchema),
+    page: v.number(),
+    limit: v.number(),
+    total: v.number(),
+    total_pages: v.number(),
+});
+export type PostMediaPage = v.InferOutput<typeof PostMediaPageSchema>;
+
+export interface AttachMediaResult {
+    success: boolean;
+    attached: number;
+    total: number;
+}
+
+export interface ReorderMediaResult {
+    success: boolean;
+}
+
+export interface UnbindMediaResult {
+    success: boolean;
+    remaining: number;
+}
+
+export interface TrashMediaResult {
+    mediaUpdated: number;
+}
