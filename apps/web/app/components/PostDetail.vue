@@ -2,7 +2,6 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
     AlertTriangle,
-    ChevronDown,
     ChevronLeft,
     ChevronRight,
     FileImage,
@@ -21,7 +20,6 @@ import {
     ZoomOut,
     Maximize,
     CircleDotDashed,
-    PanelRight,
 } from "@lucide/vue";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { storeToRefs } from "pinia";
@@ -30,7 +28,17 @@ import { toast } from "vue-sonner";
 import { useUserStore } from "@/stores/user";
 import { usePostMediaQuery } from "@/composables/usePostMediaQuery";
 import { useApi } from "@/composables/useApi";
-import type { PostMediaSummary } from "@/types/post";
+import type { ApiResponse } from "@/types/api";
+import {
+    MediaType,
+    TrackPurpose,
+    type AttachMediaResult,
+    type PostMediaPage,
+    type PostMediaSummary,
+    type ReorderMediaResult,
+    type TrashMediaResult,
+    type UnbindMediaResult,
+} from "@/types/post";
 import OrphanMediaPickerDialog from "./OrphanMediaPickerDialog.vue";
 import ManageTracksDialog from "./ManageTracksDialog.vue";
 
@@ -50,6 +58,14 @@ const {
     fetchPage,
 } = usePostMediaQuery(selectedPostId);
 
+const refreshPostData = async (postId: string) => {
+    await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["post", postId] }),
+        queryClient.invalidateQueries({ queryKey: ["posts"] }),
+    ]);
+    await fetchPage();
+};
+
 const activeMediaId = ref<string | null>(null);
 const currentIndex = ref(0);
 const activeTab = ref<"details" | "management">("details");
@@ -60,8 +76,8 @@ const isMobile = ref(false);
 
 const isOverlay = computed(() => isImmersiveView.value || isMediaOnly.value);
 const currentMedia = computed<PostMediaSummary | null>(() => {
-    if (postMediaList.value.length === 0) return null;
-    return postMediaList.value.find((media) => media.id === activeMediaId.value) ?? postMediaList.value[0] ?? null;
+    const activeMedia = postMediaList.value.find((media) => media.id === activeMediaId.value);
+    return activeMedia ?? postMediaList.value[0] ?? null;
 });
 const currentPosition = computed(() => currentMedia.value?.position ?? 0);
 const mediaCounter = computed(() => (mediaTotal.value > 0 ? `${currentPosition.value + 1} / ${mediaTotal.value}` : "0 / 0"));
@@ -71,7 +87,21 @@ const canNext = computed(
     () => postMediaList.value.length > 1 || currentIndex.value < postMediaList.value.length - 1 || mediaPage.value < mediaTotalPages.value,
 );
 const platformLabel = computed(() => t(`platforms.${selectedPost.value?.platform || "UNKNOWN"}`));
-const formatMediaType = (type?: string | null) => getMediaTypeLabel(type, t);
+const isZoomableMedia = computed(() => currentMedia.value?.type === MediaType.IMAGE || currentMedia.value?.type === MediaType.LIVE_PHOTO);
+const formatMediaType = (type?: MediaType | null) => getMediaTypeLabel(type, t);
+
+const postMediaListWithPreview = computed(() =>
+    postMediaList.value.map((item) => ({
+        ...item,
+        previewUrl: getMediaPreviewUrl(item),
+    })),
+);
+
+const getErrorMessage = (error: unknown): string => {
+    if (error instanceof Error) return error.message;
+    if (typeof error === "string") return error;
+    return "";
+};
 
 const isEditingTracks = ref(false);
 const trackEditMediaId = ref<string | undefined>(undefined);
@@ -86,16 +116,25 @@ const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 5;
 const ZOOM_STEP = 0.1;
 
+const clampZoom = (level: number): number => {
+    if (!Number.isFinite(level)) return 1;
+    return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(level * 100) / 100));
+};
+
 const zoomIn = () => {
-    zoomLevel.value = Math.min(MAX_ZOOM, parseFloat((zoomLevel.value + ZOOM_STEP).toFixed(2)));
+    zoomLevel.value = clampZoom(zoomLevel.value + ZOOM_STEP);
 };
 
 const zoomOut = () => {
-    zoomLevel.value = Math.max(MIN_ZOOM, parseFloat((zoomLevel.value - ZOOM_STEP).toFixed(2)));
+    zoomLevel.value = clampZoom(zoomLevel.value - ZOOM_STEP);
 };
 
 const zoomTo = (level: number) => {
-    zoomLevel.value = level;
+    zoomLevel.value = clampZoom(level);
+};
+
+const handleZoomChange = (level: number) => {
+    zoomTo(level);
 };
 
 const rotateLeft = () => {
@@ -124,12 +163,11 @@ const openTrackEditor = (mediaId: string) => {
     isEditingTracks.value = true;
 };
 
-const handleDialogClose = (open: boolean) => {
+const handleDialogClose = async (open: boolean) => {
     isEditingTracks.value = open;
-    if (!open && selectedPost.value?.id) {
-        queryClient.invalidateQueries({ queryKey: ["post", selectedPost.value.id] });
-        queryClient.invalidateQueries({ queryKey: ["posts"] });
-        fetchPage();
+    const postId = selectedPost.value?.id;
+    if (!open && postId) {
+        await refreshPostData(postId);
     }
 };
 
@@ -180,15 +218,19 @@ watch(postMediaList, (newList) => {
 
 const selectMedia = (mediaId: string) => {
     const index = postMediaList.value.findIndex((media) => media.id === mediaId);
-    if (index >= 0) currentIndex.value = index;
-    activeMediaId.value = mediaId;
+    const media = postMediaList.value[index];
+    if (!media) return;
+
+    currentIndex.value = index;
+    activeMediaId.value = media.id;
 };
 
 const previousMedia = async () => {
     if (isLoadingMediaList.value) return;
     const index = postMediaList.value.findIndex((media) => media.id === activeMediaId.value);
     if (index > 0) {
-        selectMedia(postMediaList.value[index - 1]!.id);
+        const previous = postMediaList.value[index - 1];
+        if (previous) selectMedia(previous.id);
         return;
     }
 
@@ -201,7 +243,8 @@ const previousMedia = async () => {
 
     // Loop back to the last item
     if (postMediaList.value.length > 1) {
-        selectMedia(postMediaList.value[postMediaList.value.length - 1]!.id);
+        const last = postMediaList.value[postMediaList.value.length - 1];
+        if (last) selectMedia(last.id);
     }
 };
 
@@ -209,7 +252,8 @@ const nextMedia = async () => {
     if (isLoadingMediaList.value) return;
     const index = postMediaList.value.findIndex((media) => media.id === activeMediaId.value);
     if (index >= 0 && index < postMediaList.value.length - 1) {
-        selectMedia(postMediaList.value[index + 1]!.id);
+        const next = postMediaList.value[index + 1];
+        if (next) selectMedia(next.id);
         return;
     }
 
@@ -222,7 +266,8 @@ const nextMedia = async () => {
 
     // Loop back to the first item
     if (postMediaList.value.length > 1) {
-        selectMedia(postMediaList.value[0]!.id);
+        const first = postMediaList.value[0];
+        if (first) selectMedia(first.id);
     }
 };
 
@@ -279,8 +324,15 @@ const handleResize = () => {
 
 const handleKeydown = (event: KeyboardEvent) => {
     if (event.defaultPrevented || isEditingTracks.value || isOrphanPickerOpen.value || isCreateMediaOpen.value) return;
-    const target = event.target as HTMLElement | null;
-    if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
+    const target = event.target;
+    if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        target instanceof HTMLButtonElement
+    ) {
+        return;
+    }
 
     if (event.key === "Escape") {
         if (isOverlay.value) leaveImmersiveView();
@@ -304,9 +356,11 @@ onUnmounted(() => {
 });
 
 const copyLink = async () => {
-    if (!selectedPost.value) return;
+    const postId = selectedPost.value?.id;
+    if (!postId) return;
+
     try {
-        await navigator.clipboard.writeText(`${window.location.origin}/posts/${selectedPost.value.id}`);
+        await navigator.clipboard.writeText(`${window.location.origin}/posts/${postId}`);
         toast.success(t("post_detail.toasts.copy_success"));
     } catch {
         toast.error(t("post_detail.toasts.copy_failed"));
@@ -314,20 +368,23 @@ const copyLink = async () => {
 };
 
 async function attachMediaIds(mediaIds: string[]) {
-    if (!selectedPost.value) return false;
+    const postId = selectedPost.value?.id;
+    if (!postId || mediaIds.length === 0) return false;
+
     try {
-        const response = await useApi<{ success: boolean }>(`/post/${selectedPost.value.id}/bind_media`, {
+        const response = await useApi<ApiResponse<AttachMediaResult>>(`/post/${postId}/bind_media`, {
             method: "POST",
             body: { media_ids: mediaIds },
         });
-        if (response?.success) {
-            queryClient.invalidateQueries({ queryKey: ["post", selectedPost.value.id] });
-            queryClient.invalidateQueries({ queryKey: ["posts"] });
-            await fetchPage();
-            return true;
+
+        if (!response.success || !response.data?.success) {
+            throw new Error(response.message || t("post_detail.toasts.attach_failed"));
         }
-    } catch (error: any) {
-        toast.error(t("post_detail.toasts.attach_failed"), { description: error.message || String(error) });
+
+        await refreshPostData(postId);
+        return true;
+    } catch (error: unknown) {
+        toast.error(t("post_detail.toasts.attach_failed"), { description: getErrorMessage(error) });
     }
     return false;
 }
@@ -347,54 +404,79 @@ const handleUploadMediaCreated = async (media: { id: string; title: string }) =>
 };
 
 const handleShiftMedia = async (mediaId: string, direction: "left" | "right") => {
-    if (!selectedPost.value || !mediaTotal.value) return;
+    const postId = selectedPost.value?.id;
+    if (!postId || mediaTotal.value <= 0) return;
+
     try {
-        const response = await useApi<{ success: boolean; data: { list: PostMediaSummary[] } }>(`/post/${selectedPost.value.id}/media`, {
+        const response = await useApi<ApiResponse<PostMediaPage>>(`/post/${postId}/media`, {
             query: { limit: mediaTotal.value },
         });
-        const allMedia = response?.success ? response.data.list : [];
+
+        if (!response.success || !response.data) {
+            throw new Error(response.message || t("post_detail.toasts.reorder_failed"));
+        }
+
+        const allMedia = [...response.data.list];
         const index = allMedia.findIndex((media) => media.id === mediaId);
         const targetIndex = direction === "left" ? index - 1 : index + 1;
         if (index < 0 || targetIndex < 0 || targetIndex >= allMedia.length) return;
 
-        [allMedia[index], allMedia[targetIndex]] = [allMedia[targetIndex]!, allMedia[index]!];
-        const reorderResponse = await useApi<{ success: boolean }>(`/post/${selectedPost.value.id}/media/reorder`, {
+        const current = allMedia[index];
+        const target = allMedia[targetIndex];
+        if (!current || !target) return;
+
+        allMedia[index] = target;
+        allMedia[targetIndex] = current;
+
+        const reorderResponse = await useApi<ApiResponse<ReorderMediaResult>>(`/post/${postId}/media/reorder`, {
             method: "POST",
             body: { media_ids: allMedia.map((media) => media.id) },
         });
-        if (!reorderResponse?.success) throw new Error(t("post_detail.toasts.reorder_failed"));
+
+        if (!reorderResponse.success || !reorderResponse.data?.success) {
+            throw new Error(reorderResponse.message || t("post_detail.toasts.reorder_failed"));
+        }
+
         toast.success(t("post_detail.toasts.reorder_success"));
-        await fetchPage();
-    } catch (error: any) {
-        toast.error(t("post_detail.toasts.reorder_failed"), { description: error.message || String(error) });
+        await refreshPostData(postId);
+    } catch (error: unknown) {
+        toast.error(t("post_detail.toasts.reorder_failed"), { description: getErrorMessage(error) });
     }
 };
 
 const handleUnlinkMedia = async (mediaId: string) => {
-    if (!selectedPost.value) return;
+    const postId = selectedPost.value?.id;
+    if (!postId) return;
+
     try {
-        const response = await useApi<{ success: boolean }>(`/post/${selectedPost.value.id}/media/${mediaId}/remove`, { method: "POST" });
-        if (!response?.success) throw new Error(t("post_detail.toasts.unlink_failed"));
+        const response = await useApi<ApiResponse<UnbindMediaResult>>(`/post/${postId}/media/${mediaId}/remove`, { method: "POST" });
+        if (!response.success || !response.data?.success) {
+            throw new Error(response.message || t("post_detail.toasts.unlink_failed"));
+        }
+
         toast.success(t("post_detail.toasts.unlink_success"));
         if (activeMediaId.value === mediaId) activeMediaId.value = null;
-        await fetchPage();
-        queryClient.invalidateQueries({ queryKey: ["post", selectedPost.value.id] });
-    } catch (error: any) {
-        toast.error(t("post_detail.toasts.unlink_failed"), { description: error.message || String(error) });
+        await refreshPostData(postId);
+    } catch (error: unknown) {
+        toast.error(t("post_detail.toasts.unlink_failed"), { description: getErrorMessage(error) });
     }
 };
 
 const handleTrashMedia = async (mediaId: string) => {
-    if (!selectedPost.value) return;
+    const postId = selectedPost.value?.id;
+    if (!postId) return;
+
     try {
-        const response = await useApi<{ success: boolean }>(`/media/trash/${mediaId}`, { method: "POST" });
-        if (!response?.success) throw new Error(t("post_detail.toasts.trash_failed"));
+        const response = await useApi<ApiResponse<TrashMediaResult>>(`/media/trash/${mediaId}`, { method: "POST" });
+        if (!response.success || !response.data || response.data.mediaUpdated < 1) {
+            throw new Error(response.message || t("post_detail.toasts.trash_failed"));
+        }
+
         toast.success(t("post_detail.toasts.trash_success"));
         if (activeMediaId.value === mediaId) activeMediaId.value = null;
-        await fetchPage();
-        queryClient.invalidateQueries({ queryKey: ["post", selectedPost.value.id] });
-    } catch (error: any) {
-        toast.error(t("post_detail.toasts.trash_failed"), { description: error.message || String(error) });
+        await refreshPostData(postId);
+    } catch (error: unknown) {
+        toast.error(t("post_detail.toasts.trash_failed"), { description: getErrorMessage(error) });
     }
 };
 
@@ -508,7 +590,7 @@ const confirmTrashMedia = async () => {
 
                 <!-- Center: Floating Glassmorphism Inspection Toolbar -->
                 <div
-                    v-if="currentMedia?.type === 'IMAGE' || currentMedia?.type === 'LIVE_PHOTO'"
+                    v-if="isZoomableMedia"
                     class="hidden sm:flex h-10 items-center gap-1 rounded-full border border-white/15 bg-zinc-950/80 px-3 backdrop-blur-xl shadow-2xl pointer-events-auto"
                 >
                     <!-- Rotate Left -->
@@ -609,11 +691,11 @@ const confirmTrashMedia = async () => {
                 <UniversalMediaViewer
                     :media="currentMedia"
                     :is-loading="isLoadingMediaList"
-                    :interactive="['IMAGE', 'LIVE_PHOTO'].includes(currentMedia?.type || '')"
+                    :interactive="isZoomableMedia"
                     :hide-badge="isOverlay"
                     :zoom="zoomLevel"
                     :rotation="rotationAngle"
-                    @zoom-change="zoomLevel = $event"
+                    @zoom-change="handleZoomChange"
                     @click-media="handleMediaClick"
                     class="h-full w-full"
                 />
@@ -711,7 +793,7 @@ const confirmTrashMedia = async () => {
                 <UniversalMediaViewer
                     :media="currentMedia"
                     :is-loading="isLoadingMediaList"
-                    :interactive="['IMAGE', 'LIVE_PHOTO'].includes(currentMedia?.type || '')"
+                    :interactive="isZoomableMedia"
                     @click-media="handleMediaClick"
                     class="h-full w-full"
                 />
@@ -829,7 +911,7 @@ const confirmTrashMedia = async () => {
                     <!-- Sleek Horizontal Swiper Cards -->
                     <div class="flex gap-2.5 overflow-x-auto pb-1 scrollbar-none select-none -mx-1 px-1">
                         <button
-                            v-for="item in postMediaList"
+                            v-for="item in postMediaListWithPreview"
                             :key="item.id"
                             type="button"
                             class="w-34 shrink-0 text-left rounded-lg border p-1.5 flex flex-col gap-1.5 transition-all duration-150 cursor-pointer relative group/media-card"
@@ -845,8 +927,8 @@ const confirmTrashMedia = async () => {
                                 class="w-full aspect-video bg-zinc-950 rounded overflow-hidden relative border border-zinc-150 dark:border-zinc-800/80"
                             >
                                 <img
-                                    v-if="item.cover_url || item.thumbnail_url || item.tracks?.[0]?.url"
-                                    :src="item.cover_url || item.thumbnail_url || item.tracks?.[0]?.url"
+                                    v-if="item.previewUrl"
+                                    :src="item.previewUrl"
                                     class="w-full h-full object-cover transition-transform duration-200 group-hover/media-card:scale-105"
                                     loading="lazy"
                                 />
@@ -858,26 +940,6 @@ const confirmTrashMedia = async () => {
                                         :is="item.type === 'VIDEO' ? Film : item.type === 'AUDIO' ? Music : FileImage"
                                         class="w-3.5 h-3.5"
                                     />
-                                </div>
-                                <div
-                                    v-if="item.type === 'VIDEO'"
-                                    class="absolute inset-0 flex items-center justify-center bg-black/10 group-hover/media-card:bg-black/25 transition-all"
-                                >
-                                    <div
-                                        class="w-5.5 h-5.5 rounded-full bg-white/95 text-zinc-950 flex items-center justify-center opacity-0 scale-75 group-hover/media-card:opacity-100 group-hover/media-card:scale-100 transition-all duration-150"
-                                    >
-                                        <Film class="w-2.5 h-2.5 fill-current" />
-                                    </div>
-                                </div>
-                                <div
-                                    v-if="item.duration || item.page_count"
-                                    class="absolute bottom-1 right-1 bg-black/75 text-[8px] font-medium text-white px-1 py-0.5 rounded-xs font-mono"
-                                >
-                                    {{
-                                        item.duration
-                                            ? `${Math.floor(item.duration / 60)}:${String(Math.round(item.duration % 60)).padStart(2, "0")}`
-                                            : `${item.page_count}p`
-                                    }}
                                 </div>
                             </div>
 

@@ -1,3 +1,5 @@
+import { TrackPurpose, type PostMediaSummary } from "@/types/post";
+
 /**
  * Helper function to translate media type codes into localized labels using a switch statement.
  */
@@ -16,4 +18,17 @@ export function getMediaTypeLabel(type: string | null | undefined, t: (key: stri
         default:
             return type || "";
     }
+}
+
+/**
+ * Resolves the thumbnail/preview URL for a PostMediaSummary item.
+ * Prioritizes explicit cover_url, then COVER track, then CONTENT track.
+ */
+export function getMediaPreviewUrl(media: PostMediaSummary): string | undefined {
+    if (media.cover_url) return media.cover_url;
+
+    const coverTrack = media.tracks.find((track) => track.purpose === TrackPurpose.COVER);
+    if (coverTrack?.url) return coverTrack.url;
+
+    return media.tracks.find((track) => track.purpose === TrackPurpose.CONTENT)?.url ?? undefined;
 }

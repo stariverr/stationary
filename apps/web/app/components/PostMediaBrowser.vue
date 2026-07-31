@@ -96,14 +96,13 @@ const displayRange = computed(() => {
 
 const mediaTypeLabel = (type: MediaType) => getMediaTypeLabel(type, t);
 const fallbackTitle = (position: number) => t("post_detail.media_item", { number: position + 1 });
-const mediaPreviewUrl = (media: PostMediaSummary): string | null => {
-    if (media.cover_url) return media.cover_url;
 
-    const coverTrack = media.tracks.find((track) => track.purpose === TrackPurpose.COVER);
-    if (coverTrack?.url) return coverTrack.url;
-
-    return media.tracks.find((track) => track.purpose === TrackPurpose.CONTENT)?.url ?? null;
-};
+const mediaListWithPreview = computed(() =>
+    props.list.map((item) => ({
+        ...item,
+        previewUrl: getMediaPreviewUrl(item),
+    })),
+);
 </script>
 
 <template>
@@ -192,7 +191,7 @@ const mediaPreviewUrl = (media: PostMediaSummary): string | null => {
 
             <template v-else>
                 <button
-                    v-for="item in list"
+                    v-for="item in mediaListWithPreview"
                     :key="item.id"
                     type="button"
                     class="group relative flex w-full items-center gap-3 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-2.5 text-left transition hover:border-zinc-400 dark:hover:border-zinc-700 cursor-pointer"
@@ -212,8 +211,8 @@ const mediaPreviewUrl = (media: PostMediaSummary): string | null => {
                         class="relative flex h-10 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-950"
                     >
                         <img
-                            v-if="mediaPreviewUrl(item)"
-                            :src="mediaPreviewUrl(item)"
+                            v-if="item.previewUrl"
+                            :src="item.previewUrl"
                             :alt="item.title || fallbackTitle(item.position)"
                             class="h-full w-full object-cover"
                             loading="lazy"
