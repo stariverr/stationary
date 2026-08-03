@@ -12,7 +12,7 @@ const sourceFiles = {
         const output = await new Response(proc.stdout).text();
         await proc.exited;
         const files = output.trim().split("\n").filter(Boolean);
-        const file = files.find(f => f.includes("concerned_shape")) ?? files.sort().at(0);
+        const file = files.find((f) => f.includes("concerned_shape")) ?? files.sort().at(0);
         return Bun.file(file ?? "").text();
     },
 };

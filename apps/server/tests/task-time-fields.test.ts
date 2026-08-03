@@ -18,23 +18,27 @@ describe("task time fields", () => {
 
         const parsed = taskApi.CreateTaskSchema.parse({
             library_id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3",
-            posts: [{
-                title: "Original timestamp",
-                description: "",
-                external_id: "post-1",
-                tags: [],
-                author: { name: "Author", external_id: "author-1" },
-                platform: "XHS",
-                published_time: "2024-01-02T03:04:05Z",
-                media: [{
-                    external_id: "media-1",
-                    title: "Media",
+            posts: [
+                {
+                    title: "Original timestamp",
                     description: "",
-                    type: "IMAGE",
-                    primary_file_url: "https://example.com/image.jpg",
-                    published_time: "2024-01-02T03:05:06Z",
-                }],
-            }],
+                    external_id: "post-1",
+                    tags: [],
+                    author: { name: "Author", external_id: "author-1" },
+                    platform: "XHS",
+                    published_time: "2024-01-02T03:04:05Z",
+                    media: [
+                        {
+                            external_id: "media-1",
+                            title: "Media",
+                            description: "",
+                            type: "IMAGE",
+                            primary_file_url: "https://example.com/image.jpg",
+                            published_time: "2024-01-02T03:05:06Z",
+                        },
+                    ],
+                },
+            ],
         });
 
         expect(parsed.posts[0].published_time?.toString()).toBe("2024-01-02T03:04:05Z");
@@ -47,23 +51,27 @@ describe("task time fields", () => {
 
         const parsed = taskApi.CreateTaskSchema.parse({
             library_id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3",
-            posts: [{
-                title: "Legacy timestamp",
-                description: "",
-                external_id: "post-legacy",
-                tags: [],
-                author: { name: "Author", external_id: "author-1" },
-                platform: "DOUYIN",
-                create_time: "1710000000",
-                media: [{
-                    external_id: "media-legacy",
-                    title: "",
+            posts: [
+                {
+                    title: "Legacy timestamp",
                     description: "",
-                    type: "VIDEO",
-                    primary_file_url: "https://example.com/video.mp4",
-                    create_time: "1710000000123",
-                }],
-            }],
+                    external_id: "post-legacy",
+                    tags: [],
+                    author: { name: "Author", external_id: "author-1" },
+                    platform: "DOUYIN",
+                    create_time: "1710000000",
+                    media: [
+                        {
+                            external_id: "media-legacy",
+                            title: "",
+                            description: "",
+                            type: "VIDEO",
+                            primary_file_url: "https://example.com/video.mp4",
+                            create_time: "1710000000123",
+                        },
+                    ],
+                },
+            ],
         });
 
         expect(parsed.posts[0].published_time?.epochMilliseconds).toBe(1710000000000);

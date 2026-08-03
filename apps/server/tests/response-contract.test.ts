@@ -13,9 +13,9 @@ const apiSources = [
 
 const stripStrings = (source: string) =>
     source
-        .replace(/`(?:\\.|[^`\\])*`/gs, "\"\"")
-        .replace(/"(?:\\.|[^"\\])*"/gs, "\"\"")
-        .replace(/'(?:\\.|[^'\\])*'/gs, "\"\"");
+        .replace(/`(?:\\.|[^`\\])*`/gs, '""')
+        .replace(/"(?:\\.|[^"\\])*"/gs, '""')
+        .replace(/'(?:\\.|[^'\\])*'/gs, '""');
 
 describe("response contract", () => {
     test("success can carry paginated list data inside data", () => {

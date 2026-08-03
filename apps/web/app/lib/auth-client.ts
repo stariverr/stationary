@@ -6,9 +6,7 @@ export const authClient = createAuthClient({
     // 'fetchOptions': {
     //     'credentials': 'include',
     // }
-    plugins: [
-        emailOTPClient()
-    ]
+    plugins: [emailOTPClient()],
 });
 
 export const { signIn, signUp, signOut, useSession, getSession } = authClient;

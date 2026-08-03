@@ -38,6 +38,6 @@ describe("route authentication", () => {
     test("user profile route requires auth", async () => {
         const source = await routeSources.user();
 
-        expect(source).toContain("router.use(\"*\", requireAuth)");
+        expect(source).toContain('router.use("*", requireAuth)');
     });
 });

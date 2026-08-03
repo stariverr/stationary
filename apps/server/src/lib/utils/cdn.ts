@@ -11,6 +11,3 @@ export function buildCdnUrl(_bucket: string | null | undefined, path: string | n
     const cleanPath = path.replace(/^\/+/, "");
     return `${cleanBase}/${cleanPath}`;
 }
-
-
-

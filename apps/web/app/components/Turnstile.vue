@@ -36,9 +36,9 @@ const renderWidget = () => {
                 },
                 "expired-callback": () => {
                     emit("update:modelValue", "");
-                }
+                },
             });
-            
+
             // Allow a short duration for iframe to render, preventing CLS
             setTimeout(() => {
                 turnstileReady.value = true;
@@ -97,15 +97,15 @@ onUnmounted(() => {
 
 // Expose reset method to parent forms
 defineExpose({
-    reset
+    reset,
 });
 </script>
 
 <template>
     <div class="flex justify-center my-3 relative min-h-[65px] w-full items-center">
         <!-- Skeleton Loader -->
-        <div 
-            v-if="!turnstileReady" 
+        <div
+            v-if="!turnstileReady"
             class="absolute w-[300px] h-[65px] bg-gray-50 border border-gray-200/60 rounded-xl flex items-center justify-center animate-pulse z-10"
         >
             <div class="flex items-center gap-2.5">
@@ -113,10 +113,10 @@ defineExpose({
                 <span class="text-xs text-gray-400 font-medium">Checking security...</span>
             </div>
         </div>
-        
+
         <!-- Turnstile Container -->
-        <div 
-            ref="containerRef" 
+        <div
+            ref="containerRef"
             class="w-[300px] h-[65px] transition-opacity duration-300"
             :class="{ 'opacity-0': !turnstileReady, 'opacity-100': turnstileReady }"
         ></div>

@@ -21,9 +21,7 @@ export function usePostMediaQuery(postId: MaybeRefOrGetter<string | number | nul
     const typeFilter = ref<MediaType | undefined>(undefined);
     let requestSequence = 0;
 
-    async function fetchPage(
-        options: PostMediaQueryOptions = {},
-    ) {
+    async function fetchPage(options: PostMediaQueryOptions = {}) {
         const id = toValue(postId);
         if (!id) return;
 
