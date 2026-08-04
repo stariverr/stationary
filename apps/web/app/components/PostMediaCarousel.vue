@@ -2,6 +2,7 @@
 import { ref, computed, watch } from "vue";
 import { ChevronLeft, ChevronRight } from "@lucide/vue";
 import { Swiper, SwiperSlide } from "swiper/vue";
+import type { Swiper as SwiperClass } from "swiper";
 import "swiper/css";
 import { type Post, type Track } from "@/types/post";
 
@@ -99,12 +100,7 @@ const emit = defineEmits<{
 
 const handleMediaClick = (event: MouseEvent) => {
     const target = event.target as HTMLElement;
-    if (
-        target.closest(".vds-controls") ||
-        target.closest(".vds-time-slider") ||
-        target.closest("button") ||
-        target.closest("a")
-    ) {
+    if (target.closest(".vds-controls") || target.closest(".vds-time-slider") || target.closest("button") || target.closest("a")) {
         return;
     }
     emit("click-media");
@@ -148,7 +144,9 @@ const scrollNext = () => swiperInstance.value?.slideNext();
                             v-if="media.type === 'VIDEO'"
                             :src="media.url || ''"
                             :poster="media.thumbnail || media.poster || ''"
-                            :subtitles="media.subtitles"
+                            :tracks="media.tracks"
+                            :playback="media.playback"
+                            :subtitles="media.subtitles?.length ? media.subtitles : media.playback?.subtitle_tracks"
                             :width="media.width"
                             :height="media.height"
                             class="max-h-full max-w-full h-full w-auto"
@@ -221,7 +219,9 @@ const scrollNext = () => swiperInstance.value?.slideNext();
                         v-if="media.type === 'VIDEO'"
                         :src="media.url || ''"
                         :poster="media.thumbnail || media.poster || ''"
-                        :subtitles="media.subtitles"
+                        :tracks="media.tracks"
+                        :playback="media.playback"
+                        :subtitles="media.subtitles?.length ? media.subtitles : media.playback?.subtitle_tracks"
                         :width="media.width"
                         :height="media.height"
                         class="w-full h-full"

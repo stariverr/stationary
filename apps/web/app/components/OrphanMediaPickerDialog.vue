@@ -5,8 +5,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2 } from "@lucide/vue";
 import { useApi } from "@/composables/useApi";
 import { toast } from "vue-sonner";
-import { useI18n } from "vue-i18n";
-
 const { t } = useI18n();
 const formatMediaType = (type?: string | null) => getMediaTypeLabel(type, t);
 

@@ -713,7 +713,19 @@
                 "fullscreen": "全屏",
                 "exit_fullscreen": "退出全屏",
                 "normal_speed": "常速",
-                "loading": "正在加载视频..."
+                "loading": "正在加载视频...",
+                "no_subtitles": "无可用字幕",
+                "subtitle_size": "字幕大小",
+                "subtitle_size_small": "小",
+                "subtitle_size_normal": "标准",
+                "subtitle_size_large": "大",
+                "subtitle_size_xlarge": "特大",
+                "subtitle_bg": "字幕背景",
+                "subtitle_bg_shadow": "文字阴影",
+                "subtitle_bg_box": "半透明底框",
+                "audio_tracks": "音轨",
+                "default_audio": "默认音轨",
+                "default_subtitle": "默认字幕"
             }
         },
         "toasts": {

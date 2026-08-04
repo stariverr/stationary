@@ -50,11 +50,13 @@ function sortTracks<T extends { priority?: number; quality?: string }>(tracks: T
 
 function selectContentTrack(tracks: MediaTrack[] | undefined, type: string): MediaTrack | undefined {
     const candidates = sortTracks(
-        (tracks || []).filter(
-            (track) => track.type.toUpperCase() === type && track.purpose.toUpperCase() !== "COVER",
-        ),
+        (tracks || []).filter((track) => track.type.toUpperCase() === type && track.purpose.toUpperCase() !== "COVER"),
     );
-    return candidates.find((track) => track.is_default) || candidates.find((track) => track.purpose.toUpperCase() === "CONTENT") || candidates[0];
+    return (
+        candidates.find((track) => track.is_default) ||
+        candidates.find((track) => track.purpose.toUpperCase() === "CONTENT") ||
+        candidates[0]
+    );
 }
 
 // 1. Cover / Poster Track
@@ -351,9 +353,10 @@ const handleImageClick = (e: MouseEvent) => {
                         :src="defaultVideoSrc"
                         :poster="defaultPosterUrl"
                         :tracks="media.tracks"
-                        :subtitles="media.subtitles || []"
-                        :width="media.width"
-                        :height="media.height"
+                        :playback="media.playback"
+                        :subtitles="media.subtitles?.length ? media.subtitles : media.playback?.subtitle_tracks || []"
+                        :width="media.width ?? undefined"
+                        :height="media.height ?? undefined"
                         class="w-full h-full"
                     />
                     <div v-else class="text-zinc-500 flex flex-col items-center gap-2">
@@ -447,12 +450,7 @@ const handleImageClick = (e: MouseEvent) => {
                         </h3>
                         <p class="mt-0.5 text-[10px] uppercase tracking-wider text-zinc-500">{{ $t("post_detail.viewer.audio_asset") }}</p>
                     </div>
-                    <audio
-                        v-if="contentAssetUrl"
-                        :src="contentAssetUrl"
-                        controls
-                        class="w-full mt-2 accent-indigo-600 outline-none"
-                    />
+                    <audio v-if="contentAssetUrl" :src="contentAssetUrl" controls class="w-full mt-2 accent-indigo-600 outline-none" />
                 </div>
             </template>
 

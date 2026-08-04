@@ -638,25 +638,33 @@ const handleVideoMouseLeave = (e: Event) => {
                                         <!-- Parameter List Key-Values (Aligned grid layout) -->
                                         <div v-if="editingTrackId !== item.id" class="flex flex-col gap-1.5 mt-2 text-xs">
                                             <div class="flex items-center">
-                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{ $t("media.tracks.field_purpose") }}</span>
+                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{
+                                                    $t("media.tracks.field_purpose")
+                                                }}</span>
                                                 <span class="uppercase font-semibold" :class="isDark ? 'text-zinc-300' : 'text-zinc-800'">{{
                                                     $t("media.purposes." + item.purpose, item.purpose)
                                                 }}</span>
                                             </div>
                                             <div class="flex items-center">
-                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{ $t("media.tracks.field_quality") }}</span>
+                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{
+                                                    $t("media.tracks.field_quality")
+                                                }}</span>
                                                 <span class="font-semibold" :class="isDark ? 'text-zinc-300' : 'text-zinc-800'">{{
                                                     $t("media.quality." + item.quality?.toLowerCase(), item.quality)
                                                 }}</span>
                                             </div>
                                             <div v-if="item.language" class="flex items-center">
-                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{ $t("media.tracks.field_language") }}</span>
+                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{
+                                                    $t("media.tracks.field_language")
+                                                }}</span>
                                                 <span class="font-semibold" :class="isDark ? 'text-zinc-300' : 'text-zinc-800'">{{
                                                     getFriendlyLanguage(item.language)
                                                 }}</span>
                                             </div>
                                             <div v-if="item.codec" class="flex items-center">
-                                                <span class="w-20 shrink-0 text-zinc-500 font-normal font-sans select-none">{{ $t("media.tracks.field_codec") }}</span>
+                                                <span class="w-20 shrink-0 text-zinc-500 font-normal font-sans select-none">{{
+                                                    $t("media.tracks.field_codec")
+                                                }}</span>
                                                 <span
                                                     class="font-semibold font-mono text-[11px]"
                                                     :class="isDark ? 'text-zinc-350' : 'text-zinc-800'"
@@ -664,13 +672,17 @@ const handleVideoMouseLeave = (e: Event) => {
                                                 >
                                             </div>
                                             <div v-if="item.file?.size" class="flex items-center">
-                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{ $t("media.tracks.field_file_size") }}</span>
+                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{
+                                                    $t("media.tracks.field_file_size")
+                                                }}</span>
                                                 <span class="font-semibold" :class="isDark ? 'text-zinc-300' : 'text-zinc-800'">{{
                                                     formatFileSize(item.file?.size)
                                                 }}</span>
                                             </div>
                                             <div v-if="item.file?.mime_type" class="flex items-start">
-                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none mt-0.5">{{ $t("media.tracks.field_format") }}</span>
+                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none mt-0.5">{{
+                                                    $t("media.tracks.field_format")
+                                                }}</span>
                                                 <span
                                                     class="font-mono text-[10px] px-1.5 py-0.5 rounded border break-all select-all leading-tight"
                                                     :class="
@@ -683,7 +695,9 @@ const handleVideoMouseLeave = (e: Event) => {
                                                 </span>
                                             </div>
                                             <div v-if="item.file?.width && item.file?.height" class="flex items-center">
-                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{ $t("media.tracks.field_resolution") }}</span>
+                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{
+                                                    $t("media.tracks.field_resolution")
+                                                }}</span>
                                                 <span class="font-semibold" :class="isDark ? 'text-zinc-300' : 'text-zinc-800'">
                                                     {{ item.file.width }} × {{ item.file.height }}
                                                     <span class="text-zinc-400 font-normal text-[11px]"
@@ -692,13 +706,17 @@ const handleVideoMouseLeave = (e: Event) => {
                                                 </span>
                                             </div>
                                             <div v-if="item.file?.duration" class="flex items-center">
-                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{ $t("media.tracks.field_duration") }}</span>
+                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{
+                                                    $t("media.tracks.field_duration")
+                                                }}</span>
                                                 <span class="font-semibold" :class="isDark ? 'text-zinc-300' : 'text-zinc-800'"
                                                     >{{ item.file.duration }}s</span
                                                 >
                                             </div>
                                             <div class="flex items-center">
-                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{ $t("media.tracks.field_origin") }}</span>
+                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{
+                                                    $t("media.tracks.field_origin")
+                                                }}</span>
                                                 <span
                                                     class="font-semibold"
                                                     :class="[
@@ -711,11 +729,17 @@ const handleVideoMouseLeave = (e: Event) => {
                                                               : 'text-indigo-650',
                                                     ]"
                                                 >
-                                                    {{ item.is_generated ? $t("media.tracks.origin_generated") : $t("media.tracks.origin_manual") }}
+                                                    {{
+                                                        item.is_generated
+                                                            ? $t("media.tracks.origin_generated")
+                                                            : $t("media.tracks.origin_manual")
+                                                    }}
                                                 </span>
                                             </div>
                                             <div v-if="item.variant_key && item.display_name" class="flex items-center">
-                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{ $t("media.tracks.field_variant_key") }}</span>
+                                                <span class="w-20 shrink-0 text-zinc-500 font-normal select-none">{{
+                                                    $t("media.tracks.field_variant_key")
+                                                }}</span>
                                                 <span
                                                     class="font-mono text-[10px] px-1.5 py-0.5 rounded border"
                                                     :class="
@@ -1039,9 +1063,9 @@ const handleVideoMouseLeave = (e: Event) => {
             <div class="grid grid-cols-2 gap-3 text-xs">
                 <!-- Purpose Selection (PRIORITIZED) -->
                 <div class="space-y-1">
-                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'"
-                        >{{ $t("media.tracks.field_purpose") }}</Label
-                    >
+                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                        $t("media.tracks.field_purpose")
+                    }}</Label>
                     <Select v-model="newTrackParams.purpose">
                         <SelectTrigger
                             class="w-full h-9 rounded-xl outline-none transition-all text-xs border focus:ring-2"
@@ -1067,9 +1091,9 @@ const handleVideoMouseLeave = (e: Event) => {
 
                 <!-- Type Selection -->
                 <div class="space-y-1">
-                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'"
-                        >{{ $t("media.tracks.field_type") }}</Label
-                    >
+                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                        $t("media.tracks.field_type")
+                    }}</Label>
                     <Select v-model="newTrackParams.type" :disabled="!newTrackParams.purpose">
                         <SelectTrigger
                             class="w-full h-9 rounded-xl outline-none transition-all text-xs border focus:ring-2"
@@ -1086,13 +1110,15 @@ const handleVideoMouseLeave = (e: Event) => {
                             :class="isDark ? 'bg-zinc-900 border-zinc-800 text-white' : 'bg-white border-zinc-200 text-zinc-800'"
                         >
                             <SelectItem value="IMAGE">{{ $t("media.track_types.IMAGE") }}</SelectItem>
-                            <SelectItem v-if="newTrackParams.purpose !== 'COVER' && newTrackParams.purpose !== 'THUMBNAIL'" value="VIDEO"
-                                >{{ $t("media.track_types.VIDEO") }}</SelectItem
-                            >
-                            <SelectItem v-if="newTrackParams.purpose !== 'COVER' && newTrackParams.purpose !== 'THUMBNAIL'" value="AUDIO"
-                                >{{ $t("media.track_types.AUDIO") }}</SelectItem
-                            >
-                            <SelectItem v-if="newTrackParams.purpose !== 'COVER' && newTrackParams.purpose !== 'THUMBNAIL'" value="SUBTITLE"
+                            <SelectItem v-if="newTrackParams.purpose !== 'COVER' && newTrackParams.purpose !== 'THUMBNAIL'" value="VIDEO">{{
+                                $t("media.track_types.VIDEO")
+                            }}</SelectItem>
+                            <SelectItem v-if="newTrackParams.purpose !== 'COVER' && newTrackParams.purpose !== 'THUMBNAIL'" value="AUDIO">{{
+                                $t("media.track_types.AUDIO")
+                            }}</SelectItem>
+                            <SelectItem
+                                v-if="newTrackParams.purpose !== 'COVER' && newTrackParams.purpose !== 'THUMBNAIL'"
+                                value="SUBTITLE"
                                 >{{ $t("media.track_types.SUBTITLE") }}</SelectItem
                             >
                         </SelectContent>
@@ -1150,9 +1176,9 @@ const handleVideoMouseLeave = (e: Event) => {
 
                 <!-- Dynamic Field: Subtitle format (Subtitle only) -->
                 <div v-if="newTrackParams.type === 'SUBTITLE'" class="space-y-1">
-                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'"
-                        >{{ $t("media.tracks.field_format") }}</Label
-                    >
+                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                        $t("media.tracks.field_format")
+                    }}</Label>
                     <Select v-model="newTrackParams.metadata.format" :disabled="!newTrackParams.purpose">
                         <SelectTrigger
                             class="w-full h-9 rounded-xl outline-none transition-all text-xs border focus:ring-2"
@@ -1177,9 +1203,9 @@ const handleVideoMouseLeave = (e: Event) => {
 
                 <!-- Dynamic Field: Language Selection (Subtitle/Audio only) -->
                 <div v-if="['SUBTITLE', 'AUDIO'].includes(newTrackParams.type)" class="space-y-1">
-                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'"
-                        >{{ $t("media.tracks.field_language") }}</Label
-                    >
+                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                        $t("media.tracks.field_language")
+                    }}</Label>
                     <Select v-model="newTrackParams.language" :disabled="!newTrackParams.purpose">
                         <SelectTrigger
                             class="w-full h-9 rounded-xl outline-none transition-all text-xs border focus:ring-2"
@@ -1207,9 +1233,9 @@ const handleVideoMouseLeave = (e: Event) => {
 
                 <!-- Dynamic Field: Codec (Video/Audio only) -->
                 <div v-if="['VIDEO', 'AUDIO'].includes(newTrackParams.type)" class="space-y-1">
-                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'"
-                        >{{ $t("media.tracks.field_codec") }}</Label
-                    >
+                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                        $t("media.tracks.field_codec")
+                    }}</Label>
                     <Input
                         type="text"
                         v-model="newTrackParams.codec"
@@ -1241,9 +1267,9 @@ const handleVideoMouseLeave = (e: Event) => {
                 </button>
                 <div v-if="showAdvancedSettings && newTrackParams.purpose" class="grid grid-cols-2 gap-3 mt-3">
                     <div class="space-y-1">
-                        <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'"
-                            >{{ $t("media.tracks.field_priority") }}</Label
-                        >
+                        <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                            $t("media.tracks.field_priority")
+                        }}</Label>
                         <Input
                             type="number"
                             v-model.number="newTrackParams.priority"
@@ -1258,9 +1284,9 @@ const handleVideoMouseLeave = (e: Event) => {
                         />
                     </div>
                     <div class="space-y-1">
-                        <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'"
-                            >{{ $t("media.tracks.field_variant_key") }}</Label
-                        >
+                        <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                            $t("media.tracks.field_variant_key")
+                        }}</Label>
                         <Input
                             type="text"
                             v-model="newTrackParams.variant_key"
@@ -1275,9 +1301,9 @@ const handleVideoMouseLeave = (e: Event) => {
                         />
                     </div>
                     <div class="space-y-1 col-span-2">
-                        <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'"
-                            >{{ $t("media.tracks.field_display_name") }}</Label
-                        >
+                        <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                            $t("media.tracks.field_display_name")
+                        }}</Label>
                         <Input
                             type="text"
                             v-model="newTrackParams.display_name"
@@ -1310,7 +1336,9 @@ const handleVideoMouseLeave = (e: Event) => {
                 <span v-if="isUploadingTrack" class="flex items-center gap-2">
                     <Loader2 class="w-3.5 h-3.5 animate-spin" /> {{ $t("media.tracks.uploading") }}
                 </span>
-                <span v-else class="flex items-center gap-2"> <Upload class="w-3.5 h-3.5" /> {{ $t("media.tracks.upload_and_register") }} </span>
+                <span v-else class="flex items-center gap-2">
+                    <Upload class="w-3.5 h-3.5" /> {{ $t("media.tracks.upload_and_register") }}
+                </span>
                 <input type="file" class="hidden" @change="handleUploadTrack($event, newTrackParams)" :disabled="isUploadDisabled" />
             </label>
         </div>

@@ -713,7 +713,19 @@
                 "fullscreen": "Fullscreen",
                 "exit_fullscreen": "Exit Fullscreen",
                 "normal_speed": "Normal",
-                "loading": "Loading video..."
+                "loading": "Loading video...",
+                "no_subtitles": "No subtitles available",
+                "subtitle_size": "Subtitle Size",
+                "subtitle_size_small": "Small",
+                "subtitle_size_normal": "Normal",
+                "subtitle_size_large": "Large",
+                "subtitle_size_xlarge": "Extra Large",
+                "subtitle_bg": "Subtitle Style",
+                "subtitle_bg_shadow": "Text Shadow",
+                "subtitle_bg_box": "Translucent Box",
+                "audio_tracks": "Audio Tracks",
+                "default_audio": "Default Track",
+                "default_subtitle": "Default Subtitle"
             }
         },
         "toasts": {

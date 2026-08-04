@@ -66,12 +66,9 @@ const getMediaThumb = (med: any) => {
             </DialogHeader>
 
             <!-- Media Switcher (only shown if post has multiple media items) -->
-            <div
-                v-if="mediaList && mediaList.length > 1"
-                class="flex flex-col gap-2 border-b border-zinc-100 pb-4 mt-3 shrink-0"
-            >
+            <div v-if="mediaList && mediaList.length > 1" class="flex flex-col gap-2 border-b border-zinc-100 pb-4 mt-3 shrink-0">
                 <div class="flex items-center justify-between text-xs text-zinc-500 font-medium">
-                        <span>{{ $t("post_detail.manage.select_media_asset") }}</span>
+                    <span>{{ $t("post_detail.manage.select_media_asset") }}</span>
                     <span class="font-mono text-[10px] bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded-full">
                         {{ mediaList.findIndex((m) => m.id === trackEditMediaId) + 1 }} / {{ mediaList.length }}
                     </span>
@@ -104,7 +101,7 @@ const getMediaThumb = (med: any) => {
                         <div
                             class="absolute bottom-1 right-1 bg-black/60 backdrop-blur-xs text-[8px] font-bold text-white px-1 py-0.2 rounded-md font-mono scale-90 origin-bottom-right"
                         >
-                                {{ formatMediaType(med.type) }}
+                            {{ formatMediaType(med.type) }}
                         </div>
                         <div
                             v-if="trackEditMediaId === med.id"

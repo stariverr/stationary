@@ -21,14 +21,13 @@ import {
     Video as VideoIcon,
 } from "@lucide/vue";
 import { useMediaStore, type MediaListItem, type MappedMediaItem, type MatchedDetails } from "@/stores/media";
-import { type ApiPostDetail, type Track } from "@/types/post";
+import { type ApiPostDetail, type ApiPostMedia, type PostMediaSummary, type Track } from "@/types/post";
 import { toast } from "vue-sonner";
 import { storeToRefs } from "pinia";
 import { Swiper, SwiperSlide } from "swiper/vue";
 import "swiper/css";
 import { Temporal } from "@js-temporal/polyfill";
 import { useApi } from "@/composables/useApi";
-
 
 const store = useMediaStore();
 const { selectedMediaId, selectedMedia, medias, displayMode } = storeToRefs(store);
@@ -104,6 +103,10 @@ interface MappedSiblingMedia {
         label: string;
         format: string;
     }>;
+    tracks?: Track[];
+    playback?: ApiPostMedia["playback"];
+    audio_tracks?: any[];
+    subtitle_tracks?: any[];
     matched_reason?: unknown;
     matched_details?: MatchedDetails;
     score?: number;
@@ -120,7 +123,11 @@ interface MediaInputForSubtitles {
     url?: string | null;
     primary_file_url?: string | null;
     media_url?: string | null;
+    live_url?: string | null;
     tracks?: Track[];
+    playback?: ApiPostMedia["playback"];
+    audio_tracks?: any[];
+    subtitle_tracks?: any[];
     date?: string;
     create_time?: string;
     published_time?: string | null;
@@ -218,25 +225,7 @@ watch(selectedMediaId, async (newId) => {
             const mediaResponse = await useApi<{
                 success: boolean;
                 data: {
-                    list: Array<{
-                        id: string;
-                        type: string;
-                        title: string;
-                        sort_order: number;
-                        thumbnail_url: string;
-                        preview_url?: string;
-                        width: number;
-                        height: number;
-                        duration?: number;
-                        page_count?: number;
-                        position: number;
-                        subtitles?: Array<{
-                            url: string;
-                            language: string;
-                            label: string;
-                            format: string;
-                        }>;
-                    }>;
+                    list: Array<PostMediaSummary & { position: number }>;
                 };
             }>(`/post/${selectedMedia.value.post_id}/media`, {
                 query: {
@@ -250,14 +239,16 @@ watch(selectedMediaId, async (newId) => {
                         ({
                             id: m.id,
                             type: m.type,
-                            url: m.preview_url || m.thumbnail_url || null,
-                            thumbnail: m.thumbnail_url || null,
-                            width: m.width,
-                            height: m.height,
+                            url: m.url || null,
+                            thumbnail: m.cover_url || null,
+                            width: m.width ?? undefined,
+                            height: m.height ?? undefined,
                             title: m.title,
                             sort_order: m.sort_order,
-                            duration: m.duration,
-                            page_count: m.page_count,
+                            tracks: m.tracks || [],
+                            playback: m.playback || null,
+                            audio_tracks: m.audio_tracks || [],
+                            subtitle_tracks: m.subtitle_tracks || [],
                             subtitles: m.subtitles || [],
                         }) as unknown as MappedSiblingMedia,
                 );
@@ -657,7 +648,9 @@ const handleAddTag = async (tagToAdd: string) => {
                                         <VideoPlayer
                                             v-else-if="media.type?.toLowerCase() === 'video'"
                                             :src="media.url || media.media_url || ''"
-                                            :subtitles="media.subtitles"
+                                            :tracks="media.tracks"
+                                            :playback="media.playback"
+                                            :subtitles="media.subtitles?.length ? media.subtitles : media.playback?.subtitle_tracks"
                                             :width="media.width"
                                             :height="media.height"
                                             class="max-h-full max-w-full h-full w-auto drop-shadow-2xl rounded-sm"
