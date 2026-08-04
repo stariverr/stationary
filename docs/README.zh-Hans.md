@@ -36,7 +36,7 @@
 ## ✨ 核心特性
 
 - 🎨 **Card-on-Canvas 美学设计**：融合 Apple 风格的空间卡片画布层级与 Linear 级别的桌面精细度，采用 HSL 色调与高密度布局。
-- 📸 **Live Photo 与原生多媒体支持**：原生支持 Live Photo 交互播放、浏览器端 HEIC/HEIF 图像解码，以及 WebVTT 字幕自动转换。
+- 📸 **Live Photo 与原生多媒体支持**：原生支持 Live Photo 交互播放与浏览器端 HEIC/HEIF 图像解码。
 - 🎬 **统一 DASH 分片流播**：针对音视频分离的多轨媒体源，在后台解析 `sidx` 索引块范围并生成 SegmentBase 元数据，通过 `dash.js` 实现免转码、低延迟流播。
 - 🏷️ **多租户媒体库与标签管理**：基于 Library 的物理隔离，支持 RBAC 细粒度授权（`VIEWER` / `EDITOR` / `ADMIN`），提供标签别名映射与规范化审核流。
 - 🔍 **AI 混合检索与富化**：结合 SQL Trigram 模糊匹配、Gemini 文本向量 (`text-embedding-004`) 与视觉向量 (`multimodal-embedding-004`)，使用倒数排序融合 (RRF) 算法实现精准检索与 AI 标注。
@@ -123,7 +123,7 @@ bun run dev
 - 🔌 **[媒体元数据同步工作流 & API 契约](./external_api.contract.zh-Hans.md)** - 客户端对接规范、`external_id` 生成逻辑与 API 结构。
 - 🔄 **[Metadata 物理保存与清理流程详细说明](./save_metadata_flow.zh-Hans.md)** - `saveMetadata` 执行流程、差异检测与 S3 软删除清扫。
 - 🔍 **[多空间 AI 混合检索架构规范](./ai_hybrid_search.zh-Hans.md)** - 向量空间隔离、pgvector HNSW 索引与 RRF 排序融合。
-- ⚖️ **[系统架构设计取舍与 Trade-offs](./trade-offs.zh-Hans.md)** - Multi-Track 设计、DASH 分片解析与 WebVTT 转换的取舍考量。
+- ⚖️ **[系统架构设计取舍与 Trade-offs](./trade-offs.zh-Hans.md)** - Multi-Track 设计与 DASH 分片解析的取舍考量。
 - 🛠️ **[任务执行引擎接入指南：新增任务类型](./task_engine_extension.zh-Hans.md)** - 基于策略模式扩展后台异步任务处理器的指南。
 - 📜 **[TypeScript 编写规范与避坑指南](./code.rule.zh-Hans.md)** - Temporal API、Web API Streams 和 `bun:File` 强制编码规范。
 

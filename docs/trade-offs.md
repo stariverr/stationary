@@ -36,20 +36,7 @@ Rather than requiring the external sync clients to compute these ranges or downl
 
 ---
 
-## 3. Automated Subtitle WebVTT Conversion
-
-### Context & Decision
-External integration agents frequently retrieve subtitles in platform-specific formats (such as custom JSON subtitle payloads). Browsers cannot play these subtitles natively.
-
-During the synchronization pipeline in `TaskService.processMedia`, when a track of type `SUBTITLE` with metadata format `json` is fetched, the backend automatically intercepts and converts it to standard **WebVTT format (`.vtt`)** in-memory before uploading it to S3 as a WebVTT track.
-
-### Rationales
-- **Native Browser Playback**: The player can directly load the converted `.vtt` file in standard HTML5 `<track>` tags, avoiding client-side parsing libraries.
-- **Zero Disk Overhead**: Conversion is performed completely in-memory, bypassing local temporary files.
-
----
-
-## 4. Media-Centric Vectorization (No Direct Post Vectorization)
+## 3. Media-Centric Vectorization (No Direct Post Vectorization)
 
 ### Context & Decision
 We index and embed search documents at the `Media` level (`entity_type: EntityType.MEDIA`) rather than the `Post` level, even though `Post` represents the top-level logical entity containing media.
@@ -61,7 +48,7 @@ We index and embed search documents at the `Media` level (`entity_type: EntityTy
 
 ---
 
-## 5. Server-Side Cover & Thumbnail Generation
+## 4. Server-Side Cover & Thumbnail Generation
 
 ### Context & Decision
 To support different display layouts (board covers, masonry grid scrolling, lightboxes, and video playback), Stationary uses a lightweight **cover and thumbnail generation architecture**:

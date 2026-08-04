@@ -36,7 +36,7 @@
 ## ✨ Key Features
 
 - 🎨 **Card-on-Canvas Design System**: Built on Apple-inspired spatial depth layers and Linear-class desktop refinement with clean HSL palettes.
-- 📸 **Native Live Photo & Interactive Media**: Support for Live Photo interactive playback, browser-native HEIC/HEIF decoding, and automated WebVTT subtitle conversion.
+- 📸 **Native Live Photo & Interactive Media**: Support for Live Photo interactive playback and browser-native HEIC/HEIF decoding.
 - 🎬 **Unified DASH Streaming**: Audio/video split streams from multi-track media sources are parsed on-the-fly via dynamic `sidx` SegmentBase extraction and streamed smoothly with `dash.js`.
 - 🏷️ **Multi-Tenant Library Management**: Physical asset isolation per Library, fine-grained RBAC (`VIEWER`, `EDITOR`, `ADMIN`), and reconstructive tag normalization with alias mapping.
 - 🔍 **Hybrid AI Search & Enrichment**: Reciprocal Rank Fusion (RRF) combining SQL trigram text search, Gemini text embeddings (`text-embedding-004`), and visual similarity vectors (`multimodal-embedding-004`).
@@ -123,7 +123,7 @@ Detailed specifications and architectural guides are available in the [`docs/`](
 - 🔌 **[Metadata Sync & API Contracts](./docs/external_api.contract.md)** - Integration client schemas, `external_id` deduplication rules, and sync payloads.
 - 🔄 **[Metadata Ingestion Pipeline](./docs/save_metadata_flow.md)** - Execution flow of `saveMetadata`, change detection, and S3 soft-delete lifecycle.
 - 🔍 **[Multi-Space Hybrid Search Spec](./docs/ai_hybrid_search.md)** - Vector space segregation, pgvector HNSW indexing, and RRF rank fusion.
-- ⚖️ **[Architectural Trade-offs](./docs/trade-offs.md)** - Design rationale behind Multi-Track schemas, DASH segment parsing, and WebVTT conversion.
+- ⚖️ **[Architectural Trade-offs](./docs/trade-offs.md)** - Design rationale behind Multi-Track schemas and DASH segment parsing.
 - 🛠️ **[Task Engine Extension Guide](./docs/task_engine_extension.md)** - Strategy pattern guide for adding new background job handlers.
 - 📜 **[TypeScript & Bun Guidelines](./docs/code.rule.md)** - Mandatory standards for Temporal API, Web API streams, and `bun:File`.
 
