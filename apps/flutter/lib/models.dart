@@ -121,6 +121,7 @@ class Media {
   final int? width;
   final int? height;
   final List<MediaTrack> tracks;
+  final List<MediaPreviewItem> covers;
 
   Media({
     required this.id,
@@ -137,6 +138,7 @@ class Media {
     this.width,
     this.height,
     required this.tracks,
+    this.covers = const [],
   });
 
   factory Media.fromJson(Map<String, dynamic> json) {
@@ -144,6 +146,16 @@ class Media {
     if (json['tracks'] is List) {
       tracksList = (json['tracks'] as List)
           .map((t) => MediaTrack.fromJson(Map<String, dynamic>.from(t as Map)))
+          .toList();
+    }
+
+    var coversList = <MediaPreviewItem>[];
+    if (json['covers'] is List) {
+      coversList = (json['covers'] as List)
+          .map(
+            (c) =>
+                MediaPreviewItem.fromJson(Map<String, dynamic>.from(c as Map)),
+          )
           .toList();
     }
 
@@ -162,6 +174,7 @@ class Media {
       width: json['width'] as int?,
       height: json['height'] as int?,
       tracks: tracksList,
+      covers: coversList,
     );
   }
 }
