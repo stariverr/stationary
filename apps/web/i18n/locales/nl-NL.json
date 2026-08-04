@@ -22,9 +22,18 @@
         "settings": "Instellingen"
     },
     "grid": {
-        "showing_items": "{count} items weergeven",
-        "page_info": "Pag. {current} / {total}",
-        "items_per_page": "{count} / pagina"
+        "showing_items": "Toont {count} items",
+        "page_info": "Pagina {current} / {total}",
+        "items_per_page": "{count} / pagina",
+        "items_per_page_label": "Paginagrootte",
+        "view_options": "Weergave-opties",
+        "aspect_ratio": "Beeldverhouding",
+        "card_size": "Kaartformaat",
+        "size_sm": "Klein",
+        "size_md": "Middel",
+        "size_lg": "Groot",
+        "size_xl": "Extra groot",
+        "aspect_auto": "Auto"
     },
     "platforms": {
         "XHS": "Rednote",

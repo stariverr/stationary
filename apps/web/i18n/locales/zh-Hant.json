@@ -56,7 +56,16 @@
     "grid": {
         "showing_items": "顯示 {count} 項",
         "page_info": "第 {current} / {total} 頁",
-        "items_per_page": "每頁 {count} 條"
+        "items_per_page": "每頁 {count} 條",
+        "items_per_page_label": "每頁顯示",
+        "view_options": "視圖設定",
+        "aspect_ratio": "卡片比例",
+        "card_size": "卡片大小",
+        "size_sm": "小",
+        "size_md": "中",
+        "size_lg": "大",
+        "size_xl": "特大",
+        "aspect_auto": "自適應"
     },
     "platforms": {
         "XHS": "小紅書",

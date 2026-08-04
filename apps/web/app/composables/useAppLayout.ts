@@ -21,6 +21,19 @@ export const useAppLayout = () => {
             get: () => store.isCreateMediaOpen,
             set: (val) => (store.isCreateMediaOpen = val),
         }),
+        postItemAspectRatio: computed({
+            get: () => store.postItemAspectRatio,
+            set: (val) => (store.postItemAspectRatio = val),
+        }),
+        postItemSize: computed({
+            get: () => store.postItemSize,
+            set: (val) => (store.postItemSize = val),
+        }),
+        postLayoutMode: computed({
+            get: () => store.postLayoutMode,
+            set: (val) => (store.postLayoutMode = val),
+        }),
+        postItemSizePx: computed(() => store.postItemSizePx),
         toggleSidebar: store.toggleSidebar,
         closeSidebar: store.closeSidebar,
     };

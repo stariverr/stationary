@@ -7,6 +7,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { toast } from "vue-sonner";
 import { useApi } from "@/composables/useApi";
 import { usePostStore } from "@/stores/posts";
+import { useAppLayout } from "@/composables/useAppLayout";
 
 const { post, isSelected, isChecked, showCheckbox } = defineProps<{
     post: Post;
@@ -24,6 +25,19 @@ const videoRef = ref<HTMLVideoElement | null>(null);
 const isHovered = ref(false);
 const isRegenerating = ref(false);
 const postStore = usePostStore();
+const { postItemAspectRatio, postItemSize, postLayoutMode } = useAppLayout();
+
+const cardAspectRatioStyle = computed(() => {
+    const ratio = postItemAspectRatio.value || "4:3";
+    if (ratio === "auto") {
+        return { aspectRatio: "auto" };
+    }
+    const parts = ratio.split(":");
+    if (parts.length === 2) {
+        return { aspectRatio: `${parts[0]} / ${parts[1]}` };
+    }
+    return { aspectRatio: "4 / 3" };
+});
 
 watch(isHovered, async (hovering) => {
     const firstMedia = post.media?.[0];
@@ -162,8 +176,13 @@ const getPlatformBadgeClass = (platform: string) => {
     <ContextMenu>
         <ContextMenuTrigger as-child>
             <div
-                class="group relative flex flex-col gap-2 p-2 rounded-xl transition-all duration-200 cursor-pointer"
-                :class="isSelected ? 'bg-blue-50 ring-2 ring-blue-500' : 'hover:bg-gray-100'"
+                class="group relative flex rounded-xl transition-all duration-200 cursor-pointer"
+                :class="[
+                    postLayoutMode === 'list'
+                        ? 'flex-row items-center gap-4 p-3 border border-slate-100/80 bg-white hover:bg-slate-50 hover:border-slate-200'
+                        : 'flex-col gap-2 p-2 hover:bg-gray-100',
+                    isSelected ? 'bg-blue-50 ring-2 ring-blue-500' : '',
+                ]"
                 @mouseenter="handleMouseEnter"
                 @mouseleave="handleMouseLeave"
                 @click="emit('click', $event)"
@@ -177,7 +196,13 @@ const getPlatformBadgeClass = (platform: string) => {
                     />
                 </div>
 
-                <div class="relative aspect-4/3 rounded-lg overflow-hidden border border-gray-100 bg-gray-50">
+                <div
+                    class="relative rounded-lg overflow-hidden border border-gray-100 bg-gray-50 transition-all duration-300 shrink-0"
+                    :style="postLayoutMode === 'list' ? undefined : cardAspectRatioStyle"
+                    :class="[
+                        postLayoutMode === 'list' ? 'w-28 sm:w-36 h-20 sm:h-24' : postItemAspectRatio === 'auto' ? 'min-h-36 max-h-80' : '',
+                    ]"
+                >
                     <!-- Text Card -->
                     <div
                         v-if="post.type === 'TEXT'"
@@ -243,7 +268,7 @@ const getPlatformBadgeClass = (platform: string) => {
                     </div>
                 </div>
 
-                <div class="flex flex-col px-1 gap-1">
+                <div :class="postLayoutMode === 'list' ? 'flex-1 min-w-0 flex flex-col gap-1 justify-center' : 'flex flex-col px-1 gap-1'">
                     <!-- Author & Platform Info -->
                     <div class="flex items-center justify-between mt-1 gap-2">
                         <div class="flex items-center gap-1.5 min-w-0">

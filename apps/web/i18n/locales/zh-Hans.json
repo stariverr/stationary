@@ -63,7 +63,18 @@
         "showing_items": "显示 {count} 项",
         "page_info": "第 {current} / {total} 页",
         "items_per_page": "每页 {count} 条",
-        "items_per_page_label": "每页显示"
+        "items_per_page_label": "每页显示",
+        "view_options": "视图设置",
+        "aspect_ratio": "卡片比例",
+        "card_size": "卡片大小",
+        "layout_mode": "布局方式",
+        "layout_grid": "网格视图",
+        "layout_list": "列表视图",
+        "size_sm": "小",
+        "size_md": "中",
+        "size_lg": "大",
+        "size_xl": "特大",
+        "aspect_auto": "自适应"
     },
     "platforms": {
         "XHS": "小红书",

@@ -16,6 +16,7 @@ import {
     User,
     Tag as TagIcon,
     Plus,
+    SlidersHorizontal,
 } from "@lucide/vue";
 import { useDebounceFn, onClickOutside } from "@vueuse/core";
 import { PaginationRoot, PaginationList, PaginationListItem, PaginationPrev, PaginationNext, PaginationEllipsis } from "reka-ui";
@@ -45,9 +46,15 @@ const {
     authorSearchKeyword,
     authorCache,
 } = usePosts();
-const { toggleSidebar, isCreatePostOpen } = useAppLayout();
+const { toggleSidebar, isCreatePostOpen, postItemAspectRatio, postItemSize, postItemSizePx, postLayoutMode } = useAppLayout();
 const libraryStore = useLibraryStore();
 const tagStore = useTagStore();
+
+const showViewOptions = ref(false);
+const viewOptionsRef = ref<HTMLElement | null>(null);
+onClickOutside(viewOptionsRef, () => {
+    showViewOptions.value = false;
+});
 const { isMultiSelectClick } = useMultiSelectModifier();
 const visualViewportBottomOffsetStyle = useVisualViewportBottomOffset();
 
@@ -520,20 +527,123 @@ onUnmounted(() => {
                     <span class="hidden lg:inline">{{ $t("common.batch_select", "Batch Select") }}</span>
                 </button>
 
-                <!-- Layout Switchers (Unified height and border radius, remove shadow-sm) -->
-                <div class="hidden sm:flex items-center gap-0.5 bg-gray-100/70 p-0.5 rounded-full border border-gray-200/50 shrink-0 h-9">
+                <!-- View Options Dropdown -->
+                <div ref="viewOptionsRef" class="relative shrink-0">
                     <button
-                        class="flex items-center justify-center h-7 w-7 bg-white text-gray-900 border border-gray-200/30 rounded-full transition-all cursor-pointer"
-                        title="Grid Layout"
+                        @click="showViewOptions = !showViewOptions"
+                        :class="[
+                            showViewOptions
+                                ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-50'
+                                : 'bg-white border-slate-200/80 text-slate-600 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900',
+                        ]"
+                        class="flex h-9 w-9 rounded-full sm:h-9 sm:w-auto sm:rounded-full items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 active:scale-[0.95]"
+                        :title="$t('grid.view_options')"
                     >
-                        <LayoutGrid class="w-3.5 h-3.5" />
+                        <SlidersHorizontal class="w-3.5 h-3.5" />
+                        <span class="hidden lg:inline">{{ $t("grid.view_options") }}</span>
+                        <ChevronDown class="w-3 h-3 text-slate-400 hidden lg:inline" />
                     </button>
-                    <button
-                        class="flex items-center justify-center h-7 w-7 text-gray-500 hover:text-gray-900 hover:bg-white/50 rounded-full transition-all cursor-pointer"
-                        title="List Layout"
+
+                    <div
+                        v-if="showViewOptions"
+                        class="absolute right-0 mt-2 w-72 sm:w-80 bg-white border border-slate-200/80 rounded-2xl shadow-[0_12px_30px_-4px_rgba(15,23,42,0.16),0_4px_12px_-2px_rgba(15,23,42,0.06)] z-50 p-4 flex flex-col gap-4 animate-in fade-in slide-in-from-top-2 duration-200"
                     >
-                        <List class="w-3.5 h-3.5" />
-                    </button>
+                        <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                            <span class="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                                <SlidersHorizontal class="w-3.5 h-3.5 text-blue-600" />
+                                {{ $t("grid.view_options") }}
+                            </span>
+                            <button
+                                @click="showViewOptions = false"
+                                class="text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-100 cursor-pointer"
+                            >
+                                <X class="w-3.5 h-3.5" />
+                            </button>
+                        </div>
+
+                        <!-- 1. Aspect Ratio Options -->
+                        <div class="flex flex-col gap-2">
+                            <div class="flex items-center justify-between">
+                                <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                                    {{ $t("grid.aspect_ratio") }}
+                                </span>
+                            </div>
+                            <div class="grid grid-cols-4 gap-1.5">
+                                <button
+                                    v-for="ratio in ['4:3', '3:4', '16:9', '1:1', '3:2', '9:16', 'auto'] as const"
+                                    :key="ratio"
+                                    @click="postItemAspectRatio = ratio"
+                                    :class="[
+                                        postItemAspectRatio === ratio
+                                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                                            : 'bg-slate-50 text-slate-700 border-slate-200/80 hover:bg-slate-100 hover:text-slate-900',
+                                    ]"
+                                    class="h-8 rounded-lg border text-xs font-semibold transition-all cursor-pointer flex items-center justify-center"
+                                >
+                                    {{ ratio === "auto" ? $t("grid.aspect_auto") : ratio }}
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 2. Card Size Options -->
+                        <div class="flex flex-col gap-2 border-t border-slate-100 pt-3">
+                            <div class="flex items-center justify-between">
+                                <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                                    {{ $t("grid.card_size") }}
+                                </span>
+                            </div>
+                            <div class="grid grid-cols-4 gap-1.5">
+                                <button
+                                    v-for="sizeKey in ['sm', 'md', 'lg', 'xl'] as const"
+                                    :key="sizeKey"
+                                    @click="postItemSize = sizeKey"
+                                    :class="[
+                                        postItemSize === sizeKey
+                                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                                            : 'bg-slate-50 text-slate-700 border-slate-200/80 hover:bg-slate-100 hover:text-slate-900',
+                                    ]"
+                                    class="h-8 rounded-lg border text-xs font-semibold transition-all cursor-pointer flex items-center justify-center"
+                                >
+                                    {{ $t(`grid.size_${sizeKey}`) }}
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 3. Layout Mode Options -->
+                        <div class="flex flex-col gap-2 border-t border-slate-100 pt-3">
+                            <div class="flex items-center justify-between">
+                                <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                                    {{ $t("grid.layout_mode") }}
+                                </span>
+                            </div>
+                            <div class="grid grid-cols-2 gap-1.5">
+                                <button
+                                    @click="postLayoutMode = 'grid'"
+                                    :class="[
+                                        postLayoutMode === 'grid'
+                                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                                            : 'bg-slate-50 text-slate-700 border-slate-200/80 hover:bg-slate-100 hover:text-slate-900',
+                                    ]"
+                                    class="h-8 rounded-lg border text-xs font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                                >
+                                    <LayoutGrid class="w-3.5 h-3.5" />
+                                    <span>{{ $t("grid.layout_grid") }}</span>
+                                </button>
+                                <button
+                                    @click="postLayoutMode = 'list'"
+                                    :class="[
+                                        postLayoutMode === 'list'
+                                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                                            : 'bg-slate-50 text-slate-700 border-slate-200/80 hover:bg-slate-100 hover:text-slate-900',
+                                    ]"
+                                    class="h-8 rounded-lg border text-xs font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                                >
+                                    <List class="w-3.5 h-3.5" />
+                                    <span>{{ $t("grid.layout_list") }}</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -644,7 +754,7 @@ onUnmounted(() => {
                             <!-- Combobox Dropdown Card -->
                             <div
                                 v-if="showAuthorDropdown"
-                                class="absolute left-0 mt-1.5 w-64 bg-white/95 backdrop-blur-md border border-slate-200/80 rounded-xl shadow-[0_12px_30px_-4px_rgba(15,23,42,0.08),0_4px_12px_-2px_rgba(15,23,42,0.03)] z-40 p-1.5 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200"
+                                class="absolute left-0 mt-1.5 w-64 bg-white border border-slate-200/80 rounded-xl shadow-[0_12px_30px_-4px_rgba(15,23,42,0.12),0_4px_12px_-2px_rgba(15,23,42,0.04)] z-40 p-1.5 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200"
                             >
                                 <div
                                     class="flex items-center border border-slate-200/60 rounded-md bg-slate-50/50 px-2 h-8 gap-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/5 transition-all"
@@ -767,7 +877,7 @@ onUnmounted(() => {
                             <!-- Combobox Dropdown Card -->
                             <div
                                 v-if="showTagDropdown"
-                                class="absolute right-0 mt-1.5 w-64 bg-white/95 backdrop-blur-md border border-slate-200/80 rounded-xl shadow-[0_12px_30px_-4px_rgba(15,23,42,0.08),0_4px_12px_-2px_rgba(15,23,42,0.03)] z-40 p-1.5 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200"
+                                class="absolute right-0 mt-1.5 w-64 bg-white border border-slate-200/80 rounded-xl shadow-[0_12px_30px_-4px_rgba(15,23,42,0.12),0_4px_12px_-2px_rgba(15,23,42,0.04)] z-40 p-1.5 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200"
                             >
                                 <div
                                     class="flex items-center border border-slate-200/60 rounded-md bg-slate-50/50 px-2 h-8 gap-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/5 transition-all"
@@ -889,7 +999,11 @@ onUnmounted(() => {
             <div
                 v-if="Array.isArray(posts)"
                 ref="gridContainer"
-                class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4 pb-[calc(3.75rem+env(safe-area-inset-bottom)+var(--visual-viewport-bottom-offset,0))] sm:pb-0"
+                class="pb-[calc(3.75rem+env(safe-area-inset-bottom)+var(--visual-viewport-bottom-offset,0))] sm:pb-0 transition-all duration-300"
+                :class="postLayoutMode === 'list' ? 'flex flex-col gap-3' : 'grid gap-4'"
+                :style="
+                    postLayoutMode === 'list' ? undefined : { gridTemplateColumns: `repeat(auto-fill, minmax(${postItemSizePx}px, 1fr))` }
+                "
             >
                 <PostCard
                     v-for="(post, index) in posts"

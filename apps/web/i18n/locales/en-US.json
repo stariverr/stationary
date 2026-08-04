@@ -63,7 +63,18 @@
         "showing_items": "Showing {count} items",
         "page_info": "Page {current} / {total}",
         "items_per_page": "{count} / page",
-        "items_per_page_label": "Page size"
+        "items_per_page_label": "Page size",
+        "view_options": "Display Options",
+        "aspect_ratio": "Aspect Ratio",
+        "card_size": "Card Size",
+        "layout_mode": "Layout Mode",
+        "layout_grid": "Grid View",
+        "layout_list": "List View",
+        "size_sm": "Compact",
+        "size_md": "Standard",
+        "size_lg": "Large",
+        "size_xl": "Extra Large",
+        "aspect_auto": "Auto"
     },
     "platforms": {
         "XHS": "Rednote",

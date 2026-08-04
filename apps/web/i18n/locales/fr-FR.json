@@ -24,7 +24,16 @@
     "grid": {
         "showing_items": "Affichage de {count} éléments",
         "page_info": "Page {current} / {total}",
-        "items_per_page": "{count} / page"
+        "items_per_page": "{count} / page",
+        "items_per_page_label": "Taille de page",
+        "view_options": "Options d'affichage",
+        "aspect_ratio": "Proportion",
+        "card_size": "Taille de carte",
+        "size_sm": "Petite",
+        "size_md": "Moyenne",
+        "size_lg": "Grande",
+        "size_xl": "Très grande",
+        "aspect_auto": "Auto"
     },
     "platforms": {
         "XHS": "Rednote",
