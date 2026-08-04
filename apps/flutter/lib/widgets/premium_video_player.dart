@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:http/http.dart' as http;
@@ -17,7 +17,9 @@ class PremiumVideoPlayer extends StatefulWidget {
   final VoidCallback? onFullscreen;
   final bool autoPlay;
   final List<MediaTrack>? tracks;
+  final MediaPlayback? playback;
   final ValueChanged<bool>? onControlsVisibilityChanged;
+  final BorderRadiusGeometry? borderRadius;
 
   const PremiumVideoPlayer({
     super.key,
@@ -28,7 +30,9 @@ class PremiumVideoPlayer extends StatefulWidget {
     this.onFullscreen,
     this.autoPlay = false,
     this.tracks,
+    this.playback,
     this.onControlsVisibilityChanged,
+    this.borderRadius,
   });
 
   @override
@@ -51,6 +55,7 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   bool _isLongPressFastForward = false;
   double _preFastForwardSpeed = 1.0;
   bool _showSpeedMenu = false;
+  bool _isFullscreen = false;
 
   // Gesture Ripples
   IconData? _rippleIcon;
@@ -77,11 +82,21 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   }
 
   void _checkAndInitPlayer() {
-    final resolvedUrl = _resolveUrl(widget.videoUrl);
+    var rawUrl = widget.videoUrl;
     final isIosOrMac = !kIsWeb && (Platform.isIOS || Platform.isMacOS);
-    final isDash = resolvedUrl.contains('.mpd') || resolvedUrl.contains('manifest.mpd');
+    if (isIosOrMac && widget.playback?.hlsUrl != null) {
+      rawUrl = widget.playback!.hlsUrl!;
+    }
+
+    final resolvedUrl = _resolveUrl(rawUrl);
+    final isDash =
+        resolvedUrl.contains('.mpd') || resolvedUrl.contains('manifest.mpd');
 
     if (isIosOrMac && isDash) {
+      if (widget.playback?.hlsUrl != null) {
+        _initPlayer(_resolveUrl(widget.playback!.hlsUrl!));
+        return;
+      }
       setState(() {
         _isUnsupportedOnIos = true;
         _isInitializing = false;
@@ -163,7 +178,7 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
       _controlsTimer?.cancel();
       _videoPlayerController?.removeListener(_onVideoControllerUpdate);
       _videoPlayerController?.dispose();
-      
+
       // Reset selections for new video
       _selectedVideoTrackId = null;
       _selectedAudioTrackId = null;
@@ -171,7 +186,7 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
       _subtitleCues = null;
       _showSettingsMenu = false;
       _showInfoMenu = false;
-      
+
       _checkAndInitPlayer();
     } else if (oldWidget.autoPlay != widget.autoPlay) {
       if (widget.autoPlay) {
@@ -199,11 +214,21 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
 
   void _startControlsTimer() {
     _controlsTimer?.cancel();
-    if (!_showControls || _isSeeking || !_videoPlayerController!.value.isPlaying) {
+    if (!_showControls ||
+        _isSeeking ||
+        _showSpeedMenu ||
+        _showSettingsMenu ||
+        _showInfoMenu ||
+        !_videoPlayerController!.value.isPlaying) {
       return;
     }
     _controlsTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted && _videoPlayerController!.value.isPlaying && !_isSeeking && !_showSpeedMenu) {
+      if (mounted &&
+          _videoPlayerController!.value.isPlaying &&
+          !_isSeeking &&
+          !_showSpeedMenu &&
+          !_showSettingsMenu &&
+          !_showInfoMenu) {
         _setShowControls(false);
       }
     });
@@ -228,7 +253,7 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     setState(() {
       if (_videoPlayerController!.value.isPlaying) {
         _videoPlayerController!.pause();
-        _rippleIcon = LucideIcons.pause;
+        _rippleIcon = null;
         _cancelControlsTimer(); // Keep controls visible when paused
       } else {
         _videoPlayerController!.play();
@@ -244,15 +269,15 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     final currentPos = _videoPlayerController!.value.position;
     final duration = _videoPlayerController!.value.duration;
     Duration targetPos = currentPos + Duration(seconds: seconds);
-    
+
     if (targetPos < Duration.zero) {
       targetPos = Duration.zero;
     } else if (targetPos > duration) {
       targetPos = duration;
     }
-    
+
     _videoPlayerController!.seekTo(targetPos);
-    
+
     _setShowControls(true);
     _startControlsTimer();
 
@@ -263,7 +288,10 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   }
 
   void _startFastForward() {
-    if (_videoPlayerController == null || !_videoPlayerController!.value.isPlaying) return;
+    if (_videoPlayerController == null ||
+        !_videoPlayerController!.value.isPlaying) {
+      return;
+    }
     _preFastForwardSpeed = _playbackSpeed;
     _videoPlayerController!.setPlaybackSpeed(2.0);
     setState(() {
@@ -296,7 +324,9 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
         _videoPlayerController!.setVolume(_volumeBeforeMute);
         _isMuted = false;
       } else {
-        _volumeBeforeMute = _videoPlayerController!.value.volume > 0 ? _videoPlayerController!.value.volume : 1.0;
+        _volumeBeforeMute = _videoPlayerController!.value.volume > 0
+            ? _videoPlayerController!.value.volume
+            : 1.0;
         _videoPlayerController!.setVolume(0.0);
         _isMuted = true;
       }
@@ -311,6 +341,77 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     });
   }
 
+  String _formatLanguageName(String? lang) {
+    if (lang == null || lang.trim().isEmpty) return '';
+    final code = lang.trim();
+    final lower = code.toLowerCase().replaceAll('_', '-');
+
+    const Map<String, String> langMap = {
+      'zh-cn': '简体中文 (zh-CN)',
+      'zh-hans': '简体中文 (zh-CN)',
+      'zh-tw': '繁體中文 (zh-TW)',
+      'zh-hant': '繁體中文 (zh-TW)',
+      'zh-hk': '繁體中文 (zh-HK)',
+      'zh': '中文 (zh)',
+      'en-us': 'English (en-US)',
+      'en-gb': 'English (en-GB)',
+      'en': 'English (en)',
+      'ja-jp': '日本語 (ja-JP)',
+      'ja': '日本語 (ja)',
+      'ko-kr': '한국어 (ko-KR)',
+      'ko': '한국어 (ko)',
+      'fr-fr': 'Français (fr-FR)',
+      'fr': 'Français (fr)',
+      'de-de': 'Deutsch (de-DE)',
+      'de': 'Deutsch (de)',
+      'es-es': 'Español (es-ES)',
+      'es': 'Español (es)',
+      'ru-ru': 'Русский (ru-RU)',
+      'ru': 'Русский (ru)',
+      'pt-br': 'Português (pt-BR)',
+      'pt': 'Português (pt)',
+      'it-it': 'Italiano (it-IT)',
+      'it': 'Italiano (it)',
+      'vi-vn': 'Tiếng Việt (vi)',
+      'vi': 'Tiếng Việt (vi)',
+      'th-th': 'ไทย (th)',
+      'th': 'ไทย (th)',
+      'id-id': 'Bahasa Indonesia (id)',
+      'id': 'Bahasa Indonesia (id)',
+      'ar': 'العربية (ar)',
+      'hi': 'हिन्दी (hi)',
+    };
+
+    if (langMap.containsKey(lower)) {
+      return langMap[lower]!;
+    }
+
+    final primary = lower.split('-').first;
+    const Map<String, String> primaryMap = {
+      'zh': '中文',
+      'en': 'English',
+      'ja': '日本語',
+      'ko': '한국어',
+      'fr': 'Français',
+      'de': 'Deutsch',
+      'es': 'Español',
+      'ru': 'Русский',
+      'pt': 'Português',
+      'it': 'Italiano',
+      'vi': 'Tiếng Việt',
+      'th': 'ไทย',
+      'id': 'Bahasa Indonesia',
+      'ar': 'العربية',
+      'hi': 'हिन्दी',
+    };
+
+    if (primaryMap.containsKey(primary)) {
+      return '${primaryMap[primary]!} ($code)';
+    }
+
+    return code;
+  }
+
   String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
     final minutes = twoDigits(duration.inMinutes.remainder(60));
@@ -322,7 +423,9 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     return '$minutes:$seconds';
   }
 
-  Future<void> _loadSubtitleTrack(MediaTrack track) async {
+  String? _selectedSubtitleTrackId;
+
+  Future<void> _loadSubtitleFromUrl(String url, {String? trackId}) async {
     try {
       final token = ApiService().token;
       final headers = <String, String>{};
@@ -330,16 +433,20 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
         headers['Authorization'] = 'Bearer $token';
       }
 
-      final resolvedUrl = _resolveUrl(track.url);
+      final resolvedUrl = _resolveUrl(url);
       final response = await http.get(Uri.parse(resolvedUrl), headers: headers);
 
       if (response.statusCode == 200) {
         setState(() {
           _subtitleCues = parseWebVtt(response.body);
-          _activeSubtitleTrack = track;
+          if (trackId != null) {
+            _selectedSubtitleTrackId = trackId;
+          }
         });
       } else {
-        throw Exception('Failed to load subtitle file (HTTP ${response.statusCode})');
+        throw Exception(
+          'Failed to load subtitle file (HTTP ${response.statusCode})',
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -353,25 +460,50 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     }
   }
 
+  Future<void> _loadSubtitleTrack(MediaTrack track) async {
+    await _loadSubtitleFromUrl(track.url, trackId: track.id);
+    _activeSubtitleTrack = track;
+  }
+
   MediaTrack? get _activeVideoTrack {
-    final videoTracks = (widget.tracks ?? []).where((t) => t.type == 'VIDEO' && t.purpose == 'CONTENT').toList();
+    final videoTracks = (widget.tracks ?? [])
+        .where((t) => t.type == 'VIDEO' && t.purpose == 'CONTENT')
+        .toList();
     if (videoTracks.isEmpty) return null;
     if (_selectedVideoTrackId != null) {
-      return videoTracks.firstWhere((t) => t.id == _selectedVideoTrackId, orElse: () => videoTracks.first);
+      return videoTracks.firstWhere(
+        (t) => t.id == _selectedVideoTrackId,
+        orElse: () => videoTracks.first,
+      );
     }
-    return videoTracks.firstWhere((t) => t.isDefault, orElse: () => videoTracks.first);
+    return videoTracks.firstWhere(
+      (t) => t.isDefault || t.isPrimary,
+      orElse: () => videoTracks.first,
+    );
   }
 
   MediaTrack? get _activeAudioTrack {
-    final audioTracks = (widget.tracks ?? []).where((t) => t.type == 'AUDIO' && t.purpose == 'CONTENT').toList();
+    final audioTracks = (widget.tracks ?? [])
+        .where((t) => t.type == 'AUDIO' && t.purpose == 'CONTENT')
+        .toList();
     if (audioTracks.isEmpty) return null;
     if (_selectedAudioTrackId != null) {
-      return audioTracks.firstWhere((t) => t.id == _selectedAudioTrackId, orElse: () => audioTracks.first);
+      return audioTracks.firstWhere(
+        (t) => t.id == _selectedAudioTrackId,
+        orElse: () => audioTracks.first,
+      );
     }
-    return audioTracks.firstWhere((t) => t.isDefault, orElse: () => audioTracks.first);
+    return audioTracks.firstWhere(
+      (t) => t.isDefault,
+      orElse: () => audioTracks.first,
+    );
   }
 
-  Future<void> _switchTrack({String? videoTrackId, String? audioTrackId}) async {
+  Future<void> _switchTrackByUrl(
+    String url, {
+    String? videoTrackId,
+    String? audioTrackId,
+  }) async {
     if (_videoPlayerController == null) return;
 
     final currentPos = _videoPlayerController!.value.position;
@@ -388,24 +520,101 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     await _videoPlayerController?.dispose();
     _videoPlayerController = null;
 
-    String newUrl = _resolveUrl(widget.videoUrl);
-    final isDash = newUrl.contains('.mpd') || newUrl.contains('manifest.mpd');
+    final newUrl = _resolveUrl(url);
 
-    if (isDash) {
+    try {
+      final token = ApiService().token;
+      final headers = <String, String>{};
+      if (token != null) {
+        headers['Authorization'] = 'Bearer $token';
+      }
+
+      _videoPlayerController = VideoPlayerController.networkUrl(
+        Uri.parse(newUrl),
+        httpHeaders: headers,
+      );
+
+      await _videoPlayerController!.initialize();
+      _videoPlayerController!.addListener(_onVideoControllerUpdate);
+
+      await _videoPlayerController!.seekTo(currentPos);
+      if (wasPlaying) {
+        await _videoPlayerController!.play();
+        _startControlsTimer();
+      }
+
+      if (mounted) {
+        setState(() {
+          _isInitializing = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isInitializing = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _switchTrack({
+    String? videoTrackId,
+    String? audioTrackId,
+  }) async {
+    if (_videoPlayerController == null) return;
+
+    final currentPos = _videoPlayerController!.value.position;
+    final wasPlaying = _videoPlayerController!.value.isPlaying;
+
+    setState(() {
+      _isInitializing = true;
+      if (videoTrackId != null) _selectedVideoTrackId = videoTrackId;
+      if (audioTrackId != null) _selectedAudioTrackId = audioTrackId;
+    });
+
+    _controlsTimer?.cancel();
+    _videoPlayerController?.removeListener(_onVideoControllerUpdate);
+    await _videoPlayerController?.dispose();
+    _videoPlayerController = null;
+
+    var rawUrl = widget.videoUrl;
+    final isIosOrMac = !kIsWeb && (Platform.isIOS || Platform.isMacOS);
+    if (isIosOrMac && widget.playback?.hlsUrl != null) {
+      rawUrl = widget.playback!.hlsUrl!;
+    }
+
+    String newUrl = _resolveUrl(rawUrl);
+    final isDash = newUrl.contains('.mpd') || newUrl.contains('manifest.mpd');
+    final isHls = newUrl.contains('.m3u8') || newUrl.contains('manifest.m3u8');
+
+    if (isDash || isHls) {
       final uri = Uri.parse(newUrl);
       final queryParams = Map<String, String>.from(uri.queryParameters);
-      if (_selectedVideoTrackId != null) {
+      if (_selectedVideoTrackId != null && _selectedVideoTrackId != 'default') {
         queryParams['video_track_id'] = _selectedVideoTrackId!;
+      } else {
+        queryParams.remove('video_track_id');
       }
-      if (_selectedAudioTrackId != null) {
+      if (_selectedAudioTrackId != null && _selectedAudioTrackId != 'default') {
         queryParams['audio_track_id'] = _selectedAudioTrackId!;
+      } else {
+        queryParams.remove('audio_track_id');
       }
       newUrl = uri.replace(queryParameters: queryParams).toString();
     } else {
       if (videoTrackId != null && videoTrackId != 'default') {
-        final matches = (widget.tracks ?? []).where((t) => t.id == videoTrackId).toList();
-        if (matches.isNotEmpty) {
-          newUrl = _resolveUrl(matches.first.url);
+        final playback = widget.playback;
+        final variantMatch = playback?.variants.where((v) => v.trackId == videoTrackId).toList();
+        if (variantMatch != null && variantMatch.isNotEmpty) {
+          newUrl = _resolveUrl(variantMatch.first.url);
+        } else {
+          final matches = (widget.tracks ?? [])
+              .where((t) => t.id == videoTrackId)
+              .toList();
+          if (matches.isNotEmpty) {
+            newUrl = _resolveUrl(matches.first.url);
+          }
         }
       }
     }
@@ -446,10 +655,94 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     }
   }
 
+  Widget _buildSettingsTile({
+    required String title,
+    String? subtitle,
+    required bool isActive,
+    required VoidCallback onTap,
+  }) {
+    const activeTextColor = Colors.white;
+    const activeAccentColor = Color(0xFF38BDF8); // Vibrant cyan / sky blue
+    final activeBgColor = activeAccentColor.withValues(alpha: 0.15);
+    final inactiveTextColor = Colors.white.withValues(alpha: 0.7);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          margin: const EdgeInsets.symmetric(vertical: 2),
+          decoration: BoxDecoration(
+            color: isActive ? activeBgColor : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: isActive
+                ? Border.all(
+                    color: activeAccentColor.withValues(alpha: 0.4),
+                    width: 1,
+                  )
+                : null,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: isActive ? activeTextColor : inactiveTextColor,
+                        fontSize: 13,
+                        fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                      ),
+                    ),
+                    if (subtitle != null && subtitle.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          color: isActive
+                              ? activeAccentColor
+                              : Colors.white.withValues(alpha: 0.4),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (isActive)
+                const Icon(
+                  LucideIcons.check,
+                  color: activeAccentColor,
+                  size: 16,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSettingsContent() {
-    final videoTracks = (widget.tracks ?? []).where((t) => t.type == 'VIDEO' && t.purpose == 'CONTENT').toList();
-    final audioTracks = (widget.tracks ?? []).where((t) => t.type == 'AUDIO' && t.purpose == 'CONTENT').toList();
-    final subtitleTracks = (widget.tracks ?? []).where((t) => t.type == 'SUBTITLE' && t.purpose == 'CONTENT').toList();
+    final playback = widget.playback;
+    final hasPlaybackVariants = playback != null && playback.variants.isNotEmpty;
+    final hasPlaybackAudio = playback != null && playback.audioTracks.isNotEmpty;
+    final hasPlaybackSubtitles = playback != null && playback.subtitleTracks.isNotEmpty;
+
+    final videoTracks = (widget.tracks ?? [])
+        .where((t) => t.type == 'VIDEO' && t.purpose == 'CONTENT')
+        .toList();
+    final audioTracks = (widget.tracks ?? [])
+        .where((t) => t.type == 'AUDIO' && t.purpose == 'CONTENT')
+        .toList();
+    final subtitleTracks = (widget.tracks ?? [])
+        .where((t) => t.type == 'SUBTITLE' && t.purpose == 'CONTENT')
+        .toList();
 
     return Material(
       color: Colors.transparent,
@@ -461,31 +754,120 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
             children: [
               const Text(
                 'Settings',
-                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               IconButton(
-                icon: const Icon(LucideIcons.x, color: Colors.white70, size: 20),
+                icon: const Icon(
+                  LucideIcons.x,
+                  color: Colors.white70,
+                  size: 20,
+                ),
                 onPressed: () => setState(() => _showSettingsMenu = false),
-              )
+              ),
             ],
           ),
           const Divider(color: Colors.white10),
-          
-          if (videoTracks.isNotEmpty) ...[
+
+          if (hasPlaybackVariants) ...[
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
-              child: Text('Video Quality', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+              child: Text(
+                'Video Quality',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            ...playback.variants.map((v) {
+              final isActive =
+                  _selectedVideoTrackId == v.trackId ||
+                  (_selectedVideoTrackId == null &&
+                      (v.trackId == playback.trackId ||
+                          v == playback.variants.first));
+              
+              String title = v.label;
+              if (title.isEmpty ||
+                  title == 'HIGH' ||
+                  title == 'MEDIUM' ||
+                  title == 'LOW' ||
+                  title == 'ORIGINAL') {
+                title = v.height != null
+                    ? '${v.height}p'
+                    : (v.quality.isNotEmpty ? v.quality : 'Video Quality');
+              }
+
+              List<String> details = [];
+              if (v.height != null && !title.contains('${v.height}p')) {
+                details.add('${v.height}p');
+              }
+              if (v.codec != null && v.codec!.isNotEmpty) {
+                details.add(v.codec!.toUpperCase());
+              }
+              if (v.frameRate != null && v.frameRate! > 0) {
+                details.add('${v.frameRate!.round()}fps');
+              }
+              final subtitle = details.isNotEmpty ? details.join(' • ') : null;
+
+              return _buildSettingsTile(
+                title: title,
+                subtitle: subtitle,
+                isActive: isActive,
+                onTap: () {
+                  if (playback.protocol == 'DASH') {
+                    _switchTrack(videoTrackId: v.trackId);
+                  } else {
+                    _switchTrackByUrl(v.url, videoTrackId: v.trackId);
+                  }
+                  setState(() => _showSettingsMenu = false);
+                },
+              );
+            }),
+            const Divider(color: Colors.white10),
+          ] else if (videoTracks.isNotEmpty) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
+              child: Text(
+                'Video Quality',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
             ...videoTracks.map((t) {
               final isActive = _activeVideoTrack?.id == t.id;
-              final width = t.metadata['width'] ?? 0;
-              final height = t.metadata['height'] ?? 0;
-              final label = t.displayName ?? t.quality ?? (width > 0 && height > 0 ? '${width}x$height' : 'Default');
-              return ListTile(
-                dense: true,
-                visualDensity: VisualDensity.compact,
-                title: Text(label, style: TextStyle(color: isActive ? Theme.of(context).colorScheme.primary : Colors.white70)),
-                trailing: isActive ? Icon(LucideIcons.check, color: Theme.of(context).colorScheme.primary, size: 16) : null,
+              final width = t.metadata['width'] ?? t.width ?? 0;
+              final height = t.metadata['height'] ?? t.height ?? 0;
+
+              String title = t.displayName ?? '';
+              if (title.isEmpty) {
+                if (height > 0) {
+                  title = '${height}p';
+                } else if (width > 0 && height > 0) {
+                  title = '${width}x$height';
+                } else if (t.quality != null &&
+                    t.quality != 'HIGH' &&
+                    t.quality != 'MEDIUM' &&
+                    t.quality != 'LOW') {
+                  title = t.quality!;
+                } else {
+                  title = 'Video Quality';
+                }
+              }
+
+              final subtitle = t.codec?.toUpperCase();
+
+              return _buildSettingsTile(
+                title: title,
+                subtitle: subtitle,
+                isActive: isActive,
                 onTap: () {
                   _switchTrack(videoTrackId: t.id);
                   setState(() => _showSettingsMenu = false);
@@ -495,19 +877,115 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
             const Divider(color: Colors.white10),
           ],
 
-          if (audioTracks.isNotEmpty) ...[
+          if (hasPlaybackAudio) ...[
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
-              child: Text('Audio Track', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+              child: Text(
+                'Audio Track',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            ...playback.audioTracks.map((a) {
+              final isActive =
+                  _selectedAudioTrackId == a.trackId ||
+                  (_selectedAudioTrackId == null && a.isDefault);
+
+              final formattedLang = _formatLanguageName(a.language);
+              String title = a.label;
+              if (title.isEmpty ||
+                  title == 'HIGH' ||
+                  title == 'MEDIUM' ||
+                  title == 'LOW' ||
+                  title == 'ORIGINAL' ||
+                  title == a.language ||
+                  title == 'Audio') {
+                if (formattedLang.isNotEmpty) {
+                  title = formattedLang;
+                } else if (a.codec != null) {
+                  title = 'Audio (${a.codec!.toUpperCase()})';
+                } else {
+                  title = 'Audio Track';
+                }
+              }
+
+              List<String> details = [];
+              if (formattedLang.isNotEmpty && !title.contains(formattedLang)) {
+                details.add(formattedLang);
+              }
+              if (a.codec != null &&
+                  !title.toUpperCase().contains(a.codec!.toUpperCase())) {
+                details.add(a.codec!.toUpperCase());
+              }
+              if (a.channels != null && a.channels! > 0) {
+                details.add('${a.channels} ch');
+              }
+              final subtitle = details.isNotEmpty ? details.join(' • ') : null;
+
+              return _buildSettingsTile(
+                title: title,
+                subtitle: subtitle,
+                isActive: isActive,
+                onTap: () {
+                  _switchTrack(audioTrackId: a.trackId);
+                  setState(() => _showSettingsMenu = false);
+                },
+              );
+            }),
+            const Divider(color: Colors.white10),
+          ] else if (audioTracks.isNotEmpty) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
+              child: Text(
+                'Audio Track',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
             ...audioTracks.map((t) {
               final isActive = _activeAudioTrack?.id == t.id;
-              final label = t.displayName ?? t.language ?? t.variantKey ?? 'Audio Track';
-              return ListTile(
-                dense: true,
-                visualDensity: VisualDensity.compact,
-                title: Text(label, style: TextStyle(color: isActive ? Theme.of(context).colorScheme.primary : Colors.white70)),
-                trailing: isActive ? Icon(LucideIcons.check, color: Theme.of(context).colorScheme.primary, size: 16) : null,
+
+              final formattedLang = _formatLanguageName(t.language);
+              String title = t.displayName ?? '';
+              if (title.isEmpty ||
+                  title == 'HIGH' ||
+                  title == 'MEDIUM' ||
+                  title == 'LOW' ||
+                  title == 'ORIGINAL' ||
+                  title == t.language) {
+                if (formattedLang.isNotEmpty) {
+                  title = formattedLang;
+                } else if (t.variantKey != null &&
+                    t.variantKey != 'HIGH' &&
+                    !t.variantKey!.toUpperCase().contains('HIGH')) {
+                  title = t.variantKey!;
+                } else if (t.codec != null) {
+                  title = 'Audio (${t.codec!.toUpperCase()})';
+                } else {
+                  title = 'Audio Track';
+                }
+              }
+
+              List<String> details = [];
+              if (formattedLang.isNotEmpty && !title.contains(formattedLang)) {
+                details.add(formattedLang);
+              }
+              if (t.codec != null &&
+                  !title.toUpperCase().contains(t.codec!.toUpperCase())) {
+                details.add(t.codec!.toUpperCase());
+              }
+              final subtitle = details.isNotEmpty ? details.join(' • ') : null;
+
+              return _buildSettingsTile(
+                title: title,
+                subtitle: subtitle,
+                isActive: isActive,
                 onTap: () {
                   _switchTrack(audioTrackId: t.id);
                   setState(() => _showSettingsMenu = false);
@@ -517,16 +995,78 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
             const Divider(color: Colors.white10),
           ],
 
-          if (subtitleTracks.isNotEmpty) ...[
+          if (hasPlaybackSubtitles) ...[
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
-              child: Text('Subtitles', style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold)),
+              child: Text(
+                'Subtitles',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
-            ListTile(
-              dense: true,
-              visualDensity: VisualDensity.compact,
-              title: Text('Off', style: TextStyle(color: _activeSubtitleTrack == null ? Theme.of(context).colorScheme.primary : Colors.white70)),
-              trailing: _activeSubtitleTrack == null ? Icon(LucideIcons.check, color: Theme.of(context).colorScheme.primary, size: 16) : null,
+            _buildSettingsTile(
+              title: 'Off',
+              isActive:
+                  _activeSubtitleTrack == null &&
+                  _selectedSubtitleTrackId == null,
+              onTap: () {
+                setState(() {
+                  _activeSubtitleTrack = null;
+                  _selectedSubtitleTrackId = null;
+                  _subtitleCues = null;
+                  _showSettingsMenu = false;
+                });
+              },
+            ),
+            ...playback.subtitleTracks.map((s) {
+              final isActive = _selectedSubtitleTrackId == s.trackId;
+
+              final formattedLang = _formatLanguageName(s.language);
+              String title = s.label;
+              if (title.isEmpty ||
+                  title == s.language ||
+                  title == 'Subtitle' ||
+                  title == 'HIGH' ||
+                  title == 'MEDIUM' ||
+                  title == 'LOW') {
+                title = formattedLang.isNotEmpty ? formattedLang : 'Subtitle';
+              } else if (formattedLang.isNotEmpty &&
+                  !title.contains(formattedLang)) {
+                title = '$title ($formattedLang)';
+              }
+
+              final subtitle = s.format?.toUpperCase();
+
+              return _buildSettingsTile(
+                title: title,
+                subtitle: subtitle,
+                isActive: isActive,
+                onTap: () {
+                  if (s.url != null) {
+                    _loadSubtitleFromUrl(s.url!, trackId: s.trackId);
+                  }
+                  setState(() => _showSettingsMenu = false);
+                },
+              );
+            }),
+          ] else if (subtitleTracks.isNotEmpty) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
+              child: Text(
+                'Subtitles',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            _buildSettingsTile(
+              title: 'Off',
+              isActive: _activeSubtitleTrack == null,
               onTap: () {
                 setState(() {
                   _activeSubtitleTrack = null;
@@ -537,19 +1077,28 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
             ),
             ...subtitleTracks.map((t) {
               final isActive = _activeSubtitleTrack?.id == t.id;
-              final label = t.displayName ?? t.language ?? 'Subtitle';
-              return ListTile(
-                dense: true,
-                visualDensity: VisualDensity.compact,
-                title: Text(label, style: TextStyle(color: isActive ? Theme.of(context).colorScheme.primary : Colors.white70)),
-                trailing: isActive ? Icon(LucideIcons.check, color: Theme.of(context).colorScheme.primary, size: 16) : null,
+
+              final formattedLang = _formatLanguageName(t.language);
+              String title = t.displayName ?? '';
+              if (title.isEmpty ||
+                  title == t.language ||
+                  title == 'Subtitle') {
+                title = formattedLang.isNotEmpty ? formattedLang : 'Subtitle';
+              } else if (formattedLang.isNotEmpty &&
+                  !title.contains(formattedLang)) {
+                title = '$title ($formattedLang)';
+              }
+
+              return _buildSettingsTile(
+                title: title,
+                isActive: isActive,
                 onTap: () {
                   _loadSubtitleTrack(t);
                   setState(() => _showSettingsMenu = false);
                 },
               );
             }),
-          ]
+          ],
         ],
       ),
     );
@@ -558,17 +1107,51 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   Widget _buildInfoContent() {
     final activeVideo = _activeVideoTrack;
     final activeAudio = _activeAudioTrack;
-    
-    final width = activeVideo?.metadata['width'] ?? _videoPlayerController?.value.size.width.toInt() ?? 0;
-    final height = activeVideo?.metadata['height'] ?? _videoPlayerController?.value.size.height.toInt() ?? 0;
+    final playback = widget.playback;
+
+    int width =
+        activeVideo?.metadata['width'] ??
+        activeVideo?.width ??
+        _videoPlayerController?.value.size.width.toInt() ??
+        0;
+    int height =
+        activeVideo?.metadata['height'] ??
+        activeVideo?.height ??
+        _videoPlayerController?.value.size.height.toInt() ??
+        0;
+
+    if (width == 0 && playback != null && playback.variants.isNotEmpty) {
+      width = playback.variants.first.width ?? 0;
+      height = playback.variants.first.height ?? 0;
+    }
+
     final resolution = width > 0 && height > 0 ? '${width}x$height' : 'Unknown';
-    
-    final videoCodec = activeVideo?.codec ?? activeVideo?.metadata['codecs'] ?? 'Unknown';
-    final audioCodec = activeAudio?.codec ?? activeAudio?.metadata['codecs'] ?? 'Unknown';
-    
-    final duration = _videoPlayerController != null ? _formatDuration(_videoPlayerController!.value.duration) : 'Unknown';
-    final isDash = widget.videoUrl.contains('.mpd') || widget.videoUrl.contains('manifest.mpd');
-    
+
+    final videoCodec =
+        activeVideo?.codec ??
+        activeVideo?.metadata['codecs'] ??
+        (playback != null && playback.variants.isNotEmpty
+            ? playback.variants.first.codec
+            : null) ??
+        'Unknown';
+    final audioCodec =
+        activeAudio?.codec ??
+        activeAudio?.metadata['codecs'] ??
+        (playback != null && playback.audioTracks.isNotEmpty
+            ? playback.audioTracks.first.codec
+            : null) ??
+        'Unknown';
+
+    final duration = _videoPlayerController != null
+        ? _formatDuration(_videoPlayerController!.value.duration)
+        : 'Unknown';
+    final formatStr =
+        playback?.protocol ??
+        (widget.videoUrl.contains('.mpd') ||
+                widget.videoUrl.contains('manifest.mpd')
+            ? 'MPEG-DASH (MPD)'
+            : 'Progressive (MP4)');
+
     Widget infoRow(String label, String value) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 6.0),
@@ -577,10 +1160,24 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
           children: [
             SizedBox(
               width: 100,
-              child: Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12, decoration: TextDecoration.none)),
+              child: Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                  decoration: TextDecoration.none,
+                ),
+              ),
             ),
             Expanded(
-              child: Text(value, style: const TextStyle(color: Colors.white70, fontSize: 12, decoration: TextDecoration.none)),
+              child: Text(
+                value,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  decoration: TextDecoration.none,
+                ),
+              ),
             ),
           ],
         ),
@@ -598,25 +1195,108 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
             children: [
               const Text(
                 'Video Information',
-                style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               IconButton(
-                icon: const Icon(LucideIcons.x, color: Colors.white70, size: 18),
+                icon: const Icon(
+                  LucideIcons.x,
+                  color: Colors.white70,
+                  size: 18,
+                ),
                 onPressed: () => setState(() => _showInfoMenu = false),
-              )
+              ),
             ],
           ),
           const Divider(color: Colors.white10),
-          infoRow('Format', isDash ? 'MPEG-DASH (MPD)' : 'Progressive (MP4)'),
+          infoRow('Format', formatStr),
           infoRow('Resolution', resolution),
           infoRow('Duration', duration),
           infoRow('Video Codec', videoCodec),
           infoRow('Audio Codec', audioCodec),
           if (activeVideo != null && activeVideo.metadata['bandwidth'] != null)
-            infoRow('Bitrate', '${(activeVideo.metadata['bandwidth'] / 1000).round()} kbps'),
+            infoRow(
+              'Bitrate',
+              '${(activeVideo.metadata['bandwidth'] / 1000).round()} kbps',
+            ),
           if (activeAudio != null && activeAudio.metadata['bandwidth'] != null)
-            infoRow('Audio Bitrate', '${(activeAudio.metadata['bandwidth'] / 1000).round()} kbps'),
+            infoRow(
+              'Audio Bitrate',
+              '${(activeAudio.metadata['bandwidth'] / 1000).round()} kbps',
+            ),
         ],
+      ),
+    );
+  }
+
+  String _formatSpeedLabel(double speed) {
+    return speed == speed.roundToDouble() ? '${speed.toInt()}×' : '$speed×';
+  }
+
+  Widget _buildControlButton({
+    Key? key,
+    required IconData icon,
+    required VoidCallback? onPressed,
+    String? tooltip,
+    bool emphasized = false,
+    bool active = false,
+    bool isCenterPlay = false,
+  }) {
+    final double buttonSize = isCenterPlay ? 52 : (emphasized ? 38 : 34);
+    final double iconSize = isCenterPlay ? 26 : (emphasized ? 19 : 17);
+
+    final button = Material(
+      key: key,
+      color: isCenterPlay
+          ? Colors.black.withValues(alpha: 0.65)
+          : emphasized
+          ? Colors.white.withValues(alpha: 0.18)
+          : active
+          ? Colors.white.withValues(alpha: 0.22)
+          : Colors.white.withValues(alpha: 0.08),
+      shape: CircleBorder(
+        side: (emphasized || isCenterPlay)
+            ? BorderSide(
+                color: Colors.white.withValues(alpha: isCenterPlay ? 0.3 : 0.22),
+                width: 1,
+              )
+            : BorderSide.none,
+      ),
+      child: InkWell(
+        onTap: onPressed,
+        customBorder: const CircleBorder(),
+        child: SizedBox(
+          width: buttonSize,
+          height: buttonSize,
+          child: Icon(
+            icon,
+            color: Colors.white,
+            size: iconSize,
+          ),
+        ),
+      ),
+    );
+
+    if (tooltip == null) return button;
+    return Tooltip(message: tooltip, child: button);
+  }
+
+  Widget _buildPlayerState({
+    required Widget child,
+    EdgeInsetsGeometry? padding,
+  }) {
+    return SizedBox(
+      width: widget.width,
+      height: widget.height ?? 200,
+      child: ClipRRect(
+        borderRadius: widget.borderRadius ?? BorderRadius.zero,
+        child: ColoredBox(
+          color: const Color(0xFF09090B),
+          child: Padding(padding: padding ?? EdgeInsets.zero, child: child),
+        ),
       ),
     );
   }
@@ -624,15 +1304,9 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final darkBg = const Color(0xFF09090B);
 
     if (_isUnsupportedOnIos) {
-      return Container(
-        height: 200,
-        decoration: BoxDecoration(
-          color: darkBg,
-          borderRadius: BorderRadius.circular(8),
-        ),
+      return _buildPlayerState(
         padding: const EdgeInsets.all(16),
         child: Center(
           child: Column(
@@ -664,26 +1338,8 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
       );
     }
 
-    if (_isInitializing) {
-      return Container(
-        height: 200,
-        decoration: BoxDecoration(
-          color: darkBg,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: const Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-
     if (_error != null) {
-      return Container(
-        height: 200,
-        decoration: BoxDecoration(
-          color: darkBg,
-          borderRadius: BorderRadius.circular(8),
-        ),
+      return _buildPlayerState(
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -702,9 +1358,10 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 8),
-              TextButton(
+              OutlinedButton.icon(
                 onPressed: _checkAndInitPlayer,
-                child: const Text('Retry'),
+                icon: const Icon(LucideIcons.refreshCw, size: 15),
+                label: const Text('Retry'),
               ),
             ],
           ),
@@ -712,31 +1369,78 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
       );
     }
 
-    final controller = _videoPlayerController!;
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        color: Colors.black,
+    if (_videoPlayerController == null) {
+      return _buildPlayerState(
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // 1. The Video Player (centered, maintaining aspect ratio)
-            Center(
-              child: AspectRatio(
-                aspectRatio: controller.value.aspectRatio,
-                child: VideoPlayer(controller),
+            if (widget.coverUrl != null && widget.coverUrl!.isNotEmpty)
+              Image.network(
+                _resolveUrl(widget.coverUrl!),
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) =>
+                    const SizedBox.shrink(),
+              ),
+            ColoredBox(
+              color: Colors.black.withValues(alpha: 0.62),
+              child: const Center(
+                child: SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                ),
               ),
             ),
+          ],
+        ),
+      );
+    }
 
-            // 2. Gesture Overlay Detector
+    final controller = _videoPlayerController!;
+
+    return ClipRRect(
+      borderRadius: widget.borderRadius ?? BorderRadius.zero,
+      child: ColoredBox(
+        color: const Color(0xFF050506),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Center(
+              child: controller.value.isInitialized
+                  ? AspectRatio(
+                      aspectRatio: controller.value.aspectRatio,
+                      child: VideoPlayer(controller),
+                    )
+                  : (widget.coverUrl != null && widget.coverUrl!.isNotEmpty
+                      ? Image.network(
+                          _resolveUrl(widget.coverUrl!),
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              const SizedBox.shrink(),
+                        )
+                      : Container(color: Colors.black)),
+            ),
+
+            if (_isInitializing || !controller.value.isInitialized)
+              if (widget.coverUrl != null && widget.coverUrl!.isNotEmpty)
+                Positioned.fill(
+                  child: Image.network(
+                    _resolveUrl(widget.coverUrl!),
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) =>
+                        const SizedBox.shrink(),
+                  ),
+                ),
+
             GestureDetector(
               behavior: HitTestBehavior.translucent,
               onTap: _toggleControls,
               onDoubleTapDown: (TapDownDetails details) {
                 final RenderBox box = context.findRenderObject() as RenderBox;
-                final width = box.size.width;
-                if (details.localPosition.dx < width / 2) {
+                if (details.localPosition.dx < box.size.width / 2) {
                   _seekRelative(-10);
                 } else {
                   _seekRelative(10);
@@ -748,7 +1452,41 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
               child: Container(),
             ),
 
-            // 3. Transient Play/Pause Ripple Overlay
+            if (_isInitializing || !controller.value.isInitialized)
+              Center(
+                child: Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Center(
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    ),
+                  ),
+                ),
+              )
+            else if (!controller.value.isPlaying && _rippleIcon == null)
+              Center(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  child: _buildControlButton(
+                    key: const ValueKey('center-play'),
+                    icon: LucideIcons.play,
+                    tooltip: 'Play',
+                    isCenterPlay: true,
+                    onPressed: _togglePlay,
+                  ),
+                ),
+              ),
+
             if (_rippleIcon != null)
               Positioned.fill(
                 child: Center(
@@ -766,7 +1504,6 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                 ),
               ),
 
-            // 4. Double Tap Seek Overlay
             if (_seekRippleIsLeft != null)
               Positioned(
                 left: _seekRippleIsLeft! ? 0 : null,
@@ -786,303 +1523,343 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                 ),
               ),
 
-            // 5. Long Press Fast Forward Status
             if (_isLongPressFastForward)
               Positioned(
-                top: 16,
+                top: 18,
                 left: 0,
                 right: 0,
                 child: Center(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(20),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.6),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.1),
-                          ),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              LucideIcons.chevronsRight,
-                              color: Colors.white,
-                              size: 14,
-                            ),
-                            SizedBox(width: 6),
-                            Text(
-                              '2.0X Fast Forwarding',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.72),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.14),
                       ),
                     ),
-                  ),
-                ),
-              ),
-
-            // 6. Glassmorphic Speed Selection Menu
-            if (_showSpeedMenu && _showControls)
-              Positioned(
-                bottom: 66,
-                right: widget.onFullscreen != null ? 48 : 12,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                    child: Container(
-                      width: 90,
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.65),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.15),
-                        ),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 7,
                       ),
-                      child: Column(
+                      child: Row(
                         mainAxisSize: MainAxisSize.min,
-                        children: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((speed) {
-                          final isSelected = _playbackSpeed == speed;
-                          return InkWell(
-                            onTap: () => _changeSpeed(speed),
-                            child: Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                              alignment: Alignment.center,
-                              color: isSelected ? Colors.white.withValues(alpha: 0.1) : Colors.transparent,
-                              child: Text(
-                                '${speed}x',
-                                style: TextStyle(
-                                  color: isSelected ? theme.colorScheme.primary : Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                ),
-                              ),
+                        children: [
+                          Icon(
+                            LucideIcons.fastForward,
+                            color: Colors.white,
+                            size: 14,
+                          ),
+                          SizedBox(width: 7),
+                          Text(
+                            '2× speed',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
                             ),
-                          );
-                        }).toList(),
+                          ),
+                        ],
                       ),
                     ),
                   ),
                 ),
               ),
 
-            // 7. Glassmorphic Controls Bar
             Positioned(
-              bottom: 12,
-              left: 12,
-              right: 12,
-              child: AnimatedOpacity(
-                opacity: _showControls ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeInOut,
-                child: IgnorePointer(
-                  ignoring: !_showControls,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.4),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.1),
-                            width: 1.0,
-                          ),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // Scrubber Slider
-                            PremiumVideoProgressBar(
-                              controller: controller,
-                              onDragStart: () {
-                                setState(() {
-                                  _isSeeking = true;
-                                });
-                                _cancelControlsTimer();
-                              },
-                              onDragEnd: () {
-                                setState(() {
-                                  _isSeeking = false;
-                                });
-                                _startControlsTimer();
-                              },
-                            ),
-                            const SizedBox(height: 6),
-                            // Button controls
-                            LayoutBuilder(
-                              builder: (context, constraints) {
-                                final theme = Theme.of(context);
-                                final isMobile = theme.platform == TargetPlatform.iOS || theme.platform == TargetPlatform.android;
-                                final isNarrow = constraints.maxWidth < 450;
-                                final isVeryNarrow = constraints.maxWidth < 280;
-                                final double spacing = isVeryNarrow ? 6.0 : (isNarrow ? 8.0 : 12.0);
-                                final bool showVolumeSlider = !isMobile && !isNarrow;
-
-                                return Row(
-                                  children: [
-                                    InkWell(
-                                      onTap: _togglePlay,
-                                      borderRadius: BorderRadius.circular(4),
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(6.0),
-                                        child: Icon(
-                                          controller.value.isPlaying ? LucideIcons.pause : LucideIcons.play,
-                                          color: Colors.white,
-                                          size: 18,
-                                        ),
-                                      ),
-                                    ),
-                                    SizedBox(width: spacing),
-                                    // Time counter
-                                    Text(
-                                      '${_formatDuration(controller.value.position)} / ${_formatDuration(controller.value.duration)}',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: isNarrow ? 10 : 11,
-                                        fontFamily: 'monospace',
-                                      ),
-                                    ),
-                                    const Spacer(),
-                                    // Volume Controller
-                                    GestureDetector(
-                                      onTap: _toggleMute,
-                                      behavior: HitTestBehavior.opaque,
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 2.0),
-                                        child: Icon(
-                                          _isMuted || controller.value.volume == 0
-                                              ? LucideIcons.volumeX
-                                              : controller.value.volume < 0.5
-                                                  ? LucideIcons.volume1
-                                                  : LucideIcons.volume2,
-                                          color: Colors.white,
-                                          size: 16,
-                                        ),
-                                      ),
-                                    ),
-                                    if (showVolumeSlider) ...[
-                                      const SizedBox(width: 4),
-                                      SizedBox(
-                                        width: 50,
-                                        child: SliderTheme(
-                                          data: SliderTheme.of(context).copyWith(
-                                            trackHeight: 2.0,
-                                            activeTrackColor: Colors.white,
-                                            inactiveTrackColor: Colors.white24,
-                                            thumbColor: Colors.white,
-                                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 4.0),
-                                            overlayShape: const RoundSliderOverlayShape(overlayRadius: 8.0),
-                                          ),
-                                          child: Slider(
-                                            value: _isMuted ? 0.0 : controller.value.volume,
-                                            onChanged: _setVolume,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                    SizedBox(width: spacing),
-                                    // Speed selector trigger
-                                    InkWell(
-                                      onTap: () {
-                                        setState(() {
-                                          _showSpeedMenu = !_showSpeedMenu;
-                                        });
-                                      },
-                                      borderRadius: BorderRadius.circular(4),
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                        child: Text(
-                                          '${_playbackSpeed}x',
-                                          style: TextStyle(
-                                            color: Colors.white,
-                                            fontSize: isNarrow ? 10 : 11,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    SizedBox(width: spacing),
-                                    InkWell(
-                                      onTap: () {
-                                        setState(() {
-                                          _showInfoMenu = !_showInfoMenu;
-                                          _showSettingsMenu = false;
-                                        });
-                                      },
-                                      borderRadius: BorderRadius.circular(4),
-                                      child: const Padding(
-                                        padding: EdgeInsets.all(6.0),
-                                        child: Icon(
-                                          LucideIcons.info,
-                                          color: Colors.white,
-                                          size: 18,
-                                        ),
-                                      ),
-                                    ),
-                                    SizedBox(width: spacing),
-                                    InkWell(
-                                      onTap: () {
-                                        setState(() {
-                                          _showSettingsMenu = !_showSettingsMenu;
-                                          _showInfoMenu = false;
-                                        });
-                                      },
-                                      borderRadius: BorderRadius.circular(4),
-                                      child: const Padding(
-                                        padding: EdgeInsets.all(6.0),
-                                        child: Icon(
-                                          LucideIcons.settings,
-                                          color: Colors.white,
-                                          size: 18,
-                                        ),
-                                      ),
-                                    ),
-                                    if (widget.onFullscreen != null) ...[
-                                      SizedBox(width: spacing),
-                                      InkWell(
-                                        onTap: widget.onFullscreen,
-                                        borderRadius: BorderRadius.circular(4),
-                                        child: const Padding(
-                                          padding: EdgeInsets.all(6.0),
-                                          child: Icon(
-                                            LucideIcons.maximize,
-                                            color: Colors.white,
-                                            size: 18,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                );
-                              },
-                            ),
-                          ],
-                        ),
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                ignoring: !_showControls,
+                child: AnimatedOpacity(
+                  opacity: _showControls ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOut,
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(14, 34, 14, 14),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Colors.transparent, Color(0xE6000000)],
                       ),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        PremiumVideoProgressBar(
+                          controller: controller,
+                          onDragStart: () {
+                            setState(() {
+                              _isSeeking = true;
+                            });
+                            _cancelControlsTimer();
+                          },
+                          onDragEnd: () {
+                            setState(() {
+                              _isSeeking = false;
+                            });
+                            _startControlsTimer();
+                          },
+                        ),
+                        const SizedBox(height: 3),
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final isMobile =
+                                theme.platform == TargetPlatform.iOS ||
+                                theme.platform == TargetPlatform.android;
+                            final isCompact = constraints.maxWidth < 430;
+                            final isVeryCompact = constraints.maxWidth < 330;
+                            final spacing = isVeryCompact ? 5.0 : 8.0;
+                            final showVolumeSlider = !isMobile && !isCompact;
+                            final showInfoButton = !isVeryCompact;
+
+                            return Row(
+                              children: [
+                                _buildControlButton(
+                                  icon: controller.value.isPlaying
+                                      ? LucideIcons.pause
+                                      : LucideIcons.play,
+                                  tooltip: controller.value.isPlaying
+                                      ? 'Pause'
+                                      : 'Play',
+                                  emphasized: true,
+                                  onPressed: _togglePlay,
+                                ),
+                                SizedBox(width: spacing),
+                                _buildControlButton(
+                                  icon: _isMuted || controller.value.volume == 0
+                                      ? LucideIcons.volumeX
+                                      : controller.value.volume < 0.5
+                                      ? LucideIcons.volume1
+                                      : LucideIcons.volume2,
+                                  tooltip: _isMuted ? 'Unmute' : 'Mute',
+                                  active: _isMuted,
+                                  onPressed: _toggleMute,
+                                ),
+                                if (showVolumeSlider) ...[
+                                  const SizedBox(width: 2),
+                                  SizedBox(
+                                    width: 56,
+                                    child: SliderTheme(
+                                      data: SliderTheme.of(context).copyWith(
+                                        trackHeight: 3,
+                                        activeTrackColor: Colors.white,
+                                        inactiveTrackColor: Colors.white24,
+                                        thumbColor: Colors.white,
+                                        thumbShape: const RoundSliderThumbShape(
+                                          enabledThumbRadius: 4,
+                                        ),
+                                        overlayShape:
+                                            const RoundSliderOverlayShape(
+                                              overlayRadius: 8,
+                                            ),
+                                      ),
+                                      child: Slider(
+                                        value: _isMuted
+                                            ? 0.0
+                                            : controller.value.volume,
+                                        onChanged: _setVolume,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                SizedBox(width: spacing + 2),
+                                Text(
+                                  '${_formatDuration(controller.value.position)} / ${_formatDuration(controller.value.duration)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.fade,
+                                  softWrap: false,
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(
+                                      alpha: 0.9,
+                                    ),
+                                    fontSize: isCompact ? 10 : 11,
+                                    fontWeight: FontWeight.w600,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
+                                ),
+                                const Spacer(),
+                                Material(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(999),
+                                  child: InkWell(
+                                    onTap: () {
+                                      setState(() {
+                                        _showSpeedMenu = !_showSpeedMenu;
+                                        _showInfoMenu = false;
+                                        _showSettingsMenu = false;
+                                      });
+                                      if (_showSpeedMenu) {
+                                        _cancelControlsTimer();
+                                      }
+                                    },
+                                    borderRadius: BorderRadius.circular(999),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 8,
+                                      ),
+                                      child: Text(
+                                        _formatSpeedLabel(_playbackSpeed),
+                                        style: TextStyle(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.92,
+                                          ),
+                                          fontSize: isCompact ? 10 : 11,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                if (showInfoButton) ...[
+                                  SizedBox(width: spacing),
+                                  _buildControlButton(
+                                    icon: LucideIcons.info,
+                                    tooltip: 'Video information',
+                                    active: _showInfoMenu,
+                                    onPressed: () {
+                                      setState(() {
+                                        _showInfoMenu = !_showInfoMenu;
+                                        _showSettingsMenu = false;
+                                        _showSpeedMenu = false;
+                                      });
+                                      _cancelControlsTimer();
+                                    },
+                                  ),
+                                ],
+                                SizedBox(width: spacing),
+                                _buildControlButton(
+                                  icon: LucideIcons.settings2,
+                                  tooltip: 'Settings',
+                                  active: _showSettingsMenu,
+                                  onPressed: () {
+                                    setState(() {
+                                      _showSettingsMenu = !_showSettingsMenu;
+                                      _showInfoMenu = false;
+                                      _showSpeedMenu = false;
+                                    });
+                                    _cancelControlsTimer();
+                                  },
+                                ),
+                                SizedBox(width: spacing),
+                                _buildControlButton(
+                                  icon: _isFullscreen ? LucideIcons.minimize : LucideIcons.maximize,
+                                  tooltip: _isFullscreen ? 'Exit Fullscreen' : 'Fullscreen',
+                                  onPressed: () {
+                                    setState(() {
+                                      _isFullscreen = !_isFullscreen;
+                                    });
+                                    if (widget.onFullscreen != null) {
+                                      widget.onFullscreen!();
+                                    }
+                                    if (_isFullscreen) {
+                                      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+                                    } else {
+                                      SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
+                                    }
+                                  },
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
             ),
 
-            // 8. Custom Subtitles Overlay
+            if (_showSpeedMenu && _showControls)
+              Positioned(
+                bottom: 86,
+                right: 14,
+                child: Material(
+                  color: const Color(0xFF171719),
+                  elevation: 12,
+                  shadowColor: Colors.black.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(12),
+                  clipBehavior: Clip.antiAlias,
+                  child: Container(
+                    width: 104,
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.12),
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.fromLTRB(13, 11, 13, 7),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Speed',
+                              style: TextStyle(
+                                color: Colors.white54,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.4,
+                              ),
+                            ),
+                          ),
+                        ),
+                        ...[0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((speed) {
+                          final isSelected = _playbackSpeed == speed;
+                          return InkWell(
+                            onTap: () => _changeSpeed(speed),
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 13,
+                                vertical: 9,
+                              ),
+                              color: isSelected
+                                  ? Colors.white.withValues(alpha: 0.1)
+                                  : Colors.transparent,
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      _formatSpeedLabel(speed),
+                                      style: TextStyle(
+                                        color: isSelected
+                                            ? Colors.white
+                                            : Colors.white70,
+                                        fontSize: 12,
+                                        fontWeight: isSelected
+                                            ? FontWeight.w700
+                                            : FontWeight.w500,
+                                      ),
+                                    ),
+                                  ),
+                                  if (isSelected)
+                                    const Icon(
+                                      LucideIcons.check,
+                                      color: Colors.white,
+                                      size: 14,
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
             if (_subtitleCues != null && _videoPlayerController != null)
               Positioned(
-                bottom: _showControls ? 76.0 : 24.0,
+                bottom: _showControls ? 96.0 : 24.0,
                 left: 20,
                 right: 20,
                 child: Center(
@@ -1093,7 +1870,6 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                 ),
               ),
 
-            // 9. Playback Settings Panel Drawer
             if (_showSettingsMenu && _showControls)
               Positioned.fill(
                 child: Stack(
@@ -1104,30 +1880,25 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                           _showSettingsMenu = false;
                         });
                       },
-                      child: Container(
-                        color: Colors.black26,
-                      ),
+                      child: Container(color: Colors.black26),
                     ),
                     Positioned(
                       right: 0,
                       top: 0,
                       bottom: 0,
                       width: 260,
-                      child: ClipRRect(
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.75),
-                              border: const Border(
-                                left: BorderSide(
-                                  color: Colors.white10,
-                                  width: 1.0,
-                                ),
+                      child: Material(
+                        color: const Color(0xFF111113),
+                        elevation: 18,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            border: Border(
+                              left: BorderSide(
+                                color: Colors.white.withValues(alpha: 0.12),
                               ),
                             ),
-                            child: _buildSettingsContent(),
                           ),
+                          child: _buildSettingsContent(),
                         ),
                       ),
                     ),
@@ -1135,7 +1906,6 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                 ),
               ),
 
-            // 10. Metadata Info Dialog
             if (_showInfoMenu && _showControls)
               Positioned.fill(
                 child: Stack(
@@ -1146,28 +1916,23 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                           _showInfoMenu = false;
                         });
                       },
-                      child: Container(
-                        color: Colors.black26,
-                      ),
+                      child: Container(color: Colors.black26),
                     ),
                     Center(
-                      child: ClipRRect(
+                      child: Material(
+                        color: const Color(0xFF171719),
+                        elevation: 20,
                         borderRadius: BorderRadius.circular(16),
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                          child: Container(
-                            width: 300,
-                            padding: const EdgeInsets.all(20),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.8),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.15),
-                                width: 1.0,
-                              ),
+                        child: Container(
+                          width: 300,
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 18),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.12),
                             ),
-                            child: _buildInfoContent(),
                           ),
+                          child: _buildInfoContent(),
                         ),
                       ),
                     ),
@@ -1197,7 +1962,8 @@ class PlayPauseRipple extends StatefulWidget {
   State<PlayPauseRipple> createState() => _PlayPauseRippleState();
 }
 
-class _PlayPauseRippleState extends State<PlayPauseRipple> with SingleTickerProviderStateMixin {
+class _PlayPauseRippleState extends State<PlayPauseRipple>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _scaleAnimation;
   late Animation<double> _opacityAnimation;
@@ -1210,9 +1976,10 @@ class _PlayPauseRippleState extends State<PlayPauseRipple> with SingleTickerProv
       duration: const Duration(milliseconds: 500),
     );
 
-    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.6).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
-    );
+    _scaleAnimation = Tween<double>(
+      begin: 0.8,
+      end: 1.6,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
 
     _opacityAnimation = TweenSequence<double>([
       TweenSequenceItem(tween: Tween<double>(begin: 0.0, end: 0.8), weight: 30),
@@ -1244,11 +2011,7 @@ class _PlayPauseRippleState extends State<PlayPauseRipple> with SingleTickerProv
                 color: Colors.black38,
                 shape: BoxShape.circle,
               ),
-              child: Icon(
-                widget.icon,
-                color: Colors.white,
-                size: 32,
-              ),
+              child: Icon(widget.icon, color: Colors.white, size: 32),
             ),
           ),
         );
@@ -1271,7 +2034,8 @@ class DoubleTapSeekIndicator extends StatefulWidget {
   State<DoubleTapSeekIndicator> createState() => _DoubleTapSeekIndicatorState();
 }
 
-class _DoubleTapSeekIndicatorState extends State<DoubleTapSeekIndicator> with SingleTickerProviderStateMixin {
+class _DoubleTapSeekIndicatorState extends State<DoubleTapSeekIndicator>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _opacityAnimation;
 
@@ -1302,42 +2066,54 @@ class _DoubleTapSeekIndicatorState extends State<DoubleTapSeekIndicator> with Si
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
-        return Opacity(
-          opacity: _opacityAnimation.value,
-          child: Container(
-            width: MediaQuery.of(context).size.width / 3.5,
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                center: widget.isLeft ? const Alignment(-1.0, 0.0) : const Alignment(1.0, 0.0),
-                radius: 1.2,
-                colors: [
-                  Colors.white.withValues(alpha: 0.12),
-                  Colors.transparent,
-                ],
-              ),
-            ),
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    widget.isLeft ? LucideIcons.chevronsLeft : LucideIcons.chevronsRight,
-                    color: Colors.white,
-                    size: 28,
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    widget.isLeft ? '-10s' : '+10s',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            return Opacity(
+              opacity: _opacityAnimation.value,
+              child: SizedBox(
+                width: constraints.maxWidth.isFinite
+                    ? constraints.maxWidth * 0.34
+                    : 120,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: widget.isLeft
+                          ? const Alignment(-1.0, 0.0)
+                          : const Alignment(1.0, 0.0),
+                      radius: 1.2,
+                      colors: [
+                        Colors.white.withValues(alpha: 0.12),
+                        Colors.transparent,
+                      ],
                     ),
                   ),
-                ],
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          widget.isLeft
+                              ? LucideIcons.chevronsLeft
+                              : LucideIcons.chevronsRight,
+                          color: Colors.white,
+                          size: 28,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          widget.isLeft ? '-10s' : '+10s',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -1422,23 +2198,28 @@ class PremiumSliderTrackShape extends RectangularSliderTrackShape {
     );
 
     // 1. Background
-    final Paint bgPaint = Paint()..color = sliderTheme.inactiveTrackColor ?? Colors.white24;
-    final RRect bgRRect = RRect.fromRectAndRadius(trackRect, const Radius.circular(1.5));
+    final Paint bgPaint = Paint()
+      ..color = sliderTheme.inactiveTrackColor ?? Colors.white24;
+    final RRect bgRRect = RRect.fromRectAndRadius(
+      trackRect,
+      const Radius.circular(1.5),
+    );
     canvas.drawRRect(bgRRect, bgPaint);
 
     // 2. Buffered range
     final duration = value.duration.inMilliseconds;
     if (duration > 0) {
-      final Paint bufferPaint = Paint()..color = Colors.white.withValues(alpha: 0.22);
+      final Paint bufferPaint = Paint()
+        ..color = Colors.white.withValues(alpha: 0.22);
       final double width = trackRect.width;
-      
+
       for (final range in value.buffered) {
         final startPct = range.start.inMilliseconds / duration;
         final endPct = range.end.inMilliseconds / duration;
-        
+
         final left = trackRect.left + startPct * width;
         final right = trackRect.left + endPct * width;
-        
+
         final Rect bufferRect = Rect.fromLTRB(
           left,
           trackRect.top,
@@ -1453,7 +2234,8 @@ class PremiumSliderTrackShape extends RectangularSliderTrackShape {
     }
 
     // 3. Active played track
-    final Paint activePaint = Paint()..color = sliderTheme.activeTrackColor ?? Colors.blue;
+    final Paint activePaint = Paint()
+      ..color = sliderTheme.activeTrackColor ?? Colors.blue;
     final Rect activeRect = Rect.fromLTRB(
       trackRect.left,
       trackRect.top,
@@ -1526,11 +2308,13 @@ List<WebVttCue> parseWebVtt(String vttContent) {
             textLines.add(lines[j].trim());
             j++;
           }
-          cues.add(WebVttCue(
-            startTime: start,
-            endTime: end,
-            text: textLines.join('\n'),
-          ));
+          cues.add(
+            WebVttCue(
+              startTime: start,
+              endTime: end,
+              text: textLines.join('\n'),
+            ),
+          );
           i = j - 1;
         }
       }
@@ -1544,21 +2328,14 @@ class SubtitleText extends StatelessWidget {
   final List<WebVttCue> cues;
   final Duration position;
 
-  const SubtitleText({
-    super.key,
-    required this.cues,
-    required this.position,
-  });
+  const SubtitleText({super.key, required this.cues, required this.position});
 
   @override
   Widget build(BuildContext context) {
     final currentCue = cues.firstWhere(
       (cue) => position >= cue.startTime && position <= cue.endTime,
-      orElse: () => WebVttCue(
-        startTime: Duration.zero,
-        endTime: Duration.zero,
-        text: '',
-      ),
+      orElse: () =>
+          WebVttCue(startTime: Duration.zero, endTime: Duration.zero, text: ''),
     );
 
     if (currentCue.text.isEmpty) {
