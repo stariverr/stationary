@@ -22,8 +22,12 @@ class ApiService {
     if (defaultTargetPlatform == TargetPlatform.android) {
       return 'http://10.0.2.2:9400';
     }
-    return 'http://localhost:4000'; // iOS Simulator / macOS desktop / etc.
+    return 'http://localhost:9400'; // iOS Simulator / macOS desktop / etc.
   }
+
+  final http.Client _client = http.Client();
+
+  http.Client get client => _client;
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
@@ -68,7 +72,7 @@ class ApiService {
   // --- Auth API ---
 
   Future<String> getSocialLoginUrl(String provider, String callbackUrl) async {
-    final response = await http.post(
+    final response = await _client.post(
       Uri.parse('$baseUrl/api/auth/sign-in/social'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'provider': provider, 'callbackURL': callbackUrl}),
@@ -83,10 +87,18 @@ class ApiService {
     }
   }
 
-  Future<void> login(String email, String password) async {
-    final response = await http.post(
+  Future<void> login(
+    String email,
+    String password, {
+    String? captchaToken,
+  }) async {
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      'x-captcha-response': captchaToken ?? '1x00000000000000000000AA',
+    };
+    final response = await _client.post(
       Uri.parse('$baseUrl/api/auth/sign-in/email'),
-      headers: {'Content-Type': 'application/json'},
+      headers: headers,
       body: jsonEncode({'email': email, 'password': password}),
     );
 
@@ -100,10 +112,19 @@ class ApiService {
     }
   }
 
-  Future<void> signUp(String email, String password, String name) async {
-    final response = await http.post(
+  Future<void> signUp(
+    String email,
+    String password,
+    String name, {
+    String? captchaToken,
+  }) async {
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      'x-captcha-response': captchaToken ?? '1x00000000000000000000AA',
+    };
+    final response = await _client.post(
       Uri.parse('$baseUrl/api/auth/sign-up/email'),
-      headers: {'Content-Type': 'application/json'},
+      headers: headers,
       body: jsonEncode({'email': email, 'password': password, 'name': name}),
     );
 
@@ -130,7 +151,7 @@ class ApiService {
   // --- Library API ---
 
   Future<List<LibraryItem>> fetchLibraries() async {
-    final response = await http.get(
+    final response = await _client.get(
       Uri.parse('$baseUrl/api/library/list?page=1&count=50'),
       headers: _headers,
     );
@@ -146,7 +167,7 @@ class ApiService {
     String name, [
     String description = '',
   ]) async {
-    final response = await http.post(
+    final response = await _client.post(
       Uri.parse('$baseUrl/api/library/create'),
       headers: _headers,
       body: jsonEncode({'name': name, 'description': description}),
@@ -187,7 +208,7 @@ class ApiService {
       '$baseUrl/api/post/list',
     ).replace(queryParameters: queryParams);
 
-    final response = await http.get(uri, headers: _headers);
+    final response = await _client.get(uri, headers: _headers);
     final json = _handleEnvelopeResponse(response);
 
     final total = json['data']['total'] as int? ?? 0;
@@ -201,13 +222,51 @@ class ApiService {
   }
 
   Future<Post> fetchPostDetail(String postId) async {
-    final response = await http.get(
+    // Fetch post detail and post media concurrently in parallel
+    final detailFuture = _client.get(
       Uri.parse('$baseUrl/api/post/detail/$postId'),
+      headers: _headers,
+    );
+    final mediaFuture = _client.get(
+      Uri.parse('$baseUrl/api/post/$postId/media?page=1&limit=100'),
+      headers: _headers,
+    );
+
+    final results = await Future.wait([detailFuture, mediaFuture]);
+    final response = results[0];
+    final mediaResponse = results[1];
+
+    final json = _handleEnvelopeResponse(response);
+    final postJson = Map<String, dynamic>.from(json['data'] as Map);
+
+    try {
+      if (mediaResponse.statusCode >= 200 && mediaResponse.statusCode < 300) {
+        final mediaJson = _handleEnvelopeResponse(mediaResponse);
+        final mediaData = mediaJson['data'];
+        if (mediaData is Map && mediaData['list'] is List) {
+          postJson['media'] = mediaData['list'];
+        }
+      }
+    } catch (_) {}
+
+    return Post.fromJson(postJson);
+  }
+
+  Future<List<Media>> fetchPostMedia(
+    String postId, {
+    int page = 1,
+    int limit = 50,
+  }) async {
+    final response = await _client.get(
+      Uri.parse('$baseUrl/api/post/$postId/media?page=$page&limit=$limit'),
       headers: _headers,
     );
 
     final json = _handleEnvelopeResponse(response);
-    return Post.fromJson(Map<String, dynamic>.from(json['data'] as Map));
+    final list = json['data']?['list'] as List? ?? [];
+    return list
+        .map((m) => Media.fromJson(Map<String, dynamic>.from(m as Map)))
+        .toList();
   }
 
   Future<List<Author>> fetchAuthors(
@@ -223,7 +282,7 @@ class ApiService {
       },
     );
 
-    final response = await http.get(uri, headers: _headers);
+    final response = await _client.get(uri, headers: _headers);
     final json = _handleEnvelopeResponse(response);
     final list = json['data'] as List? ?? [];
     return list
@@ -236,7 +295,7 @@ class ApiService {
       '$baseUrl/api/tag/list',
     ).replace(queryParameters: {'library_id': libraryId});
 
-    final response = await http.get(uri, headers: _headers);
+    final response = await _client.get(uri, headers: _headers);
     final json = _handleEnvelopeResponse(response);
     final list = json['data'] as List? ?? [];
     return list

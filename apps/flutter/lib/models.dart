@@ -46,6 +46,56 @@ class LibraryItem {
   }
 }
 
+class TrackStream {
+  final int index;
+  final String? id;
+  final String type; // "VIDEO", "AUDIO", "SUBTITLE"
+  final String? codec;
+  final String? language;
+  final String? label;
+  final String? role;
+  final int? width;
+  final int? height;
+  final int? bandwidth;
+  final int? channels;
+  final int? sampleRate;
+  final bool? isDefault;
+
+  TrackStream({
+    required this.index,
+    this.id,
+    required this.type,
+    this.codec,
+    this.language,
+    this.label,
+    this.role,
+    this.width,
+    this.height,
+    this.bandwidth,
+    this.channels,
+    this.sampleRate,
+    this.isDefault,
+  });
+
+  factory TrackStream.fromJson(Map<String, dynamic> json) {
+    return TrackStream(
+      index: (json['index'] as num?)?.toInt() ?? 0,
+      id: json['id'] as String?,
+      type: (json['type'] as String?) ?? '',
+      codec: json['codec'] as String?,
+      language: json['language'] as String?,
+      label: json['label'] as String?,
+      role: json['role'] as String?,
+      width: (json['width'] as num?)?.toInt(),
+      height: (json['height'] as num?)?.toInt(),
+      bandwidth: (json['bandwidth'] as num?)?.toInt(),
+      channels: (json['channels'] as num?)?.toInt(),
+      sampleRate: (json['sample_rate'] as num?)?.toInt(),
+      isDefault: json['is_default'] as bool?,
+    );
+  }
+}
+
 class MediaTrack {
   final String id;
   final String fileId;
@@ -58,10 +108,22 @@ class MediaTrack {
   final Map<String, dynamic> metadata;
   final String? variantKey;
   final bool isDefault;
+  final bool isPrimary;
   final String? displayName;
   final String? language;
   final String? codec;
   final bool isStale;
+  final String? mimeType;
+  final String? extension;
+  final int? width;
+  final int? height;
+  final int? bandwidth;
+  final String? container;
+  final bool? isFragmented;
+  final String? streamLayout;
+  final bool hasVideo;
+  final bool hasAudio;
+  final List<TrackStream> streams;
 
   MediaTrack({
     required this.id,
@@ -75,15 +137,34 @@ class MediaTrack {
     required this.metadata,
     this.variantKey,
     required this.isDefault,
+    this.isPrimary = false,
     this.displayName,
     this.language,
     this.codec,
     required this.isStale,
+    this.mimeType,
+    this.extension,
+    this.width,
+    this.height,
+    this.bandwidth,
+    this.container,
+    this.isFragmented,
+    this.streamLayout,
+    this.hasVideo = false,
+    this.hasAudio = false,
+    this.streams = const [],
   });
 
   factory MediaTrack.fromJson(Map<String, dynamic> json) {
+    var streamsList = <TrackStream>[];
+    if (json['streams'] is List) {
+      streamsList = (json['streams'] as List)
+          .map((s) => TrackStream.fromJson(Map<String, dynamic>.from(s as Map)))
+          .toList();
+    }
+
     return MediaTrack(
-      id: json['id'] as String,
+      id: (json['id'] as String?) ?? '',
       fileId: (json['file_id'] as String?) ?? '',
       url: (json['url'] as String?) ?? '',
       type: (json['type'] as String?) ?? '',
@@ -98,10 +179,266 @@ class MediaTrack {
           {},
       variantKey: json['variant_key'] as String?,
       isDefault: (json['is_default'] as bool?) ?? false,
+      isPrimary: (json['is_primary'] as bool?) ?? false,
       displayName: json['display_name'] as String?,
       language: json['language'] as String?,
       codec: json['codec'] as String?,
       isStale: (json['is_stale'] as bool?) ?? false,
+      mimeType: json['mime_type'] as String?,
+      extension: json['extension'] as String?,
+      width: (json['width'] as num?)?.toInt(),
+      height: (json['height'] as num?)?.toInt(),
+      bandwidth: (json['bandwidth'] as num?)?.toInt(),
+      container: json['container'] as String?,
+      isFragmented: json['is_fragmented'] as bool?,
+      streamLayout: json['stream_layout'] as String?,
+      hasVideo: (json['has_video'] as bool?) ?? false,
+      hasAudio: (json['has_audio'] as bool?) ?? false,
+      streams: streamsList,
+    );
+  }
+}
+
+class PlaybackVariant {
+  final String trackId;
+  final String url;
+  final String? mimeType;
+  final String quality;
+  final String label;
+  final String? codec;
+  final int? width;
+  final int? height;
+  final int? bandwidth;
+  final double? frameRate;
+
+  PlaybackVariant({
+    required this.trackId,
+    required this.url,
+    this.mimeType,
+    required this.quality,
+    required this.label,
+    this.codec,
+    this.width,
+    this.height,
+    this.bandwidth,
+    this.frameRate,
+  });
+
+  factory PlaybackVariant.fromJson(Map<String, dynamic> json) {
+    return PlaybackVariant(
+      trackId: (json['track_id'] as String?) ?? '',
+      url: (json['url'] as String?) ?? '',
+      mimeType: json['mime_type'] as String?,
+      quality: (json['quality'] as String?) ?? '',
+      label: (json['label'] as String?) ?? '',
+      codec: json['codec'] as String?,
+      width: (json['width'] as num?)?.toInt(),
+      height: (json['height'] as num?)?.toInt(),
+      bandwidth: (json['bandwidth'] as num?)?.toInt(),
+      frameRate: (json['frame_rate'] as num?)?.toDouble(),
+    );
+  }
+}
+
+class PlaybackAudioTrack {
+  final String id;
+  final String trackId;
+  final String source; // "INTERNAL" | "EXTERNAL"
+  final int? streamIndex;
+  final String? url;
+  final String? selectUrl;
+  final String? mimeType;
+  final String? language;
+  final String label;
+  final String? role;
+  final String? codec;
+  final int? channels;
+  final bool isDefault;
+  final bool selectable;
+
+  PlaybackAudioTrack({
+    required this.id,
+    required this.trackId,
+    required this.source,
+    this.streamIndex,
+    this.url,
+    this.selectUrl,
+    this.mimeType,
+    this.language,
+    required this.label,
+    this.role,
+    this.codec,
+    this.channels,
+    required this.isDefault,
+    required this.selectable,
+  });
+
+  factory PlaybackAudioTrack.fromJson(Map<String, dynamic> json) {
+    return PlaybackAudioTrack(
+      id: (json['id'] as String?) ?? '',
+      trackId: (json['track_id'] as String?) ?? '',
+      source: (json['source'] as String?) ?? 'EXTERNAL',
+      streamIndex: (json['stream_index'] as num?)?.toInt(),
+      url: json['url'] as String?,
+      selectUrl: json['select_url'] as String?,
+      mimeType: json['mime_type'] as String?,
+      language: json['language'] as String?,
+      label: (json['label'] as String?) ?? 'Audio',
+      role: json['role'] as String?,
+      codec: json['codec'] as String?,
+      channels: (json['channels'] as num?)?.toInt(),
+      isDefault: (json['is_default'] as bool?) ?? false,
+      selectable: (json['selectable'] as bool?) ?? false,
+    );
+  }
+}
+
+class PlaybackSubtitleTrack {
+  final String id;
+  final String trackId;
+  final String source; // "INTERNAL" | "EXTERNAL"
+  final int? streamIndex;
+  final String? url;
+  final String? mimeType;
+  final String? language;
+  final String label;
+  final String? format;
+  final bool selectable;
+
+  PlaybackSubtitleTrack({
+    required this.id,
+    required this.trackId,
+    required this.source,
+    this.streamIndex,
+    this.url,
+    this.mimeType,
+    this.language,
+    required this.label,
+    this.format,
+    required this.selectable,
+  });
+
+  factory PlaybackSubtitleTrack.fromJson(Map<String, dynamic> json) {
+    return PlaybackSubtitleTrack(
+      id: (json['id'] as String?) ?? '',
+      trackId: (json['track_id'] as String?) ?? '',
+      source: (json['source'] as String?) ?? 'EXTERNAL',
+      streamIndex: (json['stream_index'] as num?)?.toInt(),
+      url: json['url'] as String?,
+      mimeType: json['mime_type'] as String?,
+      language: json['language'] as String?,
+      label: (json['label'] as String?) ?? 'Subtitle',
+      format: json['format'] as String?,
+      selectable: (json['selectable'] as bool?) ?? false,
+    );
+  }
+}
+
+class PlaybackCapabilities {
+  final bool qualitySwitching;
+  final bool audioSwitching;
+  final bool subtitleSwitching;
+  final bool protocolSupportsSwitching;
+
+  PlaybackCapabilities({
+    required this.qualitySwitching,
+    required this.audioSwitching,
+    required this.subtitleSwitching,
+    required this.protocolSupportsSwitching,
+  });
+
+  factory PlaybackCapabilities.fromJson(Map<String, dynamic> json) {
+    return PlaybackCapabilities(
+      qualitySwitching: (json['quality_switching'] as bool?) ?? false,
+      audioSwitching: (json['audio_switching'] as bool?) ?? false,
+      subtitleSwitching: (json['subtitle_switching'] as bool?) ?? false,
+      protocolSupportsSwitching:
+          (json['protocol_supports_switching'] as bool?) ?? false,
+    );
+  }
+}
+
+class MediaPlayback {
+  final String? url;
+  final String? mimeType;
+  final String? protocol; // "DASH" | "HLS" | "PROGRESSIVE"
+  final String? hlsUrl;
+  final String? dashUrl;
+  final String? trackId;
+  final List<PlaybackVariant> variants;
+  final PlaybackCapabilities capabilities;
+  final List<PlaybackAudioTrack> audioTracks;
+  final List<PlaybackSubtitleTrack> subtitleTracks;
+
+  MediaPlayback({
+    this.url,
+    this.mimeType,
+    this.protocol,
+    this.hlsUrl,
+    this.dashUrl,
+    this.trackId,
+    required this.variants,
+    required this.capabilities,
+    required this.audioTracks,
+    required this.subtitleTracks,
+  });
+
+  factory MediaPlayback.fromJson(Map<String, dynamic> json) {
+    var variantsList = <PlaybackVariant>[];
+    if (json['variants'] is List) {
+      variantsList = (json['variants'] as List)
+          .map(
+            (v) => PlaybackVariant.fromJson(Map<String, dynamic>.from(v as Map)),
+          )
+          .toList();
+    }
+
+    var audioTracksList = <PlaybackAudioTrack>[];
+    if (json['audio_tracks'] is List) {
+      audioTracksList = (json['audio_tracks'] as List)
+          .map(
+            (a) =>
+                PlaybackAudioTrack.fromJson(Map<String, dynamic>.from(a as Map)),
+          )
+          .toList();
+    }
+
+    var subtitleTracksList = <PlaybackSubtitleTrack>[];
+    if (json['subtitle_tracks'] is List) {
+      subtitleTracksList = (json['subtitle_tracks'] as List)
+          .map(
+            (s) => PlaybackSubtitleTrack.fromJson(
+              Map<String, dynamic>.from(s as Map),
+            ),
+          )
+          .toList();
+    }
+
+    PlaybackCapabilities caps;
+    if (json['capabilities'] is Map) {
+      caps = PlaybackCapabilities.fromJson(
+        Map<String, dynamic>.from(json['capabilities'] as Map),
+      );
+    } else {
+      caps = PlaybackCapabilities(
+        qualitySwitching: false,
+        audioSwitching: false,
+        subtitleSwitching: false,
+        protocolSupportsSwitching: false,
+      );
+    }
+
+    return MediaPlayback(
+      url: json['url'] as String?,
+      mimeType: json['mime_type'] as String?,
+      protocol: json['protocol'] as String?,
+      hlsUrl: json['hls_url'] as String?,
+      dashUrl: json['dash_url'] as String?,
+      trackId: json['track_id'] as String?,
+      variants: variantsList,
+      capabilities: caps,
+      audioTracks: audioTracksList,
+      subtitleTracks: subtitleTracksList,
     );
   }
 }
@@ -109,6 +446,7 @@ class MediaTrack {
 class Media {
   final String id;
   final String? eid;
+  final String? postId;
   final String? source;
   final String title;
   final String? description;
@@ -122,10 +460,12 @@ class Media {
   final int? height;
   final List<MediaTrack> tracks;
   final List<MediaPreviewItem> covers;
+  final MediaPlayback? playback;
 
   Media({
     required this.id,
     this.eid,
+    this.postId,
     this.source,
     required this.title,
     this.description,
@@ -139,6 +479,7 @@ class Media {
     this.height,
     required this.tracks,
     this.covers = const [],
+    this.playback,
   });
 
   factory Media.fromJson(Map<String, dynamic> json) {
@@ -159,9 +500,17 @@ class Media {
           .toList();
     }
 
+    MediaPlayback? playback;
+    if (json['playback'] != null && json['playback'] is Map) {
+      playback = MediaPlayback.fromJson(
+        Map<String, dynamic>.from(json['playback'] as Map),
+      );
+    }
+
     return Media(
       id: json['id'] as String,
       eid: json['eid'] as String?,
+      postId: json['post_id'] as String?,
       source: json['source'] as String?,
       title: (json['title'] as String?) ?? '',
       description: json['description'] as String?,
@@ -171,10 +520,11 @@ class Media {
       publishedTime: json['published_time'] as String?,
       url: json['url'] as String?,
       coverUrl: json['cover_url'] as String?,
-      width: json['width'] as int?,
-      height: json['height'] as int?,
+      width: (json['width'] as num?)?.toInt(),
+      height: (json['height'] as num?)?.toInt(),
       tracks: tracksList,
       covers: coversList,
+      playback: playback,
     );
   }
 }
@@ -249,12 +599,20 @@ class MediaPreviewItem {
   final String type; // e.g., "VIDEO", "IMAGE", "AUDIO"
   final String quality; // e.g., "LOW", "MEDIUM", "HIGH", "ORIGINAL"
   final String? codec;
+  final String? mimeType;
+  final int? width;
+  final int? height;
+  final int? bandwidth;
 
   MediaPreviewItem({
     this.url,
     required this.type,
     required this.quality,
     this.codec,
+    this.mimeType,
+    this.width,
+    this.height,
+    this.bandwidth,
   });
 
   factory MediaPreviewItem.fromJson(Map<String, dynamic> json) {
@@ -263,6 +621,10 @@ class MediaPreviewItem {
       type: (json['type'] as String?) ?? 'IMAGE',
       quality: (json['quality'] as String?) ?? 'ORIGINAL',
       codec: json['codec'] as String?,
+      mimeType: json['mime_type'] as String?,
+      width: (json['width'] as num?)?.toInt(),
+      height: (json['height'] as num?)?.toInt(),
+      bandwidth: (json['bandwidth'] as num?)?.toInt(),
     );
   }
 }
@@ -458,6 +820,26 @@ class MediaPreview {
         ? (sortedCovers.last.url ?? '')
         : (coverUrl ?? url ?? '');
   }
+
+  Media toMedia() {
+    return Media(
+      id: id,
+      eid: eid,
+      source: source,
+      title: title,
+      description: description,
+      type: type,
+      sortOrder: sortOrder,
+      createTime: createTime,
+      publishedTime: publishedTime,
+      url: url,
+      coverUrl: coverUrl,
+      width: width,
+      height: height,
+      tracks: const [],
+      covers: covers,
+    );
+  }
 }
 
 class PostListItem {
@@ -523,6 +905,25 @@ class PostListItem {
       description: json['description'] as String?,
       tags: tagsList,
       media: mediaList,
+    );
+  }
+
+  Post toPost() {
+    return Post(
+      id: id,
+      eid: eid,
+      title: title,
+      source: source,
+      authorName: authorName,
+      createTime: createTime,
+      publishedTime: publishedTime,
+      url: url,
+      syncStatus: syncStatus,
+      lastError: lastError,
+      authorAvatarUrl: authorAvatarUrl,
+      description: description,
+      tags: tags,
+      media: media.map((m) => m.toMedia()).toList(),
     );
   }
 }
