@@ -4,7 +4,9 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
+  flutter_inappwebview_windows
   gal
+  jxl_coder
   url_launcher_windows
 )
 
