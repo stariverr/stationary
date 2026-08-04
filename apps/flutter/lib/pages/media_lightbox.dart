@@ -28,15 +28,18 @@ class _MediaLightboxState extends State<MediaLightbox> {
   late int _currentIndex;
   bool _isSaving = false;
   bool _showOverlays = true;
-  late PhotoViewController _photoViewController;
+  final Map<int, PhotoViewController> _photoViewControllers = {};
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: widget.initialIndex);
-    _photoViewController = PhotoViewController();
     _updateSystemUI();
+  }
+
+  PhotoViewController _getControllerForIndex(int index) {
+    return _photoViewControllers.putIfAbsent(index, () => PhotoViewController());
   }
 
   void _updateSystemUI() {
@@ -50,8 +53,10 @@ class _MediaLightboxState extends State<MediaLightbox> {
   @override
   void dispose() {
     _pageController.dispose();
-    _photoViewController.dispose();
-    // Restore default system UI
+    for (final controller in _photoViewControllers.values) {
+      controller.dispose();
+    }
+    _photoViewControllers.clear();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
     super.dispose();
   }
@@ -125,8 +130,6 @@ class _MediaLightboxState extends State<MediaLightbox> {
                     _showOverlays = true;
                   });
                   _updateSystemUI();
-                  _photoViewController.scale = 1.0;
-                  _photoViewController.position = Offset.zero;
                 },
                 itemBuilder: (context, index) {
                   final item = widget.mediaList[index];
@@ -140,13 +143,21 @@ class _MediaLightboxState extends State<MediaLightbox> {
                     }
                   }
 
-                  if (item.type == 'VIDEO' && item.url != null) {
+                  if (item.type == 'VIDEO' && (item.playback?.url != null || item.url != null)) {
                     return Center(
                       child: PremiumVideoPlayer(
-                        videoUrl: item.url!,
+                        videoUrl: item.playback?.url ?? item.url!,
                         coverUrl: item.coverUrl,
                         autoPlay: index == _currentIndex,
                         tracks: item.tracks,
+                        playback: item.playback,
+                        borderRadius: BorderRadius.zero,
+                        onFullscreen: () {
+                          setState(() {
+                            _showOverlays = !_showOverlays;
+                          });
+                          _updateSystemUI();
+                        },
                         onControlsVisibilityChanged: (visible) {
                           setState(() {
                             _showOverlays = visible;
@@ -166,7 +177,7 @@ class _MediaLightboxState extends State<MediaLightbox> {
                   } else if (item.url != null) {
                     return LightboxImage(
                       url: item.url!,
-                      controller: _photoViewController,
+                      controller: _getControllerForIndex(index),
                       onTap: () {
                         setState(() {
                           _showOverlays = !_showOverlays;
@@ -244,11 +255,87 @@ class _MediaLightboxState extends State<MediaLightbox> {
               ),
             ),
 
-            // Image Zoom Controls Overlay (Only for images, when overlays are visible)
+            // Left Navigation Button (<)
+            if (_showOverlays && widget.mediaList.length > 1 && _currentIndex > 0)
+              Positioned(
+                left: 16,
+                top: MediaQuery.of(context).size.height / 2 - 24,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 200),
+                  opacity: _showOverlays ? 1.0 : 0.0,
+                  child: ClipOval(
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                      child: Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.4),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            width: 1.0,
+                          ),
+                        ),
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          icon: const Icon(LucideIcons.chevronLeft, color: Colors.white, size: 24),
+                          onPressed: () {
+                            _pageController.previousPage(
+                              duration: const Duration(milliseconds: 300),
+                              curve: Curves.easeInOut,
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+            // Right Navigation Button (>)
+            if (_showOverlays && widget.mediaList.length > 1 && _currentIndex < widget.mediaList.length - 1)
+              Positioned(
+                right: 16,
+                top: MediaQuery.of(context).size.height / 2 - 24,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 200),
+                  opacity: _showOverlays ? 1.0 : 0.0,
+                  child: ClipOval(
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                      child: Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.4),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            width: 1.0,
+                          ),
+                        ),
+                        child: IconButton(
+                          padding: EdgeInsets.zero,
+                          icon: const Icon(LucideIcons.chevronRight, color: Colors.white, size: 24),
+                          onPressed: () {
+                            _pageController.nextPage(
+                              duration: const Duration(milliseconds: 300),
+                              curve: Curves.easeInOut,
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+            // Image Zoom Controls Overlay (Bottom Right)
             if (isImage && _showOverlays)
               Positioned(
                 right: 16,
-                top: MediaQuery.of(context).size.height / 2 - 80,
+                bottom: 40,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(20),
                   child: BackdropFilter(
@@ -269,22 +356,25 @@ class _MediaLightboxState extends State<MediaLightbox> {
                           IconButton(
                             icon: const Icon(LucideIcons.zoomIn, color: Colors.white, size: 20),
                             onPressed: () {
-                              final currentScale = _photoViewController.scale ?? 1.0;
-                              _photoViewController.scale = (currentScale * 1.4).clamp(0.2, 8.0);
+                              final controller = _getControllerForIndex(_currentIndex);
+                              final currentScale = controller.scale ?? 1.0;
+                              controller.scale = (currentScale * 1.4).clamp(0.2, 8.0);
                             },
                           ),
                           IconButton(
                             icon: const Icon(LucideIcons.zoomOut, color: Colors.white, size: 20),
                             onPressed: () {
-                              final currentScale = _photoViewController.scale ?? 1.0;
-                              _photoViewController.scale = (currentScale / 1.4).clamp(0.2, 8.0);
+                              final controller = _getControllerForIndex(_currentIndex);
+                              final currentScale = controller.scale ?? 1.0;
+                              controller.scale = (currentScale / 1.4).clamp(0.2, 8.0);
                             },
                           ),
                           IconButton(
                             icon: const Icon(LucideIcons.refreshCw, color: Colors.white, size: 16),
                             onPressed: () {
-                              _photoViewController.scale = 1.0;
-                              _photoViewController.position = Offset.zero;
+                              final controller = _getControllerForIndex(_currentIndex);
+                              controller.scale = null;
+                              controller.position = Offset.zero;
                             },
                           ),
                         ],
@@ -394,8 +484,9 @@ class _LightboxImageState extends State<LightboxImage> {
     return PhotoView(
       controller: widget.controller,
       imageProvider: MemoryImage(_bytes!),
+      initialScale: PhotoViewComputedScale.contained,
       minScale: PhotoViewComputedScale.contained,
-      maxScale: PhotoViewComputedScale.covered * 3.0,
+      maxScale: PhotoViewComputedScale.covered * 4.0,
       backgroundDecoration: const BoxDecoration(color: Colors.black),
       onTapUp: (context, details, controllerValue) {
         widget.onTap?.call();

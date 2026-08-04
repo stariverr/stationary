@@ -9,8 +9,15 @@ import 'media_lightbox.dart';
 
 class PostDetailPage extends StatefulWidget {
   final String postId;
+  final Post? initialPost;
 
-  const PostDetailPage({super.key, required this.postId});
+  static final Map<String, Post> detailCache = {};
+
+  const PostDetailPage({
+    super.key,
+    required this.postId,
+    this.initialPost,
+  });
 
   @override
   State<PostDetailPage> createState() => _PostDetailPageState();
@@ -22,32 +29,65 @@ class _PostDetailPageState extends State<PostDetailPage> {
   bool _isLoading = true;
   String? _errorMessage;
   int _swiperIndex = 0;
-  int? _playingInlineIndex;
+  late final PageController _pageController;
 
   @override
   void initState() {
     super.initState();
+    _pageController = PageController(initialPage: 0);
+    if (widget.initialPost != null) {
+      _post = widget.initialPost;
+      _isLoading = false;
+      PostDetailPage.detailCache[widget.postId] = widget.initialPost!;
+    } else if (PostDetailPage.detailCache.containsKey(widget.postId)) {
+      _post = PostDetailPage.detailCache[widget.postId];
+      _isLoading = false;
+    } else {
+      _isLoading = true;
+    }
     _loadPostDetail();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadPostDetail() async {
     if (!mounted) return;
-    setState(() {
-      _isLoading = true;
+
+    if (_post != null) {
+      // Keep existing post rendered while refreshing details in background
       _errorMessage = null;
-    });
+    } else if (PostDetailPage.detailCache.containsKey(widget.postId)) {
+      setState(() {
+        _post = PostDetailPage.detailCache[widget.postId];
+        _isLoading = false;
+        _errorMessage = null;
+      });
+    } else {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
 
     try {
       final post = await _apiService.fetchPostDetail(widget.postId);
+      PostDetailPage.detailCache[widget.postId] = post;
       if (!mounted) return;
       setState(() {
         _post = post;
+        _errorMessage = null;
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _errorMessage = e.toString().replaceAll('Exception: ', '');
-      });
+      if (_post == null && !PostDetailPage.detailCache.containsKey(widget.postId)) {
+        setState(() {
+          _errorMessage = e.toString().replaceAll('Exception: ', '');
+        });
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -60,12 +100,56 @@ class _PostDetailPageState extends State<PostDetailPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Post Details'),
+        titleSpacing: 0,
+        title: Row(
+          children: [
+            CircleAvatar(
+              radius: 14,
+              backgroundColor: theme.colorScheme.surfaceContainerHighest,
+              backgroundImage: _post?.authorAvatarUrl != null
+                  ? NetworkImage(_post!.authorAvatarUrl!)
+                  : null,
+              child: _post?.authorAvatarUrl == null
+                  ? const Icon(LucideIcons.user, size: 14)
+                  : null,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Post Details',
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  if (_post != null && _post!.authorName != null)
+                    Text(
+                      '${_post!.authorName} · ${_post!.source?.toUpperCase() ?? 'UNKNOWN'}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark
+                            ? const Color(0xFFA1A1AA)
+                            : const Color(0xFF71717A),
+                        fontWeight: FontWeight.normal,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
         leading: IconButton(
-          icon: const Icon(LucideIcons.arrowLeft),
+          icon: const Icon(LucideIcons.arrowLeft, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
       ),
@@ -148,7 +232,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
             width: 420,
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
-              child: _buildDetailInfoList(theme, post, showMedia: false),
+              child: _buildDetailInfoList(theme, post),
             ),
           ),
         ],
@@ -160,58 +244,204 @@ class _PostDetailPageState extends State<PostDetailPage> {
           constraints: const BoxConstraints(maxWidth: 680),
           child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
-            child: _buildDetailInfoList(theme, post, showMedia: false),
+            child: _buildDetailInfoList(theme, post),
           ),
         ),
       );
     } else {
-      // Standard mobile layout
+      // Standard mobile layout: Media on top (full width, no margin), then title and details
       return SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
-        child: _buildDetailInfoList(theme, post, showMedia: true),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (post.media.isNotEmpty)
+              _buildMediaSwiper(theme, post, isWideLayout: false),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
+              child: _buildDetailInfoList(theme, post),
+            ),
+          ],
+        ),
       );
     }
   }
 
-  Widget _buildDetailInfoList(ThemeData theme, Post post, {required bool showMedia}) {
+  Widget _buildDetailInfoList(ThemeData theme, Post post) {
     final isDark = theme.brightness == Brightness.dark;
     final media = post.media.isNotEmpty ? post.media.first : null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Title
+        // Title (Refined 18px font matching Web)
         Text(
           post.title,
-          style: theme.textTheme.headlineSmall?.copyWith(
+          style: TextStyle(
+            fontSize: 18,
             fontWeight: FontWeight.bold,
+            height: 1.3,
+            letterSpacing: -0.3,
             color: isDark ? const Color(0xFFFAFAFA) : const Color(0xFF09090B),
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
 
         // Description Paragraph
         if (post.description != null && post.description!.isNotEmpty) ...[
           Text(
             post.description!,
             style: TextStyle(
-              fontSize: 14,
-              color: isDark
-                  ? const Color(0xFFA1A1AA)
-                  : const Color(0xFF4B5563),
-              height: 1.5,
+              fontSize: 13.5,
+              color: isDark ? const Color(0xFFA1A1AA) : const Color(0xFF4B5563),
+              height: 1.55,
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
         ],
 
-        // Swiper Carousel
-        if (showMedia) _buildMediaSwiper(theme, post, isWideLayout: false),
+        // Media Assets Swiper Row (Linear/Web style)
+        if (post.media.length > 1) ...[
+          Row(
+            children: [
+              const Icon(LucideIcons.layers, size: 13, color: Color(0xFF6B7280)),
+              const SizedBox(width: 6),
+              const Text(
+                'MEDIA ASSETS',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.0,
+                  color: Color(0xFF6B7280),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${_swiperIndex + 1} / ${post.media.length}',
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF6B7280),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 54,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: post.media.length,
+              separatorBuilder: (context, index) => const SizedBox(width: 8),
+              itemBuilder: (context, idx) {
+                final item = post.media[idx];
+                final isSelected = idx == _swiperIndex;
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _swiperIndex = idx;
+                    });
+                    if (_pageController.hasClients) {
+                      _pageController.animateToPage(
+                        idx,
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeInOut,
+                      );
+                    }
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    width: 96,
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF18181B) : Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isSelected
+                            ? const Color(0xFF10B981)
+                            : (isDark
+                                ? const Color(0xFF27272A)
+                                : const Color(0xFFE5E5E5)),
+                        width: isSelected ? 1.5 : 1.0,
+                      ),
+                    ),
+                    padding: const EdgeInsets.all(4),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF09090B),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: item.coverUrl != null || item.url != null
+                              ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: Image.network(
+                                    item.coverUrl ?? item.url!,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) => Icon(
+                                      item.type == 'VIDEO'
+                                          ? LucideIcons.film
+                                          : LucideIcons.image,
+                                      size: 14,
+                                      color: Colors.white70,
+                                    ),
+                                  ),
+                                )
+                              : Icon(
+                                  item.type == 'VIDEO'
+                                      ? LucideIcons.film
+                                      : LucideIcons.image,
+                                  size: 14,
+                                  color: Colors.white70,
+                                ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '#${idx + 1}',
+                                style: TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: isSelected
+                                      ? const Color(0xFF10B981)
+                                      : (isDark
+                                          ? const Color(0xFFA1A1AA)
+                                          : const Color(0xFF6B7280)),
+                                ),
+                              ),
+                              Text(
+                                item.type,
+                                style: const TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF9CA3AF),
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
 
         const Divider(height: 1),
         const SizedBox(height: 20),
 
-        // Metadata Grid (Replicating grid grid-cols-2 gap-4 from PostDetailInfo.vue)
+        // Metadata Grid
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -221,17 +451,18 @@ class _PostDetailPageState extends State<PostDetailPage> {
                 Expanded(
                   child: _buildGridMetadataItem(
                     label: 'Author',
+                    isDark: isDark,
                     child: Row(
                       children: [
                         CircleAvatar(
-                          radius: 12,
+                          radius: 10,
                           backgroundColor:
                               theme.colorScheme.surfaceContainerHighest,
                           backgroundImage: post.authorAvatarUrl != null
                               ? NetworkImage(post.authorAvatarUrl!)
                               : null,
                           child: post.authorAvatarUrl == null
-                              ? const Icon(LucideIcons.user, size: 12)
+                              ? const Icon(LucideIcons.user, size: 10)
                               : null,
                         ),
                         const SizedBox(width: 8),
@@ -239,7 +470,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                           child: Text(
                             post.authorName ?? 'Unknown',
                             style: const TextStyle(
-                              fontSize: 14,
+                              fontSize: 13,
                               fontWeight: FontWeight.w500,
                             ),
                             overflow: TextOverflow.ellipsis,
@@ -249,15 +480,16 @@ class _PostDetailPageState extends State<PostDetailPage> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 12),
                 Expanded(
                   child: _buildGridMetadataItem(
                     label: 'Platform',
+                    isDark: isDark,
                     child: Row(
                       children: [
                         const Icon(
                           LucideIcons.globe,
-                          size: 14,
+                          size: 13,
                           color: Color(0xFF9CA3AF),
                         ),
                         const SizedBox(width: 8),
@@ -265,7 +497,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                           child: Text(
                             post.source?.toUpperCase() ?? 'UNKNOWN',
                             style: const TextStyle(
-                              fontSize: 14,
+                              fontSize: 13,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -276,28 +508,31 @@ class _PostDetailPageState extends State<PostDetailPage> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
                   child: _buildGridMetadataItem(
                     label: 'Created',
+                    isDark: isDark,
                     child: Row(
                       children: [
                         const Icon(
                           LucideIcons.calendar,
-                          size: 14,
+                          size: 13,
                           color: Color(0xFF9CA3AF),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             post.publishedTime != null
-                                ? post.publishedTime!.substring(0, 10)
+                                ? (post.publishedTime!.length >= 10
+                                      ? post.publishedTime!.substring(0, 10)
+                                      : post.publishedTime!)
                                 : 'Unknown',
                             style: const TextStyle(
-                              fontSize: 14,
+                              fontSize: 13,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -306,15 +541,16 @@ class _PostDetailPageState extends State<PostDetailPage> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 12),
                 Expanded(
                   child: _buildGridMetadataItem(
                     label: 'Dimensions',
+                    isDark: isDark,
                     child: Row(
                       children: [
                         const Icon(
                           LucideIcons.image,
-                          size: 14,
+                          size: 13,
                           color: Color(0xFF9CA3AF),
                         ),
                         const SizedBox(width: 8),
@@ -324,7 +560,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                                 ? '${media.width} x ${media.height}'
                                 : '-',
                             style: const TextStyle(
-                              fontSize: 14,
+                              fontSize: 13,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -337,14 +573,14 @@ class _PostDetailPageState extends State<PostDetailPage> {
             ),
           ],
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
 
-        // EID and Link Rows (Full-width containers)
+        // EID and Link Rows
         if (post.eid != null && post.eid!.isNotEmpty) ...[
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF18181B) : Colors.white,
+              color: isDark ? const Color(0xFF18181B) : const Color(0xFFF9FAFB),
               border: Border.all(
                 color: isDark
                     ? const Color(0xFF27272A)
@@ -357,27 +593,27 @@ class _PostDetailPageState extends State<PostDetailPage> {
               children: [
                 const Text(
                   'EID',
-                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 14),
+                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 13),
                 ),
                 Text(
                   post.eid!,
                   style: const TextStyle(
                     fontFamily: 'monospace',
                     fontWeight: FontWeight.bold,
-                    fontSize: 13,
+                    fontSize: 12.5,
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
         ],
 
         if (post.url != null && post.url!.isNotEmpty) ...[
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF18181B) : Colors.white,
+              color: isDark ? const Color(0xFF18181B) : const Color(0xFFF9FAFB),
               border: Border.all(
                 color: isDark
                     ? const Color(0xFF27272A)
@@ -390,10 +626,10 @@ class _PostDetailPageState extends State<PostDetailPage> {
               children: [
                 const Text(
                   'Source',
-                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 14),
+                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 13),
                 ),
                 GestureDetector(
-                  onTap: () {}, // Handled by standard link clicks
+                  onTap: () {},
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -402,7 +638,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                         style: TextStyle(
                           color: Color(0xFF2563EB),
                           fontWeight: FontWeight.w600,
-                          fontSize: 14,
+                          fontSize: 13,
                           decoration: TextDecoration.underline,
                         ),
                       ),
@@ -418,47 +654,59 @@ class _PostDetailPageState extends State<PostDetailPage> {
               ],
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
         ],
 
         const Divider(height: 1),
-        const SizedBox(height: 20),
+        const SizedBox(height: 18),
 
         // Tags Row
         if (post.tags.isNotEmpty) ...[
           const Row(
             children: [
-              Icon(LucideIcons.tag, size: 14, color: Color(0xFF6B7280)),
-              SizedBox(width: 8),
+              Icon(LucideIcons.tag, size: 13, color: Color(0xFF6B7280)),
+              SizedBox(width: 6),
               Text(
                 'TAGS',
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: FontWeight.bold,
                   color: Color(0xFF6B7280),
+                  letterSpacing: 1.0,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            spacing: 6,
+            runSpacing: 6,
             children: post.tags
                 .map(
                   (tag) => Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
+                      horizontal: 9,
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest,
+                      color: isDark
+                          ? const Color(0xFF27272A)
+                          : const Color(0xFFF1F5F9),
                       borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: isDark
+                            ? const Color(0xFF3F3F46)
+                            : const Color(0xFFE2E8F0),
+                        width: 0.5,
+                      ),
                     ),
                     child: Text(
-                      tag,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
+                      '#$tag',
+                      style: TextStyle(
+                        color: isDark
+                            ? const Color(0xFFD4D4D8)
+                            : const Color(0xFF475569),
+                        fontSize: 12,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -466,7 +714,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                 )
                 .toList(),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
         ],
       ],
     );
@@ -475,23 +723,34 @@ class _PostDetailPageState extends State<PostDetailPage> {
   Widget _buildGridMetadataItem({
     required String label,
     required Widget child,
+    required bool isDark,
   }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          label.toUpperCase(),
-          style: const TextStyle(
-            color: Color(0xFF9CA3AF),
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 1.1,
-          ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF18181B) : const Color(0xFFF9FAFB),
+        border: Border.all(
+          color: isDark ? const Color(0xFF27272A) : const Color(0xFFE5E5E5),
         ),
-        const SizedBox(height: 6),
-        child,
-      ],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label.toUpperCase(),
+            style: const TextStyle(
+              color: Color(0xFF9CA3AF),
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.1,
+            ),
+          ),
+          const SizedBox(height: 6),
+          child,
+        ],
+      ),
     );
   }
 
@@ -501,15 +760,15 @@ class _PostDetailPageState extends State<PostDetailPage> {
     final isDark = theme.brightness == Brightness.dark;
 
     Widget swiperWidget = ClipRRect(
-      borderRadius: BorderRadius.circular(isWideLayout ? 0 : 10),
+      borderRadius: BorderRadius.zero,
       child: Stack(
         children: [
           PageView.builder(
+            controller: _pageController,
             itemCount: post.media.length,
             onPageChanged: (idx) {
               setState(() {
                 _swiperIndex = idx;
-                _playingInlineIndex = null;
               });
             },
             itemBuilder: (context, idx) {
@@ -524,16 +783,15 @@ class _PostDetailPageState extends State<PostDetailPage> {
                 }
               }
               
-              if (item.type == 'VIDEO' && _playingInlineIndex == idx && item.url != null) {
+              if (item.type == 'VIDEO' && (item.playback?.url != null || item.url != null)) {
                 return PremiumVideoPlayer(
-                  videoUrl: item.url!,
+                  videoUrl: item.playback?.url ?? item.url!,
                   coverUrl: item.coverUrl,
-                  autoPlay: true,
+                  autoPlay: idx == _swiperIndex,
                   tracks: item.tracks,
+                  playback: item.playback,
+                  borderRadius: BorderRadius.zero,
                   onFullscreen: () {
-                    setState(() {
-                      _playingInlineIndex = null;
-                    });
                     Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -549,60 +807,20 @@ class _PostDetailPageState extends State<PostDetailPage> {
 
               return GestureDetector(
                 onTap: () {
-                  if (item.type == 'VIDEO') {
-                    setState(() {
-                      _playingInlineIndex = idx;
-                    });
-                  } else {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => MediaLightbox(
-                          mediaList: post.media,
-                          initialIndex: idx,
-                        ),
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => MediaLightbox(
+                        mediaList: post.media,
+                        initialIndex: idx,
                       ),
-                    );
-                  }
+                    ),
+                  );
                 },
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    if (item.type == 'VIDEO')
-                      Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          if (item.coverUrl != null && item.coverUrl!.isNotEmpty)
-                            PremiumImage(
-                              imageUrl: item.coverUrl!,
-                              fit: BoxFit.contain,
-                            )
-                          else
-                            Container(
-                              color: Colors.black.withValues(alpha: 0.1),
-                              child: Icon(
-                                LucideIcons.video,
-                                size: 48,
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          Center(
-                            child: Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.6),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                LucideIcons.play,
-                                color: Colors.white,
-                                size: 32,
-                              ),
-                            ),
-                          ),
-                        ],
-                      )
-                    else if (item.type == 'LIVE_PHOTO' && item.url != null && liveTrack != null)
+                    if (item.type == 'LIVE_PHOTO' && item.url != null && liveTrack != null)
                       PremiumLivePhotoPlayer(
                         imageUrl: item.url!,
                         videoUrl: liveTrack.url,
@@ -611,6 +829,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                     else if (item.url != null)
                       PremiumImage(
                         imageUrl: item.url!,
+                        placeholderUrl: item.coverUrl,
                         fit: BoxFit.contain,
                       )
                     else
@@ -649,7 +868,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
               );
             },
           ),
-          if (post.media.length > 1)
+          if (post.media.length > 1) ...[
             Positioned(
               top: 12,
               right: 12,
@@ -670,6 +889,87 @@ class _PostDetailPageState extends State<PostDetailPage> {
                 ),
               ),
             ),
+            // Left Navigation Button (<)
+            if (_swiperIndex > 0)
+              Positioned(
+                left: 12,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () {
+                        if (_pageController.hasClients) {
+                          _pageController.previousPage(
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeInOut,
+                          );
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.2),
+                            width: 1,
+                          ),
+                        ),
+                        child: const Icon(
+                          LucideIcons.chevronLeft,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            // Right Navigation Button (>)
+            if (_swiperIndex < post.media.length - 1)
+              Positioned(
+                right: 12,
+                top: 0,
+                bottom: 0,
+                child: Center(
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () {
+                        if (_pageController.hasClients) {
+                          _pageController.nextPage(
+                            duration: const Duration(milliseconds: 300),
+                            curve: Curves.easeInOut,
+                          );
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.5),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.2),
+                            width: 1,
+                          ),
+                        ),
+                        child: const Icon(
+                          LucideIcons.chevronRight,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ],
       ),
     );
@@ -705,8 +1005,8 @@ class _PostDetailPageState extends State<PostDetailPage> {
       );
     } else {
       final double screenWidth = MediaQuery.of(context).size.width;
-      final double swiperWidth = screenWidth - 48; // padding is 24 on each side
-      double swiperHeight = 320.0; // larger default
+      final double swiperWidth = screenWidth; // full screen width without margin
+      double swiperHeight = 320.0; // default height
 
       if (post.media.isNotEmpty) {
         final firstMedia = post.media.first;
@@ -715,7 +1015,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
             firstMedia.width! > 0 &&
             firstMedia.height! > 0) {
           final double ar = firstMedia.width! / firstMedia.height!;
-          swiperHeight = (swiperWidth / ar).clamp(240.0, 480.0);
+          swiperHeight = (swiperWidth / ar).clamp(240.0, 520.0);
         }
       }
 
@@ -724,17 +1024,12 @@ class _PostDetailPageState extends State<PostDetailPage> {
         children: [
           Container(
             height: swiperHeight,
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF18181B) : const Color(0xFFF9FAFB),
-              border: Border.all(
-                color: isDark ? const Color(0xFF27272A) : const Color(0xFFE5E5E5),
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
+            width: double.infinity,
+            color: isDark ? const Color(0xFF18181B) : const Color(0xFFF9FAFB),
             child: swiperWidget,
           ),
           if (post.media.length > 1) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(
@@ -753,7 +1048,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
               ),
             ),
           ],
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
         ],
       );
     }

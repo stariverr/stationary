@@ -1,6 +1,5 @@
 import 'dart:io';
-import 'dart:typed_data';
-import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 import 'package:jxl_coder/jxl_coder.dart';
 import 'package:heif_converter/heif_converter.dart';
 import 'api_service.dart';
@@ -13,6 +12,17 @@ class MediaDecoder {
     if (uri == null) return false;
     final path = uri.path.toLowerCase();
     return path.endsWith('.heic') || path.endsWith('.heif');
+  }
+
+  static bool shouldDecodeHeicManually(String url) {
+    if (!isHeic(url)) return false;
+    if (kIsWeb) return false;
+    if (defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.android) {
+      return false;
+    }
+    return true;
   }
 
   static bool isJxl(String url) {
@@ -35,7 +45,7 @@ class MediaDecoder {
       absoluteUrl = '${_apiService.baseUrl}$url';
     }
 
-    final response = await http.get(Uri.parse(absoluteUrl), headers: headers);
+    final response = await _apiService.client.get(Uri.parse(absoluteUrl), headers: headers);
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return response.bodyBytes;
     } else {
@@ -44,35 +54,37 @@ class MediaDecoder {
   }
 
   static Future<Uint8List> decodeJxl(Uint8List jxlBytes) async {
-    final decoded = await JxlCoder.jxlToJpeg(jxlBytes);
-    if (decoded == null) {
-      throw Exception('Failed to decode JXL image');
-    }
+    final decoded = await jxlBytesToJpeg(jxlBytes);
     return decoded;
   }
 
   static Future<Uint8List> decodeHeic(Uint8List heicBytes) async {
-    final tempDir = Directory.systemTemp;
-    final tempFile = File('${tempDir.path}/temp_${DateTime.now().microsecondsSinceEpoch}.heic');
-    await tempFile.writeAsBytes(heicBytes);
     try {
-      final String? jpgPath = await HeifConverter.convert(tempFile.path, format: 'jpg');
-      if (jpgPath == null) {
-        throw Exception('Failed to convert HEIC image');
+      final tempDir = Directory.systemTemp;
+      final tempFile = File('${tempDir.path}/temp_${DateTime.now().microsecondsSinceEpoch}.heic');
+      await tempFile.writeAsBytes(heicBytes);
+      try {
+        final String? jpgPath = await HeifConverter.convert(tempFile.path, format: 'jpg');
+        if (jpgPath == null) {
+          return heicBytes;
+        }
+        final jpgFile = File(jpgPath);
+        final bytes = await jpgFile.readAsBytes();
+        // Clean up
+        try {
+          await tempFile.delete();
+          await jpgFile.delete();
+        } catch (_) {}
+        return bytes;
+      } catch (e) {
+        try {
+          await tempFile.delete();
+        } catch (_) {}
+        // Fallback for desktop platforms or when plugin is unavailable (macOS/iOS decode HEIC natively)
+        return heicBytes;
       }
-      final jpgFile = File(jpgPath);
-      final bytes = await jpgFile.readAsBytes();
-      // Clean up
-      try {
-        await tempFile.delete();
-        await jpgFile.delete();
-      } catch (_) {}
-      return bytes;
-    } catch (e) {
-      try {
-        await tempFile.delete();
-      } catch (_) {}
-      rethrow;
+    } catch (_) {
+      return heicBytes;
     }
   }
 }

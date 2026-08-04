@@ -10,6 +10,7 @@ class PremiumLivePhotoPlayer extends StatefulWidget {
   final BoxFit fit;
   final double? width;
   final double? height;
+  final BorderRadiusGeometry? borderRadius;
 
   const PremiumLivePhotoPlayer({
     super.key,
@@ -18,6 +19,7 @@ class PremiumLivePhotoPlayer extends StatefulWidget {
     this.fit = BoxFit.cover,
     this.width,
     this.height,
+    this.borderRadius,
   });
 
   @override
@@ -97,7 +99,7 @@ class _PremiumLivePhotoPlayerState extends State<PremiumLivePhotoPlayer> {
   Widget build(BuildContext context) {
     final showVideo = _isInitialized && _isPlaying && !_isLoading;
 
-    return GestureDetector(
+    Widget player = GestureDetector(
       onLongPressStart: (_) => _startPlayback(),
       onLongPressEnd: (_) => _stopPlayback(),
       onLongPressUp: () => _stopPlayback(),
@@ -216,5 +218,14 @@ class _PremiumLivePhotoPlayerState extends State<PremiumLivePhotoPlayer> {
         ],
       ),
     );
+
+    if (widget.borderRadius != null) {
+      return ClipRRect(
+        borderRadius: widget.borderRadius!,
+        child: player,
+      );
+    }
+
+    return player;
   }
 }

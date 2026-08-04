@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:cloudflare_turnstile/cloudflare_turnstile.dart';
 import '../services/api_service.dart';
 
 class LoginPage extends StatefulWidget {
@@ -17,6 +18,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLogin = true;
   bool _isLoading = false;
   String? _errorMessage;
+  String? _turnstileToken;
 
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -49,9 +51,18 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       if (_isLogin) {
-        await _apiService.login(email, password);
+        await _apiService.login(
+          email,
+          password,
+          captchaToken: _turnstileToken,
+        );
       } else {
-        await _apiService.signUp(email, password, name);
+        await _apiService.signUp(
+          email,
+          password,
+          name,
+          captchaToken: _turnstileToken,
+        );
       }
       widget.onLoginSuccess();
     } catch (e) {
@@ -257,7 +268,22 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                           obscureText: true,
                         ),
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 16),
+
+                        // Cloudflare Turnstile Widget
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4.0),
+                          child: CloudflareTurnstile(
+                            siteKey: '1x00000000000000000000AA',
+                            baseUrl: _apiService.baseUrl,
+                            onTokenReceived: (token) {
+                              setState(() {
+                                _turnstileToken = token;
+                              });
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 20),
 
                         // Login Action Button (Flat layout)
                         ElevatedButton(

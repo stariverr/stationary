@@ -6,16 +6,20 @@ import '../services/api_service.dart';
 
 class PremiumImage extends StatefulWidget {
   final String imageUrl;
+  final String? placeholderUrl;
   final BoxFit fit;
   final double? width;
   final double? height;
+  final BorderRadiusGeometry? borderRadius;
 
   const PremiumImage({
     super.key,
     required this.imageUrl,
+    this.placeholderUrl,
     this.fit = BoxFit.cover,
     this.width,
     this.height,
+    this.borderRadius,
   });
 
   @override
@@ -43,9 +47,9 @@ class _PremiumImageState extends State<PremiumImage> {
 
   Future<void> _loadImage() async {
     final isJxl = MediaDecoder.isJxl(widget.imageUrl);
-    final isHeic = MediaDecoder.isHeic(widget.imageUrl);
+    final needManualHeic = MediaDecoder.shouldDecodeHeicManually(widget.imageUrl);
 
-    if (!isJxl && !isHeic) {
+    if (!isJxl && !needManualHeic) {
       setState(() {
         _decodedBytes = null;
         _isLoading = false;
@@ -103,33 +107,63 @@ class _PremiumImageState extends State<PremiumImage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    if (_isLoading) {
-      return Container(
-        width: widget.width,
-        height: widget.height,
-        color: theme.colorScheme.surfaceContainerHighest,
-        child: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              SizedBox(height: 8),
-              Text(
-                'Decoding image...',
-                style: TextStyle(fontSize: 12, color: Colors.grey),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+    Widget imageWidget;
 
-    if (_error != null) {
-      return Container(
+    if (_isLoading) {
+      if (widget.placeholderUrl != null && widget.placeholderUrl!.isNotEmpty) {
+        imageWidget = Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.network(
+              _resolveUrl(widget.placeholderUrl!),
+              headers: _getHeaders(),
+              fit: widget.fit,
+              width: widget.width,
+              height: widget.height,
+              errorBuilder: (context, error, stackTrace) => Container(
+                width: widget.width,
+                height: widget.height,
+                color: theme.colorScheme.surfaceContainerHighest,
+              ),
+            ),
+            ColoredBox(
+              color: Colors.black26,
+              child: const Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
+                ),
+              ),
+            ),
+          ],
+        );
+      } else {
+        imageWidget = Container(
+          width: widget.width,
+          height: widget.height,
+          color: theme.colorScheme.surfaceContainerHighest,
+          child: const Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Decoding image...',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+    } else if (_error != null) {
+      imageWidget = Container(
         width: widget.width,
         height: widget.height,
         color: theme.colorScheme.surfaceContainerHighest,
@@ -147,37 +181,85 @@ class _PremiumImageState extends State<PremiumImage> {
           ),
         ),
       );
-    }
-
-    if (_decodedBytes != null) {
-      return Image.memory(
+    } else if (_decodedBytes != null) {
+      imageWidget = Image.memory(
         _decodedBytes!,
         fit: widget.fit,
         width: widget.width,
         height: widget.height,
       );
+    } else {
+      imageWidget = Image.network(
+        _resolveUrl(widget.imageUrl),
+        headers: _getHeaders(),
+        fit: widget.fit,
+        width: widget.width,
+        height: widget.height,
+        frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+          if (wasSynchronouslyLoaded || frame != null) {
+            return child;
+          }
+          if (widget.placeholderUrl != null && widget.placeholderUrl!.isNotEmpty) {
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                Image.network(
+                  _resolveUrl(widget.placeholderUrl!),
+                  headers: _getHeaders(),
+                  fit: widget.fit,
+                  width: widget.width,
+                  height: widget.height,
+                  errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+                ),
+                child,
+              ],
+            );
+          }
+          return child;
+        },
+        errorBuilder: (context, error, stackTrace) {
+          if (widget.placeholderUrl != null && widget.placeholderUrl!.isNotEmpty) {
+            return Image.network(
+              _resolveUrl(widget.placeholderUrl!),
+              headers: _getHeaders(),
+              fit: widget.fit,
+              width: widget.width,
+              height: widget.height,
+              errorBuilder: (context, error, stackTrace) => Container(
+                width: widget.width,
+                height: widget.height,
+                color: theme.colorScheme.surfaceContainerHighest,
+                child: Center(
+                  child: Icon(
+                    LucideIcons.image,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            );
+          }
+          return Container(
+            width: widget.width,
+            height: widget.height,
+            color: theme.colorScheme.surfaceContainerHighest,
+            child: Center(
+              child: Icon(
+                LucideIcons.image,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          );
+        },
+      );
     }
 
-    // Standard Image
-    return Image.network(
-      _resolveUrl(widget.imageUrl),
-      headers: _getHeaders(),
-      fit: widget.fit,
-      width: widget.width,
-      height: widget.height,
-      errorBuilder: (context, error, stackTrace) {
-        return Container(
-          width: widget.width,
-          height: widget.height,
-          color: theme.colorScheme.surfaceContainerHighest,
-          child: Center(
-            child: Icon(
-              LucideIcons.image,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        );
-      },
-    );
+    if (widget.borderRadius != null) {
+      return ClipRRect(
+        borderRadius: widget.borderRadius!,
+        child: imageWidget,
+      );
+    }
+
+    return imageWidget;
   }
 }
