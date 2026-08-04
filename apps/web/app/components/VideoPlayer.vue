@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { Loader2, Maximize, Minimize, Pause, PictureInPicture2, Play, Settings, Subtitles, Volume2, VolumeX } from "@lucide/vue";
+import { Airplay, ArrowLeft, ChevronLeft, ChevronRight, Gauge, Loader2, Maximize, Minimize, MoreHorizontal, Pause, PictureInPicture2, Play, Settings, SlidersHorizontal, Subtitles, Volume2, VolumeX, X } from "@lucide/vue";
 import type { MediaPlayerElement } from "vidstack/elements";
 
 import "vidstack/player";
@@ -35,6 +34,9 @@ interface Props {
     subtitles?: Subtitle[];
     width?: number | string;
     height?: number | string;
+    autoplay?: boolean;
+    title?: string;
+    showBack?: boolean;
 }
 
 interface PlayerProvider {
@@ -71,13 +73,19 @@ const props = withDefaults(defineProps<Props>(), {
     subtitles: () => [],
     width: undefined,
     height: undefined,
+    autoplay: true,
+    title: "",
+    showBack: false,
 });
+
+const emit = defineEmits(["back"]);
 
 const { t } = useI18n();
 const playerRef = ref<MediaPlayerElement | null>(null);
 const processedSubtitles = ref<ProcessedSubtitle[]>([]);
 const isPlaying = ref(false);
 const isBuffering = ref(false);
+const isAutoplayAttempting = ref(props.autoplay);
 const isMuted = ref(false);
 const isFullscreen = ref(false);
 const isPictureInPicture = ref(false);
@@ -85,6 +93,23 @@ const runtimeQualityCount = ref(0);
 const runtimeAudioTrackCount = ref(0);
 const speedOptions = [0.5, 0.75, 1, 1.25, 1.5, 2];
 let subtitleLoadVersion = 0;
+
+const isSettingsOpen = ref(false);
+const activeSettingsTab = ref<"all" | "volume" | "quality" | "speed" | "subtitles" | "audio">("all");
+const currentSpeed = ref(1);
+
+const toggleSettings = (tab: "all" | "volume" | "quality" | "speed" | "subtitles" | "audio" = "all") => {
+    if (isSettingsOpen.value && activeSettingsTab.value === tab) {
+        isSettingsOpen.value = false;
+    } else {
+        activeSettingsTab.value = tab;
+        isSettingsOpen.value = true;
+    }
+};
+
+const closeSettings = () => {
+    isSettingsOpen.value = false;
+};
 
 const subtitleFontSize = ref<SubtitleFontSize>("normal");
 const subtitleBgStyle = ref<SubtitleBgStyle>("box");
@@ -107,12 +132,6 @@ const resolveUrl = (url: string) => {
 };
 
 const isDash = computed(() => props.playback?.protocol === "DASH" || /\.mpd($|\?)/i.test(props.src) || props.src.includes("manifest.mpd"));
-
-const aspectStyle = computed(() => {
-    const width = Number(props.width);
-    const height = Number(props.height);
-    return Number.isFinite(width) && Number.isFinite(height) && height > 0 ? { aspectRatio: `${width} / ${height}` } : {};
-});
 
 const mediaSource = computed<PlayerSource | PlayerSource[]>(() => {
     if (isDash.value) {
@@ -289,9 +308,31 @@ const handleProviderChange = (event: Event) => {
     };
 };
 
+const activeQualityLabel = ref<string>("");
+
 const handleQualitiesChange = (event: Event) => {
     runtimeQualityCount.value = (event as CustomEvent<unknown[]>).detail?.length || 0;
 };
+
+const handleQualityChange = (event: Event) => {
+    const detail = (event as CustomEvent<{ height?: number; label?: string; autoSelected?: boolean } | null>).detail;
+    if (!detail) {
+        activeQualityLabel.value = t("post_detail.viewer.player.auto_quality");
+    } else if (detail.autoSelected && detail.height) {
+        activeQualityLabel.value = `${t("post_detail.viewer.player.auto_quality")} ${detail.height}P`;
+    } else if (detail.height) {
+        activeQualityLabel.value = `${detail.height}P`;
+    } else if (detail.label) {
+        activeQualityLabel.value = detail.label;
+    } else {
+        activeQualityLabel.value = t("post_detail.viewer.player.auto_quality");
+    }
+};
+
+const displayQualityLabel = computed(() => {
+    if (activeQualityLabel.value) return activeQualityLabel.value;
+    return t("post_detail.viewer.player.quality");
+});
 
 const handleAudioTracksChange = (event: Event) => {
     const detail = (event as CustomEvent<Array<{ id?: string; label?: string; language?: string; selected?: boolean }>>).detail || [];
@@ -329,10 +370,44 @@ const handleSourceChange = () => {
     isBuffering.value = false;
 };
 
+const volumeLevel = ref(100);
+
 const handleVolumeChange = (event: Event) => {
     const detail = (event as CustomEvent<{ muted?: boolean; volume?: number }>).detail;
     isMuted.value = Boolean(detail?.muted || detail?.volume === 0);
+    if (typeof detail?.volume === "number") {
+        volumeLevel.value = Math.round(detail.volume * 100);
+    }
 };
+
+const setPlayerVolume = (val: number) => {
+    volumeLevel.value = val;
+    if (playerRef.value) {
+        playerRef.value.volume = val / 100;
+        if (val > 0 && isMuted.value) {
+            playerRef.value.muted = false;
+        }
+    }
+};
+
+const toggleMute = () => {
+    if (playerRef.value) {
+        playerRef.value.muted = !playerRef.value.muted;
+    }
+};
+
+watch(
+    () => props.autoplay,
+    (newAutoplay) => {
+        isAutoplayAttempting.value = newAutoplay;
+        if (!playerRef.value) return;
+        if (newAutoplay) {
+            playerRef.value.play().catch(() => {});
+        } else {
+            playerRef.value.pause().catch(() => {});
+        }
+    },
+);
 
 onBeforeUnmount(() => {
     subtitleLoadVersion += 1;
@@ -341,27 +416,36 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div
-        class="video-player-root relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg bg-black"
-        :style="aspectStyle"
-    >
+    <div class="video-player-root relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg bg-black">
         <ClientOnly>
             <media-player
                 ref="playerRef"
                 class="vidstack-player-core h-full w-full"
                 :src="mediaSource"
                 :poster="props.poster || undefined"
+                :autoplay="props.autoplay"
                 playsinline
                 key-target="player"
                 aria-label="Video player"
                 @provider-change="handleProviderChange"
                 @source-change="handleSourceChange"
                 @qualities-change="handleQualitiesChange"
+                @quality-change="handleQualityChange"
                 @audio-tracks-change="handleAudioTracksChange"
-                @play="isPlaying = true"
-                @pause="isPlaying = false"
+                @play="
+                    isPlaying = true;
+                    isAutoplayAttempting = false;
+                "
+                @pause="
+                    isPlaying = false;
+                    isAutoplayAttempting = false;
+                "
                 @waiting="isBuffering = true"
-                @playing="isBuffering = false"
+                @playing="
+                    isBuffering = false;
+                    isPlaying = true;
+                    isAutoplayAttempting = false;
+                "
                 @can-play="isBuffering = false"
                 @volume-change="handleVolumeChange"
                 @fullscreen-change="isFullscreen = Boolean(($event as CustomEvent<boolean>).detail)"
@@ -384,10 +468,6 @@ onBeforeUnmount(() => {
                     class="vds-poster absolute inset-0 h-full w-full object-contain"
                     :src="props.poster"
                     alt=""
-                />
-                <media-captions
-                    class="vds-captions absolute inset-x-[6%] bottom-6 z-20 pointer-events-none text-center transition-[bottom] duration-200"
-                    :class="[`sub-size-${subtitleFontSize}`, `sub-bg-${subtitleBgStyle}`]"
                 />
 
                 <media-gesture
@@ -415,7 +495,7 @@ onBeforeUnmount(() => {
                 </media-play-button>
 
                 <div
-                    v-if="isBuffering"
+                    v-if="isBuffering || (isAutoplayAttempting && !isPlaying)"
                     class="buffering-indicator pointer-events-none absolute top-1/2 left-1/2 z-25 grid h-15 w-15 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-white/20 bg-[rgba(15,15,18,0.72)] text-white shadow-2xl backdrop-blur-md"
                     aria-hidden="true"
                 >
@@ -423,228 +503,432 @@ onBeforeUnmount(() => {
                 </div>
 
                 <media-controls
-                    class="player-controls absolute inset-x-0 bottom-0 top-auto z-30 flex flex-col justify-end box-border pointer-events-none opacity-0 transition-opacity duration-220 bg-gradient-to-t from-black/45 via-black/12 to-transparent px-2.5 sm:px-3.5 pb-[max(12px,env(safe-area-inset-bottom,12px))] pt-6 data-[visible]:opacity-100 data-[active]:opacity-100"
+                    class="player-controls absolute inset-0 z-30 flex flex-col justify-between box-border pointer-events-none opacity-0 transition-opacity duration-220 bg-gradient-to-t from-black/80 via-transparent to-black/60 px-3 sm:px-4 pb-[max(10px,env(safe-area-inset-bottom,10px))] pt-3 sm:pt-3.5 data-[visible]:opacity-100 data-[active]:opacity-100"
                     hide-delay="2500"
                 >
-                    <media-controls-group class="progress-group pointer-events-auto mb-1.5 w-full">
-                        <media-time-slider class="vds-time-slider relative flex h-[22px] w-full cursor-pointer items-center touch-none">
-                            <div class="vds-slider-track" />
-                            <div class="vds-slider-track-fill vds-slider-track" />
-                            <div class="vds-slider-progress vds-slider-track" />
-                            <div class="vds-slider-thumb" />
-                            <media-slider-preview
-                                class="time-preview absolute bottom-7 left-[var(--preview-pointer,0%)] -translate-x-1/2 rounded-md border border-white/16 bg-[rgba(15,15,18,0.92)] px-2 py-1 text-[11px] text-white whitespace-nowrap tabular-nums shadow-xl backdrop-blur-md"
+                    <!-- TOP BAR: Clean & Minimal (Back button + Video Title + Cast/Airplay) -->
+                    <media-controls-group class="top-row pointer-events-auto flex w-full items-center justify-between gap-3 px-1">
+                        <div class="top-left-cluster flex items-center gap-2 min-w-0">
+                            <button
+                                v-if="props.showBack"
+                                type="button"
+                                class="control-button grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 hover:bg-white/15 hover:text-white transition-all duration-140"
+                                @click="emit('back')"
                             >
-                                <media-slider-value type="pointer" format="time" />
-                            </media-slider-preview>
-                        </media-time-slider>
-                    </media-controls-group>
-
-                    <media-controls-group class="control-row pointer-events-auto flex w-full items-center justify-between gap-1 sm:gap-3">
-                        <div class="control-cluster flex items-center gap-0.5 sm:gap-1.5 min-w-0">
-                            <media-play-button
-                                class="control-button relative grid h-8 w-8 sm:h-8.5 sm:w-8.5 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 transition-all duration-140 hover:scale-105 hover:bg-white/15 hover:text-white data-[active]:bg-sky-400/16 data-[active]:text-sky-400"
-                                :aria-label="isPlaying ? $t('post_detail.viewer.player.pause') : $t('post_detail.viewer.player.play')"
-                            >
-                                <Pause v-if="isPlaying" class="h-4.5 w-4.5 fill-current" />
-                                <Play v-else class="h-4.5 w-4.5 translate-x-px fill-current" />
-                            </media-play-button>
-
-                            <div class="volume-group group relative flex items-center">
-                                <media-mute-button
-                                    class="control-button relative grid h-8 w-8 sm:h-8.5 sm:w-8.5 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 transition-all duration-140 hover:scale-105 hover:bg-white/15 hover:text-white data-[active]:bg-sky-400/16 data-[active]:text-sky-400"
-                                    :aria-label="isMuted ? $t('post_detail.viewer.player.unmute') : $t('post_detail.viewer.player.mute')"
-                                >
-                                    <VolumeX v-if="isMuted" class="h-4.5 w-4.5" />
-                                    <Volume2 v-else class="h-4.5 w-4.5" />
-                                </media-mute-button>
-
-                                <media-volume-slider
-                                    class="vds-volume-slider relative flex h-[22px] cursor-pointer items-center touch-none box-border w-0 opacity-0 overflow-hidden ml-0 mr-0 p-0 sm:w-[66px] sm:opacity-100 sm:overflow-visible sm:px-1.5 group-hover:w-[64px] group-hover:opacity-100 group-hover:overflow-visible group-hover:ml-0.5 group-hover:mr-1 group-hover:px-1.5 group-focus-within:w-[64px] group-focus-within:opacity-100 group-focus-within:overflow-visible group-focus-within:ml-0.5 group-focus-within:mr-1 group-focus-within:px-1.5 transition-all duration-180"
-                                >
-                                    <div class="vds-slider-track" />
-                                    <div class="vds-slider-track-fill vds-slider-track" />
-                                    <div class="vds-slider-thumb" />
-                                </media-volume-slider>
-                            </div>
-
-                            <div
-                                class="time-display flex min-w-0 items-center gap-0.5 sm:gap-1 ml-1.5 sm:ml-2 text-[10px] sm:text-xs font-medium text-white/80 tabular-nums"
-                            >
-                                <media-time type="current" />
-                                <span aria-hidden="true">/</span>
-                                <media-time type="duration" />
-                            </div>
+                                <ArrowLeft class="h-4.5 w-4.5" />
+                            </button>
+                            <span v-if="props.title" class="video-title truncate text-xs sm:text-sm font-medium text-white/95 drop-shadow">
+                                {{ props.title }}
+                            </span>
                         </div>
 
-                        <div class="control-cluster flex items-center gap-0.5 sm:gap-1.5 shrink-0">
-                            <media-caption-button
-                                v-if="processedSubtitles.length > 0"
-                                class="control-button relative grid h-8 w-8 sm:h-8.5 sm:w-8.5 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 transition-all duration-140 hover:scale-105 hover:bg-white/15 hover:text-white data-[active]:bg-sky-400/16 data-[active]:text-sky-400"
-                                :aria-label="$t('post_detail.viewer.player.subtitles')"
-                            >
-                                <Subtitles class="h-4 w-4" />
-                            </media-caption-button>
-
-                            <media-menu class="settings-menu relative">
-                                <media-menu-button
-                                    class="control-button relative grid h-8 w-8 sm:h-8.5 sm:w-8.5 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 transition-colors duration-140 hover:bg-white/15 hover:text-white data-[active]:bg-sky-400/16 data-[active]:text-sky-400"
-                                    :aria-label="$t('common.settings')"
-                                >
-                                    <Settings class="h-4 w-4" />
-                                </media-menu-button>
-                                <media-menu-portal>
-                                    <media-menu-items
-                                        class="settings-panel z-50 max-h-[min(320px,50vh)] w-[min(260px,calc(100vw-24px))] overflow-y-auto rounded-xl border border-white/12 bg-[rgba(15,15,18,0.88)] p-2.5 text-xs text-white shadow-2xl backdrop-blur-xl"
-                                        placement="top end"
-                                        :offset="8"
-                                        @wheel.stop
-                                        @touchmove.stop
-                                        @pointermove.stop
-                                    >
-                                        <section
-                                            v-if="qualityAvailable"
-                                            class="settings-section [&+.settings-section]:mt-2.5 [&+.settings-section]:pt-2.5 [&+.settings-section]:border-t [&+.settings-section]:border-white/8"
-                                        >
-                                            <div
-                                                class="settings-heading flex items-center justify-between px-2 pt-0.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/45"
-                                            >
-                                                {{ $t("post_detail.viewer.player.quality") }}
-                                            </div>
-                                            <media-quality-radio-group :auto-label="$t('post_detail.viewer.player.auto_quality')">
-                                                <template>
-                                                    <media-radio>
-                                                        <span class="settings-radio-label" data-part="label"></span>
-                                                        <span class="settings-radio-hint" data-part="bitrate"></span>
-                                                    </media-radio>
-                                                </template>
-                                            </media-quality-radio-group>
-                                        </section>
-
-                                        <section
-                                            v-if="audioAvailable"
-                                            class="settings-section [&+.settings-section]:mt-2.5 [&+.settings-section]:pt-2.5 [&+.settings-section]:border-t [&+.settings-section]:border-white/8"
-                                        >
-                                            <div
-                                                class="settings-heading flex items-center justify-between px-2 pt-0.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/45"
-                                            >
-                                                {{ $t("media.tracks.group_audios") }}
-                                            </div>
-                                            <media-audio-radio-group :empty-label="$t('post_detail.viewer.player.default_audio')">
-                                                <template>
-                                                    <media-radio>
-                                                        <span class="settings-radio-label" data-part="label"></span>
-                                                    </media-radio>
-                                                </template>
-                                            </media-audio-radio-group>
-                                        </section>
-
-                                        <section
-                                            class="settings-section [&+.settings-section]:mt-2.5 [&+.settings-section]:pt-2.5 [&+.settings-section]:border-t [&+.settings-section]:border-white/8"
-                                        >
-                                            <div
-                                                class="settings-heading flex items-center justify-between px-2 pt-0.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/45"
-                                            >
-                                                {{ $t("post_detail.viewer.player.subtitles") }}
-                                            </div>
-                                            <template v-if="processedSubtitles.length > 0">
-                                                <media-captions-radio-group :off-label="$t('post_detail.viewer.player.subtitles_off')">
-                                                    <template>
-                                                        <media-radio>
-                                                            <span class="settings-radio-label" data-part="label"></span>
-                                                        </media-radio>
-                                                    </template>
-                                                </media-captions-radio-group>
-
-                                                <div class="settings-subgroup mt-1.5">
-                                                    <div class="settings-subheading px-2 py-1 text-[11px] font-medium text-white/60">
-                                                        {{ $t("post_detail.viewer.player.subtitle_size") }}
-                                                    </div>
-                                                    <div class="settings-chip-group flex flex-wrap gap-1 px-1">
-                                                        <button
-                                                            v-for="opt in subtitleSizeOptions"
-                                                            :key="opt.value"
-                                                            type="button"
-                                                            class="settings-chip flex-1 min-w-[52px] cursor-pointer rounded-md border border-white/12 bg-white/4 px-2 py-1 text-center text-[11px] font-medium text-white/70 transition-all duration-120 hover:border-white/25 hover:bg-white/10 hover:text-white"
-                                                            :class="{ active: subtitleFontSize === opt.value }"
-                                                            @click="subtitleFontSize = opt.value"
-                                                        >
-                                                            {{ opt.label }}
-                                                        </button>
-                                                    </div>
-                                                </div>
-
-                                                <div class="settings-subgroup mt-1.5">
-                                                    <div class="settings-subheading px-2 py-1 text-[11px] font-medium text-white/60">
-                                                        {{ $t("post_detail.viewer.player.subtitle_bg") }}
-                                                    </div>
-                                                    <div class="settings-chip-group flex flex-wrap gap-1 px-1">
-                                                        <button
-                                                            v-for="opt in subtitleBgOptions"
-                                                            :key="opt.value"
-                                                            type="button"
-                                                            class="settings-chip flex-1 min-w-[52px] cursor-pointer rounded-md border border-white/12 bg-white/4 px-2 py-1 text-center text-[11px] font-medium text-white/70 transition-all duration-120 hover:border-white/25 hover:bg-white/10 hover:text-white"
-                                                            :class="{ active: subtitleBgStyle === opt.value }"
-                                                            @click="subtitleBgStyle = opt.value"
-                                                        >
-                                                            {{ opt.label }}
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </template>
-                                            <template v-else>
-                                                <div
-                                                    class="settings-empty-notice rounded-md bg-white/4 p-2 text-center text-xs text-white/45"
-                                                >
-                                                    {{ $t("post_detail.viewer.player.no_subtitles") }}
-                                                </div>
-                                            </template>
-                                        </section>
-
-                                        <section
-                                            class="settings-section [&+.settings-section]:mt-2.5 [&+.settings-section]:pt-2.5 [&+.settings-section]:border-t [&+.settings-section]:border-white/8"
-                                        >
-                                            <div
-                                                class="settings-heading flex items-center justify-between px-2 pt-0.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/45"
-                                            >
-                                                {{ $t("post_detail.viewer.player.speed") }}
-                                            </div>
-                                            <media-speed-radio-group
-                                                :rates="speedOptions"
-                                                :normal-label="$t('post_detail.viewer.player.normal_speed')"
-                                            >
-                                                <template>
-                                                    <media-radio>
-                                                        <span class="settings-radio-label" data-part="label"></span>
-                                                    </media-radio>
-                                                </template>
-                                            </media-speed-radio-group>
-                                        </section>
-                                    </media-menu-items>
-                                </media-menu-portal>
-                            </media-menu>
-
+                        <div class="top-right-cluster flex items-center gap-1 shrink-0">
+                            <!-- Picture in Picture (PIP) Button -->
                             <media-pip-button
-                                class="control-button relative grid h-8 w-8 sm:h-8.5 sm:w-8.5 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 transition-all duration-140 hover:scale-105 hover:bg-white/15 hover:text-white data-[active]:bg-sky-400/16 data-[active]:text-sky-400 hidden sm:flex"
+                                class="control-button relative grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 hover:bg-white/15 hover:text-white transition-all duration-140"
                                 :aria-label="$t('post_detail.viewer.player.pip')"
                             >
-                                <PictureInPicture2 class="h-4 w-4" :class="{ 'text-emerald-300': isPictureInPicture }" />
+                                <PictureInPicture2 class="h-4 w-4" />
                             </media-pip-button>
 
-                            <media-fullscreen-button
-                                class="control-button relative grid h-8 w-8 sm:h-8.5 sm:w-8.5 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 transition-all duration-140 hover:scale-105 hover:bg-white/15 hover:text-white data-[active]:bg-sky-400/16 data-[active]:text-sky-400"
-                                :aria-label="
-                                    isFullscreen
-                                        ? $t('post_detail.viewer.player.exit_fullscreen')
-                                        : $t('post_detail.viewer.player.fullscreen')
-                                "
+                            <!-- Cast / Airplay Icon -->
+                            <button
+                                type="button"
+                                class="control-button grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 hover:bg-white/15 hover:text-white transition-all duration-140"
+                                :aria-label="$t('post_detail.viewer.player.cast')"
                             >
-                                <Minimize v-if="isFullscreen" class="h-4 w-4" />
-                                <Maximize v-else class="h-4 w-4" />
-                            </media-fullscreen-button>
+                                <Airplay class="h-4 w-4" />
+                            </button>
+
+                            <!-- More Button (...) in Top Right -->
+                            <button
+                                type="button"
+                                class="control-button grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 hover:bg-white/15 hover:text-white transition-all duration-140"
+                                :class="{ 'bg-white/20 text-white': isSettingsOpen && activeSettingsTab === 'all' }"
+                                :aria-label="$t('common.more')"
+                                @click.stop="toggleSettings('all')"
+                            >
+                                <MoreHorizontal class="h-4.5 w-4.5" />
+                            </button>
                         </div>
                     </media-controls-group>
+
+                    <!-- Transparent Backdrop for Click-Outside to Close Drawer -->
+                    <div
+                        v-if="isSettingsOpen"
+                        class="settings-backdrop pointer-events-auto fixed inset-0 sm:absolute sm:inset-0 z-40 bg-black/10 max-sm:bg-black/35 backdrop-blur-[1px] sm:backdrop-blur-none cursor-default transition-opacity duration-150"
+                        @click.stop="closeSettings"
+                    />
+
+                    <!-- Vue-driven Settings Drawer / Bottom Sheet (Light Glass Theme) -->
+                    <Transition
+                        enter-active-class="transition duration-200 ease-out"
+                        enter-from-class="opacity-0 translate-y-4"
+                        enter-to-class="opacity-100 translate-y-0"
+                        leave-active-class="transition duration-150 ease-in"
+                        leave-from-class="opacity-100 translate-y-0"
+                        leave-to-class="opacity-0 translate-y-4"
+                    >
+                        <div
+                            v-if="isSettingsOpen"
+                            class="video-settings-drawer settings-panel pointer-events-auto absolute z-50 overflow-hidden shadow-2xl backdrop-blur-2xl bg-white/95 text-neutral-900 border border-neutral-200/90 text-xs"
+                            :class="[
+                                'max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:rounded-t-2xl max-sm:max-h-[75vh]',
+                                'sm:absolute sm:top-12 sm:right-4 sm:w-68 sm:rounded-xl sm:max-h-[360px]'
+                            ]"
+                            @click.stop
+                        >
+                            <div class="sheet-handle sm:hidden mx-auto mt-2.5 h-1 w-9 rounded-full bg-neutral-300" />
+
+                            <div class="flex items-center justify-between border-b border-neutral-200/80 px-3.5 py-2.5">
+                                <div class="flex items-center gap-1.5 font-semibold text-neutral-900 text-xs">
+                                    <button
+                                        v-if="activeSettingsTab !== 'all'"
+                                        type="button"
+                                        class="rounded p-0.5 text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 transition-colors"
+                                        @click.stop="activeSettingsTab = 'all'"
+                                    >
+                                        <ChevronLeft class="h-4 w-4" />
+                                    </button>
+                                    <span>
+                                        {{
+                                            activeSettingsTab === 'volume' ? ($t('post_detail.viewer.player.volume') || '音量') :
+                                            activeSettingsTab === 'quality' ? $t('post_detail.viewer.player.quality') :
+                                            activeSettingsTab === 'speed' ? $t('post_detail.viewer.player.speed') :
+                                            activeSettingsTab === 'subtitles' ? $t('post_detail.viewer.player.subtitles') :
+                                            activeSettingsTab === 'audio' ? $t('media.tracks.group_audios') :
+                                            ($t('common.more') || '更多')
+                                        }}
+                                    </span>
+                                </div>
+                                <button
+                                    type="button"
+                                    class="rounded-full p-1 text-neutral-400 hover:bg-neutral-100 hover:text-neutral-800 transition-colors"
+                                    @click.stop="closeSettings"
+                                >
+                                    <X class="h-4 w-4" />
+                                </button>
+                            </div>
+
+                            <div class="overflow-y-auto p-3 max-h-[280px] space-y-2">
+                                <!-- Main Menu (All Settings Level) -->
+                                <div v-if="activeSettingsTab === 'all'" class="space-y-1.5">
+                                    <!-- Volume Row (Matching 100% with other rows) -->
+                                    <button
+                                        type="button"
+                                        class="flex w-full items-center justify-between rounded-xl bg-neutral-100/80 px-3.5 py-2.5 text-xs font-medium text-neutral-800 transition-all hover:bg-neutral-200/80 hover:text-neutral-900"
+                                        @click.stop="activeSettingsTab = 'volume'"
+                                    >
+                                        <span class="flex items-center gap-2">
+                                            <Volume2 v-if="!isMuted && volumeLevel > 0" class="h-4 w-4 text-neutral-500" />
+                                            <VolumeX v-else class="h-4 w-4 text-neutral-500" />
+                                            <span>{{ $t("post_detail.viewer.player.volume") || "音量" }}</span>
+                                        </span>
+                                        <span class="flex items-center gap-1 text-neutral-500 font-semibold text-xs">
+                                            <span>{{ isMuted ? '0%' : `${volumeLevel}%` }}</span>
+                                            <ChevronRight class="h-4 w-4" />
+                                        </span>
+                                    </button>
+
+                                    <!-- Quality Row -->
+                                    <button
+                                        v-if="qualityAvailable"
+                                        type="button"
+                                        class="flex w-full items-center justify-between rounded-xl bg-neutral-100/80 px-3.5 py-2.5 text-xs font-medium text-neutral-800 transition-all hover:bg-neutral-200/80 hover:text-neutral-900"
+                                        @click.stop="activeSettingsTab = 'quality'"
+                                    >
+                                        <span class="flex items-center gap-2">
+                                            <SlidersHorizontal class="h-4 w-4 text-neutral-500" />
+                                            <span>{{ $t("post_detail.viewer.player.quality") }}</span>
+                                        </span>
+                                        <span class="flex items-center gap-1 text-neutral-500 font-semibold text-xs">
+                                            <span>{{ displayQualityLabel }}</span>
+                                            <ChevronRight class="h-4 w-4" />
+                                        </span>
+                                    </button>
+
+                                    <!-- Speed Row -->
+                                    <button
+                                        type="button"
+                                        class="flex w-full items-center justify-between rounded-xl bg-neutral-100/80 px-3.5 py-2.5 text-xs font-medium text-neutral-800 transition-all hover:bg-neutral-200/80 hover:text-neutral-900"
+                                        @click.stop="activeSettingsTab = 'speed'"
+                                    >
+                                        <span class="flex items-center gap-2">
+                                            <Gauge class="h-4 w-4 text-neutral-500" />
+                                            <span>{{ $t("post_detail.viewer.player.speed") }}</span>
+                                        </span>
+                                        <span class="flex items-center gap-1 text-neutral-500 font-semibold text-xs">
+                                            <span>{{ currentSpeed === 1 ? '1.0x' : `${currentSpeed}x` }}</span>
+                                            <ChevronRight class="h-4 w-4" />
+                                        </span>
+                                    </button>
+
+                                    <!-- Subtitles Row -->
+                                    <button
+                                        type="button"
+                                        class="flex w-full items-center justify-between rounded-xl bg-neutral-100/80 px-3.5 py-2.5 text-xs font-medium text-neutral-800 transition-all hover:bg-neutral-200/80 hover:text-neutral-900"
+                                        @click.stop="activeSettingsTab = 'subtitles'"
+                                    >
+                                        <span class="flex items-center gap-2">
+                                            <Subtitles class="h-4 w-4 text-neutral-500" />
+                                            <span>{{ $t("post_detail.viewer.player.subtitles") }}</span>
+                                        </span>
+                                        <span class="flex items-center gap-1 text-neutral-500 font-semibold text-xs">
+                                            <ChevronRight class="h-4 w-4" />
+                                        </span>
+                                    </button>
+
+                                    <!-- Audio Track Row (if multi-audio) -->
+                                    <button
+                                        v-if="audioAvailable"
+                                        type="button"
+                                        class="flex w-full items-center justify-between rounded-xl bg-neutral-100/80 px-3.5 py-2.5 text-xs font-medium text-neutral-800 transition-all hover:bg-neutral-200/80 hover:text-neutral-900"
+                                        @click.stop="activeSettingsTab = 'audio'"
+                                    >
+                                        <span class="flex items-center gap-2">
+                                            <Volume2 class="h-4 w-4 text-neutral-500" />
+                                            <span>{{ $t("media.tracks.group_audios") }}</span>
+                                        </span>
+                                        <span class="flex items-center gap-1 text-neutral-500 font-semibold text-xs">
+                                            <ChevronRight class="h-4 w-4" />
+                                        </span>
+                                    </button>
+                                </div>
+
+                                <!-- Sub-Pages (when specific tab is selected) -->
+                                <template v-else>
+                                    <!-- Volume Sub-Page -->
+                                    <section v-if="activeSettingsTab === 'volume'" class="settings-section space-y-3">
+                                        <div class="rounded-xl border border-neutral-200/80 bg-neutral-100/70 p-3 space-y-2.5">
+                                            <div class="flex items-center justify-between text-xs font-semibold text-neutral-800 px-0.5">
+                                                <span class="flex items-center gap-1.5 text-neutral-700">
+                                                    <Volume2 v-if="!isMuted && volumeLevel > 0" class="h-4 w-4 text-neutral-600" />
+                                                    <VolumeX v-else class="h-4 w-4 text-neutral-400" />
+                                                    <span>{{ $t("post_detail.viewer.player.volume") || "音量" }}</span>
+                                                </span>
+                                                <span class="font-mono text-xs font-bold text-neutral-600 tabular-nums">
+                                                    {{ isMuted ? '0%' : `${volumeLevel}%` }}
+                                                </span>
+                                            </div>
+
+                                            <div class="flex items-center gap-2.5 px-0.5">
+                                                <button
+                                                    type="button"
+                                                    class="control-button grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-lg text-neutral-700 hover:bg-neutral-200/90 transition-colors"
+                                                    :aria-label="isMuted ? ($t('post_detail.viewer.player.unmute') || '取消静音') : ($t('post_detail.viewer.player.mute') || '静音')"
+                                                    @click.stop="toggleMute"
+                                                >
+                                                    <VolumeX v-if="isMuted || volumeLevel === 0" class="h-4 w-4 text-neutral-400" />
+                                                    <Volume2 v-else class="h-4 w-4 text-neutral-700" />
+                                                </button>
+
+                                                <input
+                                                    type="range"
+                                                    min="0"
+                                                    max="100"
+                                                    :value="isMuted ? 0 : volumeLevel"
+                                                    class="volume-range-slider h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-neutral-200 accent-neutral-900 transition-all focus:outline-none"
+                                                    @input.stop="setPlayerVolume(Number(($event.target as HTMLInputElement).value))"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div class="settings-chip-group flex flex-wrap gap-1">
+                                            <button
+                                                type="button"
+                                                class="settings-chip flex-1 min-w-[48px] cursor-pointer rounded-lg border border-neutral-200 bg-neutral-100/80 px-2 py-1.5 text-center text-[11px] font-medium text-neutral-700 transition-all hover:border-neutral-300 hover:bg-neutral-200/80 hover:text-neutral-900"
+                                                :class="{ 'border-neutral-800 bg-neutral-900 text-white font-semibold shadow-xs': isMuted || volumeLevel === 0 }"
+                                                @click.stop="setPlayerVolume(0)"
+                                            >
+                                                {{ $t("post_detail.viewer.player.mute") || "静音" }}
+                                            </button>
+                                            <button
+                                                v-for="v in [25, 50, 75, 100]"
+                                                :key="v"
+                                                type="button"
+                                                class="settings-chip flex-1 min-w-[48px] cursor-pointer rounded-lg border border-neutral-200 bg-neutral-100/80 px-2 py-1.5 text-center text-[11px] font-medium text-neutral-700 transition-all hover:border-neutral-300 hover:bg-neutral-200/80 hover:text-neutral-900"
+                                                :class="{ 'border-neutral-800 bg-neutral-900 text-white font-semibold shadow-xs': !isMuted && volumeLevel === v }"
+                                                @click.stop="setPlayerVolume(v)"
+                                            >
+                                                {{ v }}%
+                                            </button>
+                                        </div>
+                                    </section>
+                                    <section v-if="qualityAvailable && activeSettingsTab === 'quality'" class="settings-section">
+                                        <media-quality-radio-group :auto-label="$t('post_detail.viewer.player.auto_quality')">
+                                            <template>
+                                                <media-radio>
+                                                    <span class="settings-radio-label" data-part="label"></span>
+                                                    <span class="settings-radio-hint" data-part="bitrate"></span>
+                                                </media-radio>
+                                            </template>
+                                        </media-quality-radio-group>
+                                    </section>
+
+                                    <section v-if="audioAvailable && activeSettingsTab === 'audio'" class="settings-section">
+                                        <media-audio-radio-group :empty-label="$t('post_detail.viewer.player.default_audio')">
+                                            <template>
+                                                <media-radio>
+                                                    <span class="settings-radio-label" data-part="label"></span>
+                                                </media-radio>
+                                            </template>
+                                        </media-audio-radio-group>
+                                    </section>
+
+                                    <section v-if="activeSettingsTab === 'subtitles'" class="settings-section">
+                                        <template v-if="processedSubtitles.length > 0">
+                                            <media-captions-radio-group :off-label="$t('post_detail.viewer.player.subtitles_off')">
+                                                <template>
+                                                    <media-radio>
+                                                        <span class="settings-radio-label" data-part="label"></span>
+                                                    </media-radio>
+                                                </template>
+                                            </media-captions-radio-group>
+
+                                            <div class="settings-subgroup mt-3 pt-2 border-t border-neutral-200/80">
+                                                <div class="settings-subheading px-1 py-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+                                                    {{ $t("post_detail.viewer.player.subtitle_size") }}
+                                                </div>
+                                                <div class="settings-chip-group flex flex-wrap gap-1">
+                                                    <button
+                                                        v-for="opt in subtitleSizeOptions"
+                                                        :key="opt.value"
+                                                        type="button"
+                                                        class="settings-chip flex-1 min-w-[52px] cursor-pointer rounded-lg border border-neutral-200 bg-neutral-100/80 px-2 py-1.5 text-center text-[11px] font-medium text-neutral-700 transition-all duration-120 hover:border-neutral-300 hover:bg-neutral-200/80 hover:text-neutral-900"
+                                                        :class="{ 'border-neutral-800 bg-neutral-900 text-white font-semibold shadow-xs': subtitleFontSize === opt.value }"
+                                                        @click.stop="subtitleFontSize = opt.value"
+                                                    >
+                                                        {{ opt.label }}
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            <div class="settings-subgroup mt-2.5">
+                                                <div class="settings-subheading px-1 py-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+                                                    {{ $t("post_detail.viewer.player.subtitle_bg") }}
+                                                </div>
+                                                <div class="settings-chip-group flex flex-wrap gap-1">
+                                                    <button
+                                                        v-for="opt in subtitleBgOptions"
+                                                        :key="opt.value"
+                                                        type="button"
+                                                        class="settings-chip flex-1 min-w-[52px] cursor-pointer rounded-lg border border-neutral-200 bg-neutral-100/80 px-2 py-1.5 text-center text-[11px] font-medium text-neutral-700 transition-all duration-120 hover:border-neutral-300 hover:bg-neutral-200/80 hover:text-neutral-900"
+                                                        :class="{ 'border-neutral-800 bg-neutral-900 text-white font-semibold shadow-xs': subtitleBgStyle === opt.value }"
+                                                        @click.stop="subtitleBgStyle = opt.value"
+                                                    >
+                                                        {{ opt.label }}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </template>
+                                        <template v-else>
+                                            <div class="settings-empty-notice rounded-lg bg-neutral-100 p-3 text-center text-xs text-neutral-400">
+                                                {{ $t("post_detail.viewer.player.no_subtitles") }}
+                                            </div>
+                                        </template>
+                                    </section>
+
+                                    <section v-if="activeSettingsTab === 'speed'" class="settings-section">
+                                        <media-speed-radio-group
+                                            :rates="speedOptions"
+                                            :normal-label="$t('post_detail.viewer.player.normal_speed')"
+                                            @rate-change="currentSpeed = ($event as CustomEvent<number>).detail || 1"
+                                        >
+                                            <template>
+                                                <media-radio>
+                                                    <span class="settings-radio-label" data-part="label"></span>
+                                                </media-radio>
+                                            </template>
+                                        </media-speed-radio-group>
+                                    </section>
+                                </template>
+                            </div>
+                        </div>
+                    </Transition>
+
+                    <!-- Bottom Controls Container (Scrubber + Buttons Row) -->
+                    <div class="bottom-controls-cluster pointer-events-auto flex w-full flex-col gap-1">
+                        <!-- Video Progress Bar Scrubber -->
+                        <media-time-slider class="vds-time-slider group relative flex h-5 w-full cursor-pointer items-center touch-none select-none box-border px-0.5">
+                            <div class="vds-slider-track" />
+                            <div class="vds-slider-track-fill vds-slider-track" />
+                            <div class="vds-slider-thumb" />
+                        </media-time-slider>
+
+                        <!-- Player Core Controls Layer -->
+                        <media-controls-group class="control-row flex w-full items-center justify-between gap-1 sm:gap-3">
+                            <div class="control-cluster flex items-center gap-0.5 sm:gap-1.5 min-w-0">
+                                <media-play-button
+                                    class="control-button relative grid h-8 w-8 sm:h-8.5 sm:w-8.5 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 transition-all duration-140 hover:scale-105 hover:bg-white/15 hover:text-white"
+                                    :aria-label="isPlaying ? $t('post_detail.viewer.player.pause') : $t('post_detail.viewer.player.play')"
+                                >
+                                    <Pause v-if="isPlaying" class="h-4.5 w-4.5 fill-current" />
+                                    <Play v-else class="h-4.5 w-4.5 translate-x-px fill-current" />
+                                </media-play-button>
+
+                                <div class="time-display flex min-w-0 items-center gap-1 ml-1.5 sm:ml-2.5 text-xs sm:text-sm font-semibold text-white/95 tabular-nums drop-shadow-xs">
+                                    <media-time type="current" />
+                                    <span aria-hidden="true" class="opacity-70">/</span>
+                                    <media-time type="duration" />
+                                </div>
+                            </div>
+
+                            <div class="control-cluster flex items-center gap-0.5 sm:gap-1.5 shrink-0">
+                                <!-- Subtitles CC Button -->
+                                <button
+                                    v-if="processedSubtitles.length > 0"
+                                    type="button"
+                                    class="control-button relative grid h-8 w-8 sm:h-8.5 sm:w-8.5 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 transition-all duration-140 hover:scale-105 hover:bg-white/15 hover:text-white"
+                                    :class="{ 'bg-white/20 text-white': isSettingsOpen && activeSettingsTab === 'subtitles' }"
+                                    :aria-label="$t('post_detail.viewer.player.subtitles')"
+                                    @click.stop="toggleSettings('subtitles')"
+                                >
+                                    <Subtitles class="h-4 w-4" />
+                                </button>
+
+                                <!-- Dynamic Quality Badge (Desktop / Wide Mode) -->
+                                <button
+                                    v-if="qualityAvailable"
+                                    type="button"
+                                    class="control-button relative hidden sm:flex h-8 px-2 shrink-0 cursor-pointer items-center justify-center rounded-lg text-xs font-semibold text-white/90 transition-all duration-140 hover:bg-white/15 hover:text-white"
+                                    :class="{ 'bg-white/20 text-white font-bold': isSettingsOpen && activeSettingsTab === 'quality' }"
+                                    :aria-label="$t('post_detail.viewer.player.quality')"
+                                    @click.stop="toggleSettings('quality')"
+                                >
+                                    <span>{{ displayQualityLabel }}</span>
+                                </button>
+
+                                <!-- Speed Quick Button (Desktop / Wide Mode) -->
+                                <button
+                                    type="button"
+                                    class="control-button relative hidden sm:flex h-8 px-2 shrink-0 cursor-pointer items-center justify-center rounded-lg text-xs font-semibold text-white/90 transition-all duration-140 hover:bg-white/15 hover:text-white"
+                                    :class="{ 'bg-white/20 text-white font-bold': isSettingsOpen && activeSettingsTab === 'speed' }"
+                                    :aria-label="$t('post_detail.viewer.player.speed')"
+                                    @click.stop="toggleSettings('speed')"
+                                >
+                                    <span>{{ currentSpeed === 1 ? '1.0x' : `${currentSpeed}x` }}</span>
+                                </button>
+
+                                <media-fullscreen-button
+                                    class="control-button relative grid h-8 w-8 sm:h-8.5 sm:w-8.5 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 transition-all duration-140 hover:scale-105 hover:bg-white/15 hover:text-white"
+                                    :aria-label="
+                                        isFullscreen
+                                            ? $t('post_detail.viewer.player.exit_fullscreen')
+                                            : $t('post_detail.viewer.player.fullscreen')
+                                    "
+                                >
+                                    <Minimize v-if="isFullscreen" class="h-4 w-4" />
+                                    <Maximize v-else class="h-4 w-4" />
+                                </media-fullscreen-button>
+                            </div>
+                        </media-controls-group>
+                    </div>
                 </media-controls>
+
+                <media-captions
+                    class="vds-captions absolute inset-x-[6%] bottom-6 z-20 pointer-events-none text-center transition-[bottom] duration-220"
+                    :class="[`sub-size-${subtitleFontSize}`, `sub-bg-${subtitleBgStyle}`]"
+                />
             </media-player>
 
             <template #fallback>
@@ -667,6 +951,26 @@ onBeforeUnmount(() => {
 :deep([data-media-player]) {
     /* Override Vidstack base font scaling inside player components */
     --media-font-size: 13px !important;
+    aspect-ratio: unset !important;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+:deep(media-provider),
+:deep([data-media-provider]) {
+    width: 100% !important;
+    height: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+:deep(media-provider video),
+:deep(media-provider img),
+:deep([data-media-provider] video) {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: contain !important;
 }
 
 :deep(media-controls[data-visible]) ~ .vds-captions,
@@ -812,14 +1116,14 @@ onBeforeUnmount(() => {
     border-radius: 999px;
 }
 
-:global(.settings-panel) {
+:global(.settings-panel),
+:global(.video-settings-drawer) {
     --media-font-size: 13px !important;
     --media-menu-font-size: 13px !important;
-    display: block !important;
     width: 240px !important;
     min-width: 220px !important;
     max-width: calc(100vw - 24px) !important;
-    max-height: min(300px, 50vh) !important;
+    max-height: min(320px, 55vh) !important;
     overflow-x: hidden !important;
     overflow-y: auto !important;
     scrollbar-gutter: stable;
@@ -828,45 +1132,86 @@ onBeforeUnmount(() => {
     touch-action: pan-y !important;
     -webkit-overflow-scrolling: touch;
     box-sizing: border-box !important;
+    background: rgba(255, 255, 255, 0.95) !important;
+    color: #171717 !important;
 }
 
 :global(.settings-panel media-quality-radio-group),
 :global(.settings-panel media-audio-radio-group),
 :global(.settings-panel media-captions-radio-group),
-:global(.settings-panel media-speed-radio-group) {
-    display: grid !important;
-    gap: 3px !important;
+:global(.settings-panel media-speed-radio-group),
+:global(.video-settings-drawer media-quality-radio-group),
+:global(.video-settings-drawer media-audio-radio-group),
+:global(.video-settings-drawer media-captions-radio-group),
+:global(.video-settings-drawer media-speed-radio-group) {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    gap: 4px !important;
 }
 
-:global(.settings-panel media-radio) {
+:global(.settings-panel media-radio),
+:global(.video-settings-drawer media-radio) {
     display: flex !important;
-    min-height: 32px !important;
+    flex-direction: row !important;
     align-items: center !important;
     justify-content: space-between !important;
-    padding: 5px 10px !important;
-    border-radius: 7px !important;
-    color: rgba(255, 255, 255, 0.75) !important;
+    width: 100% !important;
+    min-height: 38px !important;
+    padding: 8px 12px !important;
+    border-radius: 10px !important;
+    background: rgba(0, 0, 0, 0.04) !important;
+    color: #262626 !important;
     font-size: 13px !important;
+    font-weight: 500 !important;
     cursor: pointer !important;
+    box-sizing: border-box !important;
     transition: all 120ms ease !important;
 }
 
-:global(.settings-panel media-radio:hover) {
-    background: rgba(255, 255, 255, 0.1) !important;
-    color: #fff !important;
+:global(.settings-panel media-radio:hover),
+:global(.video-settings-drawer media-radio:hover) {
+    background: rgba(0, 0, 0, 0.08) !important;
+    color: #000000 !important;
 }
 
-:global(.settings-panel media-radio[data-checked]) {
+:deep(media-fullscreen-button[data-active]),
+:deep(media-fullscreen-button[data-fullscreen]),
+:deep(media-play-button[data-active]),
+:deep(media-mute-button[data-active]),
+:deep(media-pip-button[data-active]),
+:deep(media-caption-button[data-active]),
+:deep(.control-button[data-active]) {
+    background-color: transparent !important;
+    background: transparent !important;
+    color: rgba(255, 255, 255, 0.9) !important;
+}
+
+:deep(media-fullscreen-button:hover),
+:deep(media-play-button:hover),
+:deep(media-mute-button:hover),
+:deep(media-pip-button:hover),
+:deep(media-caption-button:hover),
+:deep(.control-button:hover) {
+    background-color: rgba(255, 255, 255, 0.15) !important;
     background: rgba(255, 255, 255, 0.15) !important;
-    color: #fff !important;
-    font-weight: 500 !important;
+    color: #ffffff !important;
 }
 
-:global(.settings-panel media-radio[data-checked]::after) {
+:global(.settings-panel media-radio[data-checked]),
+:global(.video-settings-drawer media-radio[data-checked]) {
+    background: rgba(0, 0, 0, 0.08) !important;
+    border: 1px solid rgba(0, 0, 0, 0.25) !important;
+    color: #000000 !important;
+    font-weight: 700 !important;
+}
+
+:global(.settings-panel media-radio[data-checked]::after),
+:global(.video-settings-drawer media-radio[data-checked]::after) {
     content: "✓" !important;
-    margin-left: 8px !important;
-    color: #38bdf8 !important;
-    font-size: 12px !important;
+    margin-left: auto !important;
+    color: #000000 !important;
+    font-size: 14px !important;
     font-weight: 700 !important;
 }
 
@@ -880,12 +1225,55 @@ onBeforeUnmount(() => {
 
 :global(.settings-radio-hint) {
     margin-left: 12px !important;
-    color: rgba(255, 255, 255, 0.45) !important;
+    color: #737373 !important;
     font-size: 11px !important;
     white-space: nowrap !important;
 }
 
 :global(.settings-radio-hint:empty) {
     display: none !important;
+}
+
+@keyframes vds-sheet-slide-up {
+    from {
+        transform: translateY(100%);
+        opacity: 0.5;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+@media (max-width: 639px) {
+    :global(.settings-panel.video-settings-drawer),
+    :global(.video-settings-drawer) {
+        position: fixed !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        top: auto !important;
+        width: 100vw !important;
+        min-width: 100vw !important;
+        max-width: 100vw !important;
+        max-height: 75vh !important;
+        border-radius: 20px 20px 0 0 !important;
+        border: 1px solid rgba(0, 0, 0, 0.1) !important;
+        border-bottom: none !important;
+        background: rgba(255, 255, 255, 0.96) !important;
+        backdrop-filter: blur(24px) !important;
+        -webkit-backdrop-filter: blur(24px) !important;
+        padding: 14px 16px max(24px, env(safe-area-inset-bottom, 24px)) 16px !important;
+        box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.2) !important;
+        animation: vds-sheet-slide-up 220ms cubic-bezier(0.16, 1, 0.3, 1) !important;
+        transform: none !important;
+    }
+
+    :global(.settings-panel media-radio),
+    :global(.video-settings-drawer media-radio) {
+        min-height: 42px !important;
+        padding: 10px 14px !important;
+        font-size: 14px !important;
+    }
 }
 </style>
