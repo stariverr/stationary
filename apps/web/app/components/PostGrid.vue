@@ -17,8 +17,10 @@ import {
     Tag as TagIcon,
     Plus,
     SlidersHorizontal,
+    Grid2x2,
+    Square,
 } from "@lucide/vue";
-import { useDebounceFn, onClickOutside } from "@vueuse/core";
+import { useDebounceFn, onClickOutside, useElementSize, useWindowSize } from "@vueuse/core";
 import { PaginationRoot, PaginationList, PaginationListItem, PaginationPrev, PaginationNext, PaginationEllipsis } from "reka-ui";
 import { Button } from "@/components/ui/button";
 import { NumberField, NumberFieldInput } from "@/components/ui/number-field";
@@ -46,7 +48,14 @@ const {
     authorSearchKeyword,
     authorCache,
 } = usePosts();
-const { toggleSidebar, isCreatePostOpen, postItemAspectRatio, postItemSize, postItemSizePx, postLayoutMode } = useAppLayout();
+const {
+    toggleSidebar,
+    isCreatePostOpen,
+    postItemAspectRatio,
+    postItemColumns,
+    postItemTargetWidth,
+    postLayoutMode,
+} = useAppLayout();
 const libraryStore = useLibraryStore();
 const tagStore = useTagStore();
 
@@ -250,6 +259,66 @@ const platforms = [
 ];
 
 const scrollContainer = ref<HTMLElement | null>(null);
+const { width: scrollWidth } = useElementSize(scrollContainer);
+const { width: windowWidth } = useWindowSize();
+
+const currentWidth = computed(() => scrollWidth.value || windowWidth.value || 1200);
+const isMobile = computed(() => currentWidth.value < 640);
+
+const columnBounds = computed(() => {
+    const w = currentWidth.value;
+    const padding = w < 640 ? 24 : 48;
+    const gap = w < 640 ? 10 : 16;
+    const usableWidth = Math.max(200, w - padding);
+
+    let minCols = 1;
+    let maxCols = 3;
+
+    if (w < 640) {
+        minCols = 1;
+        maxCols = 3;
+    } else if (w < 900) {
+        minCols = 2;
+        maxCols = 4;
+    } else if (w < 1300) {
+        minCols = 3;
+        maxCols = 6;
+    } else {
+        minCols = 4;
+        maxCols = 8;
+    }
+
+    return { minCols, maxCols, usableWidth, gap };
+});
+
+const minCols = computed(() => columnBounds.value.minCols);
+const maxCols = computed(() => columnBounds.value.maxCols);
+
+const activeCols = computed({
+    get: () => {
+        const pref = postItemColumns.value;
+        const isMobile = (scrollWidth.value || windowWidth.value) < 640;
+        if (!pref || pref <= 0) {
+            return Math.min(maxCols.value, isMobile ? 2 : 4);
+        }
+        return Math.min(Math.max(minCols.value, pref), maxCols.value);
+    },
+    set: (val: number) => {
+        postItemColumns.value = Math.min(Math.max(minCols.value, val), maxCols.value);
+    },
+});
+
+const colTicks = computed(() => {
+    const { minCols, maxCols } = columnBounds.value;
+    const range = maxCols - minCols;
+    const ticks: { col: number; percent: number }[] = [];
+
+    for (let c = minCols; c <= maxCols; c++) {
+        const percent = range > 0 ? ((maxCols - c) / range) * 100 : 50;
+        ticks.push({ col: c, percent });
+    }
+    return ticks.sort((a, b) => b.col - a.col);
+});
 
 const changePage = async (newPage: number) => {
     if (newPage < 1 || newPage > totalPages.value) return;
@@ -585,26 +654,35 @@ onUnmounted(() => {
                             </div>
                         </div>
 
-                        <!-- 2. Card Size Options -->
-                        <div class="flex flex-col gap-2 border-t border-slate-100 pt-3">
+                        <!-- 2. Discrete Card Size Segmented Control Bar -->
+                        <div class="flex flex-col gap-2 border-t border-slate-100 pt-3.5">
                             <div class="flex items-center justify-between">
-                                <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                                <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                                     {{ $t("grid.card_size") }}
                                 </span>
-                            </div>
-                            <div class="grid grid-cols-4 gap-1.5">
-                                <button
-                                    v-for="sizeKey in ['sm', 'md', 'lg', 'xl'] as const"
-                                    :key="sizeKey"
-                                    @click="postItemSize = sizeKey"
-                                    :class="[
-                                        postItemSize === sizeKey
-                                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                                            : 'bg-slate-50 text-slate-700 border-slate-200/80 hover:bg-slate-100 hover:text-slate-900',
-                                    ]"
-                                    class="h-8 rounded-lg border text-xs font-semibold transition-all cursor-pointer flex items-center justify-center"
+                                <span
+                                    class="text-[11px] font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100"
                                 >
-                                    {{ $t(`grid.size_${sizeKey}`) }}
+                                    {{ $t("grid.columns_count", { count: activeCols }, `${activeCols} 列`) }}
+                                </span>
+                            </div>
+                            <div
+                                class="grid gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60"
+                                :style="{ gridTemplateColumns: `repeat(${colTicks.length}, minmax(0, 1fr))` }"
+                            >
+                                <button
+                                    v-for="tick in colTicks"
+                                    :key="tick.col"
+                                    type="button"
+                                    @click="activeCols = tick.col"
+                                    :class="[
+                                        activeCols === tick.col
+                                            ? 'bg-white text-blue-600 font-bold shadow-sm border-slate-200/80'
+                                            : 'text-slate-600 font-medium hover:text-slate-900 border-transparent hover:bg-slate-200/50',
+                                    ]"
+                                    class="h-7 rounded-lg text-xs transition-all cursor-pointer flex items-center justify-center border select-none"
+                                >
+                                    {{ tick.col }}列
                                 </button>
                             </div>
                         </div>
@@ -995,15 +1073,13 @@ onUnmounted(() => {
         </div>
 
         <!-- Content -->
-        <div ref="scrollContainer" class="flex-1 overflow-y-auto p-6 pb-0 sm:pb-6">
+        <div ref="scrollContainer" class="flex-1 overflow-y-auto p-3 sm:p-6 pb-0 sm:pb-6">
             <div
                 v-if="Array.isArray(posts)"
                 ref="gridContainer"
                 class="pb-[calc(3.75rem+env(safe-area-inset-bottom)+var(--visual-viewport-bottom-offset,0))] sm:pb-0 transition-all duration-300"
-                :class="postLayoutMode === 'list' ? 'flex flex-col gap-3' : 'grid gap-4'"
-                :style="
-                    postLayoutMode === 'list' ? undefined : { gridTemplateColumns: `repeat(auto-fill, minmax(${postItemSizePx}px, 1fr))` }
-                "
+                :class="postLayoutMode === 'list' ? 'flex flex-col gap-3' : 'grid gap-2.5 sm:gap-4'"
+                :style="postLayoutMode === 'list' ? undefined : { gridTemplateColumns: `repeat(${activeCols}, minmax(0, 1fr))` }"
             >
                 <PostCard
                     v-for="(post, index) in posts"

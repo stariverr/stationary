@@ -29,10 +29,6 @@
         "view_options": "表示設定",
         "aspect_ratio": "アスペクト比",
         "card_size": "カードサイズ",
-        "size_sm": "小",
-        "size_md": "中",
-        "size_lg": "大",
-        "size_xl": "特大",
         "aspect_auto": "自動"
     },
     "platforms": {

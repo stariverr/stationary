@@ -61,10 +61,7 @@
         "view_options": "視圖設定",
         "aspect_ratio": "卡片比例",
         "card_size": "卡片大小",
-        "size_sm": "小",
-        "size_md": "中",
-        "size_lg": "大",
-        "size_xl": "特大",
+        "columns_count": "{count} 列",
         "aspect_auto": "自適應"
     },
     "platforms": {

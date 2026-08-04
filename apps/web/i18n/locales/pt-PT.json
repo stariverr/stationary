@@ -29,10 +29,6 @@
         "view_options": "Opções de visualização",
         "aspect_ratio": "Proporção",
         "card_size": "Tamanho do cartão",
-        "size_sm": "Pequeno",
-        "size_md": "Médio",
-        "size_lg": "Grande",
-        "size_xl": "Muito grande",
         "aspect_auto": "Auto"
     },
     "platforms": {

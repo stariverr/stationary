@@ -29,10 +29,6 @@
         "view_options": "보기 설정",
         "aspect_ratio": "카드 비율",
         "card_size": "카드 크기",
-        "size_sm": "작게",
-        "size_md": "보통",
-        "size_lg": "크게",
-        "size_xl": "매우 크게",
         "aspect_auto": "자동"
     },
     "platforms": {

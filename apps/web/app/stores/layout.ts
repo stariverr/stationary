@@ -1,9 +1,8 @@
 import { defineStore, skipHydrate } from "pinia";
-import { ref, computed } from "vue";
+import { ref } from "vue";
 import { useStorage } from "@vueuse/core";
 
 export type PostItemAspectRatio = "4:3" | "3:4" | "16:9" | "1:1" | "3:2" | "9:16" | "auto";
-export type PostItemSize = "sm" | "md" | "lg" | "xl";
 export type PostLayoutMode = "grid" | "list";
 
 export const useLayoutStore = defineStore("layout", () => {
@@ -13,23 +12,10 @@ export const useLayoutStore = defineStore("layout", () => {
     const isCreateMediaOpen = ref(false);
 
     // Persisted view settings for post list cards
-    const postItemAspectRatio = useStorage<PostItemAspectRatio>("stationary-post-item-aspect-ratio", "4:3");
-    const postItemSize = useStorage<PostItemSize>("stationary-post-item-size", "md");
+    const postItemAspectRatio = useStorage<PostItemAspectRatio>("stationary-post-item-aspect-ratio", "3:4");
+    const postItemColumns = useStorage<number>("stationary-post-item-columns", 0);
+    const postItemTargetWidth = useStorage<number>("stationary-post-item-target-width", 200);
     const postLayoutMode = useStorage<PostLayoutMode>("stationary-post-layout-mode", "grid");
-
-    const postItemSizePx = computed(() => {
-        switch (postItemSize.value) {
-            case "sm":
-                return 150;
-            case "lg":
-                return 260;
-            case "xl":
-                return 320;
-            case "md":
-            default:
-                return 200;
-        }
-    });
 
     const toggleSidebar = () => {
         if (typeof window !== "undefined" && window.innerWidth < 768) {
@@ -49,9 +35,9 @@ export const useLayoutStore = defineStore("layout", () => {
         isCreatePostOpen,
         isCreateMediaOpen,
         postItemAspectRatio: skipHydrate(postItemAspectRatio),
-        postItemSize: skipHydrate(postItemSize),
+        postItemColumns: skipHydrate(postItemColumns),
+        postItemTargetWidth: skipHydrate(postItemTargetWidth),
         postLayoutMode: skipHydrate(postLayoutMode),
-        postItemSizePx,
         toggleSidebar,
         closeSidebar,
     };

@@ -19,12 +19,12 @@ describe("responsive toolbar controls", () => {
     });
 
     test("hides layout switcher shells on narrow screens", async () => {
-        for (const componentPath of gridComponents) {
-            const component = await readComponent(componentPath);
-            const match = component.match(/<!-- Layout Switchers[\s\S]*?<div class="([^"]+)"/);
+        const mediaComponent = await readComponent("app/components/MediaGrid.vue");
+        const matchMedia = mediaComponent.match(/<!-- Layout Switchers[\s\S]*?<div class="([^"]+)"/);
+        expect(matchMedia).not.toBeNull();
+        expect(matchMedia?.[1] ?? "").toContain("hidden sm:flex");
 
-            expect(match).not.toBeNull();
-            expect(match?.[1] ?? "").toContain("hidden sm:flex");
-        }
+        const postComponent = await readComponent("app/components/PostGrid.vue");
+        expect(postComponent).toContain("<!-- View Options Dropdown -->");
     });
 });

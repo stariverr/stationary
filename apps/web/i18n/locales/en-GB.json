@@ -29,10 +29,6 @@
         "view_options": "Display Options",
         "aspect_ratio": "Aspect Ratio",
         "card_size": "Card Size",
-        "size_sm": "Small",
-        "size_md": "Medium",
-        "size_lg": "Large",
-        "size_xl": "Extra Large",
         "aspect_auto": "Auto"
     },
     "platforms": {

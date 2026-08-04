@@ -29,10 +29,6 @@
         "view_options": "Weergave-opties",
         "aspect_ratio": "Beeldverhouding",
         "card_size": "Kaartformaat",
-        "size_sm": "Klein",
-        "size_md": "Middel",
-        "size_lg": "Groot",
-        "size_xl": "Extra groot",
         "aspect_auto": "Auto"
     },
     "platforms": {

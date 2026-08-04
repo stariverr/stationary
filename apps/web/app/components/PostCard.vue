@@ -25,10 +25,10 @@ const videoRef = ref<HTMLVideoElement | null>(null);
 const isHovered = ref(false);
 const isRegenerating = ref(false);
 const postStore = usePostStore();
-const { postItemAspectRatio, postItemSize, postLayoutMode } = useAppLayout();
+const { postItemAspectRatio, postLayoutMode } = useAppLayout();
 
 const cardAspectRatioStyle = computed(() => {
-    const ratio = postItemAspectRatio.value || "4:3";
+    const ratio = postItemAspectRatio.value || "3:4";
     if (ratio === "auto") {
         return { aspectRatio: "auto" };
     }
@@ -36,7 +36,7 @@ const cardAspectRatioStyle = computed(() => {
     if (parts.length === 2) {
         return { aspectRatio: `${parts[0]} / ${parts[1]}` };
     }
-    return { aspectRatio: "4 / 3" };
+    return { aspectRatio: "3 / 4" };
 });
 
 watch(isHovered, async (hovering) => {

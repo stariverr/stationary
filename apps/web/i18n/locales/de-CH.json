@@ -29,10 +29,6 @@
         "view_options": "Anzeigeoptionen",
         "aspect_ratio": "Seitenverhältnis",
         "card_size": "Kartengröße",
-        "size_sm": "Klein",
-        "size_md": "Mittel",
-        "size_lg": "Groß",
-        "size_xl": "Sehr groß",
         "aspect_auto": "Auto"
     },
     "platforms": {
