@@ -23,6 +23,7 @@ import {
     DraftFileStatus,
     MediaType,
     AsyncTaskType,
+    TrackStreamLayout,
 } from "@/db/schema";
 import { s3 } from "@/global/s3";
 import { and, eq, ilike, SQL, count, asc, desc, or, isNull, inArray } from "drizzle-orm";
@@ -37,7 +38,6 @@ import { v7 as uuidv7 } from "uuid";
 import { env } from "@/global/env";
 import { JobManager } from "@/infra/jobs/manager";
 import { buildCdnUrl } from "@/lib/utils/cdn";
-import { normalizeVariantKey } from "@/lib/utils/track";
 import { consumeDraftFile, DraftFileUnavailableError } from "@/services/draft-file";
 import { FormTimestampSchema, toIsoTimestamp } from "@/lib/utils/time";
 import {
@@ -48,26 +48,6 @@ import {
 } from "@/lib/validation/media-composition";
 import { getAllowedTrackTypesForFile, getFileExtension, getMimeTypeByExt } from "@/lib/utils/file";
 import { validate } from "@/lib/validation/validator";
-import { getMediaCoversMap, getMediaTracks, formatMediaDetail } from "@/lib/utils/media_mapper";
-
-function escapeXml(unsafe: string): string {
-    return unsafe.replace(/[<>&'"]/g, (c) => {
-        switch (c) {
-            case "<":
-                return "&lt;";
-            case ">":
-                return "&gt;";
-            case "&":
-                return "&amp;";
-            case "'":
-                return "&apos;";
-            case '"':
-                return "&quot;";
-            default:
-                return c;
-        }
-    });
-}
 
 const router = new Hono<AuthEnv>();
 
@@ -149,7 +129,7 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
         .offset(offset);
 
     const mediaIds = rawMedia.map((m) => m.id);
-    const coversByMediaId = await getMediaCoversMap(mediaIds);
+    const coversByMediaId = await MediaService.getCoversMap(mediaIds);
 
     const aiMetadataMap = new Map<string, { ai_status: string; ai_error: string | null }>();
 
@@ -246,8 +226,6 @@ router.get("/detail/:id", requireAuth, async (c) => {
         }
     }
 
-    const files = await getMediaTracks(media.id);
-
     const mediaTagsList = await db
         .select({ name: Tag.name })
         .from(MediaTag)
@@ -256,7 +234,7 @@ router.get("/detail/:id", requireAuth, async (c) => {
         .orderBy(asc(MediaTag.id));
     const mediaTags = mediaTagsList.map((mt) => mt.name);
 
-    const mediaDetail = formatMediaDetail(media, files);
+    const mediaDetail = await MediaService.getDetail(media);
 
     const response = {
         ...mediaDetail,
@@ -471,155 +449,11 @@ router.get("/:id/manifest.mpd", requireAuth, validate("param", GetMpdRequestSche
     const mediaId = c.req.valid("param").id;
     const access = await checkMediaAccess(c, mediaId);
     if (!access.media || access.errorResponse) return access.errorResponse;
-    const media = access.media;
 
-    const tracks = await db
-        .select()
-        .from(Track)
-        .where(
-            and(eq(Track.media_id, media.id), eq(Track.delete_status, DeleteStatus.ACTIVE), eq(Track.sync_status, SyncStatus.COMPLETED)),
-        );
-
-    const selectVideoTrackId = c.req.query("video_track_id");
-    const selectAudioTrackId = c.req.query("audio_track_id");
-
-    let videoFiles = tracks.filter((t) => t.type === TrackType.VIDEO && t.purpose === TrackPurpose.CONTENT);
-    let audioFiles = tracks.filter((t) => t.type === TrackType.AUDIO && t.purpose === TrackPurpose.CONTENT);
-
-    if (selectVideoTrackId) {
-        const filtered = videoFiles.filter((t) => t.id === selectVideoTrackId);
-        if (filtered.length > 0) videoFiles = filtered;
+    const mpd = await MediaService.getDashManifest(access.media.id);
+    if (!mpd) {
+        return c.json(error(Code.NOT_FOUND, "No playable DASH video tracks found for this media"), 404);
     }
-    if (selectAudioTrackId) {
-        const filtered = audioFiles.filter((t) => t.id === selectAudioTrackId);
-        if (filtered.length > 0) audioFiles = filtered;
-    }
-
-    if (videoFiles.length === 0) {
-        return c.json(error(Code.NOT_FOUND, "No video tracks found for this media"), 404);
-    }
-
-    const fileIds = tracks.map((t) => t.file_id).filter((fid): fid is string => !!fid);
-    if (fileIds.length === 0) {
-        return c.json(error(Code.NOT_FOUND, "No physical files found for this media"), 404);
-    }
-
-    const physicalFiles = await db
-        .select()
-        .from(DbFile)
-        .where(and(inArray(DbFile.id, fileIds), eq(DbFile.delete_status, DeleteStatus.ACTIVE)));
-
-    const getPresignedUrlOrCdn = async (path: string, bucket: string) => {
-        const cdnUrl = buildCdnUrl(bucket, path);
-        if (cdnUrl) return cdnUrl;
-        try {
-            return await s3.getPresignedUrl(path, {
-                bucket,
-                expiresInSeconds: 3600 * 2,
-            });
-        } catch {
-            return "";
-        }
-    };
-
-    let mediaDuration = 0;
-
-    const videoRepresentations = await Promise.all(
-        videoFiles.map(async (vf) => {
-            const file = physicalFiles.find((f) => f.id === vf.file_id);
-            if (!file) return null;
-
-            if (file.duration && file.duration > mediaDuration) {
-                mediaDuration = file.duration;
-            }
-
-            const url = await getPresignedUrlOrCdn(file.path, file.bucket);
-            const meta = vf.metadata;
-
-            let codecs = meta?.codecs?.toLowerCase() || "avc1.640028";
-            if (["hevc", "h265", "h.265"].includes(codecs)) {
-                codecs = "hvc1.1.6.L150.90";
-            } else if (["h264", "h.264", "avc"].includes(codecs)) {
-                codecs = "avc1.640028";
-            } else if (codecs === "av1") {
-                codecs = "av01.0.08M.08";
-            }
-
-            const bandwidth = meta?.bandwidth || 1500000;
-            const width = meta?.width || file.width || 1280;
-            const height = meta?.height || file.height || 720;
-            const indexRange = meta?.segment_base?.index_range || "915-5000";
-            const initRange = meta?.segment_base?.initialization || "0-914";
-
-            const timescale = meta?.segment_base?.timescale;
-            const pto = meta?.segment_base?.earliest_presentation_time;
-            const segmentBaseAttrs: string[] = [`indexRange="${indexRange}"`];
-            if (timescale !== undefined) segmentBaseAttrs.push(`timescale="${timescale}"`);
-            if (pto !== undefined) segmentBaseAttrs.push(`presentationTimeOffset="${pto}"`);
-
-            return `
-      <Representation id="${escapeXml(normalizeVariantKey(vf.variant_key))}" codecs="${codecs}" bandwidth="${bandwidth}" width="${width}" height="${height}">
-        <BaseURL>${escapeXml(url)}</BaseURL>
-        <SegmentBase ${segmentBaseAttrs.join(" ")}>
-          <Initialization range="${initRange}" />
-        </SegmentBase>
-      </Representation>`;
-        }),
-    ).then((items) => items.filter((x): x is string => x !== null));
-
-    const audioRepresentations = await Promise.all(
-        audioFiles.map(async (af) => {
-            const file = physicalFiles.find((f) => f.id === af.file_id);
-            if (!file) return null;
-
-            if (file.duration && file.duration > mediaDuration) {
-                mediaDuration = file.duration;
-            }
-
-            const url = await getPresignedUrlOrCdn(file.path, file.bucket);
-            const meta = af.metadata;
-            let codecs = meta?.codecs || "mp4a.40.2";
-            if (codecs === "aac") codecs = "mp4a.40.2";
-            const bandwidth = meta?.bandwidth || 128000;
-            const indexRange = meta?.segment_base?.index_range || "837-5000";
-            const initRange = meta?.segment_base?.initialization || "0-836";
-
-            const timescale = meta?.segment_base?.timescale;
-            const pto = meta?.segment_base?.earliest_presentation_time;
-            const segmentBaseAttrs: string[] = [`indexRange="${indexRange}"`];
-            if (timescale !== undefined) segmentBaseAttrs.push(`timescale="${timescale}"`);
-            if (pto !== undefined) segmentBaseAttrs.push(`presentationTimeOffset="${pto}"`);
-
-            return `
-      <Representation id="${escapeXml(normalizeVariantKey(af.variant_key))}" codecs="${codecs}" bandwidth="${bandwidth}">
-        <BaseURL>${escapeXml(url)}</BaseURL>
-        <SegmentBase ${segmentBaseAttrs.join(" ")}>
-          <Initialization range="${initRange}" />
-        </SegmentBase>
-      </Representation>`;
-        }),
-    ).then((items) => items.filter((x): x is string => x !== null));
-
-    const durationStr = mediaDuration > 0 ? `PT${mediaDuration}S` : "PT0S";
-
-    const mpd = `<?xml version="1.0" encoding="utf-8"?>
-<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011" type="static" mediaPresentationDuration="${durationStr}" minBufferTime="PT1.5S">
-  <Period>
-    <!-- Video Adaptation Set -->
-    <AdaptationSet mimeType="video/mp4" subsegmentAlignment="true" subsegmentStartsWithSAP="1">
-      ${videoRepresentations.join("\n")}
-    </AdaptationSet>
-    ${
-        audioRepresentations.length > 0
-            ? `
-    <!-- Audio Adaptation Set -->
-    <AdaptationSet mimeType="audio/mp4" subsegmentAlignment="true" subsegmentStartsWithSAP="1">
-      ${audioRepresentations.join("\n")}
-    </AdaptationSet>`
-            : ""
-    }
-  </Period>
-</MPD>`;
 
     c.header("Content-Type", "application/dash+xml");
     return c.text(mpd);
@@ -796,22 +630,48 @@ const RegisterTrackSchema = z.object({
     display_name: z.string().optional(),
     language: z.string().nullable().optional(),
     codec: z.string().nullable().optional(),
+    duration: z.number().nullable().optional(),
+    width: z.number().int().positive().nullable().optional(),
+    height: z.number().int().positive().nullable().optional(),
+    bandwidth: z.number().nonnegative().nullable().optional(),
     is_stale: z.boolean().optional(),
     source_track_id: z.string().nullable().optional(),
+    container: z.string().nullable().optional(),
+    is_fragmented: z.boolean().nullable().optional(),
+    stream_layout: z.enum(TrackStreamLayout).nullable().optional(),
+    has_video: z.boolean().nullable().optional(),
+    has_audio: z.boolean().nullable().optional(),
+    streams: z
+        .array(
+            z.object({
+                index: z.number().int().nonnegative(),
+                id: z.string().nullable().optional(),
+                type: z.enum([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
+                codec: z.string().nullable().optional(),
+                language: z.string().nullable().optional(),
+                label: z.string().nullable().optional(),
+                role: z.string().nullable().optional(),
+                width: z.number().int().positive().nullable().optional(),
+                height: z.number().int().positive().nullable().optional(),
+                bandwidth: z.number().nonnegative().nullable().optional(),
+                channels: z.number().int().positive().nullable().optional(),
+                sample_rate: z.number().int().positive().nullable().optional(),
+                is_default: z.boolean().optional(),
+            }),
+        )
+        .nullable()
+        .optional(),
     file: z.object({
         path: z.string().min(1),
         bucket: z.string().min(1),
         mime_type: z.string().min(1),
         extension: z.string().min(1),
         size: z.number().int().nonnegative(),
-        width: z.number().int().positive().nullable().optional(),
-        height: z.number().int().positive().nullable().optional(),
-        duration: z.number().nullable().optional(),
     }),
 });
 
 router.post("/:id/tracks/upsert", requireAuth, validate("json", RegisterTrackSchema), async (c) => {
-    const id = c.req.param("id")!;
+    const id = c.req.param("id");
     const body = c.req.valid("json");
 
     const access = await checkMediaAccess(c, id);
@@ -835,6 +695,12 @@ router.post("/:id/tracks/upsert", requireAuth, validate("json", RegisterTrackSch
                 codec: body.codec,
                 is_stale: body.is_stale,
                 source_track_id: body.source_track_id,
+                container: body.container,
+                is_fragmented: body.is_fragmented,
+                stream_layout: body.stream_layout,
+                has_video: body.has_video,
+                has_audio: body.has_audio,
+                streams: body.streams,
             },
             body.file,
             tx,
@@ -906,11 +772,36 @@ const UpdateTrackMetadataSchema = z.object({
     is_stale: z.boolean().optional(),
     metadata: z.any().optional(),
     source_track_id: z.string().nullable().optional(),
+    container: z.string().nullable().optional(),
+    is_fragmented: z.boolean().nullable().optional(),
+    stream_layout: z.enum(TrackStreamLayout).nullable().optional(),
+    has_video: z.boolean().nullable().optional(),
+    has_audio: z.boolean().nullable().optional(),
+    streams: z
+        .array(
+            z.object({
+                index: z.number().int().nonnegative(),
+                id: z.string().nullable().optional(),
+                type: z.enum([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
+                codec: z.string().nullable().optional(),
+                language: z.string().nullable().optional(),
+                label: z.string().nullable().optional(),
+                role: z.string().nullable().optional(),
+                width: z.number().int().positive().nullable().optional(),
+                height: z.number().int().positive().nullable().optional(),
+                bandwidth: z.number().nonnegative().nullable().optional(),
+                channels: z.number().int().positive().nullable().optional(),
+                sample_rate: z.number().int().positive().nullable().optional(),
+                is_default: z.boolean().optional(),
+            }),
+        )
+        .nullable()
+        .optional(),
 });
 
 router.post("/:id/tracks/:trackId/update", requireAuth, validate("json", UpdateTrackMetadataSchema), async (c) => {
-    const id = c.req.param("id")!;
-    const trackId = c.req.param("trackId")!;
+    const id = c.req.param("id");
+    const trackId = c.req.param("trackId");
     const body = c.req.valid("json");
 
     const access = await checkMediaAccess(c, id);

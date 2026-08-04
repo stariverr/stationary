@@ -20,8 +20,9 @@ import {
     AsyncTaskUnitKind,
     AsyncSubjectType,
 } from "@/db/schema";
-import { eq, and, not, notInArray, inArray, gte, isNull, isNotNull, or, lt } from "drizzle-orm";
+import { eq, and, not, inArray, isNull, isNotNull, or, lt } from "drizzle-orm";
 import { downloadStream, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
+import { extractSegmentBase } from "@/lib/utils/mp4-segment";
 import { withLock } from "@/lib/utils/lock";
 import { env } from "@/global/env";
 import { s3 } from "@/global/s3";
@@ -32,150 +33,35 @@ import type { PostItemData, MediaItemData } from "@/api/task";
 import { Temporal } from "@js-temporal/polyfill";
 import { sanitizeTags } from "@/lib/utils/tag_sanitizer";
 import { generateDeterministicVariantKey } from "@/lib/utils/track";
-import { Quality } from "@/lib/types";
+import { cleanTrackMetadata, deriveTrackFormat, normalizeIncomingTrack, type TrackFormatFields } from "@/lib/utils/track-format";
+import { DeleteService } from "@/services/delete";
 
-function formatVttTime(seconds: number): string {
-    const ms = Math.floor((seconds % 1) * 1000)
-        .toString()
-        .padStart(3, "0");
-    const totalSecs = Math.floor(seconds);
-    const s = (totalSecs % 60).toString().padStart(2, "0");
-    const m = (Math.floor(totalSecs / 60) % 60).toString().padStart(2, "0");
-    const h = Math.floor(totalSecs / 3600)
-        .toString()
-        .padStart(2, "0");
-    return `${h}:${m}:${s}.${ms}`;
+
+
+type TagRecord = typeof Tag.$inferSelect;
+type TagLookup = Map<string, TagRecord>;
+type TrackMetadataFields = {
+    language?: string;
+    codecs?: string;
+};
+
+function getTrackMetadataFields(track: Record<string, any>): TrackMetadataFields {
+    const meta = (track.metadata ?? {}) as Record<string, any>;
+    const language = typeof track.language === "string" ? track.language : typeof meta.language === "string" ? meta.language : undefined;
+    const codecs =
+        typeof track.codec === "string"
+            ? track.codec
+            : typeof meta.codecs === "string"
+              ? meta.codecs
+              : typeof meta.codec === "string"
+                ? meta.codec
+                : undefined;
+    return { language, codecs };
 }
 
-function convertBiliJsonToVtt(jsonText: string): string {
-    const data = JSON.parse(jsonText);
-    let vtt = "WEBVTT\n\n";
-    if (data && Array.isArray(data.body)) {
-        for (const [idx, item] of data.body.entries()) {
-            const from = formatVttTime(item.from || 0);
-            const to = formatVttTime(item.to || 0);
-            const content = item.content || "";
-            vtt += `${idx + 1}\n${from} --> ${to}\n${content}\n\n`;
-        }
-    }
-    return vtt;
-}
-
-async function extractSegmentBase(stream: ReadableStream): Promise<{
-    segment_base?: {
-        initialization: string;
-        index_range: string;
-        timescale?: number;
-        earliest_presentation_time?: string;
-    };
-    stream: ReadableStream;
-}> {
-    const maxHeaderSize = 32768;
-    const chunks: Uint8Array[] = [];
-    let bytesRead = 0;
-    const reader = stream.getReader();
-    let done = false;
-    let sidxRange:
-        | {
-              initialization: string;
-              index_range: string;
-              timescale?: number;
-              earliest_presentation_time?: string;
-          }
-        | undefined = undefined;
-
-    while (bytesRead < maxHeaderSize) {
-        const { value, done: readDone } = await reader.read();
-        if (readDone) {
-            done = true;
-            break;
-        }
-        if (value) {
-            chunks.push(value);
-            bytesRead += value.length;
-        }
-    }
-
-    const headerBuffer = new Uint8Array(bytesRead);
-    let offset = 0;
-    for (const chunk of chunks) {
-        headerBuffer.set(chunk, offset);
-        offset += chunk.length;
-    }
-
-    offset = 0;
-    const view = new DataView(headerBuffer.buffer, headerBuffer.byteOffset, headerBuffer.byteLength);
-    while (offset + 8 <= bytesRead) {
-        const size = view.getUint32(offset);
-        const type = String.fromCharCode(
-            headerBuffer[offset + 4],
-            headerBuffer[offset + 5],
-            headerBuffer[offset + 6],
-            headerBuffer[offset + 7],
-        );
-
-        if (type === "sidx") {
-            const version = view.getUint8(offset + 8);
-            const timescale = view.getUint32(offset + 16);
-            let earliestPresentationTime = 0n;
-            if (version === 0) {
-                earliestPresentationTime = BigInt(view.getUint32(offset + 20));
-            } else {
-                earliestPresentationTime = view.getBigUint64(offset + 20);
-            }
-            sidxRange = {
-                initialization: `0-${offset - 1}`,
-                index_range: `${offset}-${offset + size - 1}`,
-                timescale,
-                earliest_presentation_time: earliestPresentationTime.toString(),
-            };
-            break;
-        }
-
-        if (size === 0) {
-            break;
-        }
-        if (size === 1) {
-            if (offset + 16 > bytesRead) break;
-            const sizeLarge = view.getBigUint64(offset + 8);
-            offset += Number(sizeLarge);
-        } else {
-            offset += size;
-        }
-    }
-
-    const reconstructedStream = new ReadableStream({
-        async start(controller) {
-            for (const chunk of chunks) {
-                controller.enqueue(chunk);
-            }
-            if (done) {
-                controller.close();
-                return;
-            }
-            try {
-                while (true) {
-                    const { value, done: readDone } = await reader.read();
-                    if (readDone) {
-                        controller.close();
-                        break;
-                    }
-                    if (value) {
-                        controller.enqueue(value);
-                    }
-                }
-            } catch (err) {
-                controller.error(err);
-            } finally {
-                reader.releaseLock();
-            }
-        },
-    });
-
-    return {
-        segment_base: sidxRange,
-        stream: reconstructedStream,
-    };
+async function loadTagLookup(executor: DbExecutor, libraryId: string): Promise<TagLookup> {
+    const existingTags = await executor.select().from(Tag).where(eq(Tag.library_id, libraryId));
+    return new Map(existingTags.map((tag) => [tag.normalized_name, tag]));
 }
 
 async function syncEntityTags(
@@ -186,6 +72,7 @@ async function syncEntityTags(
     rawTags: string[],
     source: TagSource,
     sourceField: string,
+    tagLookup?: TagLookup,
 ) {
     const sanitized = sanitizeTags(rawTags);
     if (sanitized.length === 0) {
@@ -197,27 +84,27 @@ async function syncEntityTags(
         return;
     }
 
-    const existingTags = await executor.select().from(Tag).where(eq(Tag.library_id, libraryId));
-
-    // Build unified map of normalized names & aliases pointing to their own tag
-    const normalizedLookup = new Map<string, any>();
-    for (const t of existingTags) {
-        normalizedLookup.set(t.normalized_name, t);
-    }
+    const normalizedLookup = tagLookup ?? (await loadTagLookup(executor, libraryId));
 
     const targetTagIds: string[] = [];
+    const missingItems: typeof sanitized = [];
 
     for (const item of sanitized) {
-        if (normalizedLookup.has(item.normalized)) {
-            const matched = normalizedLookup.get(item.normalized);
-            if (matched.status === TagStatus.IGNORED) {
-                continue;
+        const matched = normalizedLookup.get(item.normalized);
+        if (matched) {
+            if (matched.status !== TagStatus.IGNORED) {
+                targetTagIds.push(matched.id);
             }
-            targetTagIds.push(matched.id);
         } else {
-            const inserted = await executor
-                .insert(Tag)
-                .values({
+            missingItems.push(item);
+        }
+    }
+
+    if (missingItems.length > 0) {
+        const insertedTags = await executor
+            .insert(Tag)
+            .values(
+                missingItems.map((item) => ({
                     name: item.name,
                     normalized_name: item.normalized,
                     canonical_tag_id: null,
@@ -225,19 +112,19 @@ async function syncEntityTags(
                     status: TagStatus.CANDIDATE,
                     source: source,
                     source_field: sourceField,
-                })
-                .returning();
-            if (inserted[0]) {
-                targetTagIds.push(inserted[0].id);
-                // Put the newly created candidate into the lookup map to prevent duplicates in the same batch
-                normalizedLookup.set(item.normalized, inserted[0]);
-            }
+                })),
+            )
+            .returning();
+
+        for (const inserted of insertedTags) {
+            targetTagIds.push(inserted.id);
+            normalizedLookup.set(inserted.normalized_name, inserted);
         }
     }
 
     if (entityType === "post") {
-        const existingLinks = await executor.select().from(PostTag).where(eq(PostTag.post_id, entityId));
-        const existingTagIds = existingLinks.map((l: any) => l.tag_id);
+        const existingLinks = await executor.select({ tag_id: PostTag.tag_id }).from(PostTag).where(eq(PostTag.post_id, entityId));
+        const existingTagIds = existingLinks.map((l) => l.tag_id);
 
         const toAdd = targetTagIds.filter((id: string) => !existingTagIds.includes(id));
         const toDelete = existingTagIds.filter((id: string) => !targetTagIds.includes(id));
@@ -254,8 +141,8 @@ async function syncEntityTags(
             await executor.delete(PostTag).where(and(eq(PostTag.post_id, entityId), inArray(PostTag.tag_id, toDelete)));
         }
     } else {
-        const existingLinks = await executor.select().from(MediaTag).where(eq(MediaTag.media_id, entityId));
-        const existingTagIds = existingLinks.map((l: any) => l.tag_id);
+        const existingLinks = await executor.select({ tag_id: MediaTag.tag_id }).from(MediaTag).where(eq(MediaTag.media_id, entityId));
+        const existingTagIds = existingLinks.map((l) => l.tag_id);
 
         const toAdd = targetTagIds.filter((id: string) => !existingTagIds.includes(id));
         const toDelete = existingTagIds.filter((id: string) => !targetTagIds.includes(id));
@@ -272,6 +159,228 @@ async function syncEntityTags(
             await executor.delete(MediaTag).where(and(eq(MediaTag.media_id, entityId), inArray(MediaTag.tag_id, toDelete)));
         }
     }
+}
+
+type IncomingTrack = MediaItemData["tracks"][number];
+type ExistingTrack = typeof Track.$inferSelect;
+
+type PreparedTrack = IncomingTrack & {
+    variant_key: string;
+    is_default: boolean;
+    format: TrackFormatFields;
+    metadata_signature: string;
+    streams_signature: string;
+    priority: number;
+    language: string | null;
+    codec: string | null;
+    duration: number | null;
+    width: number | null;
+    height: number | null;
+    bandwidth: number | null;
+};
+
+const trackGroupKey = (type: TrackType, purpose: TrackPurpose) => `${type}:${purpose}`;
+
+const trackIdentityKey = (track: Pick<IncomingTrack, "type" | "purpose"> & { variant_key: string }) =>
+    `${trackGroupKey(track.type, track.purpose)}:${track.variant_key}`;
+
+function prepareIncomingTracks(tracks: IncomingTrack[]): PreparedTrack[] {
+    const prepared = tracks.map((track) => {
+        const normalized = normalizeIncomingTrack(track);
+        const baseKey = generateDeterministicVariantKey(
+            {
+                type: track.type,
+                purpose: track.purpose,
+                quality: track.quality,
+                priority: normalized.priority,
+                metadata: track.metadata,
+                language: normalized.language ?? undefined,
+                codec: normalized.codec ?? undefined,
+            },
+            null,
+        );
+
+        return {
+            ...track,
+            priority: normalized.priority,
+            language: normalized.language,
+            codec: normalized.codec,
+            duration: normalized.duration,
+            width: normalized.width,
+            height: normalized.height,
+            bandwidth: normalized.bandwidth,
+            metadata: normalized.metadata,
+            baseKey,
+            format: normalized.format,
+            metadata_signature: JSON.stringify(normalized.metadata),
+            streams_signature: JSON.stringify(normalized.format.streams),
+        };
+    });
+
+    const seenKeys = new Set<string>();
+    const defaultKeys = new Map<string, string>();
+    const keyedTracks = prepared.map(({ baseKey, ...track }) => {
+        let variantKey = baseKey;
+        let duplicateIndex = 1;
+        const duplicateKey = () => `${trackIdentityKey({ ...track, variant_key: variantKey })}`;
+
+        while (seenKeys.has(duplicateKey())) {
+            duplicateIndex += 1;
+            variantKey = `${baseKey}-dup-${duplicateIndex}`;
+        }
+        seenKeys.add(duplicateKey());
+
+        return {
+            ...track,
+            variant_key: variantKey,
+        };
+    });
+
+    for (const track of keyedTracks) {
+        if (track.priority === 0) {
+            const groupKey = trackGroupKey(track.type, track.purpose);
+            if (!defaultKeys.has(groupKey)) defaultKeys.set(groupKey, track.variant_key);
+        }
+    }
+
+    return keyedTracks.map((track) => ({
+        ...track,
+        is_default: defaultKeys.get(trackGroupKey(track.type, track.purpose)) === track.variant_key,
+    }));
+}
+
+function hasTrackPayloadChanged(existing: ExistingTrack, incoming: PreparedTrack): boolean {
+    const metadataFields = getTrackMetadataFields(incoming);
+    return (
+        existing.source_url !== incoming.url ||
+        existing.is_original !== incoming.is_original ||
+        existing.quality !== incoming.quality ||
+        existing.sync_status === SyncStatus.FAILED ||
+        existing.language !== (metadataFields.language || null) ||
+        existing.codec !== (metadataFields.codecs || null) ||
+        existing.container !== incoming.format.container ||
+        existing.is_fragmented !== incoming.format.is_fragmented ||
+        existing.stream_layout !== incoming.format.stream_layout ||
+        existing.has_video !== incoming.format.has_video ||
+        existing.has_audio !== incoming.format.has_audio ||
+        JSON.stringify(existing.streams || []) !== incoming.streams_signature ||
+        JSON.stringify(existing.metadata || {}) !== incoming.metadata_signature
+    );
+}
+
+function trackNeedsProcessing(existing: ExistingTrack, incoming: PreparedTrack): boolean {
+    return existing.sync_status === SyncStatus.PENDING || hasTrackPayloadChanged(existing, incoming);
+}
+
+function getTrackPresentationUpdates(existing: ExistingTrack, incoming: PreparedTrack): Partial<typeof Track.$inferInsert> {
+    const updates: Partial<typeof Track.$inferInsert> = {};
+    if (existing.priority !== incoming.priority) updates.priority = incoming.priority;
+    if (existing.is_default !== incoming.is_default) updates.is_default = incoming.is_default;
+    return updates;
+}
+
+async function syncPreparedTrack(
+    tx: Transaction,
+    mediaId: string,
+    incoming: PreparedTrack,
+    existing: ExistingTrack | undefined,
+): Promise<boolean> {
+    const now = Temporal.Now.instant();
+    const presentationUpdates = existing ? getTrackPresentationUpdates(existing, incoming) : {};
+
+    if (!incoming.url) {
+        if (!existing || incoming.purpose === TrackPurpose.COVER) return false;
+
+        const oldFileId = existing.file_id;
+        await tx
+            .update(Track)
+            .set({
+                ...presentationUpdates,
+                source_url: null,
+                file_id: null,
+                sync_status: SyncStatus.COMPLETED,
+                last_error: null,
+                update_time: now,
+            })
+            .where(eq(Track.id, existing.id));
+        await DeleteService.softDeleteFileIfUnreferenced(oldFileId, tx, now);
+        return false;
+    }
+
+    if (!existing) {
+        const metadataFields = getTrackMetadataFields(incoming);
+        await tx.insert(Track).values({
+            media_id: mediaId,
+            type: incoming.type,
+            purpose: incoming.purpose,
+            is_original: incoming.is_original,
+            quality: incoming.quality,
+            priority: incoming.priority,
+            source_url: incoming.url,
+            metadata: incoming.metadata,
+            sync_status: SyncStatus.PENDING,
+            variant_key: incoming.variant_key,
+            is_default: incoming.is_default,
+            language: metadataFields.language || null,
+            codec: metadataFields.codecs || null,
+            duration: incoming.duration,
+            width: incoming.width,
+            height: incoming.height,
+            bandwidth: incoming.bandwidth,
+            is_stale: false,
+            container: incoming.format.container,
+            is_fragmented: incoming.format.is_fragmented,
+            stream_layout: incoming.format.stream_layout,
+            has_video: incoming.format.has_video,
+            has_audio: incoming.format.has_audio,
+            streams: incoming.format.streams,
+        });
+        return true;
+    }
+
+    if (hasTrackPayloadChanged(existing, incoming)) {
+        const metadataFields = getTrackMetadataFields(incoming);
+        const oldFileId = existing.file_id;
+
+        await tx
+            .update(Track)
+            .set({
+                ...presentationUpdates,
+                source_url: incoming.url,
+                is_original: incoming.is_original,
+                quality: incoming.quality,
+                priority: incoming.priority,
+                metadata: incoming.metadata,
+                sync_status: SyncStatus.PENDING,
+                file_id: null,
+                last_error: null,
+                language: metadataFields.language || null,
+                codec: metadataFields.codecs || null,
+                duration: incoming.duration,
+                width: incoming.width,
+                height: incoming.height,
+                bandwidth: incoming.bandwidth,
+                container: incoming.format.container,
+                is_fragmented: incoming.format.is_fragmented,
+                stream_layout: incoming.format.stream_layout,
+                has_video: incoming.format.has_video,
+                has_audio: incoming.format.has_audio,
+                streams: incoming.format.streams,
+                update_time: now,
+            })
+            .where(eq(Track.id, existing.id));
+        await DeleteService.softDeleteFileIfUnreferenced(oldFileId, tx, now);
+        return true;
+    }
+
+    if (Object.keys(presentationUpdates).length > 0) {
+        await tx
+            .update(Track)
+            .set({ ...presentationUpdates, update_time: now })
+            .where(eq(Track.id, existing.id));
+    }
+
+    return existing.sync_status === SyncStatus.PENDING;
 }
 
 export const TaskService = {
@@ -309,7 +418,10 @@ export const TaskService = {
                     authorId = author.id;
                 }
             } catch (e) {
-                console.error(e);
+                console.error(
+                    `[TASK_SERVICE] Failed to save/upsert author (platform=${postData.platform}, external_id=${postData.author.external_id}):`,
+                    e,
+                );
             }
         }
 
@@ -378,39 +490,30 @@ export const TaskService = {
             hasPendingTasks = true;
         }
 
+        const tagLookup =
+            postData.tags?.length || postData.media.some((media) => media.tags?.length)
+                ? await loadTagLookup(tx, targetLibraryId)
+                : undefined;
+
         // Sync relational tags for post
-        await syncEntityTags(tx, targetLibraryId, "post", postId, postData.tags || [], TagSource.SCRAPER, "post.tags");
+        await syncEntityTags(tx, targetLibraryId, "post", postId, postData.tags || [], TagSource.SCRAPER, "post.tags", tagLookup);
 
         // 3. Media sync
-        const mediaEids: string[] = postData.media.map((m) => m.external_id).filter((eid): eid is string => !!eid);
+        const mediaEidSet = new Set(postData.media.map((media) => media.external_id).filter((eid): eid is string => Boolean(eid)));
+        const postMediaRecords = await tx.select().from(Media).where(eq(Media.post_id, postId));
+        const activeMediaRecords = postMediaRecords.filter((media) => media.delete_status === DeleteStatus.ACTIVE);
+        const previouslyDeletedMediaRecords = postMediaRecords.filter((media) => media.delete_status === DeleteStatus.DELETED);
 
-        let mediaToDelete: any[] = [];
-        if (postData.media.length === 0) {
-            mediaToDelete = await tx
-                .select()
-                .from(Media)
-                .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE)));
-        } else if (mediaEids.length > 0) {
-            mediaToDelete = await tx
-                .select()
-                .from(Media)
-                .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE), notInArray(Media.eid, mediaEids)));
-        } else {
-            mediaToDelete = await tx
-                .select()
-                .from(Media)
-                .where(
-                    and(
-                        eq(Media.post_id, postId),
-                        eq(Media.delete_status, DeleteStatus.ACTIVE),
-                        gte(Media.sort_order, postData.media.length),
-                    ),
-                );
-        }
+        const mediaToDelete = activeMediaRecords.filter((media) => {
+            if (postData.media.length === 0) return true;
+            if (mediaEidSet.size > 0) return !mediaEidSet.has(media.eid);
+            return media.sort_order >= postData.media.length;
+        });
 
+        const mediaToDeleteIds = new Set(mediaToDelete.map((media) => media.id));
         if (mediaToDelete.length > 0) {
-            const deletedMediaIds = mediaToDelete.map((m) => m.id);
             const deleteTime = Temporal.Now.instant();
+            const deletedMediaIds = [...mediaToDeleteIds];
 
             await tx
                 .update(Media)
@@ -424,7 +527,7 @@ export const TaskService = {
                 .select({ file_id: Track.file_id })
                 .from(Track)
                 .where(and(inArray(Track.media_id, deletedMediaIds), eq(Track.delete_status, DeleteStatus.ACTIVE)));
-            const fileIds = mediaFiles.map((mf) => mf.file_id).filter((fid): fid is string => !!fid);
+            const fileIds = [...new Set(mediaFiles.map((mediaFile) => mediaFile.file_id).filter((id): id is string => Boolean(id)))];
 
             await tx
                 .update(Track)
@@ -447,352 +550,157 @@ export const TaskService = {
             hasPendingTasks = true;
         }
 
+        const deletedMediaRecords = [...previouslyDeletedMediaRecords, ...mediaToDelete];
+        const retainedActiveMedia = activeMediaRecords.filter((media) => !mediaToDeleteIds.has(media.id));
+        const activeMediaIds = retainedActiveMedia.map((media) => media.id);
+        const existingTracks =
+            activeMediaIds.length > 0 ? await tx.select().from(Track).where(inArray(Track.media_id, activeMediaIds)) : [];
+        const tracksByMediaId = new Map<string, ExistingTrack[]>();
+        for (const track of existingTracks) {
+            const mediaTracks = tracksByMediaId.get(track.media_id) ?? [];
+            mediaTracks.push(track);
+            tracksByMediaId.set(track.media_id, mediaTracks);
+        }
+
+        const findMedia = (records: (typeof Media.$inferSelect)[], mediaData: MediaItemData, index: number) =>
+            records.find((media) => (mediaData.external_id ? media.eid === mediaData.external_id : media.sort_order === index));
+
         for (const [index, mediaData] of postData.media.entries()) {
             const incomingPublishedTime = mediaData.published_time;
             const fallbackPublishedTime = incomingPublishedTime ?? postData.published_time;
-            const oldMediaList = await tx
-                .select()
-                .from(Media)
-                .where(
-                    and(
-                        eq(Media.post_id, postId),
-                        eq(Media.delete_status, DeleteStatus.ACTIVE),
-                        mediaData.external_id ? eq(Media.eid, mediaData.external_id) : eq(Media.sort_order, index),
-                    ),
-                );
+            const media = findMedia(retainedActiveMedia, mediaData, index);
 
-            const deletedMediaList =
-                oldMediaList.length === 0
-                    ? await tx
-                          .select()
-                          .from(Media)
-                          .where(
-                              and(
-                                  eq(Media.post_id, postId),
-                                  eq(Media.delete_status, DeleteStatus.DELETED),
-                                  mediaData.external_id ? eq(Media.eid, mediaData.external_id) : eq(Media.sort_order, index),
-                              ),
-                          )
-                    : [];
-
-            if (deletedMediaList.length > 0) {
+            if (!media && findMedia(deletedMediaRecords, mediaData, index)) {
                 continue;
             }
 
+            const tracksWithKeys = prepareIncomingTracks(mediaData.tracks);
             let mediaId: string;
-            let m = oldMediaList[0];
+            let existingMediaTracks: ExistingTrack[];
 
-            // Pre-calculate variant keys for incoming tracks
-            const adaptedIncomingTracks = mediaData.tracks.map((track, idx) => {
-                const baseKey = generateDeterministicVariantKey(
-                    {
-                        type: track.type,
-                        purpose: track.purpose,
-                        quality: track.quality,
-                        priority: track.priority,
-                        metadata: track.metadata,
-                        language: (track.metadata as any)?.language,
-                        codec: (track.metadata as any)?.codecs,
-                    },
-                    null,
-                );
-                return {
-                    ...track,
-                    baseKey,
-                    index: idx,
-                };
-            });
-
-            const seenKeys = new Set<string>();
-            const tracksWithKeys = adaptedIncomingTracks.map((track) => {
-                let finalKey = track.baseKey;
-                let counter = 1;
-                while (seenKeys.has(`${track.purpose}:${finalKey}`)) {
-                    counter++;
-                    finalKey = `${track.baseKey}-dup-${counter}`;
-                }
-                seenKeys.add(`${track.purpose}:${finalKey}`);
-                return {
-                    ...track,
-                    variant_key: finalKey,
-                };
-            });
-
-            if (!m) {
-                // Create new media if not exists
-                const mediaInsertData: typeof Media.$inferInsert = {
-                    eid: mediaData.external_id || "",
-                    post_id: postId,
-                    library_id: targetLibraryId,
-                    source: postData.platform,
-                    title: mediaData.title || "",
-                    description: mediaData.description || "",
-                    type: mediaData.type,
-                    sort_order: index,
-                    published_time: fallbackPublishedTime,
-                    sync_status: SyncStatus.PENDING,
-                };
-                const insertedMedia = await tx.insert(Media).values(mediaInsertData).returning({ id: Media.id });
+            if (!media) {
+                const insertedMedia = await tx
+                    .insert(Media)
+                    .values({
+                        eid: mediaData.external_id || "",
+                        post_id: postId,
+                        library_id: targetLibraryId,
+                        source: postData.platform,
+                        title: mediaData.title || "",
+                        description: mediaData.description || "",
+                        type: mediaData.type,
+                        sort_order: index,
+                        published_time: fallbackPublishedTime,
+                        sync_status: SyncStatus.PENDING,
+                    })
+                    .returning({ id: Media.id });
                 mediaId = insertedMedia[0].id;
+                existingMediaTracks = [];
+                tracksByMediaId.set(mediaId, existingMediaTracks);
                 hasPendingTasks = true;
             } else {
-                // Update existing media if it exists
-                mediaId = m.id;
+                mediaId = media.id;
+                existingMediaTracks = tracksByMediaId.get(mediaId) ?? [];
+                const activeTracks = existingMediaTracks.filter((track) => track.delete_status === DeleteStatus.ACTIVE);
+                const existingTrackByKey = new Map(activeTracks.map((track) => [trackIdentityKey(track), track]));
+                const incomingTrackKeys = new Set(tracksWithKeys.map(trackIdentityKey));
+                const mediaNeedsProcessing =
+                    tracksWithKeys.some((track) => {
+                        const existing = existingTrackByKey.get(trackIdentityKey(track));
+                        return !existing || trackNeedsProcessing(existing, track);
+                    }) || activeTracks.some((track) => !incomingTrackKeys.has(trackIdentityKey(track)));
+
                 const updateData: Partial<typeof Media.$inferInsert> = {
                     sort_order: index,
                     title: mediaData.title || "",
                     description: mediaData.description || "",
                     type: mediaData.type,
                 };
-                if (incomingPublishedTime || (!m.published_time && fallbackPublishedTime)) {
+                if (incomingPublishedTime || (!media.published_time && fallbackPublishedTime)) {
                     updateData.published_time = incomingPublishedTime ?? fallbackPublishedTime;
                 }
-
-                // Fetch existing active tracks to see if any track needs processing
-                const activeTracks = await tx
-                    .select()
-                    .from(Track)
-                    .where(and(eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)));
-
-                let mediaNeedsProcessing = false;
-
-                // Check if any incoming track is new, modified, or pending/failed
-                for (const track of tracksWithKeys) {
-                    const existing = activeTracks.find(
-                        (t) => t.type === track.type && t.purpose === track.purpose && t.variant_key === track.variant_key,
-                    );
-                    if (!existing) {
-                        mediaNeedsProcessing = true;
-                        break;
-                    }
-                    if (
-                        existing.source_url !== track.url ||
-                        existing.is_original !== track.is_original ||
-                        existing.quality !== track.quality ||
-                        existing.sync_status === SyncStatus.FAILED ||
-                        existing.sync_status === SyncStatus.PENDING ||
-                        existing.language !== ((track.metadata as any)?.language || null) ||
-                        existing.codec !== ((track.metadata as any)?.codecs || null) ||
-                        JSON.stringify(existing.metadata) !== JSON.stringify(track.metadata || {})
-                    ) {
-                        mediaNeedsProcessing = true;
-                        break;
-                    }
-                }
-
-                // Also check if any existing active tracks are being removed
-                if (!mediaNeedsProcessing) {
-                    for (const t of activeTracks) {
-                        const stillExists = tracksWithKeys.some(
-                            (track) => track.type === t.type && track.purpose === t.purpose && track.variant_key === t.variant_key,
-                        );
-                        if (!stillExists) {
-                            mediaNeedsProcessing = true;
-                            break;
-                        }
-                    }
-                }
-
-                if (m.sync_status === SyncStatus.FAILED || m.sync_status === SyncStatus.PENDING || mediaNeedsProcessing) {
+                if (media.sync_status === SyncStatus.FAILED || media.sync_status === SyncStatus.PENDING || mediaNeedsProcessing) {
                     updateData.sync_status = SyncStatus.PENDING;
                     updateData.last_error = null;
                     hasPendingTasks = true;
                 }
 
                 if (Object.keys(updateData).length > 0) {
-                    await tx.update(Media).set(updateData).where(eq(Media.id, m.id));
+                    await tx.update(Media).set(updateData).where(eq(Media.id, mediaId));
                 }
             }
 
             // Sync relational tags for media
-            await syncEntityTags(tx, targetLibraryId, "media", mediaId, mediaData.tags || [], TagSource.SCRAPER, "media.tags");
+            await syncEntityTags(tx, targetLibraryId, "media", mediaId, mediaData.tags || [], TagSource.SCRAPER, "media.tags", tagLookup);
 
-            // Sync Track records
-            const existingTracks = await tx.select().from(Track).where(eq(Track.media_id, mediaId));
+            const activeTracks = existingMediaTracks.filter((track) => track.delete_status === DeleteStatus.ACTIVE);
+            const activeTrackByKey = new Map(activeTracks.map((track) => [trackIdentityKey(track), track]));
+            const incomingTrackKeys = new Set(tracksWithKeys.map(trackIdentityKey));
+            const obsoleteTracks = activeTracks.filter((track) => !incomingTrackKeys.has(trackIdentityKey(track)));
+            if (obsoleteTracks.length > 0) {
+                const deleteTime = Temporal.Now.instant();
+                const obsoleteTrackIds = obsoleteTracks.map((track) => track.id);
+                const obsoleteFileIds = [
+                    ...new Set(obsoleteTracks.map((track) => track.file_id).filter((id): id is string => Boolean(id))),
+                ];
 
-            const processedTrackKeys = new Set<string>(tracksWithKeys.map((t) => t.variant_key));
-
-            // Clean up obsolete Track records across all partitions first
-            for (const t of existingTracks) {
-                if (t.delete_status === DeleteStatus.ACTIVE && !processedTrackKeys.has(t.variant_key)) {
-                    const deleteTime = Temporal.Now.instant();
-                    if (t.file_id) {
-                        await tx
-                            .update(File)
-                            .set({
-                                delete_status: DeleteStatus.DELETED,
-                                delete_time: deleteTime,
-                            })
-                            .where(eq(File.id, t.file_id));
-                    }
+                if (obsoleteFileIds.length > 0) {
                     await tx
-                        .update(Track)
+                        .update(File)
                         .set({
                             delete_status: DeleteStatus.DELETED,
                             delete_time: deleteTime,
                         })
-                        .where(eq(Track.id, t.id));
+                        .where(and(inArray(File.id, obsoleteFileIds), eq(File.delete_status, DeleteStatus.ACTIVE)));
                 }
+                await tx
+                    .update(Track)
+                    .set({
+                        delete_status: DeleteStatus.DELETED,
+                        delete_time: deleteTime,
+                    })
+                    .where(and(inArray(Track.id, obsoleteTrackIds), eq(Track.delete_status, DeleteStatus.ACTIVE)));
             }
 
-            // Group by type and purpose to determine defaults
-            const defaultTrackMap = new Map<string, string>(); // `type:purpose` -> variant_key
+            const trackGroups = new Map<string, { type: TrackType; purpose: TrackPurpose; defaultKey?: string }>();
             for (const track of tracksWithKeys) {
-                const groupKey = `${track.type}:${track.purpose}`;
-                if (track.priority === 0) {
-                    if (!defaultTrackMap.has(groupKey)) {
-                        defaultTrackMap.set(groupKey, track.variant_key);
-                    }
-                }
+                const groupKey = trackGroupKey(track.type, track.purpose);
+                const group = trackGroups.get(groupKey) ?? { type: track.type, purpose: track.purpose };
+                if (track.is_default) group.defaultKey = track.variant_key;
+                trackGroups.set(groupKey, group);
             }
 
-            const tracksWithDefaultFlag = tracksWithKeys.map((track) => {
-                const groupKey = `${track.type}:${track.purpose}`;
-                const is_default = defaultTrackMap.get(groupKey) === track.variant_key;
-                return {
-                    ...track,
-                    is_default,
-                };
-            });
-
-            // Unset is_default for other active tracks in the DB for each unique group
-            const uniqueGroups = new Set<string>();
-            for (const track of tracksWithDefaultFlag) {
-                uniqueGroups.add(`${track.type}:${track.purpose}`);
-            }
-
-            for (const groupKey of uniqueGroups) {
-                const [groupType, groupPurpose] = groupKey.split(":") as [TrackType, TrackPurpose];
-                const defaultKey = defaultTrackMap.get(groupKey);
-
+            for (const group of trackGroups.values()) {
                 const unsetCondition = [
                     eq(Track.media_id, mediaId),
-                    eq(Track.type, groupType),
-                    eq(Track.purpose, groupPurpose),
+                    eq(Track.type, group.type),
+                    eq(Track.purpose, group.purpose),
                     eq(Track.delete_status, DeleteStatus.ACTIVE),
                 ];
-                if (defaultKey) {
-                    unsetCondition.push(not(eq(Track.variant_key, defaultKey)));
+                if (group.defaultKey) {
+                    unsetCondition.push(not(eq(Track.variant_key, group.defaultKey)));
                 }
 
                 await tx
                     .update(Track)
                     .set({ is_default: false })
                     .where(and(...unsetCondition));
+                for (const existing of activeTracks) {
+                    if (
+                        existing.type === group.type &&
+                        existing.purpose === group.purpose &&
+                        (!group.defaultKey || existing.variant_key !== group.defaultKey)
+                    ) {
+                        existing.is_default = false;
+                    }
+                }
             }
 
-            const processAffiliatedFile = async (trackInfo: {
-                type: TrackType;
-                purpose: TrackPurpose;
-                is_original: boolean;
-                quality: Quality;
-                priority: number;
-                url: string | null | undefined;
-                metadata?: any;
-                variant_key: string;
-                is_default: boolean;
-            }) => {
-                const existing = existingTracks.find(
-                    (t) =>
-                        t.type === trackInfo.type &&
-                        t.purpose === trackInfo.purpose &&
-                        t.variant_key === trackInfo.variant_key &&
-                        t.delete_status === DeleteStatus.ACTIVE,
-                );
-                if (trackInfo.url) {
-                    const metadata = trackInfo.metadata || {};
-                    const extractedLang = trackInfo.metadata?.language || null;
-                    const extractedCodec = trackInfo.metadata?.codecs || null;
-
-                    if (!existing) {
-                        await tx.insert(Track).values({
-                            media_id: mediaId,
-                            type: trackInfo.type,
-                            purpose: trackInfo.purpose,
-                            is_original: trackInfo.is_original,
-                            quality: trackInfo.quality,
-                            priority: trackInfo.priority,
-                            source_url: trackInfo.url,
-                            metadata: metadata,
-                            sync_status: SyncStatus.PENDING,
-                            variant_key: trackInfo.variant_key,
-                            is_default: trackInfo.is_default,
-                            language: extractedLang,
-                            codec: extractedCodec,
-                            is_stale: false,
-                        });
-                        hasPendingTasks = true;
-                    } else {
-                        // Update is_default if changed
-                        if (existing.is_default !== trackInfo.is_default) {
-                            await tx
-                                .update(Track)
-                                .set({
-                                    is_default: trackInfo.is_default,
-                                })
-                                .where(eq(Track.id, existing.id));
-                            existing.is_default = trackInfo.is_default;
-                        }
-
-                        // Check if contents/URLs changed and need sync
-                        if (
-                            existing.source_url !== trackInfo.url ||
-                            existing.is_original !== trackInfo.is_original ||
-                            existing.quality !== trackInfo.quality ||
-                            existing.sync_status === SyncStatus.FAILED ||
-                            existing.language !== extractedLang ||
-                            existing.codec !== extractedCodec ||
-                            JSON.stringify(existing.metadata) !== JSON.stringify(metadata)
-                        ) {
-                            if (existing.file_id) {
-                                await tx
-                                    .update(File)
-                                    .set({
-                                        delete_status: DeleteStatus.DELETED,
-                                        delete_time: Temporal.Now.instant(),
-                                    })
-                                    .where(eq(File.id, existing.file_id));
-                            }
-                            await tx
-                                .update(Track)
-                                .set({
-                                    source_url: trackInfo.url,
-                                    is_original: trackInfo.is_original,
-                                    quality: trackInfo.quality,
-                                    priority: trackInfo.priority,
-                                    metadata: metadata,
-                                    sync_status: SyncStatus.PENDING,
-                                    file_id: null,
-                                    last_error: null,
-                                    language: extractedLang,
-                                    codec: extractedCodec,
-                                })
-                                .where(eq(Track.id, existing.id));
-                            hasPendingTasks = true;
-                        } else if (existing.sync_status === "PENDING") {
-                            hasPendingTasks = true;
-                        }
-                    }
-                } else if (existing) {
-                    // Do not erase existing cover files if url is null/undefined
-                    if (trackInfo.purpose === TrackPurpose.COVER) {
-                        return;
-                    }
-                    await tx
-                        .update(Track)
-                        .set({
-                            source_url: null,
-                            file_id: null,
-                            sync_status: SyncStatus.COMPLETED,
-                            last_error: null,
-                        })
-                        .where(eq(Track.id, existing.id));
+            for (const track of tracksWithKeys) {
+                const existing = activeTrackByKey.get(trackIdentityKey(track));
+                if (await syncPreparedTrack(tx, mediaId, track, existing)) {
+                    hasPendingTasks = true;
                 }
-            };
-
-            // Process all tracks in a unified loop
-            for (const track of tracksWithDefaultFlag) {
-                await processAffiliatedFile(track);
             }
         }
 
@@ -833,13 +741,13 @@ export const TaskService = {
             .limit(1);
         const m = mediaRecords[0];
         if (!m || !m.post_id) return;
-        return this.processMedia(m.post_id, m.sort_order, { external_id: m.eid } as any, signal);
+        return this.processMedia(m.post_id, m.sort_order, { external_id: m.eid }, signal);
     },
 
     /**
      * Step 2: Process individual media
      */
-    async processMedia(postId: string, index: number, mediaData: MediaItemData, signal?: AbortSignal) {
+    async processMedia(postId: string, index: number, mediaData: Partial<MediaItemData> & { external_id?: string }, signal?: AbortSignal) {
         signal?.throwIfAborted();
         const mediaRecords = await db
             .select()
@@ -888,25 +796,10 @@ export const TaskService = {
                                 let ext = getExtensionFromContentType(contentType, mf.source_url);
                                 let responseBody: ReadableStream | Uint8Array;
 
-                                // Auto-convert Bilibili JSON subtitle to WebVTT
-                                if (mf.type === TrackType.SUBTITLE && mf.metadata.format === "json") {
-                                    const jsonText = await response.text();
-                                    try {
-                                        const vttText = convertBiliJsonToVtt(jsonText);
-                                        responseBody = new TextEncoder().encode(vttText);
-                                        contentType = "text/vtt";
-                                        contentLength = responseBody.length.toString();
-                                        ext = "vtt";
-                                    } catch (err) {
-                                        console.error("Failed to convert Bilibili JSON subtitle:", err);
-                                        responseBody = new TextEncoder().encode(jsonText);
-                                    }
-                                } else {
-                                    if (!response.body) {
-                                        throw new Error("Response body is empty");
-                                    }
-                                    responseBody = response.body;
+                                if (!response.body) {
+                                    throw new Error("Response body is empty");
                                 }
+                                responseBody = response.body;
 
                                 let segmentBase: { initialization: string; index_range: string } | undefined;
                                 if (
@@ -946,9 +839,6 @@ export const TaskService = {
                                 );
                                 lockSignal.throwIfAborted();
 
-                                const width = mf.metadata?.width ?? null;
-                                const height = mf.metadata?.height ?? null;
-                                const duration = mf.metadata?.duration ?? null;
                                 const size = contentLength ? parseInt(contentLength) : null;
 
                                 const fileResults = await db
@@ -958,9 +848,6 @@ export const TaskService = {
                                         mime_type: contentType || "application/octet-stream",
                                         extension: ext,
                                         bucket: env.S3_BUCKET,
-                                        width: width,
-                                        height: height,
-                                        duration: duration ? Math.round(duration) : null,
                                         size: size,
                                     })
                                     .onConflictDoUpdate({
@@ -968,9 +855,6 @@ export const TaskService = {
                                         set: {
                                             mime_type: contentType || "application/octet-stream",
                                             extension: ext,
-                                            width: width,
-                                            height: height,
-                                            duration: duration ? Math.round(duration) : null,
                                             size: size,
                                             delete_status: DeleteStatus.ACTIVE,
                                             delete_time: null,
@@ -984,6 +868,25 @@ export const TaskService = {
                                 if (segmentBase) {
                                     updatedMetadata.segment_base = segmentBase;
                                 }
+                                const format = deriveTrackFormat({
+                                    type: mf.type,
+                                    metadata: updatedMetadata,
+                                    container: mf.container,
+                                    is_fragmented: mf.is_fragmented,
+                                    stream_layout: mf.stream_layout,
+                                    has_video: mf.has_video,
+                                    has_audio: mf.has_audio,
+                                    streams: mf.streams,
+                                    file: {
+                                        mime_type: contentType,
+                                        extension: ext,
+                                    },
+                                });
+
+                                const width = typeof mf.metadata?.width === "number" ? mf.metadata.width : null;
+                                const height = typeof mf.metadata?.height === "number" ? mf.metadata.height : null;
+                                const duration = typeof mf.metadata?.duration === "number" ? mf.metadata.duration : null;
+                                const bandwidth = typeof mf.metadata?.bandwidth === "number" ? mf.metadata.bandwidth : null;
 
                                 await db
                                     .update(Track)
@@ -992,6 +895,16 @@ export const TaskService = {
                                         sync_status: SyncStatus.COMPLETED,
                                         last_error: null,
                                         metadata: updatedMetadata,
+                                        container: format.container,
+                                        is_fragmented: format.is_fragmented,
+                                        stream_layout: format.stream_layout,
+                                        has_video: format.has_video,
+                                        has_audio: format.has_audio,
+                                        streams: format.streams,
+                                        width: width,
+                                        height: height,
+                                        duration: duration,
+                                        bandwidth: bandwidth,
                                     })
                                     .where(eq(Track.id, mf.id));
                             }
@@ -1380,8 +1293,6 @@ export const TaskService = {
                             mime_type: sourceFile.mime_type,
                             extension: sourceFile.extension,
                             bucket: sourceFile.bucket,
-                            width: sourceFile.width,
-                            height: sourceFile.height,
                             size: sourceFile.size,
                             hash: sourceFile.hash,
                         })

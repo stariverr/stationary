@@ -8,7 +8,7 @@ import {
     TrackType,
     TrackPurpose,
     MediaType,
-    type GeneratedCoverMetadata,
+    type TrackMetadata,
 } from "@/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 import { renderCoverFrame } from "@/lib/utils/cover_renderer";
@@ -188,8 +188,6 @@ export const CoverService = {
                     extension: "avif",
                     bucket: env.S3_BUCKET,
                     size: renderResult.size,
-                    width: renderResult.width,
-                    height: renderResult.height,
                 })
                 .onConflictDoUpdate({
                     target: DbFile.path,
@@ -197,8 +195,6 @@ export const CoverService = {
                         mime_type: "image/avif",
                         extension: "avif",
                         size: renderResult.size,
-                        width: renderResult.width,
-                        height: renderResult.height,
                         delete_status: DeleteStatus.ACTIVE,
                         delete_time: null,
                     },
@@ -207,7 +203,7 @@ export const CoverService = {
 
             const createdFileId = fileResults[0].id;
             const variantKey = `cover:${qualityLower}:recipe:${RECIPE_VERSION}`;
-            const metadata: GeneratedCoverMetadata = {
+            const metadata: TrackMetadata = {
                 source_track_id: params.sourceTrackId || source.track.id,
                 source_file_id: sourceFileId,
                 recipe_version: RECIPE_VERSION,
@@ -237,6 +233,8 @@ export const CoverService = {
                         sync_status: SyncStatus.COMPLETED,
                         last_error: null,
                         metadata,
+                        width: renderResult.width,
+                        height: renderResult.height,
                         is_generated: true,
                         is_original: false,
                         source_track_id: source.track.id,
@@ -248,14 +246,16 @@ export const CoverService = {
                     .insert(Track)
                     .values({
                         media_id: media.id,
+                        file_id: createdFileId,
                         type: TrackType.IMAGE,
                         purpose: TrackPurpose.COVER,
                         quality: quality,
                         priority: quality === Quality.LOW ? 10 : quality === Quality.MEDIUM ? 20 : 30,
-                        file_id: createdFileId,
                         sync_status: SyncStatus.COMPLETED,
                         last_error: null,
                         metadata,
+                        width: renderResult.width,
+                        height: renderResult.height,
                         variant_key: variantKey,
                         is_generated: true,
                         is_original: false,
@@ -271,6 +271,8 @@ export const CoverService = {
                             sync_status: SyncStatus.COMPLETED,
                             last_error: null,
                             metadata,
+                            width: renderResult.width,
+                            height: renderResult.height,
                             is_generated: true,
                             is_original: false,
                             source_track_id: source.track.id,

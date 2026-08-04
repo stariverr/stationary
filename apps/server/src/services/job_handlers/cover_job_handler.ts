@@ -9,7 +9,6 @@ import {
     AsyncTaskUnitKind,
     AsyncSubjectType,
     AsyncOutcomeCode,
-    type GeneratedCoverMetadata,
 } from "@/db/schema";
 import { and, eq, gt, asc, inArray, type SQL } from "drizzle-orm";
 import { RECIPE_VERSION } from "@/lib/utils/cover_profiles";
@@ -68,7 +67,7 @@ function buildUnitsForMedia(
                     (t.variant_key === expectedVariantKey || (!t.is_generated && t.quality === quality)),
             );
             if (existingTrack && existingTrack.sync_status === SyncStatus.COMPLETED && existingTrack.file_id) {
-                const metadata = (existingTrack.metadata as GeneratedCoverMetadata) || {};
+                const metadata = existingTrack.metadata || {};
                 if (!existingTrack.is_generated || metadata.source_file_id === source.fileId) {
                     isAlreadyCompleted = true;
                 }

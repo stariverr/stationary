@@ -165,9 +165,6 @@ const ConfirmDraftSchema = z.object({
     bucket: z.string().min(1),
     mime_type: z.string().min(1),
     size: z.number().int().nonnegative(),
-    width: z.number().int().positive().nullable().optional(),
-    height: z.number().int().positive().nullable().optional(),
-    duration: z.number().nullable().optional(),
     upload_token: z.string().min(1),
 });
 
@@ -230,9 +227,6 @@ router.post(
                 .update(DbFile)
                 .set({
                     size: body.size,
-                    width: body.width || null,
-                    height: body.height || null,
-                    duration: body.duration ? Math.round(body.duration) : null,
                 })
                 .where(eq(DbFile.id, draftRow.file_id))
                 .returning();

@@ -39,7 +39,7 @@ import {
     MediaDraftSchema,
 } from "@/lib/validation/media-composition";
 import { validate } from "@/lib/validation/validator";
-import { getMediaCoversMap, getMediaVideosMap, getMediaTracks, PreviewItem } from "@/lib/utils/media_mapper";
+import { MediaService, type PreviewItem } from "@/services/media";
 import { Temporal } from "@js-temporal/polyfill";
 
 const router = new Hono();
@@ -172,7 +172,10 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
             .orderBy(asc(Media.sort_order));
 
         const allMediaIds = mediaRows.map((mr) => mr.id);
-        const [coversByMediaId, videosByMediaId] = await Promise.all([getMediaCoversMap(allMediaIds), getMediaVideosMap(allMediaIds)]);
+        const [coversByMediaId, videosByMediaId] = await Promise.all([
+            MediaService.getCoversMap(allMediaIds),
+            MediaService.getVideosMap(allMediaIds),
+        ]);
 
         for (const row of mediaRows) {
             if (!row.post_id) continue;
@@ -461,7 +464,7 @@ router.get(
             .select({ count: count() })
             .from(Media)
             .where(and(...conditions));
-        const total = totalResult[0]?.count ?? 0;
+        const total = totalResult[0].count;
 
         const offset = (page - 1) * limit;
 
@@ -475,44 +478,7 @@ router.get(
 
         const totalPages = Math.ceil(total / limit);
 
-        const mediaList = await Promise.all(
-            finalRows.map(async (m, i) => {
-                const files = await getMediaTracks(m.id);
-                const sortedFiles = [...files].sort((a, b) => a.priority - b.priority);
-
-                const tracks = sortedFiles
-                    .filter((f) => Boolean(f.file_path))
-                    .map((f) => ({
-                        id: f.track_id,
-                        file_id: f.file_id,
-                        url: buildCdnUrl(f.file_bucket, f.file_path),
-                        type: f.type,
-                        purpose: f.purpose,
-                        is_original: f.is_original,
-                        quality: f.quality,
-                        priority: f.priority,
-                        metadata: f.metadata || {},
-                        variant_key: f.variant_key,
-                        is_default: f.is_default,
-                        display_name: f.display_name,
-                        language: f.language,
-                        codec: f.codec,
-                    }));
-
-                // TODO: change cover field to an array, with different resolution variants
-                const coverTrack = tracks.find((t) => t.purpose === TrackPurpose.COVER);
-
-                return {
-                    id: m.id,
-                    type: m.type,
-                    title: m.title,
-                    sort_order: m.sort_order,
-                    position: offset + i,
-                    cover_url: coverTrack?.url ?? "",
-                    tracks,
-                };
-            }),
-        );
+        const mediaList = await MediaService.getDetails(finalRows, offset);
 
         return c.json(
             success(Code.SUCCESS, {

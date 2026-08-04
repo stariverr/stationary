@@ -13,6 +13,7 @@ import {
     customType,
     timestamp,
     varchar,
+    real,
 } from "drizzle-orm/pg-core";
 import { v7 as createUuidV7 } from "uuid";
 import { Temporal } from "@js-temporal/polyfill";
@@ -88,6 +89,21 @@ export enum TrackType {
     PDF = "PDF",
 }
 export const TrackTypeEnum = pgEnum("track_type", [TrackType.IMAGE, TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE, TrackType.PDF]);
+
+export enum TrackStreamLayout {
+    SINGLE = "SINGLE",
+    MUXED = "MUXED",
+    VIDEO_ONLY = "VIDEO_ONLY",
+    AUDIO_ONLY = "AUDIO_ONLY",
+    TEXT_ONLY = "TEXT_ONLY",
+}
+export const TrackStreamLayoutEnum = pgEnum("track_stream_layout", [
+    TrackStreamLayout.SINGLE,
+    TrackStreamLayout.MUXED,
+    TrackStreamLayout.VIDEO_ONLY,
+    TrackStreamLayout.AUDIO_ONLY,
+    TrackStreamLayout.TEXT_ONLY,
+]);
 
 export enum TrackPurpose {
     CONTENT = "CONTENT",
@@ -422,60 +438,47 @@ export const Media = pgTable(
     ],
 );
 
-export interface VideoTrackMetadata {
-    type?: "mp4" | "fmp4";
-    codecs?: string;
-    bandwidth?: number;
-    width?: number;
-    height?: number;
-    duration?: number;
+export interface MediaStream {
+    index: number;
+    id?: string | null;
+    type: TrackType.VIDEO | TrackType.AUDIO | TrackType.SUBTITLE;
+    codec?: string | null;
+    language?: string | null;
+    label?: string | null;
+    role?: string | null;
+    width?: number | null;
+    height?: number | null;
+    bandwidth?: number | null;
+    channels?: number | null;
+    sample_rate?: number | null;
+    is_default?: boolean;
+}
+
+export type Stream = MediaStream;
+
+export interface TrackMetadata {
+    /** DASH / fMP4 segment index info */
     segment_base?: {
         initialization?: string;
         index_range?: string;
         timescale?: number;
         earliest_presentation_time?: string;
     };
-}
-
-export interface AudioTrackMetadata {
-    codecs?: string;
-    bandwidth?: number;
-    label?: string;
-    duration?: number;
-    segment_base?: {
-        initialization?: string;
-        index_range?: string;
-        timescale?: number;
-        earliest_presentation_time?: string;
-    };
-}
-
-export interface SubtitleTrackMetadata {
-    language?: string;
-    label?: string;
-    format?: string;
-}
-
-export interface GeneratedCoverMetadata {
-    source_track_id: string;
-    source_file_id: string;
-    recipe_version: number;
-    generation_mode: "REUSE" | "TRANSCODE" | "VIDEO_FRAME";
+    recipe_version?: number;
+    generation_mode?: "REUSE" | "TRANSCODE" | "VIDEO_FRAME";
     seek_seconds?: number;
-    generated_width: number;
-    generated_height: number;
-}
+    generated_width?: number;
+    generated_height?: number;
 
-export interface CoverMetadata {
-    primary_file_id?: string;
-    seek_seconds?: number;
-}
+    frame_rate?: number;
+    label?: string;
+    role?: string;
+    audio_group_id?: string;
 
-export type MediaFileMetadata = VideoTrackMetadata &
-    AudioTrackMetadata &
-    SubtitleTrackMetadata &
-    CoverMetadata &
-    Partial<GeneratedCoverMetadata>;
+    /** Low-frequency raw tags/extensions */
+    raw_tags?: Record<string, string>;
+    [key: string]: any;
+}
 
 // Track Model
 export const Track = pgTable(
@@ -500,13 +503,23 @@ export const Track = pgTable(
         source_url: text("source_url").default(""),
         sync_status: SyncStatusEnum("sync_status").default(SyncStatus.PENDING).notNull(),
         last_error: text("last_error"),
-        metadata: jsonb("metadata").$type<MediaFileMetadata>().default({}).notNull(),
+        metadata: jsonb("metadata").$type<TrackMetadata>().default({}).notNull(),
+        container: text("container"),
+        is_fragmented: boolean("is_fragmented"),
+        stream_layout: TrackStreamLayoutEnum("stream_layout"),
+        has_video: boolean("has_video").default(false).notNull(),
+        has_audio: boolean("has_audio").default(false).notNull(),
+        streams: jsonb("streams").$type<MediaStream[]>().default([]).notNull(),
         variant_key: varchar("variant_key", { length: 255 }).default("temp-migration").notNull(),
         is_default: boolean("is_default").default(false).notNull(),
         is_primary: boolean("is_primary").default(false).notNull(),
         display_name: text("display_name"),
         language: text("language"),
         codec: text("codec"),
+        duration: real("duration"),
+        width: integer("width"),
+        height: integer("height"),
+        bandwidth: integer("bandwidth"),
         is_stale: boolean("is_stale").default(false).notNull(),
         source_track_id: uuid("source_track_id"),
         create_time: temporal("create_time")
@@ -586,12 +599,6 @@ export const File = pgTable("file", {
     extension: text("extension"),
     path: text("path").notNull().unique(), // Path in bucket
     bucket: text("bucket").notNull(),
-    // TODO: determine nullability
-    width: integer("width"), // Metadata for quick rendering
-    // TODO: determine nullability
-    height: integer("height"),
-    // TODO: determine nullability
-    duration: integer("duration"), // For videos
     create_time: temporal("create_time")
         .default(sql`now()`)
         .notNull(),

@@ -14,6 +14,7 @@ import {
     DeleteStatus,
     TrackType,
     TrackPurpose,
+    TrackStreamLayout,
     PostSource,
     MediaType,
     EntityType,
@@ -118,14 +119,41 @@ const TrackMetadataSchema = z.object({
     segment_base: SegmentBaseSchema.nullish().transform((v) => v ?? undefined),
 });
 
+const TrackStreamSchema = z.object({
+    index: z.number().int().nonnegative(),
+    id: z.string().nullable().optional(),
+    type: z.enum([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
+    codec: z.string().nullable().optional(),
+    language: z.string().nullable().optional(),
+    label: z.string().nullable().optional(),
+    role: z.string().nullable().optional(),
+    width: z.number().int().positive().nullable().optional(),
+    height: z.number().int().positive().nullable().optional(),
+    bandwidth: z.number().nonnegative().nullable().optional(),
+    channels: z.number().int().positive().nullable().optional(),
+    sample_rate: z.number().int().positive().nullable().optional(),
+    is_default: z.boolean().optional(),
+});
+
 const TrackSchema = z.object({
     url: z.string(),
     type: z.enum(TrackType),
     purpose: z.enum(TrackPurpose).default(TrackPurpose.CONTENT),
     is_original: z.boolean().default(true),
     quality: z.enum(Quality).default(Quality.HIGH),
-    priority: z.number().default(0),
+    language: z.string().nullable().optional(),
+    codec: z.string().nullable().optional(),
+    duration: z.number().nullable().optional(),
+    width: z.number().int().positive().nullable().optional(),
+    height: z.number().int().positive().nullable().optional(),
+    bandwidth: z.number().nonnegative().nullable().optional(),
     metadata: TrackMetadataSchema.nullish().transform((v) => v ?? {}),
+    container: z.string().nullable().optional(),
+    is_fragmented: z.boolean().nullable().optional(),
+    stream_layout: z.enum(TrackStreamLayout).nullable().optional(),
+    has_video: z.boolean().nullable().optional(),
+    has_audio: z.boolean().nullable().optional(),
+    streams: z.array(TrackStreamSchema).nullable().optional(),
 });
 
 const MediaItemSchema = z
@@ -145,32 +173,19 @@ const MediaItemSchema = z
         /** Media Duration (in seconds) */
         duration: z.number().nullable().optional(),
         published_time: TimestampSchema.optional(),
-        /** @deprecated Use published_time. Kept for legacy import payloads. */
-        create_time: TimestampSchema.optional(),
-    })
-    .transform(({ create_time, published_time, ...media }) => ({
-        ...media,
-        published_time: published_time ?? create_time,
-    }));
+    });
 
-const PostItemSchema = z
-    .object({
-        title: z.string(),
-        url: z.string().optional(),
-        description: z.string().default(""),
-        external_id: z.string().optional().default(""),
-        tags: z.array(z.string()).default([]),
-        author: AuthorSchema,
-        platform: z.enum(PostSource),
-        media: z.array(MediaItemSchema),
-        published_time: TimestampSchema.optional(),
-        /** @deprecated Use published_time. Kept for legacy import payloads. */
-        create_time: TimestampSchema.optional(),
-    })
-    .transform(({ create_time, published_time, ...post }) => ({
-        ...post,
-        published_time: published_time ?? create_time,
-    }));
+const PostItemSchema = z.object({
+    title: z.string(),
+    url: z.string().optional(),
+    description: z.string().default(""),
+    external_id: z.string().optional().default(""),
+    tags: z.array(z.string()).default([]),
+    author: AuthorSchema,
+    platform: z.enum(PostSource),
+    media: z.array(MediaItemSchema),
+    published_time: TimestampSchema.optional(),
+});
 
 export const CreateTaskSchema = z.object({
     library_id: z.uuid(),

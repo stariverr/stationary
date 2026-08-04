@@ -68,5 +68,5 @@ export function generateDeterministicVariantKey(
     }
 
     const normalized = normalizeVariantKey(key);
-    return normalized === "variant" ? `legacy-${type.toLowerCase()}-${priority}` : normalized;
+    return normalized === "variant" ? `variant-${type.toLowerCase()}-${priority}` : normalized;
 }

@@ -1,10 +1,25 @@
-import { and, eq, not, inArray } from "drizzle-orm";
+import { and, eq, not } from "drizzle-orm";
 import { db, Transaction } from "@/global/db";
-import { DeleteStatus, File, Track, SyncStatus, Media, Post, TrackType, TrackPurpose } from "@/db/schema";
+import {
+    DeleteStatus,
+    File,
+    Track,
+    SyncStatus,
+    Media,
+    Post,
+    TrackType,
+    TrackPurpose,
+    TrackStreamLayout,
+    type Stream,
+    type TrackMetadata,
+} from "@/db/schema";
 
 import { generateDeterministicVariantKey } from "@/lib/utils/track";
 import { Quality } from "@/lib/types";
 import { Temporal } from "@js-temporal/polyfill";
+import { cleanTrackMetadata, deriveTrackFormat } from "@/lib/utils/track-format";
+import { DeleteService } from "@/services/delete";
+import { MediaService } from "@/services/media";
 
 export interface FileData {
     path: string;
@@ -12,9 +27,170 @@ export interface FileData {
     mime_type: string;
     extension: string;
     size: number;
+}
+
+export interface UpsertTrackInput {
+    type: TrackType;
+    purpose: TrackPurpose;
+    quality: Quality;
+    priority: number;
+    source_url?: string;
+    metadata?: TrackMetadata | Record<string, unknown>;
+    variant_key?: string;
+    is_default?: boolean;
+    is_primary?: boolean;
+    display_name?: string;
+    language?: string | null;
+    codec?: string | null;
+    duration?: number | null;
     width?: number | null;
     height?: number | null;
-    duration?: number | null;
+    bandwidth?: number | null;
+    is_stale?: boolean;
+    source_track_id?: string | null;
+    container?: string | null;
+    is_fragmented?: boolean | null;
+    stream_layout?: TrackStreamLayout | null;
+    has_video?: boolean | null;
+    has_audio?: boolean | null;
+    streams?: Stream[] | null;
+}
+
+export interface UpdateTrackMetadataInput {
+    priority?: number;
+    quality?: Quality;
+    display_name?: string | null;
+    variant_key?: string;
+    is_default?: boolean;
+    is_primary?: boolean;
+    language?: string | null;
+    codec?: string | null;
+    is_stale?: boolean;
+    metadata?: Record<string, unknown>;
+    source_track_id?: string | null;
+    container?: string | null;
+    is_fragmented?: boolean | null;
+    stream_layout?: TrackStreamLayout | null;
+    has_video?: boolean | null;
+    has_audio?: boolean | null;
+    streams?: Stream[] | null;
+}
+
+const asMetadataRecord = (value: unknown): Record<string, any> =>
+    typeof value === "object" && value !== null ? { ...(value as Record<string, any>) } : {};
+
+function prepareTrackMetadata(incomingMetadata: unknown) {
+    return cleanTrackMetadata(asMetadataRecord(incomingMetadata));
+}
+
+function resolveFormatUpdate(
+    update: {
+        container?: string | null;
+        is_fragmented?: boolean | null;
+        stream_layout?: TrackStreamLayout | null;
+        has_video?: boolean | null;
+        has_audio?: boolean | null;
+        streams?: Stream[] | null;
+    },
+    fallback?: typeof Track.$inferSelect,
+) {
+    return {
+        container: update.container !== undefined ? update.container : fallback?.container,
+        is_fragmented: update.is_fragmented !== undefined ? update.is_fragmented : fallback?.is_fragmented,
+        stream_layout: update.stream_layout !== undefined ? update.stream_layout : fallback?.stream_layout,
+        has_video: update.has_video !== undefined ? update.has_video : fallback?.has_video,
+        has_audio: update.has_audio !== undefined ? update.has_audio : fallback?.has_audio,
+        streams: update.streams !== undefined ? update.streams : fallback?.streams,
+    };
+}
+
+async function resolveFileRecord(tx: Transaction, fileDataOrId: FileData | string) {
+    if (typeof fileDataOrId === "string") {
+        const [existingFile] = await tx.select().from(File).where(eq(File.id, fileDataOrId)).limit(1);
+        if (!existingFile) {
+            throw new Error(`File ${fileDataOrId} not found`);
+        }
+        return existingFile;
+    }
+
+    const [newFile] = await tx
+        .insert(File)
+        .values({
+            path: fileDataOrId.path,
+            bucket: fileDataOrId.bucket,
+            mime_type: fileDataOrId.mime_type,
+            extension: fileDataOrId.extension,
+            size: fileDataOrId.size,
+            delete_status: DeleteStatus.ACTIVE,
+        })
+        .returning();
+    return newFile;
+}
+
+async function unsetOtherDefaults(
+    tx: Transaction,
+    mediaId: string,
+    type: TrackType,
+    purpose: TrackPurpose,
+    now: Temporal.Instant,
+    excludeTrackId?: string,
+) {
+    const unsetFilters = [
+        eq(Track.media_id, mediaId),
+        eq(Track.type, type),
+        eq(Track.purpose, purpose),
+        eq(Track.delete_status, DeleteStatus.ACTIVE),
+    ];
+    if (excludeTrackId) {
+        unsetFilters.push(not(eq(Track.id, excludeTrackId)));
+    }
+    await tx
+        .update(Track)
+        .set({ is_default: false, update_time: now })
+        .where(and(...unsetFilters));
+}
+
+async function unsetOtherPrimaries(tx: Transaction, mediaId: string, now: Temporal.Instant, excludeTrackId?: string) {
+    const unsetFilters = [eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)];
+    if (excludeTrackId) {
+        unsetFilters.push(not(eq(Track.id, excludeTrackId)));
+    }
+    await tx
+        .update(Track)
+        .set({ is_primary: false, update_time: now })
+        .where(and(...unsetFilters));
+}
+
+function extractTrackAttributes(input: UpsertTrackInput, fileRecord: typeof File.$inferSelect, existingTrack?: typeof Track.$inferSelect) {
+    const preservesExistingFile = existingTrack ? existingTrack.file_id === fileRecord.id : false;
+    const finalMetadata =
+        input.metadata !== undefined ? prepareTrackMetadata(input.metadata) : ((existingTrack?.metadata as Record<string, unknown>) ?? {});
+    const formatUpdate = resolveFormatUpdate(input, preservesExistingFile ? existingTrack : undefined);
+
+    const format = deriveTrackFormat({
+        ...input,
+        metadata: finalMetadata,
+        ...formatUpdate,
+        file: fileRecord,
+    });
+
+    const language = input.language !== undefined ? input.language : (existingTrack?.language ?? null);
+    const codec = input.codec !== undefined ? input.codec : preservesExistingFile ? (existingTrack?.codec ?? null) : null;
+    const duration = input.duration ?? existingTrack?.duration ?? null;
+    const width = input.width ?? existingTrack?.width ?? null;
+    const height = input.height ?? existingTrack?.height ?? null;
+    const bandwidth = input.bandwidth ?? existingTrack?.bandwidth ?? null;
+
+    return {
+        metadata: finalMetadata,
+        format,
+        language,
+        codec,
+        duration,
+        width,
+        height,
+        bandwidth,
+    };
 }
 
 export const TrackService = {
@@ -29,54 +205,11 @@ export const TrackService = {
             .where(and(eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)));
     },
 
-    async upsertTrack(
-        mediaId: string,
-        trackInfo: {
-            type: TrackType;
-            purpose: TrackPurpose;
-            quality: Quality;
-            priority: number;
-            source_url?: string;
-            metadata?: any;
-            variant_key?: string;
-            is_default?: boolean;
-            is_primary?: boolean;
-            display_name?: string;
-            language?: string | null;
-            codec?: string | null;
-            is_stale?: boolean;
-            source_track_id?: string | null;
-        },
-        fileDataOrId: FileData | string,
-        tx: Transaction,
-    ) {
+    async upsertTrack(mediaId: string, trackInfo: UpsertTrackInput, fileDataOrId: FileData | string, tx: Transaction) {
         const now = Temporal.Now.instant();
 
         // 1. Resolve or insert physical File record
-        let fileRecord: any;
-        if (typeof fileDataOrId === "string") {
-            const [existingFile] = await tx.select().from(File).where(eq(File.id, fileDataOrId)).limit(1);
-            if (!existingFile) {
-                throw new Error(`File ${fileDataOrId} not found`);
-            }
-            fileRecord = existingFile;
-        } else {
-            const [newFile] = await tx
-                .insert(File)
-                .values({
-                    path: fileDataOrId.path,
-                    bucket: fileDataOrId.bucket,
-                    mime_type: fileDataOrId.mime_type,
-                    extension: fileDataOrId.extension,
-                    size: fileDataOrId.size,
-                    width: fileDataOrId.width || null,
-                    height: fileDataOrId.height || null,
-                    duration: fileDataOrId.duration ? Math.round(fileDataOrId.duration) : null,
-                    delete_status: DeleteStatus.ACTIVE,
-                })
-                .returning();
-            fileRecord = newFile;
-        }
+        const fileRecord = await resolveFileRecord(tx, fileDataOrId);
 
         const variant_key =
             trackInfo.variant_key ??
@@ -109,87 +242,60 @@ export const TrackService = {
 
         const is_default = trackInfo.is_default ?? trackInfo.priority === 0;
         if (is_default) {
-            const unsetFilters = [
-                eq(Track.media_id, mediaId),
-                eq(Track.type, trackInfo.type),
-                eq(Track.purpose, trackInfo.purpose),
-                eq(Track.delete_status, DeleteStatus.ACTIVE),
-            ];
-            if (existingTrack) {
-                unsetFilters.push(not(eq(Track.id, existingTrack.id)));
-            }
-            await tx
-                .update(Track)
-                .set({
-                    is_default: false,
-                    update_time: now,
-                })
-                .where(and(...unsetFilters));
+            await unsetOtherDefaults(tx, mediaId, trackInfo.type, trackInfo.purpose, now, existingTrack?.id);
         }
 
         const is_primary = trackInfo.is_primary ?? (trackInfo.purpose === TrackPurpose.CONTENT && is_default);
         if (is_primary) {
-            const unsetPrimaryFilters = [eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)];
-            if (existingTrack) {
-                unsetPrimaryFilters.push(not(eq(Track.id, existingTrack.id)));
-            }
-            await tx
-                .update(Track)
-                .set({
-                    is_primary: false,
-                    update_time: now,
-                })
-                .where(and(...unsetPrimaryFilters));
+            await unsetOtherPrimaries(tx, mediaId, now, existingTrack?.id);
         }
 
-        let oldFileId: string | null = null;
-        let trackId: string;
+        // 3. Extract metadata, format, and attributes
+        const { metadata, format, language, codec, duration, width, height, bandwidth } = extractTrackAttributes(
+            trackInfo,
+            fileRecord,
+            existingTrack,
+        );
 
-        const extractedLang = trackInfo.language ?? trackInfo.metadata?.language ?? null;
-        const extractedCodec = trackInfo.codec ?? trackInfo.metadata?.codecs ?? null;
+        let resultTrack: typeof Track.$inferSelect;
+        let oldFileId: string | null = null;
 
         if (existingTrack) {
-            // Keep track of the old file to soft-delete it later
             oldFileId = existingTrack.file_id;
-            trackId = existingTrack.id;
 
-            // Merge and update metadata
-            const mergedMetadata = {
-                ...existingTrack.metadata,
-                ...trackInfo.metadata,
-                width: fileRecord.width ?? existingTrack.metadata?.width,
-                height: fileRecord.height ?? existingTrack.metadata?.height,
-                duration: fileRecord.duration ? Math.round(fileRecord.duration) : existingTrack.metadata?.duration,
-            };
-
-            await tx
+            const [updated] = await tx
                 .update(Track)
                 .set({
                     file_id: fileRecord.id,
-                    is_generated: false, // User took over
+                    is_generated: false,
                     is_original: true,
                     source_url: trackInfo.source_url ?? existingTrack.source_url,
-                    metadata: mergedMetadata,
+                    metadata,
                     variant_key,
                     is_default,
                     is_primary,
                     display_name: trackInfo.display_name ?? existingTrack.display_name,
-                    language: extractedLang,
-                    codec: extractedCodec,
+                    language,
+                    codec,
+                    duration,
+                    width,
+                    height,
+                    bandwidth,
                     is_stale: false,
                     sync_status: SyncStatus.COMPLETED,
                     source_track_id: trackInfo.source_track_id !== undefined ? trackInfo.source_track_id : existingTrack.source_track_id,
+                    container: format.container,
+                    is_fragmented: format.is_fragmented,
+                    stream_layout: format.stream_layout,
+                    has_video: format.has_video,
+                    has_audio: format.has_audio,
+                    streams: format.streams,
                     update_time: now,
                 })
-                .where(eq(Track.id, existingTrack.id));
+                .where(eq(Track.id, existingTrack.id))
+                .returning();
+            resultTrack = updated;
         } else {
-            // Insert new track
-            const mergedMetadata = {
-                ...trackInfo.metadata,
-                width: fileRecord.width,
-                height: fileRecord.height,
-                duration: fileRecord.duration ? Math.round(fileRecord.duration) : null,
-            };
             const [inserted] = await tx
                 .insert(Track)
                 .values({
@@ -203,70 +309,40 @@ export const TrackService = {
                     priority: trackInfo.priority,
                     source_url: trackInfo.source_url || "",
                     sync_status: SyncStatus.COMPLETED,
-                    metadata: mergedMetadata,
+                    metadata,
+                    container: format.container,
+                    is_fragmented: format.is_fragmented,
+                    stream_layout: format.stream_layout,
+                    has_video: format.has_video,
+                    has_audio: format.has_audio,
+                    streams: format.streams,
                     variant_key,
                     is_default,
                     is_primary,
                     display_name: trackInfo.display_name,
-                    language: extractedLang,
-                    codec: extractedCodec,
+                    language,
+                    codec,
+                    duration,
+                    width,
+                    height,
+                    bandwidth,
                     source_track_id: trackInfo.source_track_id || null,
                     create_time: now,
                     update_time: now,
                 })
                 .returning();
-            trackId = inserted.id;
+            resultTrack = inserted;
         }
 
-        // 3. Mark media and post sync status as COMPLETED
-        await tx
-            .update(Media)
-            .set({
-                sync_status: SyncStatus.COMPLETED,
-                update_time: now,
-            })
-            .where(eq(Media.id, mediaId));
+        // 4. Mark media and post sync status as COMPLETED
+        await MediaService.syncMediaAndPostStatus(mediaId, tx, now);
 
-        const [media] = await tx.select().from(Media).where(eq(Media.id, mediaId)).limit(1);
-        if (media && media.post_id) {
-            const activeMedias = await tx
-                .select({ sync_status: Media.sync_status })
-                .from(Media)
-                .where(and(eq(Media.post_id, media.post_id), eq(Media.delete_status, DeleteStatus.ACTIVE)));
-
-            const allCompleted = activeMedias.every((m) => m.sync_status === SyncStatus.COMPLETED);
-            if (allCompleted) {
-                await tx
-                    .update(Post)
-                    .set({
-                        sync_status: SyncStatus.COMPLETED,
-                        update_time: now,
-                    })
-                    .where(eq(Post.id, media.post_id));
-            }
-        }
-
-        // 4. Soft-delete old file if it is no longer referenced anywhere
+        // 5. Soft-delete old file if it is no longer referenced anywhere
         if (oldFileId && oldFileId !== fileRecord.id) {
-            const [refTrack] = await tx
-                .select()
-                .from(Track)
-                .where(and(eq(Track.file_id, oldFileId), eq(Track.delete_status, DeleteStatus.ACTIVE)))
-                .limit(1);
-
-            if (!refTrack) {
-                await tx
-                    .update(File)
-                    .set({
-                        delete_status: DeleteStatus.DELETED,
-                        delete_time: now,
-                    })
-                    .where(eq(File.id, oldFileId));
-            }
+            await DeleteService.softDeleteFileIfUnreferenced(oldFileId, tx, now);
         }
 
-        // 5. Return updated track with physical File object
-        const [resultTrack] = await tx.select().from(Track).where(eq(Track.id, trackId)).limit(1);
+        // 6. Return updated track with physical File object
         return {
             track: resultTrack,
             file: fileRecord,
@@ -277,7 +353,6 @@ export const TrackService = {
         return db.transaction(async (tx) => {
             const now = Temporal.Now.instant();
 
-            // 1. Fetch existing track
             const [existingTrack] = await tx
                 .select()
                 .from(Track)
@@ -288,60 +363,35 @@ export const TrackService = {
             }
 
             const oldFileId = existingTrack.file_id;
+            const newFile = await resolveFileRecord(tx, fileData);
 
-            // 2. Insert new physical File record
-            const [newFile] = await tx
-                .insert(File)
-                .values({
-                    path: fileData.path,
-                    bucket: fileData.bucket,
-                    mime_type: fileData.mime_type,
-                    extension: fileData.extension,
-                    size: fileData.size,
-                    width: fileData.width || null,
-                    height: fileData.height || null,
-                    duration: fileData.duration ? Math.round(fileData.duration) : null,
-                    delete_status: DeleteStatus.ACTIVE,
-                })
-                .returning();
+            const finalMetadata = (existingTrack.metadata as Record<string, unknown>) ?? {};
+            const format = deriveTrackFormat({
+                type: existingTrack.type,
+                metadata: finalMetadata,
+                file: newFile,
+            });
 
-            // Merge metadata
-            const mergedMetadata = {
-                ...existingTrack.metadata,
-                width: newFile.width ?? existingTrack.metadata?.width,
-                height: newFile.height ?? existingTrack.metadata?.height,
-                duration: newFile.duration ? Math.round(newFile.duration) : existingTrack.metadata?.duration,
-            };
-
-            // 3. Update existing track record with new file_id
             const [updatedTrack] = await tx
                 .update(Track)
                 .set({
                     file_id: newFile.id,
-                    metadata: mergedMetadata,
+                    metadata: finalMetadata,
+                    container: format.container,
+                    is_fragmented: format.is_fragmented,
+                    stream_layout: format.stream_layout,
+                    has_video: format.has_video,
+                    has_audio: format.has_audio,
+                    streams: format.streams,
+                    codec: typeof finalMetadata.codecs === "string" ? finalMetadata.codecs : null,
                     is_stale: false,
                     update_time: now,
                 })
                 .where(eq(Track.id, trackId))
                 .returning();
 
-            // 4. Soft-delete old file if no longer referenced
             if (oldFileId && oldFileId !== newFile.id) {
-                const [refTrack] = await tx
-                    .select()
-                    .from(Track)
-                    .where(and(eq(Track.file_id, oldFileId), eq(Track.delete_status, DeleteStatus.ACTIVE)))
-                    .limit(1);
-
-                if (!refTrack) {
-                    await tx
-                        .update(File)
-                        .set({
-                            delete_status: DeleteStatus.DELETED,
-                            delete_time: now,
-                        })
-                        .where(eq(File.id, oldFileId));
-                }
+                await DeleteService.softDeleteFileIfUnreferenced(oldFileId, tx, now);
             }
 
             return {
@@ -364,7 +414,6 @@ export const TrackService = {
                 throw new Error("Track not found");
             }
 
-            // Soft-delete the track
             await tx
                 .update(Track)
                 .set({
@@ -373,56 +422,16 @@ export const TrackService = {
                 })
                 .where(eq(Track.id, trackId));
 
-            // Soft-delete the corresponding file if unreferenced
-            if (trackRecord.file_id) {
-                const [otherRef] = await tx
-                    .select()
-                    .from(Track)
-                    .where(
-                        and(
-                            eq(Track.file_id, trackRecord.file_id),
-                            not(eq(Track.id, trackId)),
-                            eq(Track.delete_status, DeleteStatus.ACTIVE),
-                        ),
-                    )
-                    .limit(1);
-
-                if (!otherRef) {
-                    await tx
-                        .update(File)
-                        .set({
-                            delete_status: DeleteStatus.DELETED,
-                            delete_time: now,
-                        })
-                        .where(eq(File.id, trackRecord.file_id));
-                }
-            }
+            await DeleteService.softDeleteFileIfUnreferenced(trackRecord.file_id, tx, now);
 
             return { success: true };
         });
     },
 
-    async updateTrackMetadata(
-        mediaId: string,
-        trackId: string,
-        updates: {
-            priority?: number;
-            quality?: any;
-            display_name?: string | null;
-            variant_key?: string;
-            is_default?: boolean;
-            is_primary?: boolean;
-            language?: string | null;
-            codec?: string | null;
-            is_stale?: boolean;
-            metadata?: any;
-            source_track_id?: string | null;
-        },
-    ) {
+    async updateTrackMetadata(mediaId: string, trackId: string, updates: UpdateTrackMetadataInput) {
         return db.transaction(async (tx) => {
             const now = Temporal.Now.instant();
 
-            // 1. Fetch current track
             const [trackRecord] = await tx
                 .select()
                 .from(Track)
@@ -432,8 +441,24 @@ export const TrackService = {
                 throw new Error("Track not found");
             }
 
-            const setParams: any = {
+            const finalMetadata =
+                updates.metadata !== undefined ? prepareTrackMetadata(updates.metadata) : (trackRecord.metadata as Record<string, unknown>);
+            const formatUpdate = resolveFormatUpdate(updates, trackRecord);
+            const format = deriveTrackFormat({
+                type: trackRecord.type,
+                metadata: finalMetadata,
+                ...formatUpdate,
+            });
+
+            const setParams: Partial<typeof Track.$inferSelect> = {
                 update_time: now,
+                metadata: finalMetadata,
+                container: format.container,
+                is_fragmented: format.is_fragmented,
+                stream_layout: format.stream_layout,
+                has_video: format.has_video,
+                has_audio: format.has_audio,
+                streams: format.streams,
             };
 
             if (updates.priority !== undefined) setParams.priority = updates.priority;
@@ -447,41 +472,12 @@ export const TrackService = {
             if (updates.is_stale !== undefined) setParams.is_stale = updates.is_stale;
             if (updates.source_track_id !== undefined) setParams.source_track_id = updates.source_track_id;
 
-            if (updates.metadata !== undefined) {
-                setParams.metadata = {
-                    ...trackRecord.metadata,
-                    ...updates.metadata,
-                };
-            }
-
-            // 2. If toggling is_default to true, unset others in the same group
             if (updates.is_default === true) {
-                await tx
-                    .update(Track)
-                    .set({
-                        is_default: false,
-                        update_time: now,
-                    })
-                    .where(
-                        and(
-                            eq(Track.media_id, mediaId),
-                            eq(Track.type, trackRecord.type),
-                            eq(Track.purpose, trackRecord.purpose),
-                            not(eq(Track.id, trackId)),
-                            eq(Track.delete_status, DeleteStatus.ACTIVE),
-                        ),
-                    );
+                await unsetOtherDefaults(tx, mediaId, trackRecord.type, trackRecord.purpose, now, trackId);
             }
 
-            // 3. If toggling is_primary to true, unset primary on all other tracks for this media
             if (updates.is_primary === true) {
-                await tx
-                    .update(Track)
-                    .set({
-                        is_primary: false,
-                        update_time: now,
-                    })
-                    .where(and(eq(Track.media_id, mediaId), not(eq(Track.id, trackId)), eq(Track.delete_status, DeleteStatus.ACTIVE)));
+                await unsetOtherPrimaries(tx, mediaId, now, trackId);
             }
 
             const [updated] = await tx.update(Track).set(setParams).where(eq(Track.id, trackId)).returning();

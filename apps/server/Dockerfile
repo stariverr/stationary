@@ -21,7 +21,7 @@ ENV NODE_ENV=production
 
 # Install FFmpeg and ImageMagick for media cover frame extraction
 USER root
-RUN apk add --no-cache ffmpeg imagemagick
+RUN apk add --no-cache ffmpeg imagemagick imagemagick-heic imagemagick-jxl
 USER bun
 
 COPY --from=build /app/apps/server/dist/index.js index.js

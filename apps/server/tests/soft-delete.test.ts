@@ -6,6 +6,7 @@ const sourceFiles = {
     mediaApi: () => Bun.file("src/api/media.ts").text(),
     libraryApi: () => Bun.file("src/api/library.ts").text(),
     taskService: () => Bun.file("src/services/task.ts").text(),
+    trackService: () => Bun.file("src/services/track.ts").text(),
     recycleService: () => Bun.file("src/services/recycle.ts").text(),
     latestMigration: async () => {
         const proc = Bun.spawn(["find", "drizzle", "-name", "migration.sql", "-print"], {
@@ -15,8 +16,7 @@ const sourceFiles = {
         await proc.exited;
         const files = output.trim().split("\n").filter(Boolean);
         // Find the concerned_shape or latest migration
-        const file =
-            files.find((f) => f.includes("concerned_shape")) ?? files.sort().at(0);
+        const file = files.find((f) => f.includes("concerned_shape")) ?? files.sort().at(0);
         return Bun.file(file ?? "").text();
     },
 };
@@ -27,19 +27,11 @@ describe("soft deletion lifecycle", () => {
         const migration = await sourceFiles.latestMigration();
 
         expect(schema).toContain('delete_time: temporal("delete_time")');
-        expect(schema).toContain(
-            'index("post_library_delete_time_idx").on(table.library_id, table.delete_time)',
-        );
-        expect(schema).toContain(
-            'index("media_library_delete_time_idx").on(table.library_id, table.delete_time)',
-        );
-        expect(schema).toContain(
-            'index("media_post_delete_time_idx").on(table.post_id, table.delete_time)',
-        );
+        expect(schema).toContain('index("post_library_delete_time_idx").on(table.library_id, table.delete_time)');
+        expect(schema).toContain('index("media_library_delete_time_idx").on(table.library_id, table.delete_time)');
+        expect(schema).toContain('index("media_post_delete_time_idx").on(table.post_id, table.delete_time)');
 
-        const hasAddOrRename =
-            migration.includes('"delete_time"') ||
-            migration.includes('"delete_status"');
+        const hasAddOrRename = migration.includes('"delete_time"') || migration.includes('"delete_status"');
         expect(hasAddOrRename).toBe(true);
     });
 
@@ -69,9 +61,7 @@ describe("soft deletion lifecycle", () => {
         const clean = (str: string) => str.replace(/\s+/g, "");
 
         expect(clean(libraryApi)).toContain(clean("DeleteService.deleteLibrary(id)"));
-        expect(clean(libraryApi)).toContain(
-            clean("Please empty posts and media in this library before deleting it."),
-        );
+        expect(clean(libraryApi)).toContain(clean("Please empty posts and media in this library before deleting it."));
         expect(clean(recycleService)).toContain(clean("eq(Post.library_id,libraryId)"));
         expect(clean(recycleService)).toContain(clean("eq(Post.delete_status,DeleteStatus.ACTIVE)"));
         expect(clean(recycleService)).toContain(clean("eq(Media.library_id,libraryId)"));
@@ -84,5 +74,12 @@ describe("soft deletion lifecycle", () => {
         expect(taskService).toContain("delete_time: deleteTime");
         expect(taskService).not.toContain("db.delete(Media)");
         expect(taskService).not.toContain("db.delete(MediaFile)");
+    });
+
+    test("track replacement and deletion share referential orphan checks", async () => {
+        const trackService = await sourceFiles.trackService();
+
+        expect(trackService).toContain("DeleteService.canPurgeFile(fileId, tx)");
+        expect(trackService.match(/softDeleteFileIfUnreferenced\(tx,/g)?.length).toBeGreaterThanOrEqual(3);
     });
 });

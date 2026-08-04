@@ -171,7 +171,11 @@ async function tryImageMagickCover(inputPath: string, profile: CoverProfile, out
                     return true;
                 }
             }
-        } catch {
+        } catch (e: unknown) {
+            if (e instanceof Error) {
+                console.error("[Magick]: " + e.message);
+            }
+            console.error("[Magick]: failed to generate cover using ImageMagick");
             // Binary not installed or failed, try next candidate
         }
     }

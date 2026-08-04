@@ -1,6 +1,5 @@
-import { writeFileSync } from "fs";
 import { z } from "zod";
-import { MediaType, PostSource, TrackType, TrackPurpose } from "@/db/schema";
+import { MediaType, PostSource, TrackType, TrackPurpose, TrackStreamLayout } from "@/db/schema";
 import { Quality } from "@/lib/types";
 
 // FormTimestampSchema helper
@@ -208,6 +207,174 @@ const PresignUploadSchema = z.object({
     fileName: z.string().min(1),
 });
 
+const TrackStreamSchema = z.object({
+    index: z.number().int().nonnegative(),
+    id: z.string().nullable().optional(),
+    type: z.enum([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
+    codec: z.string().nullable().optional(),
+    language: z.string().nullable().optional(),
+    label: z.string().nullable().optional(),
+    role: z.string().nullable().optional(),
+    width: z.number().int().positive().nullable().optional(),
+    height: z.number().int().positive().nullable().optional(),
+    bandwidth: z.number().nonnegative().nullable().optional(),
+    channels: z.number().int().positive().nullable().optional(),
+    sample_rate: z.number().int().positive().nullable().optional(),
+    is_default: z.boolean().optional(),
+});
+
+const TrackFormatSchema = z.object({
+    container: z.string().nullable().optional(),
+    is_fragmented: z.boolean().nullable().optional(),
+    stream_layout: z.enum(TrackStreamLayout).nullable().optional(),
+    has_video: z.boolean().nullable().optional(),
+    has_audio: z.boolean().nullable().optional(),
+    streams: z.array(TrackStreamSchema).nullable().optional(),
+});
+
+const TrackResponseSchema = z.object({
+    id: z.string(),
+    file_id: z.string(),
+    url: z.string(),
+    type: z.enum(TrackType),
+    purpose: z.enum(TrackPurpose),
+    is_original: z.boolean(),
+    quality: z.enum(Quality),
+    priority: z.number().int(),
+    metadata: z.record(z.string(), z.unknown()),
+    variant_key: z.string(),
+    is_default: z.boolean(),
+    is_primary: z.boolean(),
+    display_name: z.string().nullable(),
+    language: z.string().nullable(),
+    codec: z.string().nullable(),
+    is_stale: z.boolean(),
+    mime_type: z.string().nullable(),
+    extension: z.string().nullable(),
+    width: z.number().nullable(),
+    height: z.number().nullable(),
+    container: z.string().nullable(),
+    is_fragmented: z.boolean().nullable(),
+    stream_layout: z.enum(TrackStreamLayout).nullable(),
+    has_video: z.boolean(),
+    has_audio: z.boolean(),
+    streams: z.array(TrackStreamSchema),
+});
+
+const PlaybackVariantResponseSchema = z.object({
+    track_id: z.string(),
+    url: z.string(),
+    mime_type: z.string().nullable(),
+    quality: z.string(),
+    label: z.string(),
+    codec: z.string().nullable(),
+    width: z.number().nullable(),
+    height: z.number().nullable(),
+    bandwidth: z.number().nullable(),
+    frame_rate: z.number().nullable(),
+});
+
+const PlaybackAudioTrackResponseSchema = z.object({
+    id: z.string(),
+    track_id: z.string(),
+    source: z.enum(["INTERNAL", "EXTERNAL"]),
+    stream_index: z.number().nullable(),
+    url: z.string().nullable(),
+    select_url: z.string().nullable(),
+    mime_type: z.string().nullable(),
+    language: z.string().nullable(),
+    label: z.string(),
+    role: z.string().nullable(),
+    codec: z.string().nullable(),
+    channels: z.number().nullable(),
+    is_default: z.boolean(),
+    selectable: z.boolean(),
+});
+
+const PlaybackSubtitleTrackResponseSchema = z.object({
+    id: z.string(),
+    track_id: z.string(),
+    source: z.enum(["INTERNAL", "EXTERNAL"]),
+    stream_index: z.number().nullable(),
+    url: z.string().nullable(),
+    mime_type: z.string().nullable(),
+    language: z.string().nullable(),
+    label: z.string(),
+    format: z.string().nullable(),
+    selectable: z.boolean(),
+});
+
+const MediaPlaybackResponseSchema = z.object({
+    url: z.string().nullable(),
+    mime_type: z.string().nullable(),
+    protocol: z.enum(["DASH", "PROGRESSIVE"]).nullable(),
+    track_id: z.string().nullable(),
+    variants: z.array(PlaybackVariantResponseSchema),
+    capabilities: z.object({
+        quality_switching: z.boolean(),
+        audio_switching: z.boolean(),
+        subtitle_switching: z.boolean(),
+        protocol_supports_switching: z.boolean(),
+    }),
+    audio_tracks: z.array(PlaybackAudioTrackResponseSchema),
+    subtitle_tracks: z.array(PlaybackSubtitleTrackResponseSchema),
+});
+
+const MediaDetailResponseSchema = z.object({
+    id: z.uuid(),
+    eid: z.string(),
+    post_id: z.uuid().nullable(),
+    source: z.enum(PostSource),
+    title: z.string(),
+    description: z.string(),
+    type: z.enum(MediaType),
+    sort_order: z.number().int(),
+    create_time: z.string().optional(),
+    published_time: z.string().optional(),
+    sync_status: z.string(),
+    last_error: z.string().nullable(),
+    url: z.string().nullable(),
+    playback: MediaPlaybackResponseSchema.nullable(),
+    audio_tracks: z.array(PlaybackAudioTrackResponseSchema),
+    subtitle_tracks: z.array(PlaybackSubtitleTrackResponseSchema),
+    subtitles: z.array(
+        z.object({
+            url: z.string(),
+            language: z.string(),
+            label: z.string(),
+            format: z.string(),
+        }),
+    ),
+    cover_url: z.string().nullable(),
+    cover_variants: z.record(
+        z.string(),
+        z.object({
+            track_id: z.string(),
+            url: z.string().nullable(),
+            width: z.number().nullable(),
+            height: z.number().nullable(),
+            status: z.enum(["READY", "STALE"]),
+        }),
+    ),
+    covers: z.array(
+        z.object({
+            url: z.string().nullable(),
+            quality: z.enum(Quality),
+            codec: z.string().nullable(),
+        }),
+    ),
+    width: z.number().nullable(),
+    height: z.number().nullable(),
+    tracks: z.array(TrackResponseSchema),
+    position: z.number().int().optional(),
+    ai_status: z.string().optional(),
+    ai_error: z.string().nullable().optional(),
+    tags: z.array(z.string()).optional(),
+});
+
+const mediaDetailOpenApiSchema = zodToOpenApi(MediaDetailResponseSchema);
+const trackResponseOpenApiSchema = zodToOpenApi(TrackResponseSchema);
+
 const RegisterTrackSchema = z.object({
     type: z.enum(TrackType),
     purpose: z.enum(TrackPurpose),
@@ -217,11 +384,13 @@ const RegisterTrackSchema = z.object({
     metadata: z.any().optional(),
     variant_key: z.string().optional(),
     is_default: z.boolean().optional(),
+    is_primary: z.boolean().optional(),
     display_name: z.string().optional(),
     language: z.string().nullable().optional(),
     codec: z.string().nullable().optional(),
     is_stale: z.boolean().optional(),
     source_track_id: z.string().nullable().optional(),
+    ...TrackFormatSchema.shape,
     file: z.object({
         path: z.string().min(1),
         bucket: z.string().min(1),
@@ -258,6 +427,7 @@ const UpdateTrackMetadataSchema = z.object({
     is_stale: z.boolean().optional(),
     metadata: z.any().optional(),
     source_track_id: z.string().nullable().optional(),
+    ...TrackFormatSchema.shape,
 });
 
 // Task & Workflow schemas
@@ -294,6 +464,7 @@ const TrackSchema = z.object({
     quality: z.enum(Quality).default(Quality.HIGH),
     priority: z.number().default(0),
     metadata: TrackMetadataSchema.nullish(),
+    ...TrackFormatSchema.shape,
 });
 
 const MediaItemSchema = z.object({
@@ -666,6 +837,31 @@ const routes: RouteItem[] = [
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
     {
+        path: "/api/post/:id/media",
+        method: "get",
+        summary: "List paginated media for a Post",
+        tags: ["Post"],
+        paramSchema: z.object({ id: z.uuid() }),
+        querySchema: z.object({
+            page: z.number().int().positive().optional(),
+            limit: z.number().int().positive().optional(),
+            keyword: z.string().optional(),
+            type: z.enum(MediaType).optional(),
+        }),
+        requiresAuth: true,
+        responseSchema: makeUnifiedSuccessResponse({
+            type: "object",
+            properties: {
+                list: { type: "array", items: mediaDetailOpenApiSchema },
+                page: { type: "integer" },
+                limit: { type: "integer" },
+                total: { type: "integer" },
+                total_pages: { type: "integer" },
+            },
+            required: ["list", "page", "limit", "total", "total_pages"],
+        }),
+    },
+    {
         path: "/api/post/trash/:id",
         method: "post",
         summary: "Move Post to trash",
@@ -784,7 +980,7 @@ const routes: RouteItem[] = [
         tags: ["Media"],
         paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
+        responseSchema: makeUnifiedSuccessResponse(mediaDetailOpenApiSchema),
     },
     {
         path: "/api/media/trash/:id",
@@ -896,7 +1092,7 @@ const routes: RouteItem[] = [
         tags: ["Media"],
         paramSchema: z.object({ id: z.uuid() }),
         requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "array", items: { type: "object" } }),
+        responseSchema: makeUnifiedSuccessResponse({ type: "array", items: trackResponseOpenApiSchema }),
     },
     {
         path: "/api/media/:id/tracks/presign-upload",
@@ -1151,7 +1347,7 @@ const routes: RouteItem[] = [
     },
 ];
 
-function generateOpenApi() {
+async function generateOpenApi() {
     const spec: any = {
         openapi: "3.0.0",
         info: {
@@ -1293,8 +1489,8 @@ function generateOpenApi() {
     }
 
     const outputPath = "./docs/openapi.json";
-    writeFileSync(outputPath, JSON.stringify(spec, null, 2), "utf8");
+    await Bun.write(outputPath, JSON.stringify(spec, null, 2));
     console.log(`Successfully generated OpenAPI JSON spec to: ${outputPath}`);
 }
 
-generateOpenApi();
+await generateOpenApi();

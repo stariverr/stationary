@@ -194,4 +194,22 @@ export const DeleteService = {
 
         return authors + libraries + tracks === 0;
     },
+
+    /** Soft-delete file if it is no longer referenced by any active entity */
+    async softDeleteFileIfUnreferenced(fileId: string | null, tx?: Transaction, deleteTime = Temporal.Now.instant()) {
+        if (!fileId) return false;
+        const canPurge = await this.canPurgeFile(fileId, tx);
+        if (!canPurge) return false;
+
+        const executor = tx || db;
+        const deleted = await executor
+            .update(File)
+            .set({
+                delete_status: DeleteStatus.DELETED,
+                delete_time: deleteTime,
+            })
+            .where(and(eq(File.id, fileId), eq(File.delete_status, DeleteStatus.ACTIVE)))
+            .returning({ id: File.id });
+        return deleted.length > 0;
+    },
 };
