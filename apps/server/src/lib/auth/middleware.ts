@@ -28,10 +28,12 @@ async function resolveAuth(c: Context<AuthEnv>) {
     let apiToken: typeof ExternalApiToken.$inferSelect | null = null;
 
     const authHeader = c.req.header("Authorization");
+    const queryToken = c.req.query("token") || c.req.query("api_token");
+    const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
+    const rawToken = bearerToken || queryToken;
 
     // 1. Try resolving via Developer API Token first
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-        const rawToken = authHeader.substring(7);
+    if (rawToken) {
         const tokenRecord = await ApiTokenService.verifyToken(rawToken);
         if (tokenRecord) {
             const businessUsers = await db.select().from(User).where(eq(User.id, tokenRecord.owner_id)).limit(1);

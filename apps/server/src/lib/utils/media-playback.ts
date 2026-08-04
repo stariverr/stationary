@@ -72,7 +72,9 @@ export interface PlaybackSubtitleTrack {
 export interface MediaPlaybackInfo {
     url: string | null;
     mime_type: string | null;
-    protocol: "DASH" | "PROGRESSIVE" | null;
+    protocol: "DASH" | "HLS" | "PROGRESSIVE" | null;
+    hls_url: string | null;
+    dash_url: string | null;
     track_id: string | null;
     variants: PlaybackVariant[];
     capabilities: {
@@ -172,13 +174,21 @@ const toVariant = (track: PlaybackTrackInput, url: string, mimeType: string | nu
     };
 };
 
-const audioFields = (track: PlaybackTrackInput, stream?: Stream) => ({
-    language: stream?.language ?? track.language ?? track.metadata.language ?? null,
-    label: stream?.label || track.display_name || track.metadata.label || stream?.language || track.language || track.quality || "Audio",
-    role: stream?.role ?? track.metadata.role ?? (track.is_default ? "main" : "alternate"),
-    codec: stream?.codec ?? track.codec ?? track.metadata.codecs ?? null,
-    channels: finiteNumber(stream?.channels, track.metadata.channels),
-});
+const audioFields = (track: PlaybackTrackInput, stream?: Stream) => {
+    const language = stream?.language ?? track.language ?? track.metadata.language ?? null;
+    const codec = stream?.codec ?? track.codec ?? track.metadata.codecs ?? null;
+    const explicitLabel = stream?.label || track.display_name || track.metadata.label || stream?.language || track.language;
+    const qualityLabel = track.quality && !["HIGH", "MEDIUM", "LOW", "ORIGINAL"].includes(track.quality.toUpperCase()) ? track.quality : null;
+    const fallbackLabel = codec ? `Audio (${String(codec).toUpperCase()})` : "Audio Track";
+
+    return {
+        language,
+        label: explicitLabel || qualityLabel || fallbackLabel,
+        role: stream?.role ?? track.metadata.role ?? (track.is_default ? "main" : "alternate"),
+        codec,
+        channels: finiteNumber(stream?.channels, track.metadata.channels),
+    };
+};
 
 const toExternalSubtitle = (track: PlaybackTrackInput): PlaybackSubtitleTrack => ({
     id: `track:${track.track_id}`,
@@ -193,15 +203,23 @@ const toExternalSubtitle = (track: PlaybackTrackInput): PlaybackSubtitleTrack =>
     selectable: true,
 });
 
+import { createMediaSignature } from "./media-signer";
+
 function resolveDashPlayback(
     mediaId: string,
     dashVideoTracks: PlaybackTrackInput[],
     dashAudioTracks: PlaybackTrackInput[],
     subtitleTracks: PlaybackTrackInput[],
 ): MediaPlaybackInfo {
-    const dashUrl = `/api/media/${mediaId}/manifest.mpd`;
+    const sig = createMediaSignature(mediaId);
+    const dashUrl = `/api/media/${mediaId}/manifest.mpd?${sig.queryParams}`;
+    const hlsUrl = `/api/media/${mediaId}/manifest.m3u8?${sig.queryParams}`;
     const primaryDashTrack = selectPrimaryTrack(dashVideoTracks);
-    const variants = dashVideoTracks.map((track) => toVariant(track, dashUrl, "application/dash+xml"));
+    const variants = dashVideoTracks.map((track) => {
+        const trackSig = createMediaSignature(mediaId, track.track_id);
+        const variantHlsUrl = `/api/media/${mediaId}/hls/${track.track_id}/manifest.m3u8?${trackSig.queryParams}`;
+        return toVariant(track, variantHlsUrl, "application/x-mpegURL");
+    });
     const resolvedAudioTracks = dashAudioTracks.map(
         (track): PlaybackAudioTrack => ({
             id: `track:${track.track_id}`,
@@ -222,6 +240,8 @@ function resolveDashPlayback(
         url: dashUrl,
         mime_type: "application/dash+xml",
         protocol: "DASH",
+        hls_url: hlsUrl,
+        dash_url: dashUrl,
         track_id: primaryDashTrack?.track_id || null,
         variants,
         capabilities: {
@@ -301,6 +321,8 @@ function resolveProgressivePlayback(
         url: selectedVideo?.url || null,
         mime_type: selectedVideo ? inferMimeType(selectedVideo) : null,
         protocol: selectedVideo ? "PROGRESSIVE" : null,
+        hls_url: null,
+        dash_url: null,
         track_id: selectedVideo?.track_id || null,
         variants,
         capabilities: {

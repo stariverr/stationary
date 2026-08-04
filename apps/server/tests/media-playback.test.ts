@@ -123,8 +123,8 @@ test("resolves separated fMP4 tracks as DASH playback with selectable variants",
     const playback = resolveMediaPlayback("media-2", [video, audio]);
 
     expect(playback.protocol).toBe("DASH");
-    expect(playback.url).toBe("/api/media/media-2/manifest.mpd");
-    expect(playback.variants[0]?.url).toBe("/api/media/media-2/manifest.mpd");
+    expect(playback.url?.startsWith("/api/media/media-2/manifest.mpd")).toBe(true);
+    expect(playback.variants[0]?.url.startsWith("/api/media/media-2/hls/")).toBe(true);
     expect(playback.variants[0]?.label).toBe("1080p");
     expect(playback.variants[0]?.bandwidth).toBe(5_000_000);
     expect(playback.audio_tracks[0]?.select_url).toBeNull();

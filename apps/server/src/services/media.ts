@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { db, Transaction } from "@/global/db";
 import {
     Media,
@@ -23,6 +23,13 @@ import {
     type DashAudioRepresentation,
     type DashSegmentBase,
 } from "@/lib/utils/dash-manifest";
+import {
+    buildHlsMasterManifest,
+    buildHlsVariantManifest,
+    type HlsVideoVariant,
+    type HlsAudioVariant,
+    type HlsSubtitleVariant,
+} from "@/lib/utils/hls-manifest";
 import { isDashCompatibleFormat } from "@/lib/utils/track-format";
 
 export interface PreviewItem {
@@ -430,6 +437,230 @@ export const MediaService = {
             duration: mediaDuration,
             video,
             audio,
+        });
+    },
+
+    /**
+     * Single authority HLS Master m3u8 playlist generation for a media item.
+     */
+    async getHlsMasterManifest(
+        mediaId: string,
+        querySuffix?: string,
+        options?: { videoTrackId?: string; audioTrackId?: string },
+    ): Promise<string | null> {
+        const rows = await db
+            .select({
+                track: Track,
+                file: DbFile,
+            })
+            .from(Track)
+            .leftJoin(DbFile, and(eq(Track.file_id, DbFile.id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
+            .where(
+                and(eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE), eq(Track.sync_status, SyncStatus.COMPLETED)),
+            );
+
+        const normalizeVideoCodec = (value: string | null | undefined) => {
+            const codec = value?.toLowerCase() || "avc1.640028";
+            if (["hevc", "h265", "h.265"].includes(codec)) return "hvc1.1.6.L150.90";
+            if (["h264", "h.264", "avc"].includes(codec)) return "avc1.640028";
+            if (codec === "av1") return "av01.0.08M.08";
+            return codec;
+        };
+
+        const video: HlsVideoVariant[] = [];
+        const audio: HlsAudioVariant[] = [];
+        const subtitle: HlsSubtitleVariant[] = [];
+
+        for (const r of rows) {
+            if (!r.file?.bucket || !r.file?.path) continue;
+            const url = buildCdnUrl(r.file.bucket, r.file.path);
+            if (!url) continue;
+
+            const streams = r.track.streams || [];
+
+            // 1. Process Video Streams
+            const videoStreams = streams.filter((s) => s.type === TrackType.VIDEO);
+            if (r.track.type === TrackType.VIDEO || videoStreams.length > 0) {
+                if (videoStreams.length > 0) {
+                    for (const s of videoStreams) {
+                        video.push({
+                            track_id: r.track.id,
+                            stream_index: s.index,
+                            url,
+                            codec: normalizeVideoCodec(s.codec || r.track.codec),
+                            bandwidth: s.bandwidth || r.track.bandwidth || 1_500_000,
+                            width: s.width || r.track.width || 1280,
+                            height: s.height || r.track.height || 720,
+                            frame_rate: r.track.metadata?.frame_rate,
+                        });
+                    }
+                } else {
+                    video.push({
+                        track_id: r.track.id,
+                        stream_index: null,
+                        url,
+                        codec: normalizeVideoCodec(r.track.codec),
+                        bandwidth: r.track.bandwidth || 1_500_000,
+                        width: r.track.width || 1280,
+                        height: r.track.height || 720,
+                        frame_rate: r.track.metadata?.frame_rate,
+                    });
+                }
+            }
+
+            // 2. Process Audio Streams
+            const audioStreams = streams.filter((s) => s.type === TrackType.AUDIO);
+            if (r.track.type === TrackType.AUDIO || audioStreams.length > 0) {
+                if (audioStreams.length > 0) {
+                    for (const s of audioStreams) {
+                        const language = s.language || r.track.language || null;
+                        const codec = s.codec || r.track.codec || "mp4a.40.2";
+                        audio.push({
+                            track_id: r.track.id,
+                            stream_index: s.index,
+                            url,
+                            codec: codec.toLowerCase() === "aac" ? "mp4a.40.2" : codec,
+                            bandwidth: s.bandwidth || r.track.bandwidth || 128_000,
+                            language,
+                            label: s.label || r.track.display_name || language || `Audio ${audio.length + 1}`,
+                            channels: s.channels || 2,
+                            is_default: r.track.is_default,
+                        });
+                    }
+                } else if (r.track.type === TrackType.AUDIO) {
+                    const language = r.track.language || null;
+                    const codec = r.track.codec || "mp4a.40.2";
+                    audio.push({
+                        track_id: r.track.id,
+                        stream_index: null,
+                        url,
+                        codec: codec.toLowerCase() === "aac" ? "mp4a.40.2" : codec,
+                        bandwidth: r.track.bandwidth || 128_000,
+                        language,
+                        label: r.track.display_name || language || `Audio ${audio.length + 1}`,
+                        channels: 2,
+                        is_default: r.track.is_default,
+                    });
+                }
+            }
+
+            // 3. Process Subtitle Streams
+            const subtitleStreams = streams.filter((s) => s.type === TrackType.SUBTITLE);
+            if (r.track.type === TrackType.SUBTITLE || subtitleStreams.length > 0) {
+                if (subtitleStreams.length > 0) {
+                    for (const s of subtitleStreams) {
+                        const language = s.language || r.track.language || null;
+                        subtitle.push({
+                            track_id: r.track.id,
+                            stream_index: s.index,
+                            url,
+                            language,
+                            label: s.label || r.track.display_name || language || `Subtitle ${subtitle.length + 1}`,
+                            is_default: r.track.is_default,
+                        });
+                    }
+                } else if (r.track.type === TrackType.SUBTITLE) {
+                    const language = r.track.language || null;
+                    subtitle.push({
+                        track_id: r.track.id,
+                        stream_index: null,
+                        url,
+                        language,
+                        label: r.track.display_name || language || `Subtitle ${subtitle.length + 1}`,
+                        is_default: r.track.is_default,
+                    });
+                }
+            }
+        }
+
+        let videoTrackId = options?.videoTrackId;
+        let audioTrackId = options?.audioTrackId;
+
+        if (querySuffix) {
+            const cleanSuffix = querySuffix.replace(/^\?/, "");
+            const params = new URLSearchParams(cleanSuffix);
+            if (!videoTrackId) videoTrackId = params.get("video_track_id") ?? undefined;
+            if (!audioTrackId) audioTrackId = params.get("audio_track_id") ?? undefined;
+        }
+
+        let filteredVideo = video;
+        if (videoTrackId) {
+            const matched = video.filter((v) => v.track_id === videoTrackId);
+            if (matched.length > 0) filteredVideo = matched;
+        }
+
+        let filteredAudio = audio;
+        if (audioTrackId) {
+            const matched = audio.filter((a) => a.track_id === audioTrackId);
+            if (matched.length > 0) filteredAudio = matched;
+        }
+
+        if (filteredVideo.length === 0) return null;
+
+        return buildHlsMasterManifest({
+            media_id: mediaId,
+            video: filteredVideo,
+            audio: filteredAudio,
+            subtitle,
+            query_suffix: querySuffix,
+        });
+    },
+
+    /**
+     * Single authority HLS Variant m3u8 playlist generation for a track.
+     */
+    async getHlsVariantManifest(mediaId: string, trackId: string, querySuffix?: string): Promise<string | null> {
+        const rows = await db
+            .select({
+                track: Track,
+                file: DbFile,
+            })
+            .from(Track)
+            .leftJoin(DbFile, and(eq(Track.file_id, DbFile.id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
+            .where(
+                and(
+                    eq(Track.media_id, mediaId),
+                    eq(Track.id, trackId),
+                    eq(Track.delete_status, DeleteStatus.ACTIVE),
+                    eq(Track.sync_status, SyncStatus.COMPLETED),
+                ),
+            );
+
+        const row = rows[0];
+        if (!row || !row.file || !row.file.bucket || !row.file.path) return null;
+        const fileUrl = buildCdnUrl(row.file.bucket, row.file.path);
+        if (!fileUrl) return null;
+
+        const segmentBase = row.track.metadata?.segment_base;
+        let initRange: string | null = null;
+        let mediaRange: string | null = null;
+
+        if (segmentBase?.initialization) {
+            const [initStartStr, initEndStr] = segmentBase.initialization.split("-");
+            const initStart = Number(initStartStr || 0);
+            const initEnd = Number(initEndStr || 0);
+            const initLength = initEnd - initStart + 1;
+            initRange = `${initLength}@${initStart}`;
+
+            let mediaStart = initEnd + 1;
+            if (segmentBase.index_range) {
+                const [, indexEndStr] = segmentBase.index_range.split("-");
+                mediaStart = Number(indexEndStr || initEnd) + 1;
+            }
+
+            const fileSize = row.file.size || 0;
+            const mediaLength = fileSize > mediaStart ? fileSize - mediaStart : 0;
+            if (mediaLength > 0) {
+                mediaRange = `${mediaLength}@${mediaStart}`;
+            }
+        }
+
+        return buildHlsVariantManifest({
+            file_url: fileUrl,
+            init_range: initRange,
+            media_range: mediaRange,
+            duration: row.track.duration || 10,
+            query_suffix: querySuffix,
         });
     },
 

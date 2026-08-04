@@ -30,6 +30,7 @@ import { and, eq, ilike, SQL, count, asc, desc, or, isNull, inArray } from "driz
 
 import { Quality } from "@/lib/types";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
+import { verifyMediaSignature } from "@/lib/utils/media-signer";
 import { RecycleService } from "@/services/recycle";
 import { DeleteService } from "@/services/delete";
 import { MediaService } from "@/services/media";
@@ -445,12 +446,12 @@ const GetMpdRequestSchema = z.object({
     id: z.uuid(),
 });
 
-router.get("/:id/manifest.mpd", requireAuth, validate("param", GetMpdRequestSchema), async (c) => {
+router.get("/:id/manifest.mpd", validate("param", GetMpdRequestSchema), async (c) => {
     const mediaId = c.req.valid("param").id;
-    const access = await checkMediaAccess(c, mediaId);
-    if (!access.media || access.errorResponse) return access.errorResponse;
+    const access = await verifyMediaStreamAccess(c, mediaId);
+    if (!access.ok) return access.errorResponse;
 
-    const mpd = await MediaService.getDashManifest(access.media.id);
+    const mpd = await MediaService.getDashManifest(mediaId);
     if (!mpd) {
         return c.json(error(Code.NOT_FOUND, "No playable DASH video tracks found for this media"), 404);
     }
@@ -458,6 +459,90 @@ router.get("/:id/manifest.mpd", requireAuth, validate("param", GetMpdRequestSche
     c.header("Content-Type", "application/dash+xml");
     return c.text(mpd);
 });
+
+const GetHlsRequestSchema = z.object({
+    id: z.uuid(),
+});
+
+const GetHlsVariantRequestSchema = z.object({
+    id: z.uuid(),
+    trackId: z.uuid(),
+});
+
+router.get("/:id/manifest.m3u8", validate("param", GetHlsRequestSchema), async (c) => {
+    const mediaId = c.req.valid("param").id;
+    const access = await verifyMediaStreamAccess(c, mediaId);
+    if (!access.ok) return access.errorResponse;
+
+    const videoTrackId = c.req.query("video_track_id");
+    const audioTrackId = c.req.query("audio_track_id");
+
+    const rawQuery = c.req.query();
+    const queryParams = new URLSearchParams(rawQuery);
+    const queryString = queryParams.toString();
+    const querySuffix = queryString ? `?${queryString}` : undefined;
+
+    const m3u8 = await MediaService.getHlsMasterManifest(mediaId, querySuffix, {
+        videoTrackId,
+        audioTrackId,
+    });
+    if (!m3u8) {
+        return c.json(error(Code.NOT_FOUND, "No playable HLS video tracks found for this media"), 404);
+    }
+
+    return c.newResponse(m3u8, 200, {
+        "Content-Type": "application/x-mpegURL",
+    });
+});
+
+router.get("/:id/hls/:trackId/manifest.m3u8", validate("param", GetHlsVariantRequestSchema), async (c) => {
+    const { id: mediaId, trackId } = c.req.valid("param");
+    const access = await verifyMediaStreamAccess(c, mediaId, trackId);
+    if (!access.ok) return access.errorResponse;
+
+    const rawQuery = c.req.query();
+    const queryParams = new URLSearchParams(rawQuery);
+    const queryString = queryParams.toString();
+    const querySuffix = queryString ? `?${queryString}` : undefined;
+
+    const m3u8 = await MediaService.getHlsVariantManifest(mediaId, trackId, querySuffix);
+    if (!m3u8) {
+        return c.json(error(Code.NOT_FOUND, "No playable HLS variant track found"), 404);
+    }
+
+    return c.newResponse(m3u8, 200, {
+        "Content-Type": "application/x-mpegURL",
+    });
+});
+
+async function verifyMediaStreamAccess(
+    c: Context,
+    mediaId: string,
+    trackId?: string,
+): Promise<{ ok: boolean; errorResponse: any }> {
+    const expires = c.req.query("expires");
+    const sig = c.req.query("sig");
+
+    // 1. Zero-DB HMAC Signature Check (Industry Standard Signed URL)
+    if (expires && sig) {
+        const isValid = verifyMediaSignature(mediaId, trackId, expires, sig);
+        if (isValid) {
+            return { ok: true, errorResponse: null };
+        }
+        return {
+            ok: false,
+            errorResponse: c.json(error(Code.FORBIDDEN, "Invalid or expired media signature"), 403),
+        };
+    }
+
+    // 2. Session / API Token check fallback if no signature provided
+    const access = await checkMediaAccess(c, mediaId);
+    if (!access.media || access.errorResponse) {
+        return { ok: false, errorResponse: access.errorResponse };
+    }
+
+    return { ok: true, errorResponse: null };
+}
 
 async function checkMediaAccess(
     c: Context,
