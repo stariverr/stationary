@@ -16,6 +16,7 @@ const props = withDefaults(
         hideBadge?: boolean;
         zoom?: number;
         rotation?: number;
+        autoplay?: boolean;
     }>(),
     {
         isLoading: false,
@@ -23,6 +24,7 @@ const props = withDefaults(
         hideBadge: false,
         zoom: 1,
         rotation: 0,
+        autoplay: true,
     },
 );
 
@@ -357,6 +359,7 @@ const handleImageClick = (e: MouseEvent) => {
                         :subtitles="media.subtitles?.length ? media.subtitles : media.playback?.subtitle_tracks || []"
                         :width="media.width ?? undefined"
                         :height="media.height ?? undefined"
+                        :autoplay="props.autoplay"
                         class="w-full h-full"
                     />
                     <div v-else class="text-zinc-500 flex flex-col items-center gap-2">
@@ -418,6 +421,17 @@ const handleImageClick = (e: MouseEvent) => {
                         v-if="imageSrcUrl || defaultPosterUrl"
                         :src="imageSrcUrl || defaultPosterUrl"
                         class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
+                        aria-hidden="true"
+                    />
+                    <!-- Fast Cover/Thumbnail Placeholder Layer -->
+                    <img
+                        v-if="defaultPosterUrl && defaultPosterUrl !== imageSrcUrl && isImageLoading"
+                        :src="defaultPosterUrl"
+                        class="absolute z-10 max-w-full max-h-full object-contain select-none pointer-events-none"
+                        :style="{
+                            transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
+                            transformOrigin: 'center center',
+                        }"
                         aria-hidden="true"
                     />
                     <img

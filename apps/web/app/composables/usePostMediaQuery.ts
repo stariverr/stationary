@@ -10,7 +10,10 @@ export interface PostMediaQueryOptions {
     type?: MediaType | "";
 }
 
-export function usePostMediaQuery(postId: MaybeRefOrGetter<string | number | null | undefined>) {
+export function usePostMediaQuery(
+    postId: MaybeRefOrGetter<string | number | null | undefined>,
+    initialPostGetter?: () => { media?: any[] } | null | undefined,
+) {
     const list = ref<PostMediaSummary[]>([]);
     const page = ref(1);
     const limit = ref(50);
@@ -31,7 +34,9 @@ export function usePostMediaQuery(postId: MaybeRefOrGetter<string | number | nul
         if (options.type !== undefined) typeFilter.value = options.type || undefined;
         const requestId = ++requestSequence;
 
-        isLoading.value = true;
+        if (list.value.length === 0) {
+            isLoading.value = true;
+        }
         try {
             const queryParams: {
                 page: number;
@@ -72,10 +77,32 @@ export function usePostMediaQuery(postId: MaybeRefOrGetter<string | number | nul
     watch(
         () => toValue(postId),
         (newId) => {
-            list.value = [];
-            page.value = 1;
-            total.value = 0;
-            totalPages.value = 0;
+            const initialPost = initialPostGetter?.();
+            if (initialPost && Array.isArray(initialPost.media) && initialPost.media.length > 0) {
+                list.value = initialPost.media.map((m: any, index: number) => ({
+                    id: String(m.id),
+                    type: m.type as MediaType,
+                    title: m.title || null,
+                    sort_order: index,
+                    position: index,
+                    cover_url: m.poster || m.thumbnail || m.cover_url || "",
+                    url: m.url || null,
+                    playback: m.playback || null,
+                    subtitles: m.subtitles || [],
+                    width: m.width || null,
+                    height: m.height || null,
+                    tracks: m.tracks || [],
+                }));
+                page.value = 1;
+                total.value = initialPost.media.length;
+                totalPages.value = 1;
+                isLoading.value = false;
+            } else {
+                list.value = [];
+                page.value = 1;
+                total.value = 0;
+                totalPages.value = 0;
+            }
             keyword.value = "";
             typeFilter.value = undefined;
             if (newId) {

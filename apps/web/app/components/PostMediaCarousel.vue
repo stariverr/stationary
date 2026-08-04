@@ -149,6 +149,8 @@ const scrollNext = () => swiperInstance.value?.slideNext();
                             :subtitles="media.subtitles?.length ? media.subtitles : media.playback?.subtitle_tracks"
                             :width="media.width"
                             :height="media.height"
+                            :autoplay="index === currentIndex"
+                            :title="post?.title || ''"
                             class="max-h-full max-w-full h-full w-auto"
                         />
                         <LivePhotoPlayer
@@ -224,6 +226,8 @@ const scrollNext = () => swiperInstance.value?.slideNext();
                         :subtitles="media.subtitles?.length ? media.subtitles : media.playback?.subtitle_tracks"
                         :width="media.width"
                         :height="media.height"
+                        :autoplay="index === currentIndex"
+                        :title="post?.title || ''"
                         class="w-full h-full"
                     />
                     <LivePhotoPlayer

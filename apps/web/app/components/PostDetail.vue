@@ -56,7 +56,7 @@ const {
     totalPages: mediaTotalPages,
     isLoading: isLoadingMediaList,
     fetchPage,
-} = usePostMediaQuery(selectedPostId);
+} = usePostMediaQuery(selectedPostId, () => selectedPost.value);
 
 const refreshPostData = async (postId: string) => {
     await Promise.all([
