@@ -8,7 +8,17 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:http/http.dart' as http;
 import '../services/api_service.dart';
 import '../models.dart';
+import 'premium_image.dart';
 
+/// A production-grade, seamless video player widget for Flutter.
+///
+/// **Best Practice Patterns Enforced:**
+/// 1. **Native GPU Texture Handoff (`_isVideoReadyToPaint`)**: Native video engines
+///    (`AVPlayerLayer` / `MediaCodec`) take 16-50ms after initialization to present
+///    the first decoded video frame onto Flutter's `Texture(textureId: id)` surface.
+/// 2. **Seamless Cover Dissolve**: Keeps the cover image [coverUrl] rendered at 100% opacity
+///    until `_isVideoReadyToPaint` confirms active video frame output, then smoothly
+///    dissolves the cover via [AnimatedOpacity] (250ms `Curves.easeOut`), eliminating black flashes.
 class PremiumVideoPlayer extends StatefulWidget {
   final String videoUrl;
   final String? coverUrl;
@@ -42,6 +52,7 @@ class PremiumVideoPlayer extends StatefulWidget {
 class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   VideoPlayerController? _videoPlayerController;
   bool _isInitializing = true;
+  bool _isVideoReadyToPaint = false;
   String? _error;
   bool _isUnsupportedOnIos = false;
 
@@ -110,6 +121,7 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   Future<void> _initPlayer(String resolvedUrl) async {
     setState(() {
       _isInitializing = true;
+      _isVideoReadyToPaint = false;
       _error = null;
     });
 
@@ -132,6 +144,14 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
 
       if (widget.autoPlay) {
         await _videoPlayerController!.play();
+      } else {
+        Future.delayed(const Duration(milliseconds: 150), () {
+          if (mounted && !_isVideoReadyToPaint) {
+            setState(() {
+              _isVideoReadyToPaint = true;
+            });
+          }
+        });
       }
 
       if (mounted) {
@@ -152,6 +172,12 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
 
   void _onVideoControllerUpdate() {
     if (mounted) {
+      if (!_isVideoReadyToPaint && _videoPlayerController != null) {
+        final val = _videoPlayerController!.value;
+        if (val.isInitialized && (val.isPlaying || val.position > Duration.zero)) {
+          _isVideoReadyToPaint = true;
+        }
+      }
       setState(() {});
     }
   }
@@ -175,6 +201,7 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   void didUpdateWidget(covariant PremiumVideoPlayer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.videoUrl != widget.videoUrl) {
+      _isVideoReadyToPaint = false;
       _controlsTimer?.cancel();
       _videoPlayerController?.removeListener(_onVideoControllerUpdate);
       _videoPlayerController?.dispose();
@@ -1375,22 +1402,17 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
           fit: StackFit.expand,
           children: [
             if (widget.coverUrl != null && widget.coverUrl!.isNotEmpty)
-              Image.network(
-                _resolveUrl(widget.coverUrl!),
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) =>
-                    const SizedBox.shrink(),
+              PremiumImage(
+                imageUrl: widget.coverUrl!,
+                fit: BoxFit.contain,
               ),
-            ColoredBox(
-              color: Colors.black.withValues(alpha: 0.62),
-              child: const Center(
-                child: SizedBox(
-                  width: 28,
-                  height: 28,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2.5,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                  ),
+            const Center(
+              child: SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                 ),
               ),
             ),
@@ -1400,6 +1422,7 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     }
 
     final controller = _videoPlayerController!;
+    final showCoverOverlay = !_isVideoReadyToPaint || _isInitializing || !controller.value.isInitialized;
 
     return ClipRRect(
       borderRadius: widget.borderRadius ?? BorderRadius.zero,
@@ -1415,25 +1438,28 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                       child: VideoPlayer(controller),
                     )
                   : (widget.coverUrl != null && widget.coverUrl!.isNotEmpty
-                      ? Image.network(
-                          _resolveUrl(widget.coverUrl!),
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) =>
-                              const SizedBox.shrink(),
+                      ? PremiumImage(
+                          imageUrl: widget.coverUrl!,
+                          fit: BoxFit.contain,
                         )
                       : Container(color: Colors.black)),
             ),
 
-            if (_isInitializing || !controller.value.isInitialized)
-              if (widget.coverUrl != null && widget.coverUrl!.isNotEmpty)
-                Positioned.fill(
-                  child: Image.network(
-                    _resolveUrl(widget.coverUrl!),
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) =>
-                        const SizedBox.shrink(),
+            if (widget.coverUrl != null && widget.coverUrl!.isNotEmpty)
+              Positioned.fill(
+                child: AnimatedOpacity(
+                  opacity: showCoverOverlay ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeInOut,
+                  child: IgnorePointer(
+                    ignoring: !showCoverOverlay,
+                    child: PremiumImage(
+                      imageUrl: widget.coverUrl!,
+                      fit: BoxFit.contain,
+                    ),
                   ),
                 ),
+              ),
 
             GestureDetector(
               behavior: HitTestBehavior.translucent,
