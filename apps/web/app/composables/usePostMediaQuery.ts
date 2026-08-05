@@ -24,6 +24,15 @@ export function usePostMediaQuery(
     const typeFilter = ref<MediaType | undefined>(undefined);
     let requestSequence = 0;
 
+    const getInitialMediaKey = () => {
+        const media = initialPostGetter?.()?.media;
+        if (!Array.isArray(media) || media.length === 0) return "";
+
+        return media
+            .map((item: any) => [item.id, item.cover_url, item.poster, item.thumbnail, item.url].map((value) => value || "").join(":"))
+            .join("|");
+    };
+
     async function fetchPage(options: PostMediaQueryOptions = {}) {
         const id = toValue(postId);
         if (!id) return;
@@ -69,23 +78,45 @@ export function usePostMediaQuery(
         } catch (e) {
             console.error("Failed to fetch post media:", e);
         } finally {
-            isLoading.value = false;
+            if (requestId === requestSequence) {
+                isLoading.value = false;
+            }
         }
     }
 
-    // Reset and fetch when post ID changes
+    // Reset and seed instantly when post ID or its preview media changes
     watch(
-        () => toValue(postId),
-        (newId) => {
+        () => [toValue(postId), getInitialMediaKey()] as const,
+        ([newId], oldValues) => {
+            const oldId = oldValues?.[0];
+
+            if (!newId) {
+                requestSequence++;
+                list.value = [];
+                page.value = 1;
+                total.value = 0;
+                totalPages.value = 0;
+                isLoading.value = false;
+                return;
+            }
+
+            if (newId !== oldId) {
+                list.value = [];
+                page.value = 1;
+                total.value = 0;
+                totalPages.value = 0;
+            }
+
             const initialPost = initialPostGetter?.();
-            if (initialPost && Array.isArray(initialPost.media) && initialPost.media.length > 0) {
-                list.value = initialPost.media.map((m: any, index: number) => ({
+            const postObj = initialPost as any;
+            if (postObj && Array.isArray(postObj.media) && postObj.media.length > 0) {
+                list.value = postObj.media.map((m: any, index: number) => ({
                     id: String(m.id),
                     type: m.type as MediaType,
                     title: m.title || null,
                     sort_order: index,
                     position: index,
-                    cover_url: m.poster || m.thumbnail || m.cover_url || "",
+                    cover_url: m.cover_url || m.poster || m.thumbnail || "",
                     url: m.url || null,
                     playback: m.playback || null,
                     subtitles: m.subtitles || [],
@@ -94,20 +125,16 @@ export function usePostMediaQuery(
                     tracks: m.tracks || [],
                 }));
                 page.value = 1;
-                total.value = initialPost.media.length;
+                total.value = postObj.media.length;
                 totalPages.value = 1;
                 isLoading.value = false;
-            } else {
-                list.value = [];
-                page.value = 1;
-                total.value = 0;
-                totalPages.value = 0;
+            } else if (list.value.length === 0) {
+                isLoading.value = true;
             }
+
             keyword.value = "";
             typeFilter.value = undefined;
-            if (newId) {
-                fetchPage();
-            }
+            void fetchPage();
         },
         { immediate: true },
     );

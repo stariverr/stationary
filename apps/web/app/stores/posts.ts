@@ -387,6 +387,8 @@ export const usePostStore = defineStore("posts", () => {
     const { data: detailData, isLoading: isLoadingDetailQuery } = useQuery({
         queryKey: computed(() => ["post", selectedPostId.value]),
         enabled: computed(() => !!selectedPostId.value),
+        staleTime: 5 * 60 * 1000,
+        gcTime: 30 * 60 * 1000,
         queryFn: async () => {
             if (!selectedPostId.value) return null;
             const response = await useApi<{ success: boolean; data: ApiPostDetail }>(`/post/detail/${selectedPostId.value}`);
@@ -394,6 +396,8 @@ export const usePostStore = defineStore("posts", () => {
             if (response && response.success && response.data) {
                 const detail = response.data;
                 const displayTime = detail.published_time ?? detail.create_time;
+
+                const listPost = postsData.value?.list.find((p) => p.id == detail.id);
 
                 const uiMedia =
                     detail.media?.map((m) => {
@@ -408,6 +412,10 @@ export const usePostStore = defineStore("posts", () => {
                             m.type === "LIVE_PHOTO" ? m.tracks.find((t) => t.type === "VIDEO" && t.purpose === "CONTENT") : null;
                         const subtitleTracks = m.tracks.filter((t) => t.type === "SUBTITLE");
 
+                        const listMedia = listPost?.media?.find((lm) => lm.id == m.id);
+                        const fallbackCover =
+                            coverTrack?.url || m.cover_url || listMedia?.thumbnail || listMedia?.poster || listMedia?.cover_url || null;
+
                         let url = m.url || primaryTrack?.url || null;
 
                         return {
@@ -415,9 +423,10 @@ export const usePostStore = defineStore("posts", () => {
                             type: m.type as "VIDEO" | "IMAGE" | "LIVE_PHOTO" | "AUDIO" | "PDF",
                             url: url,
                             mime_type: primaryTrack?.mime_type || null,
-                            thumbnail: coverTrack?.url || m.cover_url || null,
+                            cover_url: fallbackCover,
+                            thumbnail: fallbackCover,
                             live_url: liveTrack?.url || null,
-                            poster: coverTrack?.url || m.cover_url || null,
+                            poster: fallbackCover,
                             sync_status: m.sync_status || "PENDING",
                             last_error: m.last_error || null,
                             ai_status: m.ai_status || "PENDING",
@@ -468,7 +477,18 @@ export const usePostStore = defineStore("posts", () => {
 
     const posts = computed(() => postsData.value?.list || []);
     const total = computed(() => postsData.value?.total || 0);
-    const selectedPost = computed(() => detailData.value || posts.value.find((p) => p.id == selectedPostId.value) || null);
+    const selectedPost = computed(() => {
+        const listPost = posts.value.find((p) => p.id == selectedPostId.value);
+        const detailPost = detailData.value;
+
+        if (!detailPost || !listPost || (detailPost.media?.length ?? 0) > 0 || (listPost.media?.length ?? 0) === 0) {
+            return detailPost || listPost || null;
+        }
+
+        // The detail endpoint intentionally omits media. Keep the list preview mounted
+        // while the full media query upgrades it to the original asset.
+        return { ...listPost, ...detailPost, media: listPost.media };
+    });
 
     const selectPost = (id: string | number) => {
         selectedPostId.value = id;

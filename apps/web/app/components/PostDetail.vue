@@ -73,6 +73,7 @@ const isImmersiveView = ref(false);
 const isMediaOnly = ref(false);
 const isUiHidden = ref(false);
 const isMobile = ref(false);
+const isMounted = ref(false);
 
 const isOverlay = computed(() => isImmersiveView.value || isMediaOnly.value);
 const currentMedia = computed<PostMediaSummary | null>(() => {
@@ -345,6 +346,7 @@ const handleKeydown = (event: KeyboardEvent) => {
 };
 
 onMounted(() => {
+    isMounted.value = true;
     handleResize();
     window.addEventListener("resize", handleResize);
     window.addEventListener("keydown", handleKeydown);
@@ -797,6 +799,8 @@ const confirmTrashMedia = async () => {
                     @click-media="handleMediaClick"
                     class="h-full w-full"
                 />
+
+                <!-- Nav Arrows for Standard Player -->
 
                 <!-- Nav Arrows for Standard Player -->
                 <button

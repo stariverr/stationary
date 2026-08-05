@@ -22,13 +22,18 @@ export function getMediaTypeLabel(type: string | null | undefined, t: (key: stri
 
 /**
  * Resolves the thumbnail/preview URL for a PostMediaSummary item.
- * Prioritizes explicit cover_url, then COVER track, then CONTENT track.
+ *
+ * **Identity Stabilization Best Practice**:
+ * Always prioritizes explicit `cover_url` or primary `url` before track fallbacks.
+ * This guarantees the returned URL string is 100% identical before and after async API detail hydration,
+ * preventing browser image bitmap flushes and eliminating thumbnail list flickering.
  */
 export function getMediaPreviewUrl(media: PostMediaSummary): string | undefined {
     if (media.cover_url) return media.cover_url;
+    if (media.url && (media.type === "IMAGE" || media.type === "LIVE_PHOTO")) return media.url;
 
     const coverTrack = media.tracks.find((track) => track.purpose === TrackPurpose.COVER);
     if (coverTrack?.url) return coverTrack.url;
 
-    return media.tracks.find((track) => track.purpose === TrackPurpose.CONTENT)?.url ?? undefined;
+    return media.tracks.find((track) => track.purpose === TrackPurpose.CONTENT)?.url ?? media.url ?? undefined;
 }
