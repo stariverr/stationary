@@ -147,7 +147,7 @@ class _MediaLightboxState extends State<MediaLightbox> {
                     return Center(
                       child: PremiumVideoPlayer(
                         videoUrl: item.playback?.url ?? item.url!,
-                        coverUrl: item.coverUrl,
+                        coverUrl: item.coverUrl ?? item.url,
                         autoPlay: index == _currentIndex,
                         tracks: item.tracks,
                         playback: item.playback,
@@ -166,11 +166,11 @@ class _MediaLightboxState extends State<MediaLightbox> {
                         },
                       ),
                     );
-                  } else if (item.type == 'LIVE_PHOTO' && item.url != null && liveTrack != null) {
+                  } else if (item.type == 'LIVE_PHOTO' && item.url != null) {
                     return Center(
                       child: PremiumLivePhotoPlayer(
                         imageUrl: item.url!,
-                        videoUrl: liveTrack.url,
+                        videoUrl: liveTrack?.url,
                         fit: BoxFit.contain,
                       ),
                     );
@@ -402,6 +402,7 @@ class LightboxImage extends StatefulWidget {
 
 class _LightboxImageState extends State<LightboxImage> {
   Uint8List? _bytes;
+  Uint8List? _previousBytes;
   bool _isLoading = true;
   String? _error;
 
@@ -415,6 +416,7 @@ class _LightboxImageState extends State<LightboxImage> {
   void didUpdateWidget(LightboxImage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.url != widget.url) {
+      _previousBytes = _bytes;
       _loadImage();
     }
   }
@@ -423,7 +425,6 @@ class _LightboxImageState extends State<LightboxImage> {
     setState(() {
       _isLoading = true;
       _error = null;
-      _bytes = null;
     });
 
     try {
@@ -441,6 +442,7 @@ class _LightboxImageState extends State<LightboxImage> {
       if (mounted) {
         setState(() {
           _bytes = finalBytes;
+          _previousBytes = null;
           _isLoading = false;
         });
       }
@@ -457,6 +459,30 @@ class _LightboxImageState extends State<LightboxImage> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
+      final fallback = _previousBytes ?? _bytes;
+      if (fallback != null) {
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            PhotoView(
+              controller: widget.controller,
+              imageProvider: MemoryImage(fallback),
+              initialScale: PhotoViewComputedScale.contained,
+              minScale: PhotoViewComputedScale.contained,
+              maxScale: PhotoViewComputedScale.covered * 4.0,
+              backgroundDecoration: const BoxDecoration(color: Colors.black),
+              onTapUp: (context, details, controllerValue) {
+                widget.onTap?.call();
+              },
+            ),
+            const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation(Colors.white),
+              ),
+            ),
+          ],
+        );
+      }
       return const Center(
         child: CircularProgressIndicator(
           valueColor: AlwaysStoppedAnimation(Colors.white),

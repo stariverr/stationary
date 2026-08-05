@@ -10,6 +10,7 @@ import 'media_lightbox.dart';
 class PostDetailPage extends StatefulWidget {
   final String postId;
   final Post? initialPost;
+  final String? initialCoverUrl;
 
   static final Map<String, Post> detailCache = {};
 
@@ -17,6 +18,7 @@ class PostDetailPage extends StatefulWidget {
     super.key,
     required this.postId,
     this.initialPost,
+    this.initialCoverUrl,
   });
 
   @override
@@ -764,6 +766,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
       child: Stack(
         children: [
           PageView.builder(
+            physics: const BouncingScrollPhysics(),
             controller: _pageController,
             itemCount: post.media.length,
             onPageChanged: (idx) {
@@ -783,10 +786,17 @@ class _PostDetailPageState extends State<PostDetailPage> {
                 }
               }
               
+              final double screenWidth = MediaQuery.of(context).size.width;
+              final double dpr = MediaQuery.of(context).devicePixelRatio;
+              final initialCover = (idx == 0 && widget.initialCoverUrl != null && widget.initialCoverUrl!.isNotEmpty)
+                  ? widget.initialCoverUrl!
+                  : item.getInitialCoverUrl(width: screenWidth, devicePixelRatio: dpr);
+              Widget mediaContent;
+
               if (item.type == 'VIDEO' && (item.playback?.url != null || item.url != null)) {
-                return PremiumVideoPlayer(
+                mediaContent = PremiumVideoPlayer(
                   videoUrl: item.playback?.url ?? item.url!,
-                  coverUrl: item.coverUrl,
+                  coverUrl: initialCover,
                   autoPlay: idx == _swiperIndex,
                   tracks: item.tracks,
                   playback: item.playback,
@@ -803,69 +813,49 @@ class _PostDetailPageState extends State<PostDetailPage> {
                     );
                   },
                 );
+              } else {
+                mediaContent = GestureDetector(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => MediaLightbox(
+                          mediaList: post.media,
+                          initialIndex: idx,
+                        ),
+                      ),
+                    );
+                  },
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (item.type == 'LIVE_PHOTO' && item.url != null)
+                        PremiumLivePhotoPlayer(
+                          imageUrl: initialCover,
+                          videoUrl: liveTrack?.url,
+                          fit: BoxFit.contain,
+                        )
+                      else if (item.url != null)
+                        PremiumImage(
+                          imageUrl: item.url!,
+                          placeholderUrl: initialCover,
+                          fit: BoxFit.contain,
+                        )
+                      else
+                        const Center(child: Text('Unsupported Media')),
+                    ],
+                  ),
+                );
               }
 
-              return GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => MediaLightbox(
-                        mediaList: post.media,
-                        initialIndex: idx,
-                      ),
-                    ),
-                  );
-                },
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (item.type == 'LIVE_PHOTO' && item.url != null && liveTrack != null)
-                      PremiumLivePhotoPlayer(
-                        imageUrl: item.url!,
-                        videoUrl: liveTrack.url,
-                        fit: BoxFit.contain,
-                      )
-                    else if (item.url != null)
-                      PremiumImage(
-                        imageUrl: item.url!,
-                        placeholderUrl: item.coverUrl,
-                        fit: BoxFit.contain,
-                      )
-                    else
-                      const Center(child: Text('Unsupported Media')),
-                    
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                            colors: [
-                              Colors.black.withValues(alpha: 0.7),
-                              Colors.transparent,
-                            ],
-                          ),
-                        ),
-                        padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
-                        child: Text(
-                          item.title,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
+              if (idx == 0) {
+                return Hero(
+                  tag: 'post_media_${widget.postId}_0',
+                  child: mediaContent,
+                );
+              }
+
+              return mediaContent;
             },
           ),
           if (post.media.length > 1) ...[
@@ -1034,17 +1024,22 @@ class _PostDetailPageState extends State<PostDetailPage> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(
                 post.media.length,
-                (idx) => Container(
-                  width: 6,
-                  height: 6,
-                  margin: const EdgeInsets.symmetric(horizontal: 3),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _swiperIndex == idx
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.outlineVariant,
-                  ),
-                ),
+                (idx) {
+                  final isSelected = _swiperIndex == idx;
+                  return AnimatedContainer(
+                    duration: const Duration(milliseconds: 250),
+                    curve: Curves.easeOutCubic,
+                    width: isSelected ? 16 : 6,
+                    height: 6,
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(3),
+                      color: isSelected
+                          ? theme.colorScheme.primary
+                          : theme.colorScheme.outlineVariant,
+                    ),
+                  );
+                },
               ),
             ),
           ],

@@ -527,6 +527,55 @@ class Media {
       playback: playback,
     );
   }
+
+  String getImageUrlForWidth(double width, {double devicePixelRatio = 2.0}) {
+    if (covers.isEmpty) return coverUrl ?? url ?? '';
+
+    double targetWidth = width * devicePixelRatio;
+    if (this.width != null && height != null && height! > this.width!) {
+      final double aspectRatio = this.width! / height!;
+      if (aspectRatio > 0) {
+        targetWidth = targetWidth / aspectRatio;
+      }
+    }
+
+    int getWidthOfQuality(String q) {
+      switch (q.toUpperCase()) {
+        case 'LOW':
+          return 360;
+        case 'MEDIUM':
+          return 720;
+        case 'HIGH':
+          return 1440;
+        case 'ORIGINAL':
+          return 3840;
+        default:
+          return 0;
+      }
+    }
+
+    final sortedCovers = List<MediaPreviewItem>.from(covers)
+      ..sort(
+        (a, b) => getWidthOfQuality(a.quality).compareTo(getWidthOfQuality(b.quality)),
+      );
+
+    for (var c in sortedCovers) {
+      if (getWidthOfQuality(c.quality) >= targetWidth) {
+        return c.url ?? '';
+      }
+    }
+    return sortedCovers.isNotEmpty
+        ? (sortedCovers.last.url ?? '')
+        : (coverUrl ?? url ?? '');
+  }
+
+  String getInitialCoverUrl({double width = 360, double devicePixelRatio = 2.0}) {
+    if (covers.isNotEmpty) {
+      final matchedUrl = getImageUrlForWidth(width, devicePixelRatio: devicePixelRatio);
+      if (matchedUrl.isNotEmpty) return matchedUrl;
+    }
+    return coverUrl ?? url ?? '';
+  }
 }
 
 class Post {

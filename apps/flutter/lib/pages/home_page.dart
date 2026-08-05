@@ -75,37 +75,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  int _sizeToStep(String size) {
-    switch (size) {
-      case 'xs':
-        return 1;
-      case 'sm':
-        return 2;
-      case 'lg':
-        return 4;
-      case 'xl':
-        return 5;
-      case 'md':
-      default:
-        return 3;
-    }
-  }
 
-  String _stepToSize(int step) {
-    switch (step) {
-      case 1:
-        return 'xs';
-      case 2:
-        return 'sm';
-      case 4:
-        return 'lg';
-      case 5:
-        return 'xl';
-      case 3:
-      default:
-        return 'md';
-    }
-  }
 
   Map<String, dynamic> _calculateColumnBounds(double width) {
     final isMobile = width < 600;
@@ -2512,6 +2482,7 @@ class _PostCardItemState extends State<PostCardItem> {
                   builder: (context) => PostDetailPage(
                     postId: post.id,
                     initialPost: post.toPost(),
+                    initialCoverUrl: coverUrl,
                   ),
                 ),
               );
@@ -2535,16 +2506,19 @@ class _PostCardItemState extends State<PostCardItem> {
                         fit: StackFit.expand,
                         children: [
                           if (coverUrl != null)
-                            Image.network(
-                              coverUrl,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) => Container(
-                                color: isDark ? const Color(0xFF27272A) : const Color(0xFFF1F5F9),
-                                child: Center(
-                                  child: Icon(
-                                    LucideIcons.image,
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                    size: 24,
+                            Hero(
+                              tag: 'post_media_${post.id}_0',
+                              child: Image.network(
+                                coverUrl,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) => Container(
+                                  color: isDark ? const Color(0xFF27272A) : const Color(0xFFF1F5F9),
+                                  child: Center(
+                                    child: Icon(
+                                      LucideIcons.image,
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                      size: 24,
+                                    ),
                                   ),
                                 ),
                               ),
