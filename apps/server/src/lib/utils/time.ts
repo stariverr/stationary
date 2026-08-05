@@ -1,5 +1,5 @@
 import { Temporal } from "@js-temporal/polyfill";
-import { z } from "zod";
+import * as v from "valibot";
 
 export const toIsoTimestamp = (value: Temporal.Instant | string | null | undefined) => {
     if (!value) return null;
@@ -16,19 +16,20 @@ export const toIsoTimestamp = (value: Temporal.Instant | string | null | undefin
     }
 };
 
-export const FormTimestampSchema = z
-    .union([z.string(), z.null()])
-    .optional()
-    .transform((val, ctx) => {
+export const FormTimestampSchema = v.pipe(
+    v.optional(v.nullable(v.string())),
+    v.check((val) => {
+        if (val === undefined || val === null) return true;
+        try {
+            Temporal.Instant.from(val);
+            return true;
+        } catch {
+            return false;
+        }
+    }, "Invalid ISO 8601 timestamp string"),
+    v.transform((val) => {
         if (val === undefined) return undefined;
         if (val === null) return null;
-        try {
-            return Temporal.Instant.from(val);
-        } catch {
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: "Invalid ISO 8601 timestamp string",
-            });
-            return z.NEVER;
-        }
-    });
+        return Temporal.Instant.from(val);
+    }),
+);

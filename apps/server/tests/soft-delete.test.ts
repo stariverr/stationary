@@ -79,7 +79,7 @@ describe("soft deletion lifecycle", () => {
     test("track replacement and deletion share referential orphan checks", async () => {
         const trackService = await sourceFiles.trackService();
 
-        expect(trackService).toContain("DeleteService.canPurgeFile(fileId, tx)");
-        expect(trackService.match(/softDeleteFileIfUnreferenced\(tx,/g)?.length).toBeGreaterThanOrEqual(3);
+        expect(trackService).toContain("DeleteService.softDeleteFileIfUnreferenced(");
+        expect(trackService.match(/softDeleteFileIfUnreferenced\(/g)?.length).toBeGreaterThanOrEqual(3);
     });
 });

@@ -12,30 +12,28 @@ import {
 } from "@/db/schema";
 import { and, eq, gt, asc, inArray, type SQL } from "drizzle-orm";
 import { RECIPE_VERSION } from "@/lib/utils/cover_profiles";
-import { z } from "zod";
+import * as v from "valibot";
 import { Quality } from "@/lib/types";
 import { CoverService, rankCoverCandidateTrack, type ResolvedCoverSource } from "@/services/cover";
 import type { TaskHandler, TaskUnitContext, TaskResult, DiscoveredUnitSpec } from "@/infra/jobs/types";
 
-const CoverTaskInputSchema = z.object({
-    qualities: z.array(z.enum(Quality)).nullable().optional(),
-    media_ids: z.array(z.string()).nullable().optional(),
-    source_type: z
-        .string()
-        .nullable()
-        .optional()
-        .transform((v) => v || "RECONCILE"),
-    force: z
-        .boolean()
-        .nullable()
-        .optional()
-        .transform((v) => v === true),
+const CoverTaskInputSchema = v.object({
+    qualities: v.optional(v.nullable(v.array(v.enum(Quality)))),
+    media_ids: v.optional(v.nullable(v.array(v.string()))),
+    source_type: v.pipe(
+        v.optional(v.nullable(v.string())),
+        v.transform((val) => val || "RECONCILE"),
+    ),
+    force: v.pipe(
+        v.optional(v.nullable(v.boolean())),
+        v.transform((val) => val === true),
+    ),
 });
 
-const CoverUnitInputSchema = z.object({
-    quality: z.enum(Quality),
-    sourceFileId: z.string(),
-    sourceTrackId: z.string().nullable().optional(),
+const CoverUnitInputSchema = v.object({
+    quality: v.enum(Quality),
+    sourceFileId: v.string(),
+    sourceTrackId: v.optional(v.nullable(v.string())),
 });
 
 /**
@@ -127,7 +125,7 @@ function resolveSourceTrackInBatch(
 
 export const CoverJobHandler: TaskHandler = {
     validateInput(input) {
-        return CoverTaskInputSchema.parse(input);
+        return v.parse(CoverTaskInputSchema, input);
     },
 
     async discoverUnits(task, discoveryCursor, batchSize) {
@@ -135,11 +133,11 @@ export const CoverJobHandler: TaskHandler = {
             return { units: [], nextCursor: null, hasMore: false };
         }
 
-        const parseResult = CoverTaskInputSchema.safeParse(task.input_snapshot || {});
+        const parseResult = v.safeParse(CoverTaskInputSchema, task.input_snapshot || {});
         if (!parseResult.success) {
-            throw new Error(`Invalid task input_snapshot schema: ${parseResult.error.message}`);
+            throw new Error(`Invalid task input_snapshot schema`);
         }
-        const inputSnapshot = parseResult.data;
+        const inputSnapshot = parseResult.output;
         const targetQualities =
             inputSnapshot.qualities && inputSnapshot.qualities.length > 0 ? inputSnapshot.qualities : [Quality.LOW, Quality.MEDIUM];
 
@@ -226,7 +224,7 @@ export const CoverJobHandler: TaskHandler = {
             const source = resolveSourceTrackInBatch(tracks, filesMap);
             if (!source) continue;
 
-            const mediaUnits = buildUnitsForMedia(media, tracks, source, targetQualities, task.config_version, isForce);
+            const mediaUnits = buildUnitsForMedia(media, tracks, source, targetQualities, task.config_version, Boolean(isForce));
             units.push(...mediaUnits);
         }
 
@@ -235,7 +233,7 @@ export const CoverJobHandler: TaskHandler = {
 
     async execute({ unit, signal }: TaskUnitContext): Promise<TaskResult> {
         signal.throwIfAborted();
-        const parseResult = CoverUnitInputSchema.safeParse(unit.input_snapshot || {});
+        const parseResult = v.safeParse(CoverUnitInputSchema, unit.input_snapshot || {});
         if (!parseResult.success) {
             return {
                 success: false,
@@ -244,7 +242,7 @@ export const CoverJobHandler: TaskHandler = {
                 error: "Missing or invalid required item input parameters",
             };
         }
-        const input = parseResult.data;
+        const input = parseResult.output;
 
         const mediaList = await db
             .select()

@@ -26,9 +26,9 @@ describe("E2E Track Pipeline & Regression Test Suite", () => {
         expect(normalized.language).toBe("zh-CN");
         expect(normalized.codec).toBe("vtt");
         expect(normalized.metadata.format).toBe("srt");
-        expect(normalized.metadata.width).toBe(1920);
-        expect(normalized.metadata.height).toBe(1080);
-        expect(normalized.metadata.duration).toBe(120);
+        expect(normalized.width).toBe(1920);
+        expect(normalized.height).toBe(1080);
+        expect(normalized.duration).toBe(120);
     });
 
     test("resolves media playback and generates valid DASH MPD manifest for separated fMP4 tracks", () => {

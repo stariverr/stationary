@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
-import { z } from "zod";
-import { validator } from "hono/validator";
+import * as v from "valibot";
+import { validate } from "@/lib/validation/validator";
 import { ApiTokenService } from "@/services/apiToken";
 
 const router = new Hono<AuthEnv>();
@@ -21,24 +21,18 @@ router.get("/", (c) => {
     );
 });
 
-export const TokenCreateBodySchema = z
-    .object({
-        name: z.string().min(1, "Name is required"),
-        library_id: z.string().uuid("Invalid library_id format").nullable().optional(),
-        expires_in_seconds: z.number().int().positive("expires_in_seconds must be positive").nullable().optional(),
-    })
-    .strict();
+export const TokenCreateBodySchema = v.strictObject({
+    name: v.pipe(v.string(), v.nonEmpty("Name is required")),
+    library_id: v.optional(v.nullable(v.pipe(v.string(), v.uuid("Invalid library_id format")))),
+    expires_in_seconds: v.optional(
+        v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1, "expires_in_seconds must be positive"))),
+    ),
+});
 
 // Create a new API token
 router.post(
     "/tokens",
-    validator("json", (value, c) => {
-        const parsed = TokenCreateBodySchema.safeParse(value);
-        if (!parsed.success) {
-            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid body"), 400);
-        }
-        return parsed.data;
-    }),
+    validate("json", TokenCreateBodySchema),
     async (c) => {
         const user = c.get("user");
         if (!user) {

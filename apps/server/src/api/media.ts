@@ -1,6 +1,6 @@
 import { Context, Hono } from "hono";
 import { db } from "@/global/db";
-import { z } from "zod";
+import * as v from "valibot";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
 import {
@@ -52,20 +52,33 @@ import { validate } from "@/lib/validation/validator";
 
 const router = new Hono<AuthEnv>();
 
-export const MediaListRequestBodySchema = z.object({
-    page: z.preprocess(
-        (val) => (val === "" || val === undefined ? undefined : Number(val)),
-        z.number().int().positive().gte(1, "Page must be 1 or greater.").optional(),
+export const MediaListRequestBodySchema = v.object({
+    page: v.optional(
+        v.pipe(
+            v.unknown(),
+            v.transform((val) => (val === "" || val === undefined ? undefined : Number(val))),
+            v.optional(v.pipe(v.number(), v.integer(), v.minValue(1, "Page must be 1 or greater."))),
+        ),
     ),
-    count: z.preprocess(
-        (val) => (val === "" || val === undefined ? undefined : Number(val)),
-        z.number().int().positive().gte(10, "Count must be 10 or greater.").lte(100, "Count must be 100 or less.").optional(),
+    count: v.optional(
+        v.pipe(
+            v.unknown(),
+            v.transform((val) => (val === "" || val === undefined ? undefined : Number(val))),
+            v.optional(
+                v.pipe(
+                    v.number(),
+                    v.integer(),
+                    v.minValue(10, "Count must be 10 or greater."),
+                    v.maxValue(100, "Count must be 100 or less."),
+                ),
+            ),
+        ),
     ),
-    keyword: z.string().optional(),
-    source: z.enum(PostSource).optional(),
-    display_mode: z.enum(["flat", "stacked"]).default("flat"),
-    library_id: z.uuid().optional(),
-    has_no_post: z.string().optional(),
+    keyword: v.optional(v.string()),
+    source: v.optional(v.enum(PostSource)),
+    display_mode: v.optional(v.picklist(["flat", "stacked"]), "flat"),
+    library_id: v.optional(v.pipe(v.string(), v.uuid())),
+    has_no_post: v.optional(v.string()),
 });
 
 // Media List - Cover-only media hydration (zero content track queries)
@@ -296,8 +309,8 @@ router.post("/delete/:id", requireAuth, async (c) => {
 
     return c.json(success(Code.SUCCESS, result));
 });
-export const SingleRegenerateCoverParamSchema = z.object({
-    id: z.uuid("Invalid media ID format"),
+export const SingleRegenerateCoverParamSchema = v.object({
+    id: v.pipe(v.string(), v.uuid("Invalid media ID format")),
 });
 
 router.post("/:id/regenerate-cover", requireAuth, validate("param", SingleRegenerateCoverParamSchema), async (c) => {
@@ -353,17 +366,18 @@ router.post("/:id/regenerate-cover", requireAuth, validate("param", SingleRegene
     );
 });
 
-export const BatchRegenerateCoversSchema = z
-    .object({
-        library_id: z.uuid("Invalid library_id format"),
-        media_ids: z.array(z.uuid("Invalid media_id format")).optional(),
-        post_ids: z.array(z.uuid("Invalid post_id format")).optional(),
-        replace_external_cover: z.boolean().optional(),
-    })
-    .refine((data) => (data.media_ids?.length || 0) + (data.post_ids?.length || 0) > 0, {
-        message: "Either media_ids or post_ids must be provided and cannot be empty",
-        path: ["media_ids"],
-    });
+export const BatchRegenerateCoversSchema = v.pipe(
+    v.object({
+        library_id: v.pipe(v.string(), v.uuid("Invalid library_id format")),
+        media_ids: v.optional(v.array(v.pipe(v.string(), v.uuid("Invalid media_id format")))),
+        post_ids: v.optional(v.array(v.pipe(v.string(), v.uuid("Invalid post_id format")))),
+        replace_external_cover: v.optional(v.boolean()),
+    }),
+    v.check(
+        (data) => (data.media_ids?.length || 0) + (data.post_ids?.length || 0) > 0,
+        "Either media_ids or post_ids must be provided and cannot be empty",
+    ),
+);
 
 router.post("/regenerate-covers", requireAuth, validate("json", BatchRegenerateCoversSchema), async (c) => {
     const user = c.get("user");
@@ -442,8 +456,8 @@ router.post("/regenerate-covers", requireAuth, validate("json", BatchRegenerateC
     );
 });
 
-const GetMpdRequestSchema = z.object({
-    id: z.uuid(),
+const GetMpdRequestSchema = v.object({
+    id: v.pipe(v.string(), v.uuid()),
 });
 
 router.get("/:id/manifest.mpd", validate("param", GetMpdRequestSchema), async (c) => {
@@ -460,13 +474,13 @@ router.get("/:id/manifest.mpd", validate("param", GetMpdRequestSchema), async (c
     return c.text(mpd);
 });
 
-const GetHlsRequestSchema = z.object({
-    id: z.uuid(),
+const GetHlsRequestSchema = v.object({
+    id: v.pipe(v.string(), v.uuid()),
 });
 
-const GetHlsVariantRequestSchema = z.object({
-    id: z.uuid(),
-    trackId: z.uuid(),
+const GetHlsVariantRequestSchema = v.object({
+    id: v.pipe(v.string(), v.uuid()),
+    trackId: v.pipe(v.string(), v.uuid()),
 });
 
 router.get("/:id/manifest.m3u8", validate("param", GetHlsRequestSchema), async (c) => {
@@ -595,15 +609,14 @@ async function checkMediaOwnership(
     return { media, errorResponse: null };
 }
 
-const MediaUpdateInfoSchema = z
-    .object({
-        title: z.string().min(1, "Title cannot be empty").optional(),
-        description: z.string().optional(),
+const MediaUpdateInfoSchema = v.pipe(
+    v.object({
+        title: v.optional(v.pipe(v.string(), v.nonEmpty("Title cannot be empty"))),
+        description: v.optional(v.string()),
         published_time: FormTimestampSchema,
-    })
-    .refine((data) => Object.keys(data).length > 0, {
-        message: "At least one field must be provided for update",
-    });
+    }),
+    v.check((data) => Object.keys(data).length > 0, "At least one field must be provided for update"),
+);
 
 router.post("/update-info/:id", requireAuth, validate("json", MediaUpdateInfoSchema), async (c) => {
     const id = c.req.param("id")!;
@@ -616,8 +629,8 @@ router.post("/update-info/:id", requireAuth, validate("json", MediaUpdateInfoSch
     return c.json(success(Code.SUCCESS, updated));
 });
 
-const MediaReplaceTagsSchema = z.object({
-    tags: z.array(z.string()),
+const MediaReplaceTagsSchema = v.object({
+    tags: v.array(v.string()),
 });
 
 router.post("/:id/tags/replace", requireAuth, validate("json", MediaReplaceTagsSchema), async (c) => {
@@ -652,12 +665,12 @@ router.get("/:id/tracks", requireAuth, async (c) => {
     return c.json(success(Code.SUCCESS, result));
 });
 
-const PresignUploadSchema = z.object({
-    type: z.enum(TrackType),
-    purpose: z.enum(TrackPurpose),
-    quality: z.enum(Quality),
-    priority: z.number().int().default(0),
-    fileName: z.string().min(1, "fileName is required"),
+const PresignUploadSchema = v.object({
+    type: v.enum(TrackType),
+    purpose: v.enum(TrackPurpose),
+    quality: v.enum(Quality),
+    priority: v.optional(v.pipe(v.number(), v.integer()), 0),
+    fileName: v.pipe(v.string(), v.nonEmpty("fileName is required")),
 });
 
 router.post("/:id/tracks/presign-upload", requireAuth, validate("json", PresignUploadSchema), async (c) => {
@@ -702,56 +715,57 @@ router.post("/:id/tracks/presign-upload", requireAuth, validate("json", PresignU
     );
 });
 
-const RegisterTrackSchema = z.object({
-    type: z.enum(TrackType),
-    purpose: z.enum(TrackPurpose),
-    quality: z.enum(Quality),
-    priority: z.number().int().default(0),
-    source_url: z.string().optional(),
-    metadata: z.any().optional(),
-    variant_key: z.string().optional(),
-    is_default: z.boolean().optional(),
-    is_primary: z.boolean().optional(),
-    display_name: z.string().optional(),
-    language: z.string().nullable().optional(),
-    codec: z.string().nullable().optional(),
-    duration: z.number().nullable().optional(),
-    width: z.number().int().positive().nullable().optional(),
-    height: z.number().int().positive().nullable().optional(),
-    bandwidth: z.number().nonnegative().nullable().optional(),
-    is_stale: z.boolean().optional(),
-    source_track_id: z.string().nullable().optional(),
-    container: z.string().nullable().optional(),
-    is_fragmented: z.boolean().nullable().optional(),
-    stream_layout: z.enum(TrackStreamLayout).nullable().optional(),
-    has_video: z.boolean().nullable().optional(),
-    has_audio: z.boolean().nullable().optional(),
-    streams: z
-        .array(
-            z.object({
-                index: z.number().int().nonnegative(),
-                id: z.string().nullable().optional(),
-                type: z.enum([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
-                codec: z.string().nullable().optional(),
-                language: z.string().nullable().optional(),
-                label: z.string().nullable().optional(),
-                role: z.string().nullable().optional(),
-                width: z.number().int().positive().nullable().optional(),
-                height: z.number().int().positive().nullable().optional(),
-                bandwidth: z.number().nonnegative().nullable().optional(),
-                channels: z.number().int().positive().nullable().optional(),
-                sample_rate: z.number().int().positive().nullable().optional(),
-                is_default: z.boolean().optional(),
-            }),
-        )
-        .nullable()
-        .optional(),
-    file: z.object({
-        path: z.string().min(1),
-        bucket: z.string().min(1),
-        mime_type: z.string().min(1),
-        extension: z.string().min(1),
-        size: z.number().int().nonnegative(),
+const RegisterTrackSchema = v.object({
+    type: v.enum(TrackType),
+    purpose: v.enum(TrackPurpose),
+    quality: v.enum(Quality),
+    priority: v.optional(v.pipe(v.number(), v.integer()), 0),
+    source_url: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+    variant_key: v.optional(v.string()),
+    is_default: v.optional(v.boolean()),
+    is_primary: v.optional(v.boolean()),
+    display_name: v.optional(v.string()),
+    language: v.optional(v.nullable(v.string())),
+    codec: v.optional(v.nullable(v.string())),
+    duration: v.optional(v.nullable(v.number())),
+    width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+    height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+    bandwidth: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
+    is_stale: v.optional(v.boolean()),
+    source_track_id: v.optional(v.nullable(v.string())),
+    container: v.optional(v.nullable(v.string())),
+    is_fragmented: v.optional(v.nullable(v.boolean())),
+    stream_layout: v.optional(v.nullable(v.enum(TrackStreamLayout))),
+    has_video: v.optional(v.nullable(v.boolean())),
+    has_audio: v.optional(v.nullable(v.boolean())),
+    streams: v.optional(
+        v.nullable(
+            v.array(
+                v.object({
+                    index: v.pipe(v.number(), v.integer(), v.minValue(0)),
+                    id: v.optional(v.nullable(v.string())),
+                    type: v.picklist([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
+                    codec: v.optional(v.nullable(v.string())),
+                    language: v.optional(v.nullable(v.string())),
+                    label: v.optional(v.nullable(v.string())),
+                    role: v.optional(v.nullable(v.string())),
+                    width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+                    height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+                    bandwidth: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
+                    channels: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+                    sample_rate: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+                    is_default: v.optional(v.boolean()),
+                }),
+            ),
+        ),
+    ),
+    file: v.object({
+        path: v.pipe(v.string(), v.nonEmpty()),
+        bucket: v.pipe(v.string(), v.nonEmpty()),
+        mime_type: v.pipe(v.string(), v.nonEmpty()),
+        extension: v.pipe(v.string(), v.nonEmpty()),
+        size: v.pipe(v.number(), v.integer(), v.minValue(0)),
     }),
 });
 
@@ -795,16 +809,16 @@ router.post("/:id/tracks/upsert", requireAuth, validate("json", RegisterTrackSch
     return c.json(success(Code.SUCCESS, result));
 });
 
-const ReplaceFileSchema = z.object({
-    file: z.object({
-        path: z.string().min(1),
-        bucket: z.string().min(1),
-        mime_type: z.string().min(1),
-        extension: z.string().min(1),
-        size: z.number().int().nonnegative(),
-        width: z.number().int().positive().nullable().optional(),
-        height: z.number().int().positive().nullable().optional(),
-        duration: z.number().nullable().optional(),
+const ReplaceFileSchema = v.object({
+    file: v.object({
+        path: v.pipe(v.string(), v.nonEmpty()),
+        bucket: v.pipe(v.string(), v.nonEmpty()),
+        mime_type: v.pipe(v.string(), v.nonEmpty()),
+        extension: v.pipe(v.string(), v.nonEmpty()),
+        size: v.pipe(v.number(), v.integer(), v.minValue(0)),
+        width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+        height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+        duration: v.optional(v.nullable(v.number())),
     }),
 });
 
@@ -845,43 +859,44 @@ router.post("/:id/tracks/:trackId/delete", requireAuth, async (c) => {
     }
 });
 
-const UpdateTrackMetadataSchema = z.object({
-    priority: z.number().int().optional(),
-    quality: z.enum(Quality).optional(),
-    display_name: z.string().nullable().optional(),
-    variant_key: z.string().optional(),
-    is_default: z.boolean().optional(),
-    is_primary: z.boolean().optional(),
-    language: z.string().nullable().optional(),
-    codec: z.string().nullable().optional(),
-    is_stale: z.boolean().optional(),
-    metadata: z.any().optional(),
-    source_track_id: z.string().nullable().optional(),
-    container: z.string().nullable().optional(),
-    is_fragmented: z.boolean().nullable().optional(),
-    stream_layout: z.enum(TrackStreamLayout).nullable().optional(),
-    has_video: z.boolean().nullable().optional(),
-    has_audio: z.boolean().nullable().optional(),
-    streams: z
-        .array(
-            z.object({
-                index: z.number().int().nonnegative(),
-                id: z.string().nullable().optional(),
-                type: z.enum([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
-                codec: z.string().nullable().optional(),
-                language: z.string().nullable().optional(),
-                label: z.string().nullable().optional(),
-                role: z.string().nullable().optional(),
-                width: z.number().int().positive().nullable().optional(),
-                height: z.number().int().positive().nullable().optional(),
-                bandwidth: z.number().nonnegative().nullable().optional(),
-                channels: z.number().int().positive().nullable().optional(),
-                sample_rate: z.number().int().positive().nullable().optional(),
-                is_default: z.boolean().optional(),
-            }),
-        )
-        .nullable()
-        .optional(),
+const UpdateTrackMetadataSchema = v.object({
+    priority: v.optional(v.pipe(v.number(), v.integer())),
+    quality: v.optional(v.enum(Quality)),
+    display_name: v.optional(v.nullable(v.string())),
+    variant_key: v.optional(v.string()),
+    is_default: v.optional(v.boolean()),
+    is_primary: v.optional(v.boolean()),
+    language: v.optional(v.nullable(v.string())),
+    codec: v.optional(v.nullable(v.string())),
+    is_stale: v.optional(v.boolean()),
+    metadata: v.optional(v.any()),
+    source_track_id: v.optional(v.nullable(v.string())),
+    container: v.optional(v.nullable(v.string())),
+    is_fragmented: v.optional(v.nullable(v.boolean())),
+    stream_layout: v.optional(v.nullable(v.enum(TrackStreamLayout))),
+    has_video: v.optional(v.nullable(v.boolean())),
+    has_audio: v.optional(v.nullable(v.boolean())),
+    streams: v.optional(
+        v.nullable(
+            v.array(
+                v.object({
+                    index: v.pipe(v.number(), v.integer(), v.minValue(0)),
+                    id: v.optional(v.nullable(v.string())),
+                    type: v.picklist([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
+                    codec: v.optional(v.nullable(v.string())),
+                    language: v.optional(v.nullable(v.string())),
+                    label: v.optional(v.nullable(v.string())),
+                    role: v.optional(v.nullable(v.string())),
+                    width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+                    height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+                    bandwidth: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
+                    channels: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+                    sample_rate: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+                    is_default: v.optional(v.boolean()),
+                }),
+            ),
+        ),
+    ),
 });
 
 router.post("/:id/tracks/:trackId/update", requireAuth, validate("json", UpdateTrackMetadataSchema), async (c) => {
@@ -896,19 +911,20 @@ router.post("/:id/tracks/:trackId/update", requireAuth, validate("json", UpdateT
     return c.json(success(Code.SUCCESS, updated));
 });
 
-const AddTracksFromDraftSchema = z.object({
-    tracks: z
-        .array(
-            z.object({
-                draft_file_id: z.uuid(),
-                type: z.enum(TrackType),
-                purpose: z.enum(TrackPurpose),
-                quality: z.enum(Quality),
-                is_default: z.boolean().default(false),
-                language: z.string().nullable().optional(),
+const AddTracksFromDraftSchema = v.object({
+    tracks: v.pipe(
+        v.array(
+            v.object({
+                draft_file_id: v.pipe(v.string(), v.uuid()),
+                type: v.enum(TrackType),
+                purpose: v.enum(TrackPurpose),
+                quality: v.enum(Quality),
+                is_default: v.optional(v.boolean(), false),
+                language: v.optional(v.nullable(v.string())),
             }),
-        )
-        .min(1),
+        ),
+        v.minLength(1),
+    ),
 });
 
 router.post("/:id/tracks/from-draft", requireAuth, validate("json", AddTracksFromDraftSchema), async (c) => {

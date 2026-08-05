@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "@/global/db";
-import { z } from "zod";
+import * as v from "valibot";
 import { validate } from "@/lib/validation/validator";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
@@ -29,75 +29,82 @@ import { Temporal } from "@js-temporal/polyfill";
 
 const router = new Hono<AuthEnv>();
 
-export const LibraryIdParamSchema = z.object({
-    id: z.uuid("Invalid library ID format"),
+export const uniqueIds = (ids: string[]) => Array.from(new Set(ids));
+
+export const LibraryIdParamSchema = v.object({
+    id: v.pipe(v.string(), v.uuid("Invalid library ID format")),
 });
 
-export const LibraryListQuerySchema = z.object({
-    page: z.preprocess((val) => (val === "" || val === undefined ? undefined : Number(val)), z.number().int().positive().gte(1).optional()),
-    count: z.preprocess(
-        (val) => (val === "" || val === undefined ? undefined : Number(val)),
-        z.number().int().positive().gte(10).lte(100).optional(),
+export const LibraryListQuerySchema = v.object({
+    page: v.optional(
+        v.pipe(
+            v.unknown(),
+            v.transform((val) => (val === "" || val === undefined ? undefined : Number(val))),
+            v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+        ),
     ),
-    keyword: z.string().optional(),
+    count: v.optional(
+        v.pipe(
+            v.unknown(),
+            v.transform((val) => (val === "" || val === undefined ? undefined : Number(val))),
+            v.optional(v.pipe(v.number(), v.integer(), v.minValue(10), v.maxValue(100))),
+        ),
+    ),
+    keyword: v.optional(v.string()),
 });
 
-export const LibraryCreateBodySchema = z
-    .object({
-        name: z.string().min(1, "Name is required"),
-        description: z.string().optional().default(""),
-    })
-    .strict();
+export const LibraryCreateBodySchema = v.strictObject({
+    name: v.pipe(v.string(), v.nonEmpty("Name is required")),
+    description: v.optional(v.string(), ""),
+});
 
-export const LibraryUpdateBodySchema = z
-    .object({
-        id: z.uuid("Invalid library ID format"),
-        name: z.string().min(1, "Name is required").optional(),
-        description: z.string().optional(),
-    })
-    .strict();
+export const LibraryUpdateBodySchema = v.strictObject({
+    id: v.pipe(v.string(), v.uuid("Invalid library ID format")),
+    name: v.optional(v.pipe(v.string(), v.nonEmpty("Name is required"))),
+    description: v.optional(v.string()),
+});
 
-export const LibraryMoveItemsBodySchema = z
-    .object({
-        post_ids: z.array(z.uuid("Invalid post ID format")).default([]),
-        media_ids: z.array(z.uuid("Invalid media ID format")).default([]),
-        target_library_id: z.uuid("Invalid target_library_id format"),
-    })
-    .strict()
-    .refine((body) => body.post_ids.length > 0 || body.media_ids.length > 0, "At least one post or media id is required")
-    .transform((data) => ({
+export const LibraryMoveItemsBodySchema = v.pipe(
+    v.strictObject({
+        post_ids: v.optional(v.array(v.pipe(v.string(), v.uuid("Invalid post ID format"))), []),
+        media_ids: v.optional(v.array(v.pipe(v.string(), v.uuid("Invalid media ID format"))), []),
+        target_library_id: v.pipe(v.string(), v.uuid("Invalid target_library_id format")),
+    }),
+    v.check((body) => body.post_ids.length > 0 || body.media_ids.length > 0, "At least one post or media id is required"),
+    v.transform((data) => ({
         target_library_id: data.target_library_id,
         post_ids: uniqueIds(data.post_ids),
         media_ids: uniqueIds(data.media_ids),
-    }));
+    })),
+);
 
-export const LibraryAiConfigSchema = z.object({
-    ai_provider: z.enum(["gemini", "openai"]).nullable().optional(),
-    openai_api_key: z.string().nullable().optional(),
-    openai_base_url: z.string().nullable().optional(),
-    openai_model_embedding_text: z.string().nullable().optional(),
-    openai_model_embedding_text_map_to: z.string().nullable().optional(),
-    openai_model_embedding_image: z.string().nullable().optional(),
-    openai_model_embedding_image_map_to: z.string().nullable().optional(),
-    openai_model_describe_image: z.string().nullable().optional(),
-    openai_model_describe_image_map_to: z.string().nullable().optional(),
-    gemini_api_key: z.string().nullable().optional(),
-    gemini_base_url: z.string().nullable().optional(),
+export const LibraryAiConfigSchema = v.object({
+    ai_provider: v.optional(v.nullable(v.picklist(["gemini", "openai"]))),
+    openai_api_key: v.optional(v.nullable(v.string())),
+    openai_base_url: v.optional(v.nullable(v.string())),
+    openai_model_embedding_text: v.optional(v.nullable(v.string())),
+    openai_model_embedding_text_map_to: v.optional(v.nullable(v.string())),
+    openai_model_embedding_image: v.optional(v.nullable(v.string())),
+    openai_model_embedding_image_map_to: v.optional(v.nullable(v.string())),
+    openai_model_describe_image: v.optional(v.nullable(v.string())),
+    openai_model_describe_image_map_to: v.optional(v.nullable(v.string())),
+    gemini_api_key: v.optional(v.nullable(v.string())),
+    gemini_base_url: v.optional(v.nullable(v.string())),
 });
 
-export const LibraryCoverJobsBodySchema = z.object({
-    type: z.enum(["MANUAL", "RECONCILE"]).optional().default("RECONCILE"),
-    media_ids: z.array(z.uuid("Invalid media ID format")).optional(),
-    qualities: z.array(z.enum(Quality)).optional(),
-    force: z.boolean().default(false),
+export const LibraryCoverJobsBodySchema = v.object({
+    type: v.optional(v.picklist(["MANUAL", "RECONCILE"]), "RECONCILE"),
+    media_ids: v.optional(v.array(v.pipe(v.string(), v.uuid("Invalid media ID format")))),
+    qualities: v.optional(v.array(v.enum(Quality))),
+    force: v.optional(v.boolean(), false),
 });
 
-export const LibraryCoverConfigBodySchema = z.object({
-    qualities: z
-        .array(z.enum(Quality))
-        .min(1, "At least 1 cover quality tier is required")
-        .max(3, "At most 3 cover quality tiers are allowed")
-        .transform((list) => {
+export const LibraryCoverConfigBodySchema = v.object({
+    qualities: v.pipe(
+        v.array(v.enum(Quality)),
+        v.minLength(1, "At least 1 cover quality tier is required"),
+        v.maxLength(3, "At most 3 cover quality tiers are allowed"),
+        v.transform((list) => {
             const set = new Set(list);
             const ordered: Quality[] = [];
             for (const q of [Quality.LOW, Quality.MEDIUM, Quality.HIGH]) {
@@ -105,9 +112,8 @@ export const LibraryCoverConfigBodySchema = z.object({
             }
             return ordered;
         }),
+    ),
 });
-
-export const uniqueIds = (ids: string[]) => Array.from(new Set(ids));
 
 export const getAttachedMediaIds = (media: Pick<typeof Media.$inferSelect, "id" | "post_id">[]) =>
     media.filter((item) => item.post_id !== null).map((item) => item.id);

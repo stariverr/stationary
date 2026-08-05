@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import * as v from "valibot";
 
 Object.assign(process.env, {
     AUTH_SECRET: "test-auth-secret",
@@ -16,7 +17,7 @@ describe("task time fields", () => {
     test("accepts published_time for posts and media", async () => {
         const taskApi = await import("../src/api/task");
 
-        const parsed = taskApi.CreateTaskSchema.parse({
+        const parsed = v.parse(taskApi.CreateTaskSchema, {
             library_id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3",
             posts: [
                 {
@@ -49,7 +50,7 @@ describe("task time fields", () => {
     test("keeps legacy create_time input as an alias for original publish time", async () => {
         const taskApi = await import("../src/api/task");
 
-        const parsed = taskApi.CreateTaskSchema.parse({
+        const parsed = v.parse(taskApi.CreateTaskSchema, {
             library_id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3",
             posts: [
                 {

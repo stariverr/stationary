@@ -1,5 +1,6 @@
-import { generateText, Output, type LanguageModel } from "ai";
-import { z } from "zod";
+import { generateText, jsonSchema, Output, type LanguageModel } from "ai";
+import { toJsonSchema } from "@valibot/to-json-schema";
+import * as v from "valibot";
 import type { ImageAiMetadata } from "./types";
 
 export const IMAGE_METADATA_PIPELINE_VERSION = "image-metadata:zh-en:v1";
@@ -14,16 +15,18 @@ const IMAGE_METADATA_PROMPT =
     "5. Scene description (e.g. rainy street, coffee shop, neon lights, desk setup).\n" +
     "6. Full OCR text of any visible writing, characters, or text. If no text exists, leave ocrText empty.";
 
+const imageMetadataSchema = v.object({
+    caption: v.string(),
+    tags: v.array(v.string()),
+    objects: v.array(v.string()),
+    colors: v.array(v.string()),
+    styles: v.array(v.string()),
+    scene: v.string(),
+    ocrText: v.string(),
+});
+
 const ImageMetadataOutput = Output.object({
-    schema: z.object({
-        caption: z.string(),
-        tags: z.array(z.string()),
-        objects: z.array(z.string()),
-        colors: z.array(z.string()),
-        styles: z.array(z.string()),
-        scene: z.string(),
-        ocrText: z.string(),
-    }),
+    schema: jsonSchema(toJsonSchema(imageMetadataSchema) as any),
 });
 
 function toImageContent(

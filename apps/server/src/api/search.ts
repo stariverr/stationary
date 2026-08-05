@@ -2,8 +2,8 @@ import { Hono } from "hono";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
-import { z } from "zod";
-import { validator } from "hono/validator";
+import * as v from "valibot";
+import { validate } from "@/lib/validation/validator";
 import { HybridSearchService } from "@/services/ai/search";
 import { MediaType, PostSource } from "@/db/schema";
 
@@ -12,30 +12,32 @@ const router = new Hono<AuthEnv>();
 // Search must be authenticated to enforce user access library boundary constraints
 router.use("*", requireAuth);
 
-export const SearchQuerySchema = z.object({
-    library_id: z.uuid("Invalid library_id format"),
-    keyword: z.string().trim(),
-    source: z.enum(PostSource).optional(),
-    media_type: z.enum(MediaType).optional(),
-    page: z.preprocess(
-        (val) => (val === "" || val === undefined ? undefined : Number(val)),
-        z.number().int().positive().gte(1).optional().default(1),
+export const SearchQuerySchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid("Invalid library_id format")),
+    keyword: v.pipe(v.string(), v.trim()),
+    source: v.optional(v.enum(PostSource)),
+    media_type: v.optional(v.enum(MediaType)),
+    page: v.optional(
+        v.pipe(
+            v.unknown(),
+            v.transform((val) => (val === "" || val === undefined ? undefined : Number(val))),
+            v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+        ),
+        1,
     ),
-    count: z.preprocess(
-        (val) => (val === "" || val === undefined ? undefined : Number(val)),
-        z.number().int().positive().gte(1).lte(100).optional().default(20),
+    count: v.optional(
+        v.pipe(
+            v.unknown(),
+            v.transform((val) => (val === "" || val === undefined ? undefined : Number(val))),
+            v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100))),
+        ),
+        20,
     ),
 });
 
 router.get(
     "/",
-    validator("query", (value, c) => {
-        const parsed = SearchQuerySchema.safeParse(value);
-        if (!parsed.success) {
-            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid search query parameters"), 400);
-        }
-        return parsed.data;
-    }),
+    validate("query", SearchQuerySchema),
     async (c) => {
         const user = c.get("user");
         if (!user) {

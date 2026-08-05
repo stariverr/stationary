@@ -1,6 +1,6 @@
 import { Context, Hono } from "hono";
 import { db } from "@/global/db";
-import { z } from "zod";
+import * as v from "valibot";
 import { error, success } from "@/lib/response";
 import { Code } from "@/lib/code";
 import { requireAuth } from "@/lib/auth/middleware";
@@ -46,23 +46,36 @@ const router = new Hono();
 const activePostFilter = and(eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time));
 const activeMediaFilter = and(eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time));
 
-export const PostListRequestBodySchema = z.object({
-    library_id: z.uuid(),
-    page: z.preprocess(
-        (val) => (val === "" || val === undefined ? undefined : Number(val)),
-        z.number().int().positive().gte(1, "Page must be 1 or greater.").optional(),
+export const PostListRequestBodySchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    page: v.optional(
+        v.pipe(
+            v.unknown(),
+            v.transform((val) => (val === "" || val === undefined ? undefined : Number(val))),
+            v.optional(v.pipe(v.number(), v.integer(), v.minValue(1, "Page must be 1 or greater."))),
+        ),
     ),
-    count: z.preprocess(
-        (val) => (val === "" || val === undefined ? undefined : Number(val)),
-        z.number().int().positive().gte(10, "Count must be 10 or greater.").lte(100, "Count must be 100 or less.").optional(),
+    count: v.optional(
+        v.pipe(
+            v.unknown(),
+            v.transform((val) => (val === "" || val === undefined ? undefined : Number(val))),
+            v.optional(
+                v.pipe(
+                    v.number(),
+                    v.integer(),
+                    v.minValue(10, "Count must be 10 or greater."),
+                    v.maxValue(100, "Count must be 100 or less."),
+                ),
+            ),
+        ),
     ),
-    keyword: z.string().optional(),
-    source: z.enum(PostSource).optional(),
-    sort_by: z.enum(["import_time", "published_time"]).optional(),
-    sort_order: z.enum(["asc", "desc"]).optional(),
-    author_ids: z.string().optional(),
-    media_type: z.enum(MediaType).optional(),
-    tag_ids: z.string().optional(),
+    keyword: v.optional(v.string()),
+    source: v.optional(v.enum(PostSource)),
+    sort_by: v.optional(v.picklist(["import_time", "published_time"])),
+    sort_order: v.optional(v.picklist(["asc", "desc"])),
+    author_ids: v.optional(v.string()),
+    media_type: v.optional(v.enum(MediaType)),
+    tag_ids: v.optional(v.string()),
 });
 
 // Post List - Cover-only media hydration (no primary content track queries)
@@ -256,11 +269,11 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
     );
 });
 
-const PostAuthorsQuerySchema = z.object({
-    library_id: z.uuid(),
-    keyword: z.string().optional(),
-    author_ids: z.string().optional(),
-    platform: z.enum(PostSource).optional(),
+const PostAuthorsQuerySchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    keyword: v.optional(v.string()),
+    author_ids: v.optional(v.string()),
+    platform: v.optional(v.enum(PostSource)),
 });
 
 router.get("/authors", requireAuth, validate("query", PostAuthorsQuerySchema), async (c) => {
@@ -316,64 +329,64 @@ router.get("/authors", requireAuth, validate("query", PostAuthorsQuerySchema), a
     return c.json(success(Code.SUCCESS, result));
 });
 
-const PostDetailRequestPathParamSchema = z.object({
-    id: z.uuid(),
+const PostDetailRequestPathParamSchema = v.object({
+    id: v.pipe(v.string(), v.uuid()),
 });
 
-export const PostDetailResponseBodySchema = z.object({
-    id: z.uuid().optional(),
-    library_id: z.uuid().optional(),
-    source: z.string().optional(),
-    eid: z.string().optional(),
-    title: z.string().nullable().optional(),
-    description: z.string().nullable().optional(),
-    tags: z.array(z.string()).nullable().optional(),
-    author_name: z.string().nullable().optional(),
-    author_avatar_url: z.string().nullable().optional(),
-    author_external_id: z.string().nullable().optional(),
-    create_time: z.string().optional(),
-    published_time: z.string().nullable().optional(),
-    media_count: z.number().optional(),
-    type: z.enum(["TEXT", "MULTI_MEDIA"]).optional(),
-    url: z.string().nullable().optional(),
-    sync_status: z.string().optional(),
-    last_error: z.string().nullable().optional(),
-    media: z
-        .array(
-            z.object({
-                id: z.uuid(),
-                eid: z.string().optional(),
-                post_id: z.uuid().nullable().optional(),
-                source: z.string().optional(),
-                title: z.string().nullable().optional(),
-                description: z.string().nullable().optional(),
-                type: z.string().optional(),
-                sort_order: z.number().optional(),
-                create_time: z.string().optional(),
-                published_time: z.string().nullable().optional(),
-                sync_status: z.string().optional(),
-                last_error: z.string().nullable().optional(),
-                ai_status: z.string().optional(),
-                ai_error: z.string().nullable().optional(),
-                url: z.string().nullable().optional(),
-                cover_url: z.string().nullable().optional(),
-                width: z.number().nullable().optional(),
-                height: z.number().nullable().optional(),
-                tracks: z.array(
-                    z.object({
-                        id: z.string().optional(),
-                        url: z.string(),
-                        type: z.string(),
-                        purpose: z.string(),
-                        is_original: z.boolean(),
-                        quality: z.string(),
-                        priority: z.number(),
-                        metadata: z.record(z.string(), z.any()),
+export const PostDetailResponseBodySchema = v.object({
+    id: v.optional(v.pipe(v.string(), v.uuid())),
+    library_id: v.optional(v.pipe(v.string(), v.uuid())),
+    source: v.optional(v.string()),
+    eid: v.optional(v.string()),
+    title: v.optional(v.nullable(v.string())),
+    description: v.optional(v.nullable(v.string())),
+    tags: v.optional(v.nullable(v.array(v.string()))),
+    author_name: v.optional(v.nullable(v.string())),
+    author_avatar_url: v.optional(v.nullable(v.string())),
+    author_external_id: v.optional(v.nullable(v.string())),
+    create_time: v.optional(v.string()),
+    published_time: v.optional(v.nullable(v.string())),
+    media_count: v.optional(v.number()),
+    type: v.optional(v.picklist(["TEXT", "MULTI_MEDIA"])),
+    url: v.optional(v.nullable(v.string())),
+    sync_status: v.optional(v.string()),
+    last_error: v.optional(v.nullable(v.string())),
+    media: v.optional(
+        v.array(
+            v.object({
+                id: v.pipe(v.string(), v.uuid()),
+                eid: v.optional(v.string()),
+                post_id: v.optional(v.nullable(v.pipe(v.string(), v.uuid()))),
+                source: v.optional(v.string()),
+                title: v.optional(v.nullable(v.string())),
+                description: v.optional(v.nullable(v.string())),
+                type: v.optional(v.string()),
+                sort_order: v.optional(v.number()),
+                create_time: v.optional(v.string()),
+                published_time: v.optional(v.nullable(v.string())),
+                sync_status: v.optional(v.string()),
+                last_error: v.optional(v.nullable(v.string())),
+                ai_status: v.optional(v.string()),
+                ai_error: v.optional(v.nullable(v.string())),
+                url: v.optional(v.nullable(v.string())),
+                cover_url: v.optional(v.nullable(v.string())),
+                width: v.optional(v.nullable(v.number())),
+                height: v.optional(v.nullable(v.number())),
+                tracks: v.array(
+                    v.object({
+                        id: v.optional(v.string()),
+                        url: v.string(),
+                        type: v.string(),
+                        purpose: v.string(),
+                        is_original: v.boolean(),
+                        quality: v.string(),
+                        priority: v.number(),
+                        metadata: v.record(v.string(), v.any()),
                     }),
                 ),
             }),
-        )
-        .optional(),
+        ),
+    ),
 });
 
 router.get("/detail/:id", requireAuth, validate("param", PostDetailRequestPathParamSchema), async (c) => {
@@ -404,7 +417,7 @@ router.get("/detail/:id", requireAuth, validate("param", PostDetailRequestPathPa
         .orderBy(asc(PostTag.id));
     const postTags = postTagsList.map((pt) => pt.name);
 
-    const result: z.infer<typeof PostDetailResponseBodySchema> = {
+    const result: v.InferOutput<typeof PostDetailResponseBodySchema> = {
         id: postData.id,
         library_id: postData.library_id,
         source: postData.source,
@@ -427,15 +440,29 @@ router.get("/detail/:id", requireAuth, validate("param", PostDetailRequestPathPa
     return c.json(success(Code.SUCCESS, result));
 });
 
-const PostMediaListQuerySchema = z.object({
-    page: z.preprocess((val) => (val === undefined ? 1 : Number(val)), z.number().int().positive().default(1)),
-    limit: z.preprocess((val) => (val === undefined ? 50 : Number(val)), z.number().int().positive().default(50)),
-    keyword: z.string().optional(),
-    type: z.enum([MediaType.IMAGE, MediaType.VIDEO, MediaType.LIVE_PHOTO, MediaType.AUDIO, MediaType.PDF]).optional(),
+const PostMediaListQuerySchema = v.object({
+    page: v.optional(
+        v.pipe(
+            v.unknown(),
+            v.transform((val) => (val === undefined ? 1 : Number(val))),
+            v.pipe(v.number(), v.integer(), v.minValue(1)),
+        ),
+        1,
+    ),
+    limit: v.optional(
+        v.pipe(
+            v.unknown(),
+            v.transform((val) => (val === undefined ? 50 : Number(val))),
+            v.pipe(v.number(), v.integer(), v.minValue(1)),
+        ),
+        50,
+    ),
+    keyword: v.optional(v.string()),
+    type: v.optional(v.picklist([MediaType.IMAGE, MediaType.VIDEO, MediaType.LIVE_PHOTO, MediaType.AUDIO, MediaType.PDF])),
 });
 
-const PostMediaListParamSchema = z.object({
-    id: z.uuid(),
+const PostMediaListParamSchema = v.object({
+    id: v.pipe(v.string(), v.uuid()),
 });
 
 // Detail route for media under a post
@@ -586,16 +613,15 @@ async function checkPostAccess(
     return { post, errorResponse: null };
 }
 
-const PostUpdateInfoSchema = z
-    .object({
-        title: z.string().min(1, "Title cannot be empty").optional(),
-        description: z.string().optional(),
+const PostUpdateInfoSchema = v.pipe(
+    v.object({
+        title: v.optional(v.pipe(v.string(), v.nonEmpty("Title cannot be empty"))),
+        description: v.optional(v.string()),
         published_time: FormTimestampSchema,
-        url: z.url().or(z.literal("")).nullable().optional(),
-    })
-    .refine((data) => Object.keys(data).length > 0, {
-        message: "At least one field must be provided for update",
-    });
+        url: v.optional(v.nullable(v.union([v.pipe(v.string(), v.url()), v.literal("")]))),
+    }),
+    v.check((data) => Object.keys(data).length > 0, "At least one field must be provided for update"),
+);
 
 router.post("/update-info/:id", requireAuth, validate("json", PostUpdateInfoSchema), async (c) => {
     const id = c.req.param("id")!;
@@ -608,8 +634,8 @@ router.post("/update-info/:id", requireAuth, validate("json", PostUpdateInfoSche
     return c.json(success(Code.SUCCESS, updated));
 });
 
-const PostReplaceTagsSchema = z.object({
-    tag_ids: z.array(z.uuid()),
+const PostReplaceTagsSchema = v.object({
+    tag_ids: v.array(v.pipe(v.string(), v.uuid())),
 });
 
 router.post("/:id/tags/replace", requireAuth, validate("json", PostReplaceTagsSchema), async (c) => {
@@ -624,8 +650,8 @@ router.post("/:id/tags/replace", requireAuth, validate("json", PostReplaceTagsSc
     return c.json(success(Code.SUCCESS, { tag_ids: resolvedTagIds }));
 });
 
-const PostAttachMediaSchema = z.object({
-    media_ids: z.array(z.uuid()).min(1, "media_ids must contain at least one ID"),
+const PostAttachMediaSchema = v.object({
+    media_ids: v.pipe(v.array(v.pipe(v.string(), v.uuid())), v.minLength(1, "media_ids must contain at least one ID")),
 });
 
 router.post("/:id/bind_media", requireAuth, validate("json", PostAttachMediaSchema), async (c) => {
@@ -645,8 +671,8 @@ router.post("/:id/bind_media", requireAuth, validate("json", PostAttachMediaSche
     return c.json(success(Code.SUCCESS, result));
 });
 
-const PostReorderMediaSchema = z.object({
-    media_ids: z.array(z.uuid()).min(1, "media_ids must contain at least one ID"),
+const PostReorderMediaSchema = v.object({
+    media_ids: v.pipe(v.array(v.pipe(v.string(), v.uuid())), v.minLength(1, "media_ids must contain at least one ID")),
 });
 
 router.post("/:id/media/reorder", requireAuth, validate("json", PostReorderMediaSchema), async (c) => {
@@ -681,23 +707,23 @@ router.post("/:id/media/:mediaId/remove", requireAuth, async (c) => {
     return c.json(success(Code.SUCCESS, result));
 });
 
-const CreatePostMediaItemSchema = z.discriminatedUnion("kind", [
-    z.object({
-        kind: z.literal("existing"),
-        media_id: z.uuid(),
+const CreatePostMediaItemSchema = v.variant("kind", [
+    v.object({
+        kind: v.literal("existing"),
+        media_id: v.pipe(v.string(), v.uuid()),
     }),
-    z.object({
-        kind: z.literal("draft"),
+    v.object({
+        kind: v.literal("draft"),
         draft: MediaDraftSchema,
     }),
 ]);
 
-const CreatePostSchema = z.object({
-    library_id: z.uuid(),
-    title: z.string().min(1, "Title is required"),
-    description: z.string().optional().default(""),
-    tag_ids: z.array(z.uuid()).optional().default([]),
-    media_items: z.array(CreatePostMediaItemSchema).optional(),
+const CreatePostSchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    title: v.pipe(v.string(), v.nonEmpty("Title is required")),
+    description: v.optional(v.string(), ""),
+    tag_ids: v.optional(v.array(v.pipe(v.string(), v.uuid())), []),
+    media_items: v.optional(v.array(CreatePostMediaItemSchema)),
 });
 
 router.post("/create", requireAuth, validate("json", CreatePostSchema), async (c) => {

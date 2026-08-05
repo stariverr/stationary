@@ -81,7 +81,7 @@ const emailRateLimitPlugin = () => ({
     },
 });
 
-export const auth = betterAuth({
+export const auth: ReturnType<typeof betterAuth<any>> = betterAuth({
     database: drizzleAdapter(db, {
         provider: "pg",
         schema: {

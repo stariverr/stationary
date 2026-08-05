@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "@/global/db";
-import { z } from "zod";
-import { zValidator } from "@hono/zod-validator";
+import * as v from "valibot";
+import { validate } from "@/lib/validation/validator";
 import { error, success } from "@/lib/response";
 import { Code } from "@/lib/code";
 import { requireAuth } from "@/lib/auth/middleware";
@@ -12,29 +12,29 @@ import { Temporal } from "@js-temporal/polyfill";
 
 const router = new Hono();
 
-const TagListQuerySchema = z.object({
-    library_id: z.uuid(),
-    status: z.enum(TagStatus).optional(),
+const TagListQuerySchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    status: v.optional(v.enum(TagStatus)),
 });
 
-export const TagCreateBodySchema = z.object({
-    library_id: z.uuid(),
-    name: z.string().min(1),
-    color: z.string().optional(),
+export const TagCreateBodySchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    name: v.pipe(v.string(), v.nonEmpty()),
+    color: v.optional(v.string()),
 });
 
-export const TagUpdateBodySchema = z.object({
-    id: z.uuid(),
-    name: z.string().min(1).optional(),
-    color: z.string().nullable().optional(),
-    status: z.enum(TagStatus).optional(),
+export const TagUpdateBodySchema = v.object({
+    id: v.pipe(v.string(), v.uuid()),
+    name: v.optional(v.pipe(v.string(), v.nonEmpty())),
+    color: v.optional(v.nullable(v.string())),
+    status: v.optional(v.enum(TagStatus)),
 });
 
-const TagMergeBodySchema = z.object({
-    library_id: z.uuid(),
-    source_tag_id: z.uuid(),
-    target_tag_id: z.uuid(),
-    retain_as_alias: z.boolean().default(true),
+const TagMergeBodySchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    source_tag_id: v.pipe(v.string(), v.uuid()),
+    target_tag_id: v.pipe(v.string(), v.uuid()),
+    retain_as_alias: v.optional(v.boolean(), true),
 });
 
 async function checkTagNameUniqueness(libraryId: string, name: string, excludeTagId?: string): Promise<boolean> {
@@ -53,7 +53,7 @@ async function checkTagNameUniqueness(libraryId: string, name: string, excludeTa
 }
 
 // GET /api/tag/list
-router.get("/list", requireAuth, zValidator("query", TagListQuerySchema), async (c) => {
+router.get("/list", requireAuth, validate("query", TagListQuerySchema), async (c) => {
     const { library_id, status } = c.req.valid("query");
 
     try {
@@ -114,7 +114,7 @@ router.get("/list", requireAuth, zValidator("query", TagListQuerySchema), async 
 });
 
 // POST /api/tag/create
-router.post("/create", requireAuth, zValidator("json", TagCreateBodySchema), async (c) => {
+router.post("/create", requireAuth, validate("json", TagCreateBodySchema), async (c) => {
     const { library_id, name, color } = c.req.valid("json");
     const normalized = normalizeTagName(name);
 
@@ -182,7 +182,7 @@ router.post("/create", requireAuth, zValidator("json", TagCreateBodySchema), asy
 });
 
 // POST /api/tag/update
-router.post("/update", requireAuth, zValidator("json", TagUpdateBodySchema), async (c) => {
+router.post("/update", requireAuth, validate("json", TagUpdateBodySchema), async (c) => {
     const { id, name, color, status } = c.req.valid("json");
 
     try {
@@ -284,7 +284,7 @@ class TagMergeError extends Error {
 }
 
 // POST /api/tag/merge
-router.post("/merge", requireAuth, zValidator("json", TagMergeBodySchema), async (c) => {
+router.post("/merge", requireAuth, validate("json", TagMergeBodySchema), async (c) => {
     const { library_id, source_tag_id, target_tag_id, retain_as_alias } = c.req.valid("json");
 
     if (source_tag_id === target_tag_id) {

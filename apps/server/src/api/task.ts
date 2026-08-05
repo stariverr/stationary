@@ -1,6 +1,6 @@
 import { Hono } from "hono";
-import { z } from "zod";
-import { zValidator } from "@hono/zod-validator";
+import * as v from "valibot";
+import { validate } from "@/lib/validation/validator";
 import { env } from "@/global/env";
 import { Temporal } from "@js-temporal/polyfill";
 import { TaskService } from "@/services/task";
@@ -42,174 +42,194 @@ import { Quality } from "@/lib/types";
 
 const taskApp = new Hono<AuthEnv>();
 
-const AuthorSchema = z.object({
-    name: z.string().default(""),
-    /** Author can have no short_id */
-    short_id: z.string().optional(),
-    /** Author can have no external_id */
-    external_id: z.string().optional(),
-    avatar_file_url: z.string().nullable().optional(),
-    signature: z.string().nullable().optional(),
+const AuthorSchema = v.object({
+    name: v.optional(v.string(), ""),
+    short_id: v.optional(v.string()),
+    external_id: v.optional(v.string()),
+    avatar_file_url: v.optional(v.nullable(v.string())),
+    signature: v.optional(v.nullable(v.string())),
 });
 
-const TimestampSchema = z
-    .preprocess((val) => (val === null || val === "" ? undefined : val), z.string().optional())
-    .transform((val) => {
+const TimestampSchema = v.pipe(
+    v.optional(
+        v.pipe(
+            v.unknown(),
+            v.transform((val) => (val === null || val === "" ? undefined : val)),
+            v.optional(v.string()),
+        ),
+    ),
+    v.transform((val) => {
         if (val === undefined) return undefined;
-        // Handle Unix timestamps (numeric strings)
         if (/^\d+$/.test(val)) {
-            const num = Number.parseInt(val);
-            // If it's 10 digits, assume seconds; if 13, assume milliseconds
+            const num = Number.parseInt(val, 10);
             if (val.length === 10) return Temporal.Instant.fromEpochMilliseconds(num * 1000);
             if (val.length === 13) return Temporal.Instant.fromEpochMilliseconds(num);
-            // Fallback for other lengths
             return Temporal.Instant.fromEpochMilliseconds(num);
         }
         return Temporal.Instant.from(val);
-    });
+    }),
+);
 
-const SegmentBaseSchema = z.object({
-    initialization: z
-        .string()
-        .nullish()
-        .transform((v) => v ?? undefined),
-    index_range: z
-        .string()
-        .nullish()
-        .transform((v) => v ?? undefined),
+const SegmentBaseSchema = v.object({
+    initialization: v.pipe(
+        v.optional(v.nullable(v.string())),
+        v.transform((v) => v ?? undefined),
+    ),
+    index_range: v.pipe(
+        v.optional(v.nullable(v.string())),
+        v.transform((v) => v ?? undefined),
+    ),
 });
 
-const TrackMetadataSchema = z.object({
-    codecs: z
-        .string()
-        .nullish()
-        .transform((v) => v ?? undefined),
-    bandwidth: z
-        .number()
-        .nullish()
-        .transform((v) => v ?? undefined),
-    width: z
-        .number()
-        .nullish()
-        .transform((v) => v ?? undefined),
-    height: z
-        .number()
-        .nullish()
-        .transform((v) => v ?? undefined),
-    duration: z
-        .number()
-        .nullish()
-        .transform((v) => v ?? undefined),
-    language: z
-        .string()
-        .nullish()
-        .transform((v) => v ?? undefined),
-    label: z
-        .string()
-        .nullish()
-        .transform((v) => v ?? undefined),
-    format: z
-        .string()
-        .nullish()
-        .transform((v) => v ?? undefined),
-    type: z
-        .enum(["mp4", "fmp4"])
-        .nullish()
-        .transform((v) => v ?? undefined),
-    segment_base: SegmentBaseSchema.nullish().transform((v) => v ?? undefined),
+const TrackMetadataSchema = v.object({
+    codecs: v.pipe(
+        v.optional(v.nullable(v.string())),
+        v.transform((v) => v ?? undefined),
+    ),
+    bandwidth: v.pipe(
+        v.optional(v.nullable(v.number())),
+        v.transform((v) => v ?? undefined),
+    ),
+    width: v.pipe(
+        v.optional(v.nullable(v.number())),
+        v.transform((v) => v ?? undefined),
+    ),
+    height: v.pipe(
+        v.optional(v.nullable(v.number())),
+        v.transform((v) => v ?? undefined),
+    ),
+    duration: v.pipe(
+        v.optional(v.nullable(v.number())),
+        v.transform((v) => v ?? undefined),
+    ),
+    language: v.pipe(
+        v.optional(v.nullable(v.string())),
+        v.transform((v) => v ?? undefined),
+    ),
+    label: v.pipe(
+        v.optional(v.nullable(v.string())),
+        v.transform((v) => v ?? undefined),
+    ),
+    format: v.pipe(
+        v.optional(v.nullable(v.string())),
+        v.transform((v) => v ?? undefined),
+    ),
+    type: v.pipe(
+        v.optional(v.nullable(v.picklist(["mp4", "fmp4"]))),
+        v.transform((v) => v ?? undefined),
+    ),
+    segment_base: v.pipe(
+        v.optional(v.nullable(SegmentBaseSchema)),
+        v.transform((v) => v ?? undefined),
+    ),
 });
 
-const TrackStreamSchema = z.object({
-    index: z.number().int().nonnegative(),
-    id: z.string().nullable().optional(),
-    type: z.enum([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
-    codec: z.string().nullable().optional(),
-    language: z.string().nullable().optional(),
-    label: z.string().nullable().optional(),
-    role: z.string().nullable().optional(),
-    width: z.number().int().positive().nullable().optional(),
-    height: z.number().int().positive().nullable().optional(),
-    bandwidth: z.number().nonnegative().nullable().optional(),
-    channels: z.number().int().positive().nullable().optional(),
-    sample_rate: z.number().int().positive().nullable().optional(),
-    is_default: z.boolean().optional(),
+const TrackStreamSchema = v.object({
+    index: v.pipe(v.number(), v.integer(), v.minValue(0)),
+    id: v.optional(v.nullable(v.string())),
+    type: v.picklist([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
+    codec: v.optional(v.nullable(v.string())),
+    language: v.optional(v.nullable(v.string())),
+    label: v.optional(v.nullable(v.string())),
+    role: v.optional(v.nullable(v.string())),
+    width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+    height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+    bandwidth: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
+    channels: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+    sample_rate: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+    is_default: v.optional(v.boolean()),
 });
 
-const TrackSchema = z.object({
-    url: z.string(),
-    type: z.enum(TrackType),
-    purpose: z.enum(TrackPurpose).default(TrackPurpose.CONTENT),
-    is_original: z.boolean().default(true),
-    quality: z.enum(Quality).default(Quality.HIGH),
-    language: z.string().nullable().optional(),
-    codec: z.string().nullable().optional(),
-    duration: z.number().nullable().optional(),
-    width: z.number().int().positive().nullable().optional(),
-    height: z.number().int().positive().nullable().optional(),
-    bandwidth: z.number().nonnegative().nullable().optional(),
-    metadata: TrackMetadataSchema.nullish().transform((v) => v ?? {}),
-    container: z.string().nullable().optional(),
-    is_fragmented: z.boolean().nullable().optional(),
-    stream_layout: z.enum(TrackStreamLayout).nullable().optional(),
-    has_video: z.boolean().nullable().optional(),
-    has_audio: z.boolean().nullable().optional(),
-    streams: z.array(TrackStreamSchema).nullable().optional(),
+const TrackSchema = v.object({
+    url: v.string(),
+    type: v.enum(TrackType),
+    purpose: v.optional(v.enum(TrackPurpose), TrackPurpose.CONTENT),
+    is_original: v.optional(v.boolean(), true),
+    quality: v.optional(v.enum(Quality), Quality.HIGH),
+    language: v.optional(v.nullable(v.string())),
+    codec: v.optional(v.nullable(v.string())),
+    duration: v.optional(v.nullable(v.number())),
+    width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+    height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+    bandwidth: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
+    metadata: v.pipe(
+        v.optional(v.nullable(TrackMetadataSchema)),
+        v.transform((v) => v ?? {}),
+    ),
+    container: v.optional(v.nullable(v.string())),
+    is_fragmented: v.optional(v.nullable(v.boolean())),
+    stream_layout: v.optional(v.nullable(v.enum(TrackStreamLayout))),
+    has_video: v.optional(v.nullable(v.boolean())),
+    has_audio: v.optional(v.nullable(v.boolean())),
+    streams: v.optional(v.nullable(v.array(TrackStreamSchema))),
 });
 
-const MediaItemSchema = z
-    .object({
-        external_id: z.string().optional(),
-        title: z
-            .string()
-            .nullish()
-            .transform((v) => v ?? ""),
-        description: z
-            .string()
-            .nullish()
-            .transform((v) => v ?? ""),
-        type: z.enum(MediaType),
-        tracks: z.array(TrackSchema).default([]),
-        tags: z.array(z.string()).default([]),
-        /** Media Duration (in seconds) */
-        duration: z.number().nullable().optional(),
-        published_time: TimestampSchema.optional(),
-    });
+const MediaItemSchema = v.pipe(
+    v.object({
+        external_id: v.optional(v.string()),
+        title: v.pipe(
+            v.optional(v.nullable(v.string())),
+            v.transform((v) => v ?? ""),
+        ),
+        description: v.pipe(
+            v.optional(v.nullable(v.string())),
+            v.transform((v) => v ?? ""),
+        ),
+        type: v.enum(MediaType),
+        tracks: v.optional(v.array(TrackSchema), []),
+        tags: v.optional(v.array(v.string()), []),
+        duration: v.optional(v.nullable(v.number())),
+        create_time: v.optional(TimestampSchema),
+        published_time: v.optional(TimestampSchema),
+    }),
+    v.transform((data) => ({
+        ...data,
+        published_time: data.published_time ?? data.create_time,
+    })),
+);
 
-const PostItemSchema = z.object({
-    title: z.string(),
-    url: z.string().optional(),
-    description: z.string().default(""),
-    external_id: z.string().optional().default(""),
-    tags: z.array(z.string()).default([]),
-    author: AuthorSchema,
-    platform: z.enum(PostSource),
-    media: z.array(MediaItemSchema),
-    published_time: TimestampSchema.optional(),
+const PostItemSchema = v.pipe(
+    v.object({
+        title: v.string(),
+        url: v.optional(v.string()),
+        description: v.optional(v.string(), ""),
+        external_id: v.optional(v.string(), ""),
+        tags: v.optional(v.array(v.string()), []),
+        author: AuthorSchema,
+        platform: v.enum(PostSource),
+        media: v.array(MediaItemSchema),
+        create_time: v.optional(TimestampSchema),
+        published_time: v.optional(TimestampSchema),
+    }),
+    v.transform((data) => ({
+        ...data,
+        published_time: data.published_time ?? data.create_time,
+    })),
+);
+
+export const CreateTaskSchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    posts: v.array(PostItemSchema),
 });
 
-export const CreateTaskSchema = z.object({
-    library_id: z.uuid(),
-    posts: z.array(PostItemSchema),
-});
-
-const WorkflowPayloadSchema = z.object({
-    posts: z.array(
-        z.object({
+const WorkflowPayloadSchema = v.object({
+    posts: v.array(
+        v.object({
             data: PostItemSchema,
-            id: z.string(),
-            authorId: z.string().nullable(),
+            id: v.string(),
+            authorId: v.nullable(v.string()),
         }),
     ),
 });
 
-export type AuthorData = z.infer<typeof AuthorSchema>;
-export type MediaItemData = z.infer<typeof MediaItemSchema>;
-export type PostItemData = z.infer<typeof PostItemSchema>;
-export type CreateTaskPayload = z.infer<typeof CreateTaskSchema>;
-export type WorkflowPayload = z.infer<typeof WorkflowPayloadSchema>;
+export type AuthorData = v.InferOutput<typeof AuthorSchema>;
+export type MediaItemData = v.InferOutput<typeof MediaItemSchema>;
+export type PostItemData = v.InferOutput<typeof PostItemSchema>;
+export type CreateTaskPayload = v.InferOutput<typeof CreateTaskSchema>;
+export type WorkflowPayload = v.InferOutput<typeof WorkflowPayloadSchema>;
 
 // Endpoint to create a task
-taskApp.post("/create", requireAuth, zValidator("json", CreateTaskSchema), async (c) => {
+taskApp.post("/create", requireAuth, validate("json", CreateTaskSchema), async (c) => {
     const user = c.get("user");
     const apiToken = c.get("apiToken");
 
@@ -430,12 +450,12 @@ taskApp.post("/purge-stale-pending-drafts", async (c) => {
 });
 
 // Endpoint to retry sync for failed items
-const RetrySyncSchema = z.object({
-    post_ids: z.array(z.uuid()).optional(),
-    media_ids: z.array(z.uuid()).optional(),
+const RetrySyncSchema = v.object({
+    post_ids: v.optional(v.array(v.pipe(v.string(), v.uuid()))),
+    media_ids: v.optional(v.array(v.pipe(v.string(), v.uuid()))),
 });
 
-taskApp.post("/retry-sync", requireAuth, zValidator("json", RetrySyncSchema), async (c) => {
+taskApp.post("/retry-sync", requireAuth, validate("json", RetrySyncSchema), async (c) => {
     const user = c.get("user");
     if (!user) {
         return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
@@ -579,12 +599,12 @@ taskApp.post("/sweep-orphan-tags", async (c) => {
 });
 
 // Endpoint to queue items for AI enrichment
-const QueueAiSchema = z.object({
-    post_ids: z.array(z.uuid()).optional(),
-    media_ids: z.array(z.uuid()).optional(),
+const QueueAiSchema = v.object({
+    post_ids: v.optional(v.array(v.pipe(v.string(), v.uuid()))),
+    media_ids: v.optional(v.array(v.pipe(v.string(), v.uuid()))),
 });
 
-taskApp.post("/queue-ai", requireAuth, zValidator("json", QueueAiSchema), async (c) => {
+taskApp.post("/queue-ai", requireAuth, validate("json", QueueAiSchema), async (c) => {
     const user = c.get("user");
     if (!user) {
         return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);

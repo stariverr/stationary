@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { sanitizeTagAliases } from "../src/lib/utils/tag_sanitizer";
 import { TagCreateBodySchema, TagUpdateBodySchema } from "../src/api/tag";
+import * as v from "valibot";
 
 describe("tag alias sanitization utility", () => {
     test("trims whitespace and ignores empty aliases", () => {
@@ -31,7 +32,7 @@ describe("tag alias sanitization utility", () => {
 
 describe("tag schema validations", () => {
     test("create tag schema validates correct input", () => {
-        const parsed = TagCreateBodySchema.safeParse({
+        const parsed = v.safeParse(TagCreateBodySchema, {
             library_id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3",
             name: "Landing Page",
         });
@@ -39,7 +40,7 @@ describe("tag schema validations", () => {
     });
 
     test("create tag schema rejects invalid library_id", () => {
-        const parsed = TagCreateBodySchema.safeParse({
+        const parsed = v.safeParse(TagCreateBodySchema, {
             library_id: "invalid-uuid",
             name: "Landing Page",
         });
@@ -47,7 +48,7 @@ describe("tag schema validations", () => {
     });
 
     test("update tag schema validates correct input", () => {
-        const parsed = TagUpdateBodySchema.safeParse({
+        const parsed = v.safeParse(TagUpdateBodySchema, {
             id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3",
             name: "Promotions",
         });
@@ -55,7 +56,7 @@ describe("tag schema validations", () => {
     });
 
     test("update tag schema rejects invalid tag id", () => {
-        const parsed = TagUpdateBodySchema.safeParse({
+        const parsed = v.safeParse(TagUpdateBodySchema, {
             id: "invalid-uuid",
         });
         expect(parsed.success).toBe(false);

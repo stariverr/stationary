@@ -1,23 +1,23 @@
 import { MediaType, TrackPurpose, TrackType } from "@/db/schema";
 import { getAllowedTrackTypesForFile } from "@/lib/utils/file";
-import { z } from "zod";
+import * as v from "valibot";
 import { Quality } from "@/lib/types";
 
-export const TrackDraftSchema = z.object({
-    draft_file_id: z.uuid(),
-    type: z.enum(TrackType),
-    purpose: z.enum(TrackPurpose),
-    quality: z.enum(Quality),
-    is_default: z.boolean().default(false),
-    language: z.string().nullable().optional(),
+export const TrackDraftSchema = v.object({
+    draft_file_id: v.pipe(v.string(), v.uuid()),
+    type: v.enum(TrackType),
+    purpose: v.enum(TrackPurpose),
+    quality: v.enum(Quality),
+    is_default: v.optional(v.boolean(), false),
+    language: v.optional(v.nullable(v.string())),
 });
 
-export const MediaDraftSchema = z.object({
-    title: z.string().default(""),
-    description: z.string().default(""),
-    type: z.enum(MediaType),
-    tag_ids: z.array(z.uuid()).optional().default([]),
-    tracks: z.array(TrackDraftSchema).min(1, "Each media must have at least one track"),
+export const MediaDraftSchema = v.object({
+    title: v.optional(v.string(), ""),
+    description: v.optional(v.string(), ""),
+    type: v.enum(MediaType),
+    tag_ids: v.optional(v.array(v.pipe(v.string(), v.uuid())), []),
+    tracks: v.pipe(v.array(TrackDraftSchema), v.minLength(1, "Each media must have at least one track")),
 });
 
 export interface MediaCompositionTrack {

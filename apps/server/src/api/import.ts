@@ -1,7 +1,7 @@
 import { Context, Hono } from "hono";
 import { db } from "@/global/db";
-import { z } from "zod";
-import { validator } from "hono/validator";
+import * as v from "valibot";
+import { validate } from "@/lib/validation/validator";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
 import { DraftFile, DraftFileStatus, File as DbFile, Library, Media, PostSource, DeleteStatus, SyncStatus } from "@/db/schema";
@@ -75,21 +75,15 @@ function verifyUploadToken(libraryId: string, path: string, token: string): bool
 }
 
 // 1. Presign Upload URL for Draft File
-const PresignDraftSchema = z.object({
-    library_id: z.uuid(),
-    fileName: z.string().min(1, "fileName is required"),
+const PresignDraftSchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    fileName: v.pipe(v.string(), v.nonEmpty("fileName is required")),
 });
 
 router.post(
     "/draft/presign",
     requireAuth,
-    validator("json", (value, c) => {
-        const parsed = PresignDraftSchema.safeParse(value);
-        if (!parsed.success) {
-            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid parameters"), 400);
-        }
-        return parsed.data;
-    }),
+    validate("json", PresignDraftSchema),
     async (c) => {
         const { library_id, fileName } = c.req.valid("json");
         const user = c.get("user");
@@ -157,27 +151,21 @@ router.post(
 );
 
 // 2. Confirm Upload and Register as DraftFile
-const ConfirmDraftSchema = z.object({
-    library_id: z.uuid(),
-    draft_file_id: z.uuid(),
-    fileName: z.string().min(1, "fileName is required"),
-    path: z.string().min(1),
-    bucket: z.string().min(1),
-    mime_type: z.string().min(1),
-    size: z.number().int().nonnegative(),
-    upload_token: z.string().min(1),
+const ConfirmDraftSchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    draft_file_id: v.pipe(v.string(), v.uuid()),
+    fileName: v.pipe(v.string(), v.nonEmpty("fileName is required")),
+    path: v.pipe(v.string(), v.nonEmpty()),
+    bucket: v.pipe(v.string(), v.nonEmpty()),
+    mime_type: v.pipe(v.string(), v.nonEmpty()),
+    size: v.pipe(v.number(), v.integer(), v.minValue(0)),
+    upload_token: v.pipe(v.string(), v.nonEmpty()),
 });
 
 router.post(
     "/draft/confirm",
     requireAuth,
-    validator("json", (value, c) => {
-        const parsed = ConfirmDraftSchema.safeParse(value);
-        if (!parsed.success) {
-            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid parameters"), 400);
-        }
-        return parsed.data;
-    }),
+    validate("json", ConfirmDraftSchema),
     async (c) => {
         const body = c.req.valid("json");
         const user = c.get("user");
@@ -326,21 +314,15 @@ router.post("/draft/files/:id/delete", requireAuth, async (c) => {
     return c.json(success(Code.SUCCESS, { success: true }));
 });
 
-const CommitMediaSchema = z.object({
-    library_id: z.uuid(),
-    media_drafts: z.array(MediaDraftSchema).min(1, "At least one media group is required"),
+const CommitMediaSchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    media_drafts: v.pipe(v.array(MediaDraftSchema), v.minLength(1, "At least one media group is required")),
 });
 
 router.post(
     "/draft/commit-media",
     requireAuth,
-    validator("json", (value, c) => {
-        const parsed = CommitMediaSchema.safeParse(value);
-        if (!parsed.success) {
-            return c.json(error(Code.INVALID_PARAMETER, parsed.error.issues[0]?.message || "Invalid parameters"), 400);
-        }
-        return parsed.data;
-    }),
+    validate("json", CommitMediaSchema),
     async (c) => {
         const { library_id, media_drafts } = c.req.valid("json");
 

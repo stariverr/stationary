@@ -1,11 +1,11 @@
-import { z } from "zod";
+import * as v from "valibot";
+import { toJsonSchema } from "@valibot/to-json-schema";
 import { MediaType, PostSource, TrackType, TrackPurpose, TrackStreamLayout } from "@/db/schema";
 import { Quality } from "@/lib/types";
 
 // FormTimestampSchema helper
-const FormTimestampSchema = z.string().or(z.number()).nullable().optional();
+const FormTimestampSchema = v.optional(v.nullable(v.union([v.string(), v.number()])));
 
-// Convert Zod to OpenAPI Schema using native toJSONSchema method of Zod v4
 function cleanSchema(schema: any): any {
     if (!schema || typeof schema !== "object") return schema;
 
@@ -25,7 +25,7 @@ function cleanSchema(schema: any): any {
 
     // Convert anyOf [ { type: X }, { type: "null" } ] -> { type: X, nullable: true }
     if (cleaned.anyOf && Array.isArray(cleaned.anyOf)) {
-        const nullIndex = cleaned.anyOf.findIndex((x: any) => x && (x.type === "null" || x.type === null || x.type === "null"));
+        const nullIndex = cleaned.anyOf.findIndex((x: any) => x && (x.type === "null" || x.type === null));
         if (nullIndex !== -1 && cleaned.anyOf.length === 2) {
             const otherIndex = nullIndex === 0 ? 1 : 0;
             const otherSchema = cleaned.anyOf[otherIndex];
@@ -43,16 +43,14 @@ function cleanSchema(schema: any): any {
     return cleaned;
 }
 
-function zodToOpenApi(schema: any): any {
+function valibotToOpenApi(schema: any): any {
     if (!schema) return undefined;
 
-    if (typeof schema.toJSONSchema === "function") {
-        try {
-            const rawSchema = schema.toJSONSchema();
-            return cleanSchema(rawSchema);
-        } catch (e) {
-            console.error("Failed to call toJSONSchema on schema", e);
-        }
+    try {
+        const rawSchema = toJsonSchema(schema, { errorMode: "ignore" });
+        return cleanSchema(rawSchema);
+    } catch (e) {
+        console.error("Failed to call toJsonSchema on schema", e);
     }
 
     return { type: "object" };
@@ -71,457 +69,459 @@ function makeUnifiedSuccessResponse(dataSchema: any) {
 }
 
 // Recreate Schemas to avoid db side-effects
-const TokenCreateBodySchema = z.object({
-    name: z.string().min(1),
-    library_id: z.uuid().nullable().optional(),
-    expires_in_seconds: z.number().int().positive().nullable().optional(),
+const TokenCreateBodySchema = v.object({
+    name: v.pipe(v.string(), v.minLength(1)),
+    library_id: v.optional(v.nullable(v.pipe(v.string(), v.uuid()))),
+    expires_in_seconds: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
 });
 
-const SearchQuerySchema = z.object({
-    library_id: z.uuid(),
-    keyword: z.string().trim(),
-    source: z.enum(PostSource).optional(),
-    media_type: z.enum(MediaType).optional(),
-    page: z.number().int().positive().optional().default(1),
-    count: z.number().int().positive().optional().default(20),
+const SearchQuerySchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    keyword: v.pipe(v.string(), v.trim()),
+    source: v.optional(v.enum(PostSource)),
+    media_type: v.optional(v.enum(MediaType)),
+    page: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1)), 1),
+    count: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1)), 20),
 });
 
-const LibraryListQuerySchema = z.object({
-    page: z.number().int().positive().optional(),
-    count: z.number().int().positive().optional(),
-    keyword: z.string().optional(),
+const LibraryListQuerySchema = v.object({
+    page: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+    count: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+    keyword: v.optional(v.string()),
 });
 
-const LibraryCreateBodySchema = z.object({
-    name: z.string().min(1),
-    description: z.string().optional().default(""),
+const LibraryCreateBodySchema = v.object({
+    name: v.pipe(v.string(), v.minLength(1)),
+    description: v.optional(v.string(), ""),
 });
 
-const LibraryUpdateBodySchema = z.object({
-    id: z.uuid(),
-    name: z.string().min(1).optional(),
-    description: z.string().optional(),
+const LibraryUpdateBodySchema = v.object({
+    id: v.pipe(v.string(), v.uuid()),
+    name: v.optional(v.pipe(v.string(), v.minLength(1))),
+    description: v.optional(v.string()),
 });
 
-const LibraryMoveItemsBodySchema = z.object({
-    post_ids: z.array(z.uuid()).default([]),
-    media_ids: z.array(z.uuid()).default([]),
-    target_library_id: z.uuid(),
+const LibraryMoveItemsBodySchema = v.object({
+    post_ids: v.optional(v.array(v.pipe(v.string(), v.uuid())), []),
+    media_ids: v.optional(v.array(v.pipe(v.string(), v.uuid())), []),
+    target_library_id: v.pipe(v.string(), v.uuid()),
 });
 
-const LibraryAiConfigSchema = z.object({
-    ai_provider: z.enum(["gemini", "openai"]).nullable().optional(),
-    openai_api_key: z.string().nullable().optional(),
-    openai_base_url: z.string().nullable().optional(),
-    openai_model_embedding_text: z.string().nullable().optional(),
-    openai_model_embedding_text_map_to: z.string().nullable().optional(),
-    openai_model_embedding_image: z.string().nullable().optional(),
-    openai_model_embedding_image_map_to: z.string().nullable().optional(),
-    openai_model_describe_image: z.string().nullable().optional(),
-    openai_model_describe_image_map_to: z.string().nullable().optional(),
-    gemini_api_key: z.string().nullable().optional(),
-    gemini_base_url: z.string().nullable().optional(),
+const LibraryAiConfigSchema = v.object({
+    ai_provider: v.optional(v.nullable(v.picklist(["gemini", "openai"]))),
+    openai_api_key: v.optional(v.nullable(v.string())),
+    openai_base_url: v.optional(v.nullable(v.string())),
+    openai_model_embedding_text: v.optional(v.nullable(v.string())),
+    openai_model_embedding_text_map_to: v.optional(v.nullable(v.string())),
+    openai_model_embedding_image: v.optional(v.nullable(v.string())),
+    openai_model_embedding_image_map_to: v.optional(v.nullable(v.string())),
+    openai_model_describe_image: v.optional(v.nullable(v.string())),
+    openai_model_describe_image_map_to: v.optional(v.nullable(v.string())),
+    gemini_api_key: v.optional(v.nullable(v.string())),
+    gemini_base_url: v.optional(v.nullable(v.string())),
 });
 
-const TagListQuerySchema = z.object({
-    library_id: z.uuid(),
-    status: z.enum(["ACTIVE", "CANDIDATE", "IGNORED"]).optional(),
+const TagListQuerySchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    status: v.optional(v.picklist(["ACTIVE", "CANDIDATE", "IGNORED"])),
 });
 
-const TagCreateBodySchema = z.object({
-    library_id: z.uuid(),
-    name: z.string().min(1),
-    color: z.string().optional(),
+const TagCreateBodySchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    name: v.pipe(v.string(), v.minLength(1)),
+    color: v.optional(v.string()),
 });
 
-const TagUpdateBodySchema = z.object({
-    id: z.uuid(),
-    name: z.string().min(1).optional(),
-    color: z.string().nullable().optional(),
-    status: z.enum(["ACTIVE", "CANDIDATE", "IGNORED"]).optional(),
+const TagUpdateBodySchema = v.object({
+    id: v.pipe(v.string(), v.uuid()),
+    name: v.optional(v.pipe(v.string(), v.minLength(1))),
+    color: v.optional(v.nullable(v.string())),
+    status: v.optional(v.picklist(["ACTIVE", "CANDIDATE", "IGNORED"])),
 });
 
-const TagMergeBodySchema = z.object({
-    library_id: z.uuid(),
-    source_tag_id: z.uuid(),
-    target_tag_id: z.uuid(),
-    retain_as_alias: z.boolean().default(true),
+const TagMergeBodySchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    source_tag_id: v.pipe(v.string(), v.uuid()),
+    target_tag_id: v.pipe(v.string(), v.uuid()),
+    retain_as_alias: v.optional(v.boolean(), true),
 });
 
-const PostListRequestBodySchema = z.object({
-    library_id: z.uuid(),
-    page: z.number().int().positive().optional(),
-    count: z.number().int().positive().optional(),
-    keyword: z.string().optional(),
-    source: z.enum(PostSource).optional(),
-    sort_by: z.enum(["import_time", "published_time"]).optional(),
-    sort_order: z.enum(["asc", "desc"]).optional(),
-    author_ids: z.string().optional(),
-    media_type: z.enum(MediaType).optional(),
-    tag_ids: z.string().optional(),
+const PostListRequestBodySchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    page: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+    count: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+    keyword: v.optional(v.string()),
+    source: v.optional(v.enum(PostSource)),
+    sort_by: v.optional(v.picklist(["import_time", "published_time"])),
+    sort_order: v.optional(v.picklist(["asc", "desc"])),
+    author_ids: v.optional(v.string()),
+    media_type: v.optional(v.enum(MediaType)),
+    tag_ids: v.optional(v.string()),
 });
 
-const PostUpdateInfoSchema = z.object({
-    title: z.string().min(1).optional(),
-    description: z.string().optional(),
+const PostUpdateInfoSchema = v.object({
+    title: v.optional(v.pipe(v.string(), v.minLength(1))),
+    description: v.optional(v.string()),
     published_time: FormTimestampSchema,
-    url: z.string().url().or(z.literal("")).nullable().optional(),
+    url: v.optional(v.nullable(v.union([v.pipe(v.string(), v.url()), v.literal("")]))),
 });
 
-const PostReplaceTagsSchema = z.object({
-    tags: z.array(z.string()),
+const PostReplaceTagsSchema = v.object({
+    tags: v.array(v.string()),
 });
 
-const PostAttachMediaSchema = z.object({
-    media_ids: z.array(z.uuid()).min(1),
+const PostAttachMediaSchema = v.object({
+    media_ids: v.pipe(v.array(v.pipe(v.string(), v.uuid())), v.minLength(1)),
 });
 
-const PostReorderMediaSchema = z.object({
-    media_ids: z.array(z.uuid()).min(1),
+const PostReorderMediaSchema = v.object({
+    media_ids: v.pipe(v.array(v.pipe(v.string(), v.uuid())), v.minLength(1)),
 });
 
-const MediaListRequestBodySchema = z.object({
-    page: z.number().int().positive().optional(),
-    count: z.number().int().positive().optional(),
-    keyword: z.string().optional(),
-    source: z.enum(PostSource).optional(),
-    display_mode: z.enum(["flat", "stacked"]).default("flat"),
-    library_id: z.uuid().optional(),
+const MediaListRequestBodySchema = v.object({
+    page: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+    count: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+    keyword: v.optional(v.string()),
+    source: v.optional(v.enum(PostSource)),
+    display_mode: v.optional(v.picklist(["flat", "stacked"]), "flat"),
+    library_id: v.optional(v.pipe(v.string(), v.uuid())),
 });
 
-const MediaUpdateInfoSchema = z.object({
-    title: z.string().min(1).optional(),
-    description: z.string().optional(),
+const MediaUpdateInfoSchema = v.object({
+    title: v.optional(v.pipe(v.string(), v.minLength(1))),
+    description: v.optional(v.string()),
     published_time: FormTimestampSchema,
 });
 
-const MediaReplaceTagsSchema = z.object({
-    tags: z.array(z.string()),
+const MediaReplaceTagsSchema = v.object({
+    tags: v.array(v.string()),
 });
 
-const PresignUploadSchema = z.object({
-    type: z.enum(TrackType),
-    purpose: z.enum(TrackPurpose),
-    quality: z.enum(Quality),
-    priority: z.number().int().default(0),
-    fileName: z.string().min(1),
+const PresignUploadSchema = v.object({
+    type: v.enum(TrackType),
+    purpose: v.enum(TrackPurpose),
+    quality: v.enum(Quality),
+    priority: v.optional(v.pipe(v.number(), v.integer()), 0),
+    fileName: v.pipe(v.string(), v.minLength(1)),
 });
 
-const TrackStreamSchema = z.object({
-    index: z.number().int().nonnegative(),
-    id: z.string().nullable().optional(),
-    type: z.enum([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
-    codec: z.string().nullable().optional(),
-    language: z.string().nullable().optional(),
-    label: z.string().nullable().optional(),
-    role: z.string().nullable().optional(),
-    width: z.number().int().positive().nullable().optional(),
-    height: z.number().int().positive().nullable().optional(),
-    bandwidth: z.number().nonnegative().nullable().optional(),
-    channels: z.number().int().positive().nullable().optional(),
-    sample_rate: z.number().int().positive().nullable().optional(),
-    is_default: z.boolean().optional(),
+const TrackStreamSchema = v.object({
+    index: v.pipe(v.number(), v.integer(), v.minValue(0)),
+    id: v.optional(v.nullable(v.string())),
+    type: v.picklist([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
+    codec: v.optional(v.nullable(v.string())),
+    language: v.optional(v.nullable(v.string())),
+    label: v.optional(v.nullable(v.string())),
+    role: v.optional(v.nullable(v.string())),
+    width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+    height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+    bandwidth: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
+    channels: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+    sample_rate: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+    is_default: v.optional(v.boolean()),
 });
 
-const TrackFormatSchema = z.object({
-    container: z.string().nullable().optional(),
-    is_fragmented: z.boolean().nullable().optional(),
-    stream_layout: z.enum(TrackStreamLayout).nullable().optional(),
-    has_video: z.boolean().nullable().optional(),
-    has_audio: z.boolean().nullable().optional(),
-    streams: z.array(TrackStreamSchema).nullable().optional(),
+const TrackFormatFields = {
+    container: v.optional(v.nullable(v.string())),
+    is_fragmented: v.optional(v.nullable(v.boolean())),
+    stream_layout: v.optional(v.nullable(v.enum(TrackStreamLayout))),
+    has_video: v.optional(v.nullable(v.boolean())),
+    has_audio: v.optional(v.nullable(v.boolean())),
+    streams: v.optional(v.nullable(v.array(TrackStreamSchema))),
+};
+
+const TrackFormatSchema = v.object(TrackFormatFields);
+
+const TrackResponseSchema = v.object({
+    id: v.string(),
+    file_id: v.string(),
+    url: v.string(),
+    type: v.enum(TrackType),
+    purpose: v.enum(TrackPurpose),
+    is_original: v.boolean(),
+    quality: v.enum(Quality),
+    priority: v.pipe(v.number(), v.integer()),
+    metadata: v.record(v.string(), v.unknown()),
+    variant_key: v.string(),
+    is_default: v.boolean(),
+    is_primary: v.boolean(),
+    display_name: v.nullable(v.string()),
+    language: v.nullable(v.string()),
+    codec: v.nullable(v.string()),
+    is_stale: v.boolean(),
+    mime_type: v.nullable(v.string()),
+    extension: v.nullable(v.string()),
+    width: v.nullable(v.number()),
+    height: v.nullable(v.number()),
+    container: v.nullable(v.string()),
+    is_fragmented: v.nullable(v.boolean()),
+    stream_layout: v.nullable(v.enum(TrackStreamLayout)),
+    has_video: v.boolean(),
+    has_audio: v.boolean(),
+    streams: v.array(TrackStreamSchema),
 });
 
-const TrackResponseSchema = z.object({
-    id: z.string(),
-    file_id: z.string(),
-    url: z.string(),
-    type: z.enum(TrackType),
-    purpose: z.enum(TrackPurpose),
-    is_original: z.boolean(),
-    quality: z.enum(Quality),
-    priority: z.number().int(),
-    metadata: z.record(z.string(), z.unknown()),
-    variant_key: z.string(),
-    is_default: z.boolean(),
-    is_primary: z.boolean(),
-    display_name: z.string().nullable(),
-    language: z.string().nullable(),
-    codec: z.string().nullable(),
-    is_stale: z.boolean(),
-    mime_type: z.string().nullable(),
-    extension: z.string().nullable(),
-    width: z.number().nullable(),
-    height: z.number().nullable(),
-    container: z.string().nullable(),
-    is_fragmented: z.boolean().nullable(),
-    stream_layout: z.enum(TrackStreamLayout).nullable(),
-    has_video: z.boolean(),
-    has_audio: z.boolean(),
-    streams: z.array(TrackStreamSchema),
+const PlaybackVariantResponseSchema = v.object({
+    track_id: v.string(),
+    url: v.string(),
+    mime_type: v.nullable(v.string()),
+    quality: v.string(),
+    label: v.string(),
+    codec: v.nullable(v.string()),
+    width: v.nullable(v.number()),
+    height: v.nullable(v.number()),
+    bandwidth: v.nullable(v.number()),
+    frame_rate: v.nullable(v.number()),
 });
 
-const PlaybackVariantResponseSchema = z.object({
-    track_id: z.string(),
-    url: z.string(),
-    mime_type: z.string().nullable(),
-    quality: z.string(),
-    label: z.string(),
-    codec: z.string().nullable(),
-    width: z.number().nullable(),
-    height: z.number().nullable(),
-    bandwidth: z.number().nullable(),
-    frame_rate: z.number().nullable(),
+const PlaybackAudioTrackResponseSchema = v.object({
+    id: v.string(),
+    track_id: v.string(),
+    source: v.picklist(["INTERNAL", "EXTERNAL"]),
+    stream_index: v.nullable(v.number()),
+    url: v.nullable(v.string()),
+    select_url: v.nullable(v.string()),
+    mime_type: v.nullable(v.string()),
+    language: v.nullable(v.string()),
+    label: v.string(),
+    role: v.nullable(v.string()),
+    codec: v.nullable(v.string()),
+    channels: v.nullable(v.number()),
+    is_default: v.boolean(),
+    selectable: v.boolean(),
 });
 
-const PlaybackAudioTrackResponseSchema = z.object({
-    id: z.string(),
-    track_id: z.string(),
-    source: z.enum(["INTERNAL", "EXTERNAL"]),
-    stream_index: z.number().nullable(),
-    url: z.string().nullable(),
-    select_url: z.string().nullable(),
-    mime_type: z.string().nullable(),
-    language: z.string().nullable(),
-    label: z.string(),
-    role: z.string().nullable(),
-    codec: z.string().nullable(),
-    channels: z.number().nullable(),
-    is_default: z.boolean(),
-    selectable: z.boolean(),
+const PlaybackSubtitleTrackResponseSchema = v.object({
+    id: v.string(),
+    track_id: v.string(),
+    source: v.picklist(["INTERNAL", "EXTERNAL"]),
+    stream_index: v.nullable(v.number()),
+    url: v.nullable(v.string()),
+    mime_type: v.nullable(v.string()),
+    language: v.nullable(v.string()),
+    label: v.string(),
+    format: v.nullable(v.string()),
+    selectable: v.boolean(),
 });
 
-const PlaybackSubtitleTrackResponseSchema = z.object({
-    id: z.string(),
-    track_id: z.string(),
-    source: z.enum(["INTERNAL", "EXTERNAL"]),
-    stream_index: z.number().nullable(),
-    url: z.string().nullable(),
-    mime_type: z.string().nullable(),
-    language: z.string().nullable(),
-    label: z.string(),
-    format: z.string().nullable(),
-    selectable: z.boolean(),
-});
-
-const MediaPlaybackResponseSchema = z.object({
-    url: z.string().nullable(),
-    mime_type: z.string().nullable(),
-    protocol: z.enum(["DASH", "PROGRESSIVE"]).nullable(),
-    track_id: z.string().nullable(),
-    variants: z.array(PlaybackVariantResponseSchema),
-    capabilities: z.object({
-        quality_switching: z.boolean(),
-        audio_switching: z.boolean(),
-        subtitle_switching: z.boolean(),
-        protocol_supports_switching: z.boolean(),
+const MediaPlaybackResponseSchema = v.object({
+    url: v.nullable(v.string()),
+    mime_type: v.nullable(v.string()),
+    protocol: v.nullable(v.picklist(["DASH", "PROGRESSIVE"])),
+    track_id: v.nullable(v.string()),
+    variants: v.array(PlaybackVariantResponseSchema),
+    capabilities: v.object({
+        quality_switching: v.boolean(),
+        audio_switching: v.boolean(),
+        subtitle_switching: v.boolean(),
+        protocol_supports_switching: v.boolean(),
     }),
-    audio_tracks: z.array(PlaybackAudioTrackResponseSchema),
-    subtitle_tracks: z.array(PlaybackSubtitleTrackResponseSchema),
+    audio_tracks: v.array(PlaybackAudioTrackResponseSchema),
+    subtitle_tracks: v.array(PlaybackSubtitleTrackResponseSchema),
 });
 
-const MediaDetailResponseSchema = z.object({
-    id: z.uuid(),
-    eid: z.string(),
-    post_id: z.uuid().nullable(),
-    source: z.enum(PostSource),
-    title: z.string(),
-    description: z.string(),
-    type: z.enum(MediaType),
-    sort_order: z.number().int(),
-    create_time: z.string().optional(),
-    published_time: z.string().optional(),
-    sync_status: z.string(),
-    last_error: z.string().nullable(),
-    url: z.string().nullable(),
-    playback: MediaPlaybackResponseSchema.nullable(),
-    audio_tracks: z.array(PlaybackAudioTrackResponseSchema),
-    subtitle_tracks: z.array(PlaybackSubtitleTrackResponseSchema),
-    subtitles: z.array(
-        z.object({
-            url: z.string(),
-            language: z.string(),
-            label: z.string(),
-            format: z.string(),
+const MediaDetailResponseSchema = v.object({
+    id: v.pipe(v.string(), v.uuid()),
+    eid: v.string(),
+    post_id: v.nullable(v.pipe(v.string(), v.uuid())),
+    source: v.enum(PostSource),
+    title: v.string(),
+    description: v.string(),
+    type: v.enum(MediaType),
+    sort_order: v.pipe(v.number(), v.integer()),
+    create_time: v.optional(v.string()),
+    published_time: v.optional(v.string()),
+    sync_status: v.string(),
+    last_error: v.nullable(v.string()),
+    url: v.nullable(v.string()),
+    playback: v.nullable(MediaPlaybackResponseSchema),
+    audio_tracks: v.array(PlaybackAudioTrackResponseSchema),
+    subtitle_tracks: v.array(PlaybackSubtitleTrackResponseSchema),
+    subtitles: v.array(
+        v.object({
+            url: v.string(),
+            language: v.string(),
+            label: v.string(),
+            format: v.string(),
         }),
     ),
-    cover_url: z.string().nullable(),
-    cover_variants: z.record(
-        z.string(),
-        z.object({
-            track_id: z.string(),
-            url: z.string().nullable(),
-            width: z.number().nullable(),
-            height: z.number().nullable(),
-            status: z.enum(["READY", "STALE"]),
+    cover_url: v.nullable(v.string()),
+    cover_variants: v.record(
+        v.string(),
+        v.object({
+            track_id: v.string(),
+            url: v.nullable(v.string()),
+            width: v.nullable(v.number()),
+            height: v.nullable(v.number()),
+            status: v.picklist(["READY", "STALE"]),
         }),
     ),
-    covers: z.array(
-        z.object({
-            url: z.string().nullable(),
-            quality: z.enum(Quality),
-            codec: z.string().nullable(),
+    covers: v.array(
+        v.object({
+            url: v.nullable(v.string()),
+            quality: v.enum(Quality),
+            codec: v.nullable(v.string()),
         }),
     ),
-    width: z.number().nullable(),
-    height: z.number().nullable(),
-    tracks: z.array(TrackResponseSchema),
-    position: z.number().int().optional(),
-    ai_status: z.string().optional(),
-    ai_error: z.string().nullable().optional(),
-    tags: z.array(z.string()).optional(),
+    width: v.nullable(v.number()),
+    height: v.nullable(v.number()),
+    tracks: v.array(TrackResponseSchema),
+    position: v.optional(v.pipe(v.number(), v.integer())),
+    ai_status: v.optional(v.string()),
+    ai_error: v.optional(v.nullable(v.string())),
+    tags: v.optional(v.array(v.string())),
 });
 
-const mediaDetailOpenApiSchema = zodToOpenApi(MediaDetailResponseSchema);
-const trackResponseOpenApiSchema = zodToOpenApi(TrackResponseSchema);
+const mediaDetailOpenApiSchema = valibotToOpenApi(MediaDetailResponseSchema);
+const trackResponseOpenApiSchema = valibotToOpenApi(TrackResponseSchema);
 
-const RegisterTrackSchema = z.object({
-    type: z.enum(TrackType),
-    purpose: z.enum(TrackPurpose),
-    quality: z.enum(Quality),
-    priority: z.number().int().default(0),
-    source_url: z.string().optional(),
-    metadata: z.any().optional(),
-    variant_key: z.string().optional(),
-    is_default: z.boolean().optional(),
-    is_primary: z.boolean().optional(),
-    display_name: z.string().optional(),
-    language: z.string().nullable().optional(),
-    codec: z.string().nullable().optional(),
-    is_stale: z.boolean().optional(),
-    source_track_id: z.string().nullable().optional(),
-    ...TrackFormatSchema.shape,
-    file: z.object({
-        path: z.string().min(1),
-        bucket: z.string().min(1),
-        mime_type: z.string().min(1),
-        extension: z.string().min(1),
-        size: z.number().int().nonnegative(),
-        width: z.number().int().positive().nullable().optional(),
-        height: z.number().int().positive().nullable().optional(),
-        duration: z.number().nullable().optional(),
-    }),
-});
-
-const ReplaceFileSchema = z.object({
-    file: z.object({
-        path: z.string().min(1),
-        bucket: z.string().min(1),
-        mime_type: z.string().min(1),
-        extension: z.string().min(1),
-        size: z.number().int().nonnegative(),
-        width: z.number().int().positive().nullable().optional(),
-        height: z.number().int().positive().nullable().optional(),
-        duration: z.number().nullable().optional(),
+const RegisterTrackSchema = v.object({
+    type: v.enum(TrackType),
+    purpose: v.enum(TrackPurpose),
+    quality: v.enum(Quality),
+    priority: v.optional(v.pipe(v.number(), v.integer()), 0),
+    source_url: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+    variant_key: v.optional(v.string()),
+    is_default: v.optional(v.boolean()),
+    is_primary: v.optional(v.boolean()),
+    display_name: v.optional(v.string()),
+    language: v.optional(v.nullable(v.string())),
+    codec: v.optional(v.nullable(v.string())),
+    is_stale: v.optional(v.boolean()),
+    source_track_id: v.optional(v.nullable(v.string())),
+    ...TrackFormatFields,
+    file: v.object({
+        path: v.pipe(v.string(), v.minLength(1)),
+        bucket: v.pipe(v.string(), v.minLength(1)),
+        mime_type: v.pipe(v.string(), v.minLength(1)),
+        extension: v.pipe(v.string(), v.minLength(1)),
+        size: v.pipe(v.number(), v.integer(), v.minValue(0)),
+        width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+        height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+        duration: v.optional(v.nullable(v.number())),
     }),
 });
 
-const UpdateTrackMetadataSchema = z.object({
-    priority: z.number().int().optional(),
-    quality: z.enum(Quality).optional(),
-    display_name: z.string().nullable().optional(),
-    variant_key: z.string().optional(),
-    is_default: z.boolean().optional(),
-    language: z.string().nullable().optional(),
-    codec: z.string().nullable().optional(),
-    is_stale: z.boolean().optional(),
-    metadata: z.any().optional(),
-    source_track_id: z.string().nullable().optional(),
-    ...TrackFormatSchema.shape,
+const ReplaceFileSchema = v.object({
+    file: v.object({
+        path: v.pipe(v.string(), v.minLength(1)),
+        bucket: v.pipe(v.string(), v.minLength(1)),
+        mime_type: v.pipe(v.string(), v.minLength(1)),
+        extension: v.pipe(v.string(), v.minLength(1)),
+        size: v.pipe(v.number(), v.integer(), v.minValue(0)),
+        width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+        height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
+        duration: v.optional(v.nullable(v.number())),
+    }),
+});
+
+const UpdateTrackMetadataSchema = v.object({
+    priority: v.optional(v.pipe(v.number(), v.integer())),
+    quality: v.optional(v.enum(Quality)),
+    display_name: v.optional(v.nullable(v.string())),
+    variant_key: v.optional(v.string()),
+    is_default: v.optional(v.boolean()),
+    language: v.optional(v.nullable(v.string())),
+    codec: v.optional(v.nullable(v.string())),
+    is_stale: v.optional(v.boolean()),
+    metadata: v.optional(v.any()),
+    source_track_id: v.optional(v.nullable(v.string())),
+    ...TrackFormatFields,
 });
 
 // Task & Workflow schemas
-const AuthorSchema = z.object({
-    name: z.string().default(""),
-    short_id: z.string().optional(),
-    external_id: z.string().optional(),
-    avatar_file_url: z.string().nullable().optional(),
+const AuthorSchema = v.object({
+    name: v.optional(v.string(), ""),
+    short_id: v.optional(v.string()),
+    external_id: v.optional(v.string()),
+    avatar_file_url: v.optional(v.nullable(v.string())),
 });
 
-const SegmentBaseSchema = z.object({
-    initialization: z.string().nullish(),
-    index_range: z.string().nullish(),
+const SegmentBaseSchema = v.object({
+    initialization: v.optional(v.nullable(v.string())),
+    index_range: v.optional(v.nullable(v.string())),
 });
 
-const TrackMetadataSchema = z.object({
-    codecs: z.string().nullish(),
-    bandwidth: z.number().nullish(),
-    width: z.number().nullish(),
-    height: z.number().nullish(),
-    duration: z.number().nullish(),
-    language: z.string().nullish(),
-    label: z.string().nullish(),
-    format: z.string().nullish(),
-    type: z.enum(["mp4", "fmp4"]).nullish(),
-    segment_base: SegmentBaseSchema.nullish(),
+const TrackMetadataSchema = v.object({
+    codecs: v.optional(v.nullable(v.string())),
+    bandwidth: v.optional(v.nullable(v.number())),
+    width: v.optional(v.nullable(v.number())),
+    height: v.optional(v.nullable(v.number())),
+    duration: v.optional(v.nullable(v.number())),
+    language: v.optional(v.nullable(v.string())),
+    label: v.optional(v.nullable(v.string())),
+    format: v.optional(v.nullable(v.string())),
+    type: v.optional(v.nullable(v.picklist(["mp4", "fmp4"]))),
+    segment_base: v.optional(v.nullable(SegmentBaseSchema)),
 });
 
-const TrackSchema = z.object({
-    url: z.string(),
-    type: z.enum(TrackType),
-    purpose: z.enum(TrackPurpose).default(TrackPurpose.CONTENT),
-    is_original: z.boolean().default(true),
-    quality: z.enum(Quality).default(Quality.HIGH),
-    priority: z.number().default(0),
-    metadata: TrackMetadataSchema.nullish(),
-    ...TrackFormatSchema.shape,
+const TrackSchema = v.object({
+    url: v.string(),
+    type: v.enum(TrackType),
+    purpose: v.optional(v.enum(TrackPurpose), TrackPurpose.CONTENT),
+    is_original: v.optional(v.boolean(), true),
+    quality: v.optional(v.enum(Quality), Quality.HIGH),
+    priority: v.optional(v.number(), 0),
+    metadata: v.optional(v.nullable(TrackMetadataSchema)),
+    ...TrackFormatFields,
 });
 
-const MediaItemSchema = z.object({
-    external_id: z.string().optional(),
-    title: z.string().nullish(),
-    description: z.string().nullish(),
-    type: z.enum(MediaType),
-    tracks: z.array(TrackSchema).default([]),
-    tags: z.array(z.string()).default([]),
-    duration: z.number().nullable().optional(),
-    published_time: z.string().optional(),
-    create_time: z.string().optional(),
+const MediaItemSchema = v.object({
+    external_id: v.optional(v.string()),
+    title: v.optional(v.nullable(v.string())),
+    description: v.optional(v.nullable(v.string())),
+    type: v.enum(MediaType),
+    tracks: v.optional(v.array(TrackSchema), []),
+    tags: v.optional(v.array(v.string()), []),
+    duration: v.optional(v.nullable(v.number())),
+    published_time: v.optional(v.string()),
+    create_time: v.optional(v.string()),
 });
 
-const PostItemSchema = z.object({
-    title: z.string(),
-    url: z.string().optional(),
-    description: z.string().default(""),
-    external_id: z.string().optional().default(""),
-    tags: z.array(z.string()).default([]),
+const PostItemSchema = v.object({
+    title: v.string(),
+    url: v.optional(v.string()),
+    description: v.optional(v.string(), ""),
+    external_id: v.optional(v.string(), ""),
+    tags: v.optional(v.array(v.string()), []),
     author: AuthorSchema,
-    platform: z.enum(PostSource),
-    media: z.array(MediaItemSchema),
-    published_time: z.string().optional(),
-    create_time: z.string().optional(),
+    platform: v.enum(PostSource),
+    media: v.array(MediaItemSchema),
+    published_time: v.optional(v.string()),
+    create_time: v.optional(v.string()),
 });
 
-const CreateTaskSchema = z.object({
-    library_id: z.uuid(),
-    posts: z.array(PostItemSchema),
-    media: z.array(MediaItemSchema),
-    force: z.boolean().optional(),
+const CreateTaskSchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    posts: v.array(PostItemSchema),
+    media: v.array(MediaItemSchema),
+    force: v.optional(v.boolean()),
 });
 
-const RetrySyncSchema = z.object({
-    media_ids: z.array(z.uuid()).optional(),
-    post_ids: z.array(z.uuid()).optional(),
-    library_id: z.uuid(),
+const RetrySyncSchema = v.object({
+    media_ids: v.optional(v.array(v.pipe(v.string(), v.uuid()))),
+    post_ids: v.optional(v.array(v.pipe(v.string(), v.uuid()))),
+    library_id: v.pipe(v.string(), v.uuid()),
 });
 
-const QueueAiSchema = z.object({
-    library_id: z.uuid(),
-    entity_type: z.enum(["post", "media"]),
-    entity_ids: z.array(z.uuid()).optional(),
-    force: z.boolean().optional(),
+const QueueAiSchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    entity_type: v.picklist(["post", "media"]),
+    entity_ids: v.optional(v.array(v.pipe(v.string(), v.uuid()))),
+    force: v.optional(v.boolean()),
 });
 
 // Better Auth Schemas
-const SignUpBodySchema = z.object({
-    name: z.string(),
-    email: z.string().email(),
-    password: z.string().min(8),
+const SignUpBodySchema = v.object({
+    name: v.string(),
+    email: v.pipe(v.string(), v.email()),
+    password: v.pipe(v.string(), v.minLength(8)),
 });
 
-const SignInBodySchema = z.object({
-    email: z.string().email(),
-    password: z.string(),
+const SignInBodySchema = v.object({
+    email: v.pipe(v.string(), v.email()),
+    password: v.string(),
 });
 
 interface RouteItem {
@@ -530,9 +530,9 @@ interface RouteItem {
     summary: string;
     description?: string;
     tags: string[];
-    querySchema?: z.ZodObject<any>;
-    bodySchema?: z.ZodTypeAny;
-    paramSchema?: z.ZodObject<any>;
+    querySchema?: v.GenericSchema;
+    bodySchema?: v.GenericSchema;
+    paramSchema?: v.GenericSchema;
     responseSchema?: any;
     requiresAuth: boolean;
 }
@@ -606,7 +606,7 @@ const routes: RouteItem[] = [
         method: "delete",
         summary: "Revoke specified API token",
         tags: ["User"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -670,7 +670,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Delete specified media library",
         tags: ["Library"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -700,7 +700,7 @@ const routes: RouteItem[] = [
         method: "get",
         summary: "Get AI embedding and description config for the media library",
         tags: ["Library"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -724,7 +724,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Modify AI embedding and description config for the media library",
         tags: ["Library"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         bodySchema: LibraryAiConfigSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object", nullable: true }),
@@ -779,7 +779,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Delete tag",
         tags: ["Tag"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -818,11 +818,11 @@ const routes: RouteItem[] = [
         method: "get",
         summary: "Get author list in the media library",
         tags: ["Post"],
-        querySchema: z.object({
-            library_id: z.uuid(),
-            keyword: z.string().optional(),
-            author_ids: z.string().optional(),
-            platform: z.enum(PostSource).optional(),
+        querySchema: v.object({
+            library_id: v.pipe(v.string(), v.uuid()),
+            keyword: v.optional(v.string()),
+            author_ids: v.optional(v.string()),
+            platform: v.optional(v.enum(PostSource)),
         }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "array", items: { type: "object" } }),
@@ -832,7 +832,7 @@ const routes: RouteItem[] = [
         method: "get",
         summary: "Get Post details",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
@@ -841,12 +841,12 @@ const routes: RouteItem[] = [
         method: "get",
         summary: "List paginated media for a Post",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.uuid() }),
-        querySchema: z.object({
-            page: z.number().int().positive().optional(),
-            limit: z.number().int().positive().optional(),
-            keyword: z.string().optional(),
-            type: z.enum(MediaType).optional(),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
+        querySchema: v.object({
+            page: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+            limit: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+            keyword: v.optional(v.string()),
+            type: v.optional(v.enum(MediaType)),
         }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
@@ -866,7 +866,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Move Post to trash",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -880,7 +880,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Restore Post from trash",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -894,7 +894,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Permanently delete Post",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -908,7 +908,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Update Post info (title, description, published time, etc.)",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         bodySchema: PostUpdateInfoSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -918,7 +918,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Replace tags bound to Post",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         bodySchema: PostReplaceTagsSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
@@ -933,7 +933,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Associate physical media with Post",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         bodySchema: PostAttachMediaSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -943,7 +943,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Reorder media items under Post",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         bodySchema: PostReorderMediaSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -953,7 +953,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Remove associated media from Post",
         tags: ["Post"],
-        paramSchema: z.object({ id: z.uuid(), mediaId: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), mediaId: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
@@ -978,7 +978,7 @@ const routes: RouteItem[] = [
         method: "get",
         summary: "Get Media details",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse(mediaDetailOpenApiSchema),
     },
@@ -987,7 +987,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Move Media to trash",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -1001,7 +1001,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Restore Media from trash",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -1015,7 +1015,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Permanently delete Media and its files",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -1029,8 +1029,8 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Regenerate cover for video Media",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.uuid() }),
-        bodySchema: z.object({ replace_external_cover: z.boolean().optional() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
+        bodySchema: v.object({ replace_external_cover: v.optional(v.boolean()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
@@ -1039,11 +1039,11 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Batch regenerate video covers",
         tags: ["Media"],
-        bodySchema: z.object({
-            library_id: z.uuid(),
-            media_ids: z.array(z.uuid()).optional(),
-            post_ids: z.array(z.uuid()).optional(),
-            replace_external_cover: z.boolean().optional(),
+        bodySchema: v.object({
+            library_id: v.pipe(v.string(), v.uuid()),
+            media_ids: v.optional(v.array(v.pipe(v.string(), v.uuid()))),
+            post_ids: v.optional(v.array(v.pipe(v.string(), v.uuid()))),
+            replace_external_cover: v.optional(v.boolean()),
         }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -1053,7 +1053,7 @@ const routes: RouteItem[] = [
         method: "get",
         summary: "Get MPEG-DASH MPD playlist for video",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: {
             type: "string",
@@ -1065,7 +1065,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Update basic info of Media",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         bodySchema: MediaUpdateInfoSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -1075,7 +1075,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Replace tags bound to Media",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         bodySchema: MediaReplaceTagsSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
@@ -1090,7 +1090,7 @@ const routes: RouteItem[] = [
         method: "get",
         summary: "List all playback tracks under Media",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "array", items: trackResponseOpenApiSchema }),
     },
@@ -1099,7 +1099,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Get S3 presigned URL for uploading track",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         bodySchema: PresignUploadSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
@@ -1118,7 +1118,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Register/replace specified track and associate physical file",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         bodySchema: RegisterTrackSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -1128,7 +1128,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Replace physical file association of specified track",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.uuid(), trackId: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), trackId: v.pipe(v.string(), v.uuid()) }),
         bodySchema: ReplaceFileSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -1138,7 +1138,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Delete track record",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.uuid(), trackId: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), trackId: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
@@ -1147,7 +1147,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Update track attributes",
         tags: ["Media"],
-        paramSchema: z.object({ id: z.uuid(), trackId: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), trackId: v.pipe(v.string(), v.uuid()) }),
         bodySchema: UpdateTrackMetadataSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -1232,7 +1232,7 @@ const routes: RouteItem[] = [
         method: "get",
         summary: "Get background task status and details",
         tags: ["Jobs"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
@@ -1241,7 +1241,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Pause running background task",
         tags: ["Jobs"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
@@ -1250,7 +1250,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Resume paused background task",
         tags: ["Jobs"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
@@ -1259,7 +1259,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Cancel background task",
         tags: ["Jobs"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
@@ -1268,7 +1268,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Retry failed units of a background task",
         tags: ["Jobs"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
@@ -1277,7 +1277,7 @@ const routes: RouteItem[] = [
         method: "get",
         summary: "List units of a background task",
         tags: ["Jobs"],
-        paramSchema: z.object({ id: z.uuid() }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -1415,7 +1415,7 @@ async function generateOpenApi() {
         // Query parameters
         const queryParams: any[] = [];
         if (route.querySchema) {
-            const openApiQuery = zodToOpenApi(route.querySchema);
+            const openApiQuery = valibotToOpenApi(route.querySchema);
             if (openApiQuery && openApiQuery.properties) {
                 for (const [key, prop] of Object.entries(openApiQuery.properties)) {
                     const isRequired = openApiQuery.required && openApiQuery.required.includes(key);
@@ -1435,7 +1435,7 @@ async function generateOpenApi() {
 
         // Request body
         if (route.bodySchema) {
-            const bodySpec = zodToOpenApi(route.bodySchema);
+            const bodySpec = valibotToOpenApi(route.bodySchema);
             operation.requestBody = {
                 required: true,
                 content: {

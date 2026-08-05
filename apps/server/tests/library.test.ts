@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import * as v from "valibot";
 
 Object.assign(process.env, {
     AUTH_SECRET: "test-auth-secret",
@@ -16,7 +17,7 @@ describe("library creation", () => {
     test("rejects user_id from the request body", async () => {
         const libraryApi = await import("../src/api/library");
 
-        const parsed = libraryApi.LibraryCreateBodySchema.safeParse({
+        const parsed = v.safeParse(libraryApi.LibraryCreateBodySchema, {
             name: "Design References",
             description: "",
             user_id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3",
@@ -30,13 +31,13 @@ describe("library creation", () => {
         const id = "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3";
         const legacyIdentifierKey = ["u", "id"].join("");
 
-        const currentPayload = libraryApi.LibraryUpdateBodySchema.safeParse({
+        const currentPayload = v.safeParse(libraryApi.LibraryUpdateBodySchema, {
             id,
             name: "Updated",
         });
         expect(currentPayload.success).toBe(true);
 
-        const legacyPayload = libraryApi.LibraryUpdateBodySchema.safeParse({
+        const legacyPayload = v.safeParse(libraryApi.LibraryUpdateBodySchema, {
             [legacyIdentifierKey]: id,
             name: "Updated",
         });
@@ -51,7 +52,7 @@ describe("library item movement", () => {
         const postId = "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b4";
         const mediaId = "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b5";
 
-        const parsed = libraryApi.LibraryMoveItemsBodySchema.safeParse({
+        const parsed = v.safeParse(libraryApi.LibraryMoveItemsBodySchema, {
             post_ids: [postId],
             media_ids: [mediaId],
             target_library_id: targetLibraryId,
@@ -64,7 +65,7 @@ describe("library item movement", () => {
         const libraryApi = await import("../src/api/library");
         const targetLibraryId = "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3";
 
-        const parsed = libraryApi.LibraryMoveItemsBodySchema.safeParse({
+        const parsed = v.safeParse(libraryApi.LibraryMoveItemsBodySchema, {
             post_ids: [],
             media_ids: [],
             target_library_id: targetLibraryId,
@@ -116,12 +117,12 @@ describe("cover config and jobs api", () => {
     test("validates force option in cover jobs body schema", async () => {
         const libraryApi = await import("../src/api/library");
 
-        const defaultParsed = libraryApi.LibraryCoverJobsBodySchema.parse({
+        const defaultParsed = v.parse(libraryApi.LibraryCoverJobsBodySchema, {
             type: "MANUAL",
         });
         expect(defaultParsed.force).toBe(false);
 
-        const forceParsed = libraryApi.LibraryCoverJobsBodySchema.parse({
+        const forceParsed = v.parse(libraryApi.LibraryCoverJobsBodySchema, {
             type: "MANUAL",
             force: true,
         });
@@ -140,7 +141,7 @@ describe("cover config and jobs api", () => {
         const libraryApi = await import("../src/api/library");
         const { Quality } = await import("../src/lib/types");
 
-        const parsed = libraryApi.LibraryCoverConfigBodySchema.parse({
+        const parsed = v.parse(libraryApi.LibraryCoverConfigBodySchema, {
             qualities: ["MEDIUM", "LOW"],
         });
         expect(parsed.qualities).toEqual([Quality.LOW, Quality.MEDIUM]);

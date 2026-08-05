@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { ApiTokenService } from "../src/services/apiToken";
 import { createHash } from "crypto";
+import * as v from "valibot";
 
 Object.assign(process.env, {
     AUTH_SECRET: "test-auth-secret",
@@ -65,7 +66,7 @@ describe("Token Route Validation", () => {
         const schema = userApi.TokenCreateBodySchema;
 
         // Valid payload
-        const valid = schema.safeParse({
+        const valid = v.safeParse(schema, {
             name: "GitHub Sync Script",
             library_id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3",
             expires_in_seconds: 3600,
@@ -73,26 +74,26 @@ describe("Token Route Validation", () => {
         expect(valid.success).toBe(true);
 
         // Optional fields missing
-        const partial = schema.safeParse({
+        const partial = v.safeParse(schema, {
             name: "GitHub Sync Script",
         });
         expect(partial.success).toBe(true);
 
         // Missing required field
-        const missingName = schema.safeParse({
+        const missingName = v.safeParse(schema, {
             library_id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3",
         });
         expect(missingName.success).toBe(false);
 
         // Invalid uuid
-        const invalidUuid = schema.safeParse({
+        const invalidUuid = v.safeParse(schema, {
             name: "GitHub Sync Script",
             library_id: "invalid-uuid",
         });
         expect(invalidUuid.success).toBe(false);
 
         // Negative expiration
-        const negativeExp = schema.safeParse({
+        const negativeExp = v.safeParse(schema, {
             name: "GitHub Sync Script",
             expires_in_seconds: -10,
         });
