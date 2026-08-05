@@ -75,8 +75,6 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-
-
   Map<String, dynamic> _calculateColumnBounds(double width) {
     final isMobile = width < 600;
     final padding = isMobile ? 12.0 : 24.0;
@@ -100,8 +98,10 @@ class _HomePageState extends State<HomePage> {
       maxCols = 8;
     }
 
-    final minTargetWidth = ((usableWidth - (maxCols - 1) * spacing) / maxCols).clamp(60.0, 500.0);
-    final maxTargetWidth = ((usableWidth - (minCols - 1) * spacing) / minCols).clamp(minTargetWidth + 50.0, 1500.0);
+    final minTargetWidth = ((usableWidth - (maxCols - 1) * spacing) / maxCols)
+        .clamp(60.0, 500.0);
+    final maxTargetWidth = ((usableWidth - (minCols - 1) * spacing) / minCols)
+        .clamp(minTargetWidth + 50.0, 1500.0);
 
     return {
       'minCols': minCols,
@@ -144,17 +144,29 @@ class _HomePageState extends State<HomePage> {
                   Wrap(
                     spacing: 6,
                     runSpacing: 6,
-                    children: ['4:3', '3:4', '16:9', '1:1', '3:2', '9:16', 'auto'].map((ratio) {
-                      final isSelected = _itemAspectRatio == ratio;
-                      return ChoiceChip(
-                        label: Text(ratio == 'auto' ? 'Auto' : ratio, style: const TextStyle(fontSize: 12)),
-                        selected: isSelected,
-                        onSelected: (_) {
-                          setState(() => _itemAspectRatio = ratio);
-                          setDialogState(() {});
-                        },
-                      );
-                    }).toList(),
+                    children:
+                        [
+                          '4:3',
+                          '3:4',
+                          '16:9',
+                          '1:1',
+                          '3:2',
+                          '9:16',
+                          'auto',
+                        ].map((ratio) {
+                          final isSelected = _itemAspectRatio == ratio;
+                          return ChoiceChip(
+                            label: Text(
+                              ratio == 'auto' ? 'Auto' : ratio,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            selected: isSelected,
+                            onSelected: (_) {
+                              setState(() => _itemAspectRatio = ratio);
+                              setDialogState(() {});
+                            },
+                          );
+                        }).toList(),
                   ),
                   const SizedBox(height: 16),
                   Row(
@@ -162,10 +174,16 @@ class _HomePageState extends State<HomePage> {
                     children: [
                       const Text(
                         'Card Size',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: theme.colorScheme.primaryContainer,
                           borderRadius: BorderRadius.circular(6),
@@ -185,10 +203,13 @@ class _HomePageState extends State<HomePage> {
                   Container(
                     padding: const EdgeInsets.all(3),
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
+                      color: theme.colorScheme.surfaceContainerHighest
+                          .withValues(alpha: 0.5),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                        color: theme.colorScheme.outlineVariant.withOpacity(0.5),
+                        color: theme.colorScheme.outlineVariant.withValues(
+                          alpha: 0.5,
+                        ),
                         width: 1,
                       ),
                     ),
@@ -214,10 +235,12 @@ class _HomePageState extends State<HomePage> {
                                 boxShadow: isSelected
                                     ? [
                                         BoxShadow(
-                                          color: Colors.black.withOpacity(0.06),
+                                          color: Colors.black.withValues(
+                                            alpha: 0.06,
+                                          ),
                                           blurRadius: 4,
                                           offset: const Offset(0, 1),
-                                        )
+                                        ),
                                       ]
                                     : null,
                               ),
@@ -225,7 +248,9 @@ class _HomePageState extends State<HomePage> {
                                 '$colVal列',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
                                   color: isSelected
                                       ? theme.colorScheme.primary
                                       : theme.colorScheme.onSurfaceVariant,
@@ -404,7 +429,9 @@ class _HomePageState extends State<HomePage> {
         });
       }
     } catch (e) {
-      if (mounted && currentRequestId == _loadRequestId && !_postsCache.containsKey(cacheKey)) {
+      if (mounted &&
+          currentRequestId == _loadRequestId &&
+          !_postsCache.containsKey(cacheKey)) {
         _showErrorAlert(e.toString());
       }
     } finally {
@@ -1696,8 +1723,12 @@ class _HomePageState extends State<HomePage> {
                 LucideIcons.chevronLeft,
                 size: 18,
                 color: isPrevDisabled
-                    ? (isDark ? const Color(0xFF3F3F46) : const Color(0xFFCBD5E1))
-                    : (isDark ? const Color(0xFFFAFAFA) : const Color(0xFF0F172A)),
+                    ? (isDark
+                          ? const Color(0xFF3F3F46)
+                          : const Color(0xFFCBD5E1))
+                    : (isDark
+                          ? const Color(0xFFFAFAFA)
+                          : const Color(0xFF0F172A)),
               ),
             ),
           ),
@@ -1725,8 +1756,12 @@ class _HomePageState extends State<HomePage> {
                 LucideIcons.chevronRight,
                 size: 18,
                 color: isNextDisabled
-                    ? (isDark ? const Color(0xFF3F3F46) : const Color(0xFFCBD5E1))
-                    : (isDark ? const Color(0xFFFAFAFA) : const Color(0xFF0F172A)),
+                    ? (isDark
+                          ? const Color(0xFF3F3F46)
+                          : const Color(0xFFCBD5E1))
+                    : (isDark
+                          ? const Color(0xFFFAFAFA)
+                          : const Color(0xFF0F172A)),
               ),
             ),
           ),
@@ -1918,12 +1953,17 @@ class _HomePageState extends State<HomePage> {
                 GestureDetector(
                   onTap: _showLibrarySwitcher,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: isDark ? const Color(0xFF18181B) : Colors.white,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        color: isDark ? const Color(0xFF27272A) : const Color(0xFFE2E8F0),
+                        color: isDark
+                            ? const Color(0xFF27272A)
+                            : const Color(0xFFE2E8F0),
                         width: 0.8,
                       ),
                     ),
@@ -1932,7 +1972,9 @@ class _HomePageState extends State<HomePage> {
                       children: [
                         Icon(
                           LucideIcons.folder,
-                          color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF2563EB),
+                          color: isDark
+                              ? const Color(0xFF38BDF8)
+                              : const Color(0xFF2563EB),
                           size: 15,
                         ),
                         const SizedBox(width: 6),
@@ -1943,7 +1985,9 @@ class _HomePageState extends State<HomePage> {
                             style: TextStyle(
                               fontSize: 13.5,
                               fontWeight: FontWeight.w600,
-                              color: isDark ? const Color(0xFFFAFAFA) : const Color(0xFF0F172A),
+                              color: isDark
+                                  ? const Color(0xFFFAFAFA)
+                                  : const Color(0xFF0F172A),
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1951,7 +1995,9 @@ class _HomePageState extends State<HomePage> {
                         const SizedBox(width: 4),
                         Icon(
                           LucideIcons.chevronDown,
-                          color: isDark ? const Color(0xFFA1A1AA) : const Color(0xFF64748B),
+                          color: isDark
+                              ? const Color(0xFFA1A1AA)
+                              : const Color(0xFF64748B),
                           size: 14,
                         ),
                       ],
@@ -1960,12 +2006,17 @@ class _HomePageState extends State<HomePage> {
                 ),
                 if (_total > 0)
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: isDark ? const Color(0xFF18181B) : Colors.white,
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(
-                        color: isDark ? const Color(0xFF27272A) : const Color(0xFFE2E8F0),
+                        color: isDark
+                            ? const Color(0xFF27272A)
+                            : const Color(0xFFE2E8F0),
                         width: 0.8,
                       ),
                     ),
@@ -1975,7 +2026,9 @@ class _HomePageState extends State<HomePage> {
                         fontSize: 11,
                         fontFamily: 'monospace',
                         fontWeight: FontWeight.w600,
-                        color: isDark ? const Color(0xFFA1A1AA) : const Color(0xFF64748B),
+                        color: isDark
+                            ? const Color(0xFFA1A1AA)
+                            : const Color(0xFF64748B),
                       ),
                     ),
                   ),
@@ -2128,9 +2181,13 @@ class _HomePageState extends State<HomePage> {
                         ? (isMobile ? 2 : 4).clamp(minCols, maxCols)
                         : _itemColumns.clamp(minCols, maxCols);
 
-                    final cardWidth = (usableWidth - (activeCols - 1) * spacing) / activeCols;
+                    final cardWidth =
+                        (usableWidth - (activeCols - 1) * spacing) / activeCols;
                     final imgRatio = _itemAspectRatioValue;
-                    final childRatio = (cardWidth / (cardWidth / imgRatio + (isMobile ? 84 : 96))).clamp(0.35, 2.5);
+                    final childRatio =
+                        (cardWidth /
+                                (cardWidth / imgRatio + (isMobile ? 84 : 96)))
+                            .clamp(0.35, 2.5);
 
                     return GridView.builder(
                       padding: EdgeInsets.all(padding),
@@ -2159,8 +2216,12 @@ class _HomePageState extends State<HomePage> {
   Widget _buildViewOptionsToggleButton(ThemeData theme) {
     final isDark = theme.brightness == Brightness.dark;
     final Color bg = isDark ? const Color(0xFF18181B) : const Color(0xFFFFFFFF);
-    final Color border = isDark ? const Color(0xFF27272A) : const Color(0xFFE2E8F0);
-    final Color iconColor = isDark ? const Color(0xFFA1A1AA) : const Color(0xFF475569);
+    final Color border = isDark
+        ? const Color(0xFF27272A)
+        : const Color(0xFFE2E8F0);
+    final Color iconColor = isDark
+        ? const Color(0xFFA1A1AA)
+        : const Color(0xFF475569);
 
     return SizedBox(
       height: 38,
@@ -2174,9 +2235,7 @@ class _HomePageState extends State<HomePage> {
           side: BorderSide(color: border, width: 1.0),
           minimumSize: Size.zero,
           padding: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
         child: Icon(LucideIcons.slidersHorizontal, size: 18, color: iconColor),
       ),
@@ -2214,9 +2273,7 @@ class _HomePageState extends State<HomePage> {
           side: BorderSide(color: border, width: 1.0),
           minimumSize: Size.zero,
           padding: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
         child: Icon(LucideIcons.filter, size: 18, color: iconColor),
       ),
@@ -2266,7 +2323,9 @@ class _HomePageState extends State<HomePage> {
     if (isWide) {
       // Desktop / Wide Layout with Left Sidebar
       return Scaffold(
-        backgroundColor: isDark ? const Color(0xFF09090B) : const Color(0xFFF8FAFC),
+        backgroundColor: isDark
+            ? const Color(0xFF09090B)
+            : const Color(0xFFF8FAFC),
         body: SafeArea(
           child: Row(
             children: [
@@ -2281,7 +2340,9 @@ class _HomePageState extends State<HomePage> {
                         color: isDark ? const Color(0xFF18181B) : Colors.white,
                         border: Border(
                           bottom: BorderSide(
-                            color: isDark ? const Color(0xFF27272A) : const Color(0xFFE2E8F0),
+                            color: isDark
+                                ? const Color(0xFF27272A)
+                                : const Color(0xFFE2E8F0),
                             width: 1.0,
                           ),
                         ),
@@ -2295,7 +2356,9 @@ class _HomePageState extends State<HomePage> {
                               style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
-                                color: isDark ? const Color(0xFFFAFAFA) : const Color(0xFF111827),
+                                color: isDark
+                                    ? const Color(0xFFFAFAFA)
+                                    : const Color(0xFF111827),
                               ),
                             ),
                             const SizedBox(width: 8),
@@ -2306,7 +2369,9 @@ class _HomePageState extends State<HomePage> {
                                   vertical: 2,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: isDark ? const Color(0xFF27272A) : const Color(0xFFF3F4F6),
+                                  color: isDark
+                                      ? const Color(0xFF27272A)
+                                      : const Color(0xFFF3F4F6),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
@@ -2314,7 +2379,9 @@ class _HomePageState extends State<HomePage> {
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontFamily: 'monospace',
-                                    color: isDark ? const Color(0xFFA1A1AA) : const Color(0xFF6B7280),
+                                    color: isDark
+                                        ? const Color(0xFFA1A1AA)
+                                        : const Color(0xFF6B7280),
                                     fontWeight: FontWeight.normal,
                                   ),
                                 ),
@@ -2325,7 +2392,9 @@ class _HomePageState extends State<HomePage> {
                               style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
-                                color: isDark ? const Color(0xFFFAFAFA) : const Color(0xFF111827),
+                                color: isDark
+                                    ? const Color(0xFFFAFAFA)
+                                    : const Color(0xFF111827),
                               ),
                             ),
                         ],
@@ -2346,14 +2415,18 @@ class _HomePageState extends State<HomePage> {
     } else {
       // Mobile Layout with Custom Flat Bottom Bar
       return Scaffold(
-        backgroundColor: isDark ? const Color(0xFF09090B) : const Color(0xFFF8FAFC),
+        backgroundColor: isDark
+            ? const Color(0xFF09090B)
+            : const Color(0xFFF8FAFC),
         bottomNavigationBar: Container(
           height: 56 + MediaQuery.of(context).padding.bottom,
           decoration: BoxDecoration(
             color: isDark ? const Color(0xFF18181B) : Colors.white,
             border: Border(
               top: BorderSide(
-                color: isDark ? const Color(0xFF27272A) : const Color(0xFFE2E8F0),
+                color: isDark
+                    ? const Color(0xFF27272A)
+                    : const Color(0xFFE2E8F0),
                 width: 1.0,
               ),
             ),
@@ -2461,14 +2534,19 @@ class _PostCardItemState extends State<PostCardItem> {
     final Color cardBg = _isHovered
         ? (isDark ? const Color(0xFF27272A) : const Color(0xFFF8FAFC))
         : (isDark ? const Color(0xFF18181B) : Colors.white);
-    final Color cardBorder = isDark ? const Color(0xFF27272A) : const Color(0xFFE5E7EB);
+    final Color cardBorder = isDark
+        ? const Color(0xFF27272A)
+        : const Color(0xFFE5E7EB);
 
     return LayoutBuilder(
       builder: (context, constraints) {
         String? coverUrl;
         if (post.media.isNotEmpty) {
           final dpr = MediaQuery.of(context).devicePixelRatio;
-          coverUrl = post.media.first.getImageUrlForWidth(constraints.maxWidth, devicePixelRatio: dpr);
+          coverUrl = post.media.first.getImageUrlForWidth(
+            constraints.maxWidth,
+            devicePixelRatio: dpr,
+          );
         }
 
         return MouseRegion(
@@ -2511,16 +2589,21 @@ class _PostCardItemState extends State<PostCardItem> {
                               child: Image.network(
                                 coverUrl,
                                 fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) => Container(
-                                  color: isDark ? const Color(0xFF27272A) : const Color(0xFFF1F5F9),
-                                  child: Center(
-                                    child: Icon(
-                                      LucideIcons.image,
-                                      color: theme.colorScheme.onSurfaceVariant,
-                                      size: 24,
+                                errorBuilder: (context, error, stackTrace) =>
+                                    Container(
+                                      color: isDark
+                                          ? const Color(0xFF27272A)
+                                          : const Color(0xFFF1F5F9),
+                                      child: Center(
+                                        child: Icon(
+                                          LucideIcons.image,
+                                          color: theme
+                                              .colorScheme
+                                              .onSurfaceVariant,
+                                          size: 24,
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                ),
                               ),
                             )
                           else
@@ -2531,8 +2614,14 @@ class _PostCardItemState extends State<PostCardItem> {
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
                                   colors: isDark
-                                      ? [const Color(0xFF27272A), const Color(0xFF18181B)]
-                                      : [const Color(0xFFF1F5F9), const Color(0xFFE2E8F0)],
+                                      ? [
+                                          const Color(0xFF27272A),
+                                          const Color(0xFF18181B),
+                                        ]
+                                      : [
+                                          const Color(0xFFF1F5F9),
+                                          const Color(0xFFE2E8F0),
+                                        ],
                                 ),
                               ),
                               child: Column(
@@ -2541,7 +2630,9 @@ class _PostCardItemState extends State<PostCardItem> {
                                   Icon(
                                     LucideIcons.quote,
                                     size: 20,
-                                    color: isDark ? const Color(0xFF71717A) : const Color(0xFF94A3B8),
+                                    color: isDark
+                                        ? const Color(0xFF71717A)
+                                        : const Color(0xFF94A3B8),
                                   ),
                                   const SizedBox(height: 6),
                                   Text(
@@ -2549,7 +2640,9 @@ class _PostCardItemState extends State<PostCardItem> {
                                     style: TextStyle(
                                       fontSize: 11.5,
                                       fontWeight: FontWeight.w600,
-                                      color: isDark ? const Color(0xFFD4D4D8) : const Color(0xFF475569),
+                                      color: isDark
+                                          ? const Color(0xFFD4D4D8)
+                                          : const Color(0xFF475569),
                                       height: 1.3,
                                     ),
                                     maxLines: 2,
@@ -2566,16 +2659,26 @@ class _PostCardItemState extends State<PostCardItem> {
                               top: 8,
                               left: 8,
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2.5,
+                                ),
                                 decoration: BoxDecoration(
                                   color: Colors.black.withValues(alpha: 0.65),
                                   borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(color: Colors.white24, width: 0.5),
+                                  border: Border.all(
+                                    color: Colors.white24,
+                                    width: 0.5,
+                                  ),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(LucideIcons.layers, size: 10, color: Colors.white),
+                                    const Icon(
+                                      LucideIcons.layers,
+                                      size: 10,
+                                      color: Colors.white,
+                                    ),
                                     const SizedBox(width: 3),
                                     Text(
                                       '${post.media.length}',
@@ -2615,7 +2718,9 @@ class _PostCardItemState extends State<PostCardItem> {
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
                             height: 1.3,
-                            color: isDark ? const Color(0xFFFAFAFA) : const Color(0xFF0F172A),
+                            color: isDark
+                                ? const Color(0xFFFAFAFA)
+                                : const Color(0xFF0F172A),
                           ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
@@ -2625,20 +2730,23 @@ class _PostCardItemState extends State<PostCardItem> {
                           children: [
                             CircleAvatar(
                               radius: 9,
-                              backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                              backgroundColor:
+                                  theme.colorScheme.surfaceContainerHighest,
                               backgroundImage: post.authorAvatarUrl != null
                                   ? NetworkImage(post.authorAvatarUrl!)
                                   : null,
                               child: post.authorAvatarUrl == null
                                   ? Text(
-                                      (post.authorName != null && post.authorName!.isNotEmpty
+                                      (post.authorName != null &&
+                                                  post.authorName!.isNotEmpty
                                               ? post.authorName![0]
                                               : 'U')
                                           .toUpperCase(),
                                       style: TextStyle(
                                         fontSize: 8.5,
                                         fontWeight: FontWeight.bold,
-                                        color: theme.colorScheme.onSurfaceVariant,
+                                        color:
+                                            theme.colorScheme.onSurfaceVariant,
                                       ),
                                     )
                                   : null,
@@ -2646,13 +2754,16 @@ class _PostCardItemState extends State<PostCardItem> {
                             const SizedBox(width: 5),
                             Expanded(
                               child: Text(
-                                post.authorName != null && post.authorName!.isNotEmpty
+                                post.authorName != null &&
+                                        post.authorName!.isNotEmpty
                                     ? post.authorName!
                                     : 'Unknown',
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w500,
-                                  color: isDark ? const Color(0xFFA1A1AA) : const Color(0xFF475569),
+                                  color: isDark
+                                      ? const Color(0xFFA1A1AA)
+                                      : const Color(0xFF475569),
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -2664,12 +2775,15 @@ class _PostCardItemState extends State<PostCardItem> {
                                   ? (post.publishedTime!.length >= 10
                                         ? post.publishedTime!.substring(0, 10)
                                         : post.publishedTime!)
-                                  : (post.media.isNotEmpty && post.media.first.width != null
+                                  : (post.media.isNotEmpty &&
+                                            post.media.first.width != null
                                         ? '${post.media.first.width}x${post.media.first.height}'
                                         : ''),
                               style: TextStyle(
                                 fontSize: 10,
-                                color: isDark ? const Color(0xFF71717A) : const Color(0xFF94A3B8),
+                                color: isDark
+                                    ? const Color(0xFF71717A)
+                                    : const Color(0xFF94A3B8),
                               ),
                             ),
                           ],
