@@ -65,6 +65,8 @@ function selectContentTrack(tracks: MediaTrack[] | undefined, type: string): Med
 const defaultPosterUrl = computed(() => {
     if (!props.media) return "";
     if (props.media.cover_url) return props.media.cover_url;
+    if ((props.media as any).poster) return (props.media as any).poster;
+    if ((props.media as any).thumbnail) return (props.media as any).thumbnail;
 
     const coverTracks = (props.media.tracks || []).filter((track) => track.purpose.toUpperCase() === "COVER");
     const sorted = sortTracks(coverTracks);
@@ -108,10 +110,21 @@ const contentAssetUrl = computed(() => {
     return selectContentTrack(props.media.tracks, props.media.type)?.url || "";
 });
 
-// Image Loading State (with 200ms delay to prevent flicker on fast loads)
-const isImageLoading = ref(false);
+/**
+ * Persistent 2-Layer Image Quality Cross-Fade Architecture (LQIP / Progressive Loading Best Practice)
+ *
+ * 1. Base Layer (activeSrcUrl): Always rendered 100% visible (opacity-100) and mounted in DOM.
+ *    It NEVER unmounts, resets to opacity-0, or flushes its bitmap when higher-resolution sources arrive.
+ * 2. Upgrade Layer (pendingSrcUrl): Preloads incoming high-res image (1440p/4K) in the background
+ *    at opacity-0. When native @load event fires, it smoothly cross-fades into view via CSS
+ *    transition-opacity duration-350 ease-out over the base layer with ZERO black/blank frames.
+ */
+const activeSrcUrl = ref<string>("");
+const pendingSrcUrl = ref<string>("");
+const isPendingLoaded = ref<boolean>(false);
 const showLoadingSpinner = ref(false);
 let loadingTimer: ReturnType<typeof setTimeout> | null = null;
+let fadeTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const clearLoadingTimer = () => {
     if (loadingTimer) {
@@ -122,37 +135,104 @@ const clearLoadingTimer = () => {
 
 watch(
     () => [props.media?.id, imageSrcUrl.value, livePhotoImageSrc.value, defaultPosterUrl.value],
-    ([newId]) => {
+    (newValues, oldValues) => {
+        const newId = newValues[0];
+        const oldId = oldValues?.[0];
         clearLoadingTimer();
+        if (fadeTimeout) {
+            clearTimeout(fadeTimeout);
+            fadeTimeout = null;
+        }
+
+        const lowResCoverUrl = defaultPosterUrl.value || (props.media as any)?.poster || (props.media as any)?.thumbnail || (props.media as any)?.cover_url || "";
+        const highResUrl = imageSrcUrl.value || livePhotoImageSrc.value || "";
+
+        const baseLayerUrl = lowResCoverUrl || highResUrl;
+
+        if (!newId || !baseLayerUrl) {
+            activeSrcUrl.value = "";
+            pendingSrcUrl.value = "";
+            isPendingLoaded.value = false;
+            showLoadingSpinner.value = false;
+            return;
+        }
+
+        if (newId !== oldId || !activeSrcUrl.value) {
+            // Switched to a different media item or re-entering:
+            // ALWAYS initialize base layer with lowResCoverUrl for instant 0ms painting!
+            activeSrcUrl.value = baseLayerUrl;
+
+            // If highResUrl is present and different from baseLayerUrl, queue highResUrl in pending layer for background loading
+            if (highResUrl && highResUrl !== baseLayerUrl) {
+                pendingSrcUrl.value = highResUrl;
+                isPendingLoaded.value = false;
+            } else {
+                pendingSrcUrl.value = "";
+                isPendingLoaded.value = false;
+            }
+        } else if (highResUrl && activeSrcUrl.value !== highResUrl && pendingSrcUrl.value !== highResUrl) {
+            // Quality upgrade or track URL change while staying on same media
+            pendingSrcUrl.value = highResUrl;
+            isPendingLoaded.value = false;
+        }
+
         if (newId && (props.media?.type === "IMAGE" || props.media?.type === "LIVE_PHOTO")) {
-            isImageLoading.value = true;
-            loadingTimer = setTimeout(() => {
-                if (isImageLoading.value) {
-                    showLoadingSpinner.value = true;
-                }
-            }, 200);
+            if (!activeSrcUrl.value) {
+                loadingTimer = setTimeout(() => {
+                    if (!activeSrcUrl.value) {
+                        showLoadingSpinner.value = true;
+                    }
+                }, 200);
+            } else {
+                clearLoadingTimer();
+                showLoadingSpinner.value = false;
+            }
         } else {
-            isImageLoading.value = false;
+            clearLoadingTimer();
             showLoadingSpinner.value = false;
         }
     },
     { immediate: true },
 );
 
-const handleImageLoaded = () => {
+const handleBaseLoaded = () => {
     clearLoadingTimer();
-    isImageLoading.value = false;
     showLoadingSpinner.value = false;
 };
 
-const handleImageError = () => {
+const handleBaseError = () => {
     clearLoadingTimer();
-    isImageLoading.value = false;
     showLoadingSpinner.value = false;
+};
+
+const handlePendingLoaded = () => {
+    clearLoadingTimer();
+    showLoadingSpinner.value = false;
+    if (pendingSrcUrl.value) {
+        isPendingLoaded.value = true;
+        fadeTimeout = setTimeout(() => {
+            if (pendingSrcUrl.value) {
+                activeSrcUrl.value = pendingSrcUrl.value;
+                pendingSrcUrl.value = "";
+                isPendingLoaded.value = false;
+            }
+        }, 350);
+    }
+};
+
+const handlePendingError = () => {
+    clearLoadingTimer();
+    showLoadingSpinner.value = false;
+    pendingSrcUrl.value = "";
+    isPendingLoaded.value = false;
 };
 
 onUnmounted(() => {
     clearLoadingTimer();
+    if (fadeTimeout) {
+        clearTimeout(fadeTimeout);
+        fadeTimeout = null;
+    }
 });
 
 // Panning State
@@ -328,9 +408,9 @@ const handleImageClick = (e: MouseEvent) => {
         :class="{ 'cursor-zoom-in': props.interactive }"
         @click="props.interactive && emit('click-media')"
     >
-        <!-- Floating Glassmorphism Loading Indicator (Only shown after 200ms delay for slow loads) -->
+        <!-- Floating Glassmorphism Loading Indicator (Only shown after 200ms delay for slow loads when no image is visible) -->
         <div
-            v-if="isLoading || showLoadingSpinner"
+            v-if="(isLoading && !activeSrcUrl) || showLoadingSpinner"
             class="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-xs z-30 pointer-events-none transition-opacity duration-300"
         >
             <div class="flex items-center gap-2.5 px-4 py-2 rounded-full bg-zinc-950/85 border border-white/15 shadow-2xl backdrop-blur-xl">
@@ -398,8 +478,6 @@ const handleImageClick = (e: MouseEvent) => {
                             transformOrigin: 'center center',
                             transition: isDragging ? 'none' : 'transform 0.15s ease-out',
                         }"
-                        @load="handleImageLoaded"
-                        @error="handleImageError"
                     />
                 </div>
             </template>
@@ -418,34 +496,40 @@ const handleImageClick = (e: MouseEvent) => {
                 >
                     <!-- Ambient Blur Backdrop -->
                     <img
-                        v-if="imageSrcUrl || defaultPosterUrl"
-                        :src="imageSrcUrl || defaultPosterUrl"
+                        v-if="activeSrcUrl || pendingSrcUrl"
+                        :src="pendingSrcUrl || activeSrcUrl"
                         class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
                         aria-hidden="true"
                     />
-                    <!-- Fast Cover/Thumbnail Placeholder Layer -->
+                    <!-- Base Image Layer (Always 100% visible, never unmounts, never becomes opacity-0) -->
                     <img
-                        v-if="defaultPosterUrl && defaultPosterUrl !== imageSrcUrl && isImageLoading"
-                        :src="defaultPosterUrl"
-                        class="absolute z-10 max-w-full max-h-full object-contain select-none pointer-events-none"
-                        :style="{
-                            transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
-                            transformOrigin: 'center center',
-                        }"
-                        aria-hidden="true"
-                    />
-                    <img
-                        :src="imageSrcUrl || defaultPosterUrl"
+                        v-if="activeSrcUrl"
+                        :src="activeSrcUrl"
                         :alt="media.title || $t('post_detail.viewer.preview')"
-                        class="relative z-10 max-w-full max-h-full object-contain shadow-2xl select-none pointer-events-none"
+                        class="relative z-10 w-full h-full max-w-full max-h-full object-contain shadow-2xl select-none pointer-events-none"
                         :style="{
                             transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
                             transformOrigin: 'center center',
                             transition: isDragging ? 'none' : 'transform 0.15s ease-out',
                         }"
-                        @load="handleImageLoaded"
-                        @error="handleImageError"
+                        @load="handleBaseLoaded"
+                        @error="handleBaseError"
                         draggable="false"
+                    />
+                    <!-- High-Res Upgrade Layer (Smoothly fades in over base layer when loaded) -->
+                    <img
+                        v-if="pendingSrcUrl"
+                        :src="pendingSrcUrl"
+                        class="absolute z-20 w-full h-full max-w-full max-h-full object-contain select-none pointer-events-none transition-opacity duration-350 ease-out"
+                        :class="isPendingLoaded ? 'opacity-100' : 'opacity-0'"
+                        :style="{
+                            transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
+                            transformOrigin: 'center center',
+                            transition: isDragging ? 'none' : 'transform 0.15s ease-out, opacity 0.35s ease-out',
+                        }"
+                        @load="handlePendingLoaded"
+                        @error="handlePendingError"
+                        aria-hidden="true"
                     />
                 </div>
             </template>
