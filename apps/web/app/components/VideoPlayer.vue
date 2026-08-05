@@ -85,7 +85,22 @@ const playerRef = ref<MediaPlayerElement | null>(null);
 const processedSubtitles = ref<ProcessedSubtitle[]>([]);
 const isPlaying = ref(false);
 const isBuffering = ref(false);
+/**
+ * Native GPU Video Texture First-Frame Handoff Best Practice:
+ * Vidstack / HTML5 <video> canplay fires when bytes are buffered, but BEFORE the hardware video decoder
+ * paints the first frame onto the DOM canvas surface.
+ * isFirstFramePainted stays false until active playback produces currentTime > 0 / @playing,
+ * keeping the poster overlay visible and dissolving smoothly over 300ms to prevent black flashes.
+ */
+const isFirstFramePainted = ref(false);
 const isAutoplayAttempting = ref(props.autoplay);
+
+watch(
+    () => props.src,
+    () => {
+        isFirstFramePainted.value = false;
+    },
+);
 const isMuted = ref(false);
 const isFullscreen = ref(false);
 const isPictureInPicture = ref(false);
@@ -445,6 +460,12 @@ onBeforeUnmount(() => {
                     isBuffering = false;
                     isPlaying = true;
                     isAutoplayAttempting = false;
+                    isFirstFramePainted = true;
+                "
+                @time-update="
+                    if (($event as CustomEvent<{ currentTime: number }>).detail?.currentTime > 0) {
+                        isFirstFramePainted = true;
+                    }
                 "
                 @can-play="isBuffering = false"
                 @volume-change="handleVolumeChange"
@@ -463,11 +484,12 @@ onBeforeUnmount(() => {
                     />
                 </media-provider>
 
-                <media-poster
+                <img
                     v-if="props.poster"
-                    class="vds-poster absolute inset-0 h-full w-full object-contain"
                     :src="props.poster"
-                    alt=""
+                    class="absolute inset-0 h-full w-full object-contain pointer-events-none transition-opacity duration-300 ease-out z-20"
+                    :class="isFirstFramePainted ? 'opacity-0' : 'opacity-100'"
+                    aria-hidden="true"
                 />
 
                 <media-gesture
@@ -933,7 +955,7 @@ onBeforeUnmount(() => {
 
             <template #fallback>
                 <div class="video-player-fallback relative grid h-full w-full min-h-[200px] overflow-hidden place-items-center bg-black">
-                    <img v-if="props.poster" class="absolute inset-0 h-full w-full object-contain opacity-45" :src="props.poster" alt="" />
+                    <img v-if="props.poster" class="absolute inset-0 h-full w-full object-contain opacity-100" :src="props.poster" alt="" />
                     <div
                         class="fallback-status relative flex items-center gap-2 rounded-full border border-white/14 bg-[rgba(9,9,11,0.82)] px-3 py-2 text-xs text-white/90 backdrop-blur-md"
                     >
