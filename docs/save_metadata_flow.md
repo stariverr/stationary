@@ -44,12 +44,12 @@ graph TD
   - Inserts a new `Post` record with `sync_status` set to `PENDING` and binds the transaction metadata. Sets `hasPendingTasks = true`.
 
 ### 3. Media & Track Change Detection
-Iterates over the incoming media array, matching items by `external_id` (or falling back to index order):
+Iterates over the incoming media array and matches every item by a non-empty, stable `external_id`. If the caller cannot provide a stable identity, the server rejects the synchronization request instead of guessing from an array index or `sort_order`:
 
 #### 3.1 Soft Delete Orphaned Media & Tracks
 If a post's media list changes on the source platform (e.g., a photo is deleted from a post):
 1. **Identify Orphans**: Finds existing database `Media` items for this post that are missing from the incoming payload.
-2. **Soft Delete**: Executes a transaction updating the `delete_status = DeleteStatus.DELETED` and setting `delete_time` on the obsolete `Media`, associated `Track` entries, and the corresponding `File` records. No physical S3 files are deleted at this step.
+2. **Soft Delete**: In one transaction, marks obsolete `Media`, associated `Track`, and their owned `File` records as `DELETED` and records `delete_time`. Physical S3 objects remain until the later purge task.
 3. Sets `hasPendingTasks = true`.
 
 #### 3.2 Sync Tracks & File URL Diff Checks
@@ -62,7 +62,7 @@ For each active or new media item:
      1. Marks the old associated `File` record (if any) as `DELETED` and records the `delete_time`.
      2. Sets the `Track` status to `PENDING` and clears out its `file_id` and `last_error`.
      3. Sets `hasPendingTasks = true` to signal that background download and verification are required.
-4. **Obsolete Tracks Cleanup**: Any active `Track` records in the database that are missing from the incoming payload are marked as `DELETED`, and their files are marked as `DELETED` to wait for the cron cleanup.
+4. **Obsolete Tracks Cleanup**: Any active `Track` records in the database that are missing from the incoming payload are marked as `DELETED`, and their owned File records are marked as `DELETED` in the same transaction. Physical objects are handled by the purge task.
 
 #### 3.3 Relational Tag Mapping
 - Calls `syncEntityTags` to parse and sanitize tags.

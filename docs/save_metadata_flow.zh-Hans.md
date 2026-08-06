@@ -44,12 +44,12 @@ graph TD
   - 插入一条全新的 `Post` 记录，将 `sync_status` 设为 `PENDING`，写入对应的事务元数据，并将 `hasPendingTasks` 设为 `true`。
 
 ### 3. 媒体与轨道变更检测
-循环传入的媒体数组，通过 `external_id`（若无则退化为数组索引顺序）进行匹配：
+循环传入的媒体数组，通过非空且稳定的 `external_id` 匹配。若调用方无法提供稳定身份，服务端拒绝本次同步，不使用数组索引或 `sort_order` 猜测对象：
 
 #### 3.1 软删除孤立的媒体与轨道
 若帖子的媒体列表在源平台发生改变（例如，博主在发布后删除了帖子中的某张图片）：
 1. **识别孤立资产**：查询当前帖子在数据库中已存在但缺失于新传入负载中的 `Media` 记录。
-2. **软删除标记**：在一个事务中，将这些孤立的 `Media` 记录、关联的 `Track` 记录以及对应的 `File` 记录的 `delete_status` 统一更新为 `DeleteStatus.DELETED`，并标记 `delete_time`。在此步骤中，绝对不物理删除 S3 文件。
+2. **软删除标记**：在一个事务中，将这些 `Media` 记录、关联的 `Track` 记录及其所属 `File` 记录更新为 `DeleteStatus.DELETED` 并标记 `delete_time`。S3 物理对象由后续 purge 任务处理。
 3. 将 `hasPendingTasks` 设为 `true`。
 
 #### 3.2 轨道同步与文件 URL 差异检查
@@ -62,7 +62,7 @@ graph TD
      1. 将该轨道之前绑定的物理 `File` 记录标记为 `DELETED`，并写入 `delete_time`。
      2. 将 `Track` 的 `sync_status` 重置为 `PENDING`，同时将 `file_id` 和 `last_error` 设为 null。
      3. 将 `hasPendingTasks` 设为 `true`，以确保触发后台下载与校验。
-4. **清理过期轨道**：传入负载中已不存在的 active 状态 `Track` 变体会被标记为 `DELETED`，其关联物理 `File` 也会被同步软删除以等待定时任务清理。
+4. **清理过期轨道**：传入负载中已不存在的 active 状态 `Track` 变体会被标记为 `DELETED`，其所属 `File` 也会在同一事务中被标记为 `DELETED`，并等待 purge 任务清理物理对象。
 
 #### 3.3 关联标签映射
 - 调用 `syncEntityTags` 对标签进行清洗与去重。

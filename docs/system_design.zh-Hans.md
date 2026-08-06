@@ -35,16 +35,16 @@ erDiagram
     Author ||--o{ Post : "writes"
     Post ||--o{ Media : "has"
     Media ||--o{ Track : "references"
-    Track }o--|| File : "points_to"
+    Track ||--o| File : "owns"
 ```
 
 ### 2.1 内容层关系
 - **Author (作者)**：跨平台唯一（通过 `library_id` + `platform` + `eid` 联合唯一）。保存多平台博主的昵称、签名、平台及头像文件引用（`avatar_file_id`）。
 - **Post (帖子/文章)**：属于某一个 `Library`（媒体库）。是内容的逻辑载体，记录源站的 `eid`、标题、描述、标签及原始发布时间 (`published_time`)。
-- **Media (媒体逻辑实体)**：隶属于某个 `Post`，或作为独立媒体（`post_id` 为 null）。包含排序、标题、描述、媒体类型（IMAGE, VIDEO, LIVE_PHOTO, AUDIO, PDF）以及各类原始下载 URL。
+- **Media**：属于某个 `Post`，或作为独立媒体（`post_id` 为 null）。包含稳定外部身份 `eid`、排序、标题、描述、媒体类型（IMAGE、VIDEO、LIVE_PHOTO、AUDIO、PDF）和发布时间。Media 不再保存物理文件 URL，物理资源统一通过 `Track` 与 `File` 获取。
 
 ### 2.2 资产与物理存储层 (Track & File)
-- **File (物理资产表)**：对应 S3 中的真实文件。以 UUID 为主键，记录防重下载的 SHA-256 `hash`，以及文件大小 `size`、S3 存储路径 `path`、存储桶 `bucket`、图片/视频尺寸 (`width`, `height`) 和视频时长 `duration`。
+- **File（物理资产表）**：对应 S3 中的真实文件。以 UUID 唯一标识，记录可选的审计 hash、大小 `size`、全局唯一的 S3 对象路径 `path` 和存储桶 `bucket`。当前业务不支持在多个实体之间复用同一个 File；每个 Track、作者头像、媒体库封面和 Draft 上传都使用独立 File。文件尺寸、时长和播放格式属于 Track，而不是 File。
 - **Track (媒体轨道表)**：作为 `Media` 与 `File` 之间的桥梁，表明一个物理文件在当前媒体中扮演的角色和格式。单个逻辑 `Media` 可以包含多个 `Track` 变体：
   - `type` (TrackType 轨道类型)：`IMAGE` (图片)、`VIDEO` (视频)、`AUDIO` (音频)、`SUBTITLE` (字幕)。
   - `purpose` (TrackPurpose 轨道用途)：
@@ -52,9 +52,9 @@ erDiagram
     - `COVER`：封面图（如视频对应的封面图）。
     - `THUMBNAIL`：提取的较小网格缩略图。
     - `PREVIEW`：低码率的预览流。
-  - `quality` (TrackQuality 轨道画质)：`ORIGINAL`, `HIGH`, `MEDIUM`, `LOW`。
+  - `quality` (TrackQuality 轨道画质)：`HIGH`, `MEDIUM`, `LOW`；原始性由 `is_original` 表达。
   - `priority` (优先级) 与 `source_url` (原始同步 URL)：后台同步下载时用于确定变体解析和流媒体选择的策略。
-- **引用审计规则**：当多个实体引用同一个物理 `File` 时，系统不使用静态的 `ref_count` 字段，而是通过 `DeleteService.canPurgeFile` 对 `Author` 头像、`Library` 封面和 active `Track` 记录进行动态联表计数查询。
+- **File 与删除规则**：File 由当前业务记录独占。业务记录被软删除或替换时，在同一事务中将对应 File 标记为 `DELETED`；S3 物理对象由后续 purge 任务清理。
 
 ---
 
@@ -64,13 +64,12 @@ erDiagram
 
 ### 3.1 回收站语义 (软删除与硬删除)
 为提供数据可恢复性并保证物理资产的一致性，删除流程分为两阶段：
-- **进入回收站 (软删除)**：`Post` 或 `Media` 的首次删除操作被定义为“软删除”。在表中将 `delete_status` 设置为 `DeleteStatus.DELETED`，并标记 `delete_time` 时间戳。对应的 `Track` 和 `File` 记录也会同步设为 `DELETED`，此时保留 S3 物理对象不作任何删改。
+- **进入回收站（软删除）**：`Post` 或 `Media` 的首次删除操作被定义为“软删除”。在表中将 `delete_status` 设置为 `DeleteStatus.DELETED`，并标记删除时间。对应的 Track 和其所属 File 会在同一事务中进入删除状态，S3 对象仍由后续 purge 任务处理。
 - **清空回收站 (异步硬删除/Purge via Cron)**：
   1. 系统后台配置了一个定时任务 `/purge-expired-files`（例如每日运行）。
   2. 该任务检索已被标记为 `DELETED` 且超过 30 天的 `File` 记录。
-  3. 针对每个待清理的 `File`，执行 `DeleteService.canPurgeFile(fileId)` 动态审计。
-  4. **只有当该物理文件完全没有任何其他实体引用时**，才调用 S3 API 物理删除存储对象 (`s3.delete`)，并在数据库中彻底 `DELETE` 该 `File` 记录。
-  5. 这种软删除状态机确保了 S3 物理资源与 DB 逻辑数据的高度一致，避免了 API 响应阻塞和悬挂引用的发生。
+  3. 针对每个已过期的 `File`，先删除 S3 物理对象，再删除对应的数据库记录。File 不会被其他业务记录复用。
+  4. 这种软删除状态机确保 S3 物理资源与所属业务记录保持一致。
 
 ### 3.2 资源库删除策略
 为了防止意外删除，非空的媒体库（Library）不支持直接删除。

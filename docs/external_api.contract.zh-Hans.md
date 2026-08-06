@@ -10,8 +10,8 @@
 
 本同步工作流遵循 **职责分离 (Separation of Concerns)** 与 **契约优先** 原则，以保证平台在应对高频次、重复同步的场景下具有绝对的**幂等性**与**稳定性**。
 
-* **调用方（同步客户端/数据源端）职责**：负责解析多平台数据源、清洗防盗链参数、组装标准 Payload，并**建议尽量提供媒体的唯一标识（`external_id`）**。
-* **服务端（`TaskService`）职责**：基于标准的 Payload 执行状态机流转、数据库幂等更新（Upsert）、差异化对比以及物理存储（S3）的管理。
+* **调用方（同步客户端/数据源端）职责**：负责解析多平台数据源、清洗防盗链参数、组装标准 Payload，并在调用同步 API 前为每个 Post 和 Media 提供稳定、非空的 `external_id`。手动上传不经过该契约，手动 Media 的身份由服务端生成。
+* **服务端（`TaskService`）职责**：基于标准的 Payload 执行状态机流转、数据库幂等更新（Upsert）、差异化对比以及物理存储（S3）的管理。服务端不使用 `sort_order` 或数组索引猜测 Media 身份。
 
 ---
 
@@ -32,12 +32,12 @@
 
 - **Live Photo (`type: "LIVE_PHOTO"`)**
   - **主资产**：静态图片 (Image)
-  - **附属属性**：动态视频轨 (Video/`live_photo_video_url`)
+  - **附属属性**：动态视频轨 (Video Track)
   - **规则**：`external_id = BLAKE3(清洗后的静态图片 URL)`。动态视频轨的 URL **不参与** ID 计算。
 - **视频 (`type: "VIDEO"`)**
-  - **主资产**：视频 file (Video)
-  - **附属属性**：封面图 (Cover)
-  - **规则**：`external_id = BLAKE3(清洗后的视频 URL)`。封面图 URL **不参与** ID 计算。
+  - **主资产**：视频 Track (Video)
+  - **附属属性**：封面图 Track (Cover)
+  - **规则**：`external_id = BLAKE3(清洗后的视频 URL)`。封面图 Track 的 URL **不参与** ID 计算。
 
 > [!IMPORTANT]
 > **设计目的**：当复合实体的附属属性（如 Live Photo 的动轨 URL）发生防盗链变化时，基于主资产生成的 `external_id` 保持不变，从而精确触发服务端的局部更新逻辑（仅替换动轨文件），而不会导致整个实体的误删重建。
@@ -89,11 +89,15 @@
           "title": "媒体分段标题",
           "description": "媒体描述",
           "type": "IMAGE",
-          "primary_file_url": "https://platform.com/media_primary.jpg",
-          "alternative_file_url": null,
-          "live_photo_video_url": null,
-          "cover_file_url": null,
-          "duration": null,
+          "tracks": [
+            {
+              "url": "https://platform.com/media_primary.jpg",
+              "type": "IMAGE",
+              "purpose": "CONTENT",
+              "quality": "HIGH"
+            }
+          ],
+          "tags": [],
           "published_time": "2026-05-19T10:00:00Z"
         }
       ]
@@ -108,11 +112,11 @@
 | :--- | :--- | :--- | :--- |
 | `library_id` | String | 是 | 此次导入任务的目标媒体库 UUID。 |
 | `posts[].platform` | String | 是 | 枚举值：`UNKNOWN`, `X`, `XHS`, `BILIBILI`, `DOUYIN`, `TIKTOK`, `INSTAGRAM` |
-| `posts[].published_time` | String | 否 | 支持 ISO-8601 格式或 10/13 位 UNIX 时间戳（由 Zod 转换器自动解析） |
-| `posts[].media[].type` | String | 是 | 枚举值：`IMAGE`, `VIDEO`, `LIVE_PHOTO` |
-| `posts[].media[].primary_file_url` | String | 是 | 主媒体文件的直链 URL |
-| `posts[].media[].live_photo_video_url` | String | 否 | 仅当媒体类型为 `LIVE_PHOTO` 时传递的动态视频轨 URL |
-| `posts[].media[].cover_file_url` | String | 否 | 仅当媒体类型为 `VIDEO` 时传递的视频封面 URL |
+| `posts[].external_id` | String | 是 | 源平台帖子稳定身份，不允许为空。 |
+| `posts[].media[].external_id` | String | 是 | 源平台媒体稳定身份；同一帖子内必须唯一。 |
+| `posts[].media[].type` | String | 是 | 枚举值：`IMAGE`, `VIDEO`, `LIVE_PHOTO`, `AUDIO`, `PDF` |
+| `posts[].media[].tracks` | Array | 是 | 至少一个 Track；每个 Track 必须包含 `url`、`type`、`purpose` 和 `quality`。 |
+| `posts[].media[].published_time` | String | 否 | 媒体原始发布时间。未提供时使用 Post 的发布时间。 |
 
 ---
 

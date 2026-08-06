@@ -35,16 +35,16 @@ erDiagram
     Author ||--o{ Post : "writes"
     Post ||--o{ Media : "has"
     Media ||--o{ Track : "references"
-    Track }o--|| File : "points_to"
+    Track ||--o| File : "owns"
 ```
 
 ### 2.1 Content Layer
 - **Author**: Platform-wide unique profile (using the compound index of `library_id` + `platform` + `eid`). Stores nickname, signature, platform, and a reference to their avatar file (`avatar_file_id`).
 - **Post**: Belongs to a specific `Library`. Functions as the container for posts synced from social sites, keeping records of platform `eid`, titles, description, tags, and original publishing date (`published_time`).
-- **Media**: Belongs to a specific `Post` or floats as an independent file (where `post_id` is null). Stores titles, description, sorting positions (`sort_order`), and type (IMAGE, VIDEO, LIVE_PHOTO, AUDIO, PDF).
+- **Media**: Belongs to a specific `Post` or floats as an independent asset (`post_id` is null). Stores stable external identity `eid`, title, description, ordering (`sort_order`), type (IMAGE, VIDEO, LIVE_PHOTO, AUDIO, PDF), and publication time. Media no longer stores physical file URLs; physical resources are resolved through `Track` and `File`.
 
 ### 2.2 Asset & Storage Layer (`Track` & `File`)
-- **File**: Points to physical file locations on S3. Uses a UUID as primary key, tracking the file SHA-256 `hash` for deduplication, as well as `size`, `path` (S3 key), `bucket`, dimensions (`width`, `height`), and video `duration`.
+- **File**: Points to physical file locations on S3. Uses a UUID as primary key, tracking an optional audit hash, `size`, `path` (the globally unique S3 object key), and `bucket`. The current business model does not reuse one File across multiple entities; each Track, author avatar, library cover, and draft upload gets its own File. Dimensions, duration, and playback format are Track fields, not File fields.
 - **Track**: Connects a `Media` item to its physical `File` records, assigning file roles and formats within that media item. A single logical `Media` item can contain multiple `Track` variants:
   - `type` (TrackType Enum): `IMAGE`, `VIDEO`, `AUDIO`, `SUBTITLE`.
   - `purpose` (TrackPurpose Enum):
@@ -52,9 +52,9 @@ erDiagram
     - `COVER`: The cover frame of a video or static display.
     - `THUMBNAIL`: Extracted small preview image.
     - `PREVIEW`: Low-resolution video or web preview.
-  - `quality` (TrackQuality Enum): `ORIGINAL`, `HIGH`, `MEDIUM`, `LOW`.
+  - `quality` (TrackQuality Enum): `HIGH`, `MEDIUM`, `LOW`; original status is expressed by `is_original`.
   - `priority` & `source_url`: Used to download, match, and choose priority streams during synchronization.
-- **Reference Counting & Sharing Rule**: When multiple entities reference the same physical `File`, do not use a simple counter column (`ref_count`) on the `File` table. Instead, use `DeleteService.canPurgeFile` to run reference queries dynamically across the tables (`Author` avatar, `Library` cover, and `Track` file references).
+- **File & deletion rule**: File records are owned by their current business record. When that record is soft-deleted or replaced, the File is marked `DELETED` in the same transaction. Physical S3 deletion is performed later by the purge worker.
 
 ---
 
@@ -64,12 +64,11 @@ When database foreign keys are disabled, the application layer must enforce refe
 
 ### 3.1 Recycle Bin Semantics (Soft vs. Hard Delete)
 To prevent accidental data loss and guarantee file consistency, the deletion flow is split into two phases:
-- **Move to Recycle Bin (Soft Delete)**: The initial delete of a `Post` or `Media` marks the record as deleted by setting `delete_status = DeleteStatus.DELETED` and setting `delete_time`. Associated rows (`Track`, `File`) are also updated to the `DELETED` status, but the physical files in S3 are kept in place.
+- **Move to Recycle Bin (Soft Delete)**: The initial delete of a `Post` or `Media` marks the record as deleted by setting `delete_status = DeleteStatus.DELETED` and setting `delete_time`. Associated `Track` and owned `File` rows are updated to `DELETED` in the same transaction; physical S3 objects are handled later by the purge worker.
 - **Purge Recycle Bin (Hard Delete / Purge via Cron)**:
   1. A scheduled cron job `/purge-expired-files` runs every day to fetch `File` records that have been in the `DELETED` status for more than 30 days.
-  2. For each candidate file, the background worker invokes `DeleteService.canPurgeFile(fileId)` to query if there are any remaining active references in `Author` avatars, `Library` covers, or active `Track` records.
-  3. **Only if there are no remaining active references** does the backend trigger physical S3 object deletion (`s3.delete`) and permanently hard delete the `File` row from the database.
-  4. This soft-deletion state machine guarantees S3 and DB consistency, ensuring no active links are broken and orphans are swept cleanly.
+  2. For each expired `File`, the background worker deletes the S3 object and then removes the corresponding database row. The File is not reused by another business record.
+  3. This soft-deletion state machine guarantees S3 and DB consistency for the owning business record.
 
 ### 3.2 Library Deletion Policy
 To prevent accidental deletion, non-empty libraries (`Library`) do not support direct deletes.

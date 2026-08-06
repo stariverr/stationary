@@ -14,6 +14,7 @@ trigger: always_on
 - [TS/Bun] node:stream -> Web API stream: Use standard Web API streams instead of Node.js stream modules.
 - [TS/Bun] node:fs -> bun:File: Use the native `bun:File` APIs (such as `Bun.file()`) and Bun's built-in file system utilities.
 - [TS] Code Formatting: Always use oxc to format code.
+- [Comments] Code comments are necessary for complicated logics.
 
 # Important Rules
 

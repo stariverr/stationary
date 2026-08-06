@@ -10,8 +10,8 @@ This specification defines the communication schema, synchronization lifecycles,
 
 The synchronization pipeline is designed around **Separation of Concerns** and **Contract-First Validation** to maintain reliability and idempotency over repetitive synchronization runs.
 
-* **Client Responsibilities**: Resolves source platform metadata, strips anti-leech query tokens, formats standard payloads, and **provides stable, unique identifiers (`external_id`)** for posts and media assets.
-* **Server (`TaskService`) Responsibilities**: Records metadata payloads, coordinates background queues, handles state machines (PENDING, IN_PROGRESS, SUCCESS, FAILED), detects updates, and manages physical files in storage (S3).
+* **Client Responsibilities**: Resolves source platform metadata, strips anti-leech query tokens, formats the standard payload, and provides a stable, non-empty `external_id` for every Post and Media before calling the synchronization API. Manual uploads use a separate flow where the server generates the Media identity.
+* **Server (`TaskService`) Responsibilities**: Records metadata payloads, coordinates background queues, handles state machines (PENDING, IN_PROGRESS, SUCCESS, FAILED), detects updates, and manages physical files in storage (S3). The server never guesses Media identity from `sort_order` or array indexes.
 
 ---
 
@@ -32,12 +32,12 @@ For logical assets composed of multiple physical files (like a Live Photo or a v
 
 - **Live Photo (`type: "LIVE_PHOTO"`)**
   - **Primary Asset**: Static image.
-  - **Secondary Asset**: Dynamic video track (`live_photo_video_url`).
-  - **Rule**: `external_id = BLAKE3(cleaned static image URL)`. The dynamic video URL is ignored during ID calculation.
+  - **Secondary Asset**: Dynamic video Track.
+  - **Rule**: `external_id = BLAKE3(cleaned static image URL)`. The dynamic video Track URL is ignored during ID calculation.
 - **Video (`type: "VIDEO"`)**
   - **Primary Asset**: Video file.
-  - **Secondary Asset**: Cover frame image (`cover_file_url`).
-  - **Rule**: `external_id = BLAKE3(cleaned video URL)`. The cover image URL is ignored during ID calculation.
+  - **Secondary Asset**: Cover image Track.
+  - **Rule**: `external_id = BLAKE3(cleaned video URL)`. The cover Track URL is ignored during ID calculation.
 
 > [!IMPORTANT]
 > **Why this matters**: If an anti-leech token changes on a secondary asset (such as the dynamic video track of a Live Photo), the primary asset's `external_id` remains unchanged. This allows the server to perform a clean update (updating only the video URL) without deleting and re-downloading the entire Live Photo asset.
@@ -89,11 +89,15 @@ For streaming media, the synchronization flow adapts as follows:
           "title": "Sub-title for media",
           "description": "Media description",
           "type": "IMAGE",
-          "primary_file_url": "https://platform.com/media_primary.jpg",
-          "alternative_file_url": null,
-          "live_photo_video_url": null,
-          "cover_file_url": null,
-          "duration": null,
+          "tracks": [
+            {
+              "url": "https://platform.com/media_primary.jpg",
+              "type": "IMAGE",
+              "purpose": "CONTENT",
+              "quality": "HIGH"
+            }
+          ],
+          "tags": [],
           "published_time": "2026-05-19T10:00:00Z"
         }
       ]
@@ -108,11 +112,11 @@ For streaming media, the synchronization flow adapts as follows:
 | :--- | :--- | :--- | :--- |
 | `library_id` | String | Yes | UUID of the target library where the post batch is imported. |
 | `posts[].platform` | String | Yes | Enum: `UNKNOWN`, `X`, `XHS`, `BILIBILI`, `DOUYIN`, `TIKTOK`, `INSTAGRAM` |
-| `posts[].published_time` | String | No | ISO-8601 string or a 10/13-digit UNIX timestamp (parsed automatically by the backend) |
-| `posts[].media[].type` | String | Yes | Enum: `IMAGE`, `VIDEO`, `LIVE_PHOTO` |
-| `posts[].media[].primary_file_url` | String | Yes | Direct hotlink URL to the main file. |
-| `posts[].media[].live_photo_video_url` | String | No | URL to the video track (only valid when type is `LIVE_PHOTO`). |
-| `posts[].media[].cover_file_url` | String | No | URL to the cover frame (only valid when type is `VIDEO`). |
+| `posts[].external_id` | String | Yes | Stable source-platform identity for the Post; must not be empty. |
+| `posts[].media[].external_id` | String | Yes | Stable source-platform identity for the Media; unique within one Post. |
+| `posts[].media[].type` | String | Yes | Enum: `IMAGE`, `VIDEO`, `LIVE_PHOTO`, `AUDIO`, `PDF` |
+| `posts[].media[].tracks` | Array | Yes | At least one Track; each Track includes `url`, `type`, `purpose`, and `quality`. |
+| `posts[].media[].published_time` | String | No | Original publication time for the Media. Falls back to the Post time when omitted. |
 
 ---
 
