@@ -1,15 +1,18 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
+
+const resolveSrc = (relativePath: string) => join(import.meta.dir, "..", relativePath);
 
 const sourceFiles = {
-    schema: () => Bun.file("src/db/schema/index.ts").text(),
-    postApi: () => Bun.file("src/api/post.ts").text(),
-    mediaApi: () => Bun.file("src/api/media.ts").text(),
-    libraryApi: () => Bun.file("src/api/library.ts").text(),
-    taskService: () => Bun.file("src/services/task.ts").text(),
-    trackService: () => Bun.file("src/services/track.ts").text(),
-    recycleService: () => Bun.file("src/services/recycle.ts").text(),
+    schema: () => Bun.file(resolveSrc("src/db/schema/index.ts")).text(),
+    postApi: () => Bun.file(resolveSrc("src/api/post.ts")).text(),
+    mediaApi: () => Bun.file(resolveSrc("src/api/media.ts")).text(),
+    libraryApi: () => Bun.file(resolveSrc("src/api/library.ts")).text(),
+    taskService: () => Bun.file(resolveSrc("src/services/task.ts")).text(),
+    trackService: () => Bun.file(resolveSrc("src/services/track.ts")).text(),
+    recycleService: () => Bun.file(resolveSrc("src/services/recycle.ts")).text(),
     latestMigration: async () => {
-        const proc = Bun.spawn(["find", "drizzle", "-name", "migration.sql", "-print"], {
+        const proc = Bun.spawn(["find", resolveSrc("drizzle"), "-name", "migration.sql", "-print"], {
             stdout: "pipe",
         });
         const output = await new Response(proc.stdout).text();
@@ -76,10 +79,10 @@ describe("soft deletion lifecycle", () => {
         expect(taskService).not.toContain("db.delete(MediaFile)");
     });
 
-    test("track replacement and deletion share referential orphan checks", async () => {
+    test("track replacement and deletion perform 1:1 file soft-deletion", async () => {
         const trackService = await sourceFiles.trackService();
 
-        expect(trackService).toContain("DeleteService.softDeleteFileIfUnreferenced(");
-        expect(trackService.match(/softDeleteFileIfUnreferenced\(/g)?.length).toBeGreaterThanOrEqual(3);
+        expect(trackService).toContain("delete_status: DeleteStatus.DELETED");
+        expect(trackService).toContain("delete_time: now");
     });
 });

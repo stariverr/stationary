@@ -89,10 +89,9 @@ test("resolves separated fMP4 tracks as DASH playback with selectable variants",
         streams: [{ index: 0, type: TrackType.VIDEO, codec: "avc1" }],
         width: 1920,
         height: 1080,
+        codec: "avc1",
+        bandwidth: 5_000_000,
         metadata: {
-            type: "fmp4",
-            codecs: "avc1",
-            bandwidth: 5_000_000,
             segment_base: {
                 initialization: "0-914",
                 index_range: "915-5000",
@@ -110,9 +109,8 @@ test("resolves separated fMP4 tracks as DASH playback with selectable variants",
         has_audio: true,
         url: "https://cdn.example.test/audio.m4s",
         mime_type: "audio/mp4",
+        codec: "aac",
         metadata: {
-            type: "fmp4",
-            codecs: "aac",
             segment_base: {
                 initialization: "0-836",
                 index_range: "837-5000",

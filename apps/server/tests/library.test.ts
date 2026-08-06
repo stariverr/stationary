@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import * as v from "valibot";
+
+const resolveSrc = (relativePath: string) => join(import.meta.dir, "..", relativePath);
 
 Object.assign(process.env, {
     AUTH_SECRET: "test-auth-secret",
     RESEND_API_KEY: "test-resend-key",
+    RESEND_EMAIL_SENDER: "test@example.com",
     S3_ENDPOINT: "http://localhost:9000",
     S3_ACCESS_KEY_ID: "test-access-key",
     S3_SECRET_ACCESS_KEY: "test-secret-key",
@@ -96,7 +100,7 @@ describe("library item movement", () => {
     });
 
     test("exposes an action-style move-items endpoint", async () => {
-        const source = await Bun.file("src/api/library.ts").text();
+        const source = await Bun.file(resolveSrc("src/api/library.ts")).text();
         const clean = (str: string) => str.replace(/\s+/g, "");
 
         expect(clean(source)).toContain(clean('router.post("/move-items"'));
@@ -104,7 +108,7 @@ describe("library item movement", () => {
     });
 
     test("moves post media with their parent posts", async () => {
-        const source = await Bun.file("src/api/library.ts").text();
+        const source = await Bun.file(resolveSrc("src/api/library.ts")).text();
         const clean = (str: string) => str.replace(/\s+/g, "");
 
         expect(clean(source)).toContain(clean(".update(Post)"));
@@ -130,7 +134,7 @@ describe("cover config and jobs api", () => {
     });
 
     test("exposes decoupled cover-config and cover-jobs/active endpoints", async () => {
-        const source = await Bun.file("src/api/library.ts").text();
+        const source = await Bun.file(resolveSrc("src/api/library.ts")).text();
         const clean = (str: string) => str.replace(/\s+/g, "");
 
         expect(clean(source)).toContain(clean('router.get("/:id/cover-config"'));

@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import { generateDeterministicVariantKey, normalizeVariantKey } from "../src/lib/utils/track";
 
+const resolveSrc = (relativePath: string) => join(import.meta.dir, "..", relativePath);
+
 const sourceFiles = {
-    trackService: () => Bun.file("src/services/track.ts").text(),
-    mediaApi: () => Bun.file("src/api/media.ts").text(),
+    trackService: () => Bun.file(resolveSrc("src/services/track.ts")).text(),
+    mediaApi: () => Bun.file(resolveSrc("src/api/media.ts")).text(),
 };
 
 describe("Track Variant Key Generation", () => {
@@ -17,11 +20,13 @@ describe("Track Variant Key Generation", () => {
         const track = {
             type: "VIDEO",
             purpose: "CONTENT",
-            quality: "ORIGINAL",
+            quality: "HIGH",
+            is_original: true,
             priority: 0,
-            metadata: { codecs: "hvc1.1.6.L150.90" },
+            codec: "hvc1.1.6.L150.90",
+            metadata: {},
         };
-        // original-video when priority is 0 and quality is ORIGINAL
+        // Originality is represented by is_original; quality remains a rendition label.
         expect(generateDeterministicVariantKey(track)).toBe("original-video");
 
         // non-original, with priority
@@ -29,8 +34,10 @@ describe("Track Variant Key Generation", () => {
             type: "VIDEO",
             purpose: "CONTENT",
             quality: "HIGH",
+            is_original: false,
             priority: 2,
-            metadata: { codecs: "h264" },
+            codec: "h264",
+            metadata: {},
         };
         const file2 = {
             height: 1080,
@@ -42,9 +49,12 @@ describe("Track Variant Key Generation", () => {
         const track = {
             type: "AUDIO",
             purpose: "CONTENT",
-            quality: "ORIGINAL",
+            quality: "HIGH",
+            is_original: true,
             priority: 0,
-            metadata: { language: "zh_CN", codecs: "mp4a.40.2" },
+            language: "zh_CN",
+            codec: "mp4a.40.2",
+            metadata: {},
         };
         expect(generateDeterministicVariantKey(track)).toBe("zh-cn-mp4a402");
     });
@@ -53,9 +63,11 @@ describe("Track Variant Key Generation", () => {
         const track = {
             type: "SUBTITLE",
             purpose: "CONTENT",
-            quality: "ORIGINAL",
+            quality: "HIGH",
+            is_original: true,
             priority: 0,
-            metadata: { language: "en_US", format: "vtt" },
+            language: "en_US",
+            metadata: { format: "vtt" },
         };
         expect(generateDeterministicVariantKey(track)).toBe("en-us-vtt");
     });
@@ -64,7 +76,8 @@ describe("Track Variant Key Generation", () => {
         const track = {
             type: "IMAGE",
             purpose: "CONTENT",
-            quality: "ORIGINAL",
+            quality: "HIGH",
+            is_original: true,
             priority: 0,
         };
         expect(generateDeterministicVariantKey(track)).toBe("original");
@@ -73,6 +86,7 @@ describe("Track Variant Key Generation", () => {
             type: "IMAGE",
             purpose: "CONTENT",
             quality: "MEDIUM",
+            is_original: false,
             priority: 1,
         };
         const file2 = { width: 800, height: 600, extension: "png" };

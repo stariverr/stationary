@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import { Code } from "../src/lib/code";
 import { success } from "../src/lib/response";
+
+const resolveSrc = (relativePath: string) => join(import.meta.dir, "..", relativePath);
 
 const apiSources = [
     "src/api/library.ts",
@@ -31,14 +34,14 @@ describe("response contract", () => {
     });
 
     test("list response helper is removed", async () => {
-        const responseSource = await Bun.file("src/lib/response.ts").text();
+        const responseSource = await Bun.file(resolveSrc("src/lib/response.ts")).text();
 
         expect(responseSource).not.toMatch(/export\s+function\s+list\b/);
     });
 
     test("api JSON responses are wrapped with success or error", async () => {
         for (const file of apiSources) {
-            const source = stripStrings(await Bun.file(file).text());
+            const source = stripStrings(await Bun.file(resolveSrc(file)).text());
 
             expect(source, file).not.toMatch(/\bc\.json\(\s*\{/);
             expect(source, file).not.toMatch(/\bc\.json\(\s*list\(/);

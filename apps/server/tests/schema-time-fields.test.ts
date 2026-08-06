@@ -1,12 +1,15 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
+
+const resolveSrc = (relativePath: string) => join(import.meta.dir, "..", relativePath);
 
 const sourceFiles = {
-    schema: () => Bun.file("src/db/schema/index.ts").text(),
-    postApi: () => Bun.file("src/api/post.ts").text(),
-    mediaApi: () => Bun.file("src/api/media.ts").text(),
-    taskService: () => Bun.file("src/services/task.ts").text(),
+    schema: () => Bun.file(resolveSrc("src/db/schema/index.ts")).text(),
+    postApi: () => Bun.file(resolveSrc("src/api/post.ts")).text(),
+    mediaApi: () => Bun.file(resolveSrc("src/api/media.ts")).text(),
+    taskService: () => Bun.file(resolveSrc("src/services/task.ts")).text(),
     latestMigration: async () => {
-        const proc = Bun.spawn(["find", "drizzle", "-name", "migration.sql", "-print"], {
+        const proc = Bun.spawn(["find", resolveSrc("drizzle"), "-name", "migration.sql", "-print"], {
             stdout: "pipe",
         });
         const output = await new Response(proc.stdout).text();

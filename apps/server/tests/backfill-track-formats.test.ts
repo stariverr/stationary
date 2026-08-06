@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import { TrackStreamLayout, TrackType } from "@/db/schema";
 import { deriveBackfilledTrackFormat } from "@/scripts/backfill_track_formats";
+
+const resolveSrc = (relativePath: string) => join(import.meta.dir, "..", relativePath);
 
 describe("track format backfill", () => {
     test("re-derives legacy default values from metadata and physical file fields", () => {
@@ -32,7 +35,7 @@ describe("track format backfill", () => {
     });
 
     test("keeps the CLI dry-run by default and requires an explicit apply flag", async () => {
-        const source = await Bun.file("src/scripts/backfill_track_formats.ts").text();
+        const source = await Bun.file(resolveSrc("src/scripts/backfill_track_formats.ts")).text();
 
         expect(source).toContain("const apply = options.apply ?? false");
         expect(source).toContain('process.argv.includes("--apply")');

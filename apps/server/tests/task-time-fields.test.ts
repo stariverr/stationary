@@ -34,7 +34,7 @@ describe("task time fields", () => {
                             title: "Media",
                             description: "",
                             type: "IMAGE",
-                            primary_file_url: "https://example.com/image.jpg",
+                            tracks: [{ url: "https://example.com/image.jpg", type: "IMAGE" }],
                             published_time: "2024-01-02T03:05:06Z",
                         },
                     ],
@@ -67,7 +67,7 @@ describe("task time fields", () => {
                             title: "",
                             description: "",
                             type: "VIDEO",
-                            primary_file_url: "https://example.com/video.mp4",
+                            tracks: [{ url: "https://example.com/video.mp4", type: "VIDEO" }],
                             create_time: "1710000000123",
                         },
                     ],
@@ -77,5 +77,49 @@ describe("task time fields", () => {
 
         expect(parsed.posts[0].published_time?.epochMilliseconds).toBe(1710000000000);
         expect(parsed.posts[0].media[0].published_time?.epochMilliseconds).toBe(1710000000123);
+    });
+
+    test("requires stable post and media external identities", async () => {
+        const taskApi = await import("../src/api/task");
+        const result = v.safeParse(taskApi.CreateTaskSchema, {
+            library_id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3",
+            posts: [
+                {
+                    title: "Missing identity",
+                    author: { name: "Author" },
+                    platform: "XHS",
+                    media: [
+                        {
+                            title: "Media",
+                            type: "IMAGE",
+                            tracks: [{ url: "https://example.com/image.jpg", type: "IMAGE" }],
+                        },
+                    ],
+                },
+            ],
+        });
+
+        expect(result.success).toBe(false);
+    });
+
+    test("rejects duplicate media external identities within one post", async () => {
+        const taskApi = await import("../src/api/task");
+        const result = v.safeParse(taskApi.CreateTaskSchema, {
+            library_id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3",
+            posts: [
+                {
+                    title: "Duplicate media",
+                    external_id: "post-duplicate",
+                    author: { name: "Author" },
+                    platform: "XHS",
+                    media: [
+                        { external_id: "same", type: "IMAGE", tracks: [{ url: "https://example.com/a.jpg", type: "IMAGE" }] },
+                        { external_id: "same", type: "IMAGE", tracks: [{ url: "https://example.com/b.jpg", type: "IMAGE" }] },
+                    ],
+                },
+            ],
+        });
+
+        expect(result.success).toBe(false);
     });
 });
