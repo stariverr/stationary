@@ -29,7 +29,7 @@ import {
     AsyncSubjectType,
 } from "@/db/schema";
 import { eq, and, lt, inArray, sql } from "drizzle-orm";
-import { DeleteService } from "@/services/delete";
+
 import { JobManager } from "@/infra/jobs/manager";
 import { jobRunner } from "@/infra/jobs/runner";
 import { JobSweeper } from "@/infra/jobs/sweeper";
@@ -37,6 +37,7 @@ import type { DiscoveredUnitSpec } from "@/infra/jobs/types";
 import { createIdempotencyKey } from "@/lib/utils/hash";
 import { AiService } from "@/services/ai/service";
 import { sweepOrphanTags } from "@/scripts/sweep_orphans";
+import { runMediaTrackIntegrityScan } from "@/audit/media-track";
 import { s3 } from "@/global/s3";
 import { Quality } from "@/lib/types";
 
@@ -82,40 +83,8 @@ const SegmentBaseSchema = v.object({
 });
 
 const TrackMetadataSchema = v.object({
-    codecs: v.pipe(
-        v.optional(v.nullable(v.string())),
-        v.transform((v) => v ?? undefined),
-    ),
-    bandwidth: v.pipe(
-        v.optional(v.nullable(v.number())),
-        v.transform((v) => v ?? undefined),
-    ),
-    width: v.pipe(
-        v.optional(v.nullable(v.number())),
-        v.transform((v) => v ?? undefined),
-    ),
-    height: v.pipe(
-        v.optional(v.nullable(v.number())),
-        v.transform((v) => v ?? undefined),
-    ),
-    duration: v.pipe(
-        v.optional(v.nullable(v.number())),
-        v.transform((v) => v ?? undefined),
-    ),
-    language: v.pipe(
-        v.optional(v.nullable(v.string())),
-        v.transform((v) => v ?? undefined),
-    ),
-    label: v.pipe(
-        v.optional(v.nullable(v.string())),
-        v.transform((v) => v ?? undefined),
-    ),
     format: v.pipe(
         v.optional(v.nullable(v.string())),
-        v.transform((v) => v ?? undefined),
-    ),
-    type: v.pipe(
-        v.optional(v.nullable(v.picklist(["mp4", "fmp4"]))),
         v.transform((v) => v ?? undefined),
     ),
     segment_base: v.pipe(
@@ -141,14 +110,14 @@ const TrackStreamSchema = v.object({
 });
 
 const TrackSchema = v.object({
-    url: v.string(),
+    url: v.pipe(v.string(), v.trim(), v.minLength(1, "url is required")),
     type: v.enum(TrackType),
     purpose: v.optional(v.enum(TrackPurpose), TrackPurpose.CONTENT),
     is_original: v.optional(v.boolean(), true),
     quality: v.optional(v.enum(Quality), Quality.HIGH),
     language: v.optional(v.nullable(v.string())),
     codec: v.optional(v.nullable(v.string())),
-    duration: v.optional(v.nullable(v.number())),
+    duration: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
     width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
     height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
     bandwidth: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
@@ -166,7 +135,7 @@ const TrackSchema = v.object({
 
 const MediaItemSchema = v.pipe(
     v.object({
-        external_id: v.optional(v.string()),
+        external_id: v.pipe(v.string(), v.trim(), v.minLength(1, "external_id is required")),
         title: v.pipe(
             v.optional(v.nullable(v.string())),
             v.transform((v) => v ?? ""),
@@ -176,9 +145,9 @@ const MediaItemSchema = v.pipe(
             v.transform((v) => v ?? ""),
         ),
         type: v.enum(MediaType),
-        tracks: v.optional(v.array(TrackSchema), []),
+        tracks: v.pipe(v.array(TrackSchema), v.minLength(1, "Each media must have at least one track")),
         tags: v.optional(v.array(v.string()), []),
-        duration: v.optional(v.nullable(v.number())),
+        duration: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
         create_time: v.optional(TimestampSchema),
         published_time: v.optional(TimestampSchema),
     }),
@@ -193,7 +162,7 @@ const PostItemSchema = v.pipe(
         title: v.string(),
         url: v.optional(v.string()),
         description: v.optional(v.string(), ""),
-        external_id: v.optional(v.string(), ""),
+        external_id: v.pipe(v.string(), v.trim(), v.minLength(1, "external_id is required")),
         tags: v.optional(v.array(v.string()), []),
         author: AuthorSchema,
         platform: v.enum(PostSource),
@@ -207,10 +176,20 @@ const PostItemSchema = v.pipe(
     })),
 );
 
-export const CreateTaskSchema = v.object({
-    library_id: v.pipe(v.string(), v.uuid()),
-    posts: v.array(PostItemSchema),
-});
+export const CreateTaskSchema = v.pipe(
+    v.object({
+        library_id: v.pipe(v.string(), v.uuid()),
+        posts: v.array(PostItemSchema),
+    }),
+    v.check(
+        (data) =>
+            data.posts.every((post) => {
+                const ids = post.media.map((media) => media.external_id);
+                return new Set(ids).size === ids.length;
+            }),
+        "Media external_id must be unique within each post",
+    ),
+);
 
 const WorkflowPayloadSchema = v.object({
     posts: v.array(
@@ -349,19 +328,16 @@ taskApp.post("/purge-expired-files", async (c) => {
 
     for (const file of expiredFiles) {
         try {
-            const canPurge = await DeleteService.canPurgeFile(file.id);
-            if (canPurge) {
-                try {
-                    await s3.delete(file.path, { bucket: file.bucket });
-                } catch (s3Err: any) {
-                    if (s3Err.name !== "NotFound") {
-                        throw s3Err;
-                    }
+            try {
+                await s3.delete(file.path, { bucket: file.bucket });
+            } catch (s3Err: any) {
+                if (s3Err.name !== "NotFound") {
+                    throw s3Err;
                 }
-
-                await db.delete(DbFile).where(eq(DbFile.id, file.id));
-                purgedCount++;
             }
+
+            await db.delete(DbFile).where(eq(DbFile.id, file.id));
+            purgedCount++;
         } catch (e: any) {
             failedCount++;
             errors.push({ fileId: file.id, error: e.message || String(e) });
@@ -419,7 +395,6 @@ taskApp.post("/purge-stale-pending-drafts", async (c) => {
 
     for (const draft of staleDrafts) {
         try {
-            // Delete physically from S3
             try {
                 await s3.delete(draft.filePath, { bucket: draft.fileBucket });
             } catch (s3Err: any) {
@@ -428,7 +403,6 @@ taskApp.post("/purge-stale-pending-drafts", async (c) => {
                 }
             }
 
-            // Delete database records in transaction
             await db.transaction(async (tx) => {
                 await tx.delete(DraftFile).where(eq(DraftFile.id, draft.draftId));
                 await tx.delete(DbFile).where(eq(DbFile.id, draft.fileId));
@@ -466,13 +440,18 @@ taskApp.post("/retry-sync", requireAuth, validate("json", RetrySyncSchema), asyn
         return c.json(error(Code.INVALID_PARAMETER, "At least one post_id or media_id is required"), 400);
     }
 
-    // Auth verification: ensure all requested posts/medias belong to libraries owned by the user
+    // Auth verification: ensure all requested posts/media belong to libraries owned by the user.
     const resolvedPostIds = new Set<string>(payload.post_ids || []);
+    const requestedLibraryIds = new Set<string>();
     if (payload.media_ids?.length) {
-        const mediaList = await db.select({ post_id: Media.post_id }).from(Media).where(inArray(Media.id, payload.media_ids));
-        for (const m of mediaList) {
-            if (m.post_id) {
-                resolvedPostIds.add(m.post_id);
+        const mediaList = await db
+            .select({ post_id: Media.post_id, library_id: Media.library_id })
+            .from(Media)
+            .where(inArray(Media.id, payload.media_ids));
+        for (const media of mediaList) {
+            requestedLibraryIds.add(media.library_id);
+            if (media.post_id) {
+                resolvedPostIds.add(media.post_id);
             }
         }
     }
@@ -480,15 +459,18 @@ taskApp.post("/retry-sync", requireAuth, validate("json", RetrySyncSchema), asyn
     const postIds = Array.from(resolvedPostIds);
     if (postIds.length > 0) {
         const posts = await db.select({ library_id: Post.library_id }).from(Post).where(inArray(Post.id, postIds));
+        for (const post of posts) {
+            requestedLibraryIds.add(post.library_id);
+        }
+    }
 
-        const uniqueLibraryIds = Array.from(new Set(posts.map((p) => p.library_id)));
-        if (uniqueLibraryIds.length > 0) {
-            const libraries = await db.select({ owner_id: Library.owner_id }).from(Library).where(inArray(Library.id, uniqueLibraryIds));
+    const uniqueLibraryIds = Array.from(requestedLibraryIds);
+    if (uniqueLibraryIds.length > 0) {
+        const libraries = await db.select({ owner_id: Library.owner_id }).from(Library).where(inArray(Library.id, uniqueLibraryIds));
 
-            const isAuthorized = libraries.every((lib) => lib.owner_id === user.id);
-            if (!isAuthorized) {
-                return c.json(error(Code.UNAUTHORIZED, "You do not have access to some of the libraries"), 403);
-            }
+        const isAuthorized = libraries.length === uniqueLibraryIds.length && libraries.every((lib) => lib.owner_id === user.id);
+        if (!isAuthorized) {
+            return c.json(error(Code.UNAUTHORIZED, "You do not have access to some of the libraries"), 403);
         }
     }
 
@@ -594,6 +576,36 @@ taskApp.post("/sweep-orphan-tags", async (c) => {
     } catch (e: any) {
         const errorMsg = e instanceof Error ? e.message : String(e);
         console.error(`[task] Failed to sweep orphan tags: ${errorMsg}`);
+        return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
+    }
+});
+
+// Endpoint to reconcile Media / Track / File logical references
+
+taskApp.post("/sweep-media-track-integrity", async (c) => {
+    const cronSecret = env.CRON_SECRET;
+    if (cronSecret) {
+        const authHeader = c.req.header("Authorization");
+        const internalHeader = c.req.header("X-Internal-Token");
+        let token = "";
+        if (authHeader && authHeader.startsWith("Bearer ")) {
+            token = authHeader.substring(7);
+        } else if (internalHeader) {
+            token = internalHeader;
+        }
+        if (token !== cronSecret) {
+            return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+        }
+    } else if (process.env.NODE_ENV === "production") {
+        return c.json(error(Code.SERVICE_UNAVAILABLE, "CRON_SECRET is not configured in production"), 500);
+    }
+
+    try {
+        const report = await runMediaTrackIntegrityScan();
+        return c.json(success(Code.SUCCESS, report));
+    } catch (e: any) {
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        console.error(`[task] Failed to reconcile media/track integrity: ${errorMsg}`);
         return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
     }
 });

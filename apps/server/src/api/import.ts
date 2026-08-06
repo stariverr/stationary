@@ -15,7 +15,7 @@ import { env } from "@/global/env";
 import crypto from "crypto";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { TrackService } from "@/services/track";
-import { replaceMediaTagsTx } from "@/services/media";
+import { replaceMediaTagsTx, MediaService } from "@/services/media";
 import { consumeDraftFile, deleteDraftFile, DraftFileUnavailableError } from "@/services/draft-file";
 import { getFileExtension, getMimeTypeByExt } from "@/lib/utils/file";
 import {
@@ -388,6 +388,7 @@ router.post(
                         type: group.type,
                         sync_status: SyncStatus.PENDING,
                         create_time: now,
+                        update_time: now,
                     });
 
                     for (const track of assignTrackPriorities(group.tracks)) {
@@ -405,8 +406,11 @@ router.post(
                             },
                             fileId,
                             tx,
+                            { deferCompositionCheck: true },
                         );
                     }
+
+                    await MediaService.assertMediaReady(mediaId, tx);
 
                     if (group.tag_ids && group.tag_ids.length > 0) {
                         await replaceMediaTagsTx(tx, mediaId, library_id, group.tag_ids);

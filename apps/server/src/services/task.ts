@@ -33,30 +33,24 @@ import type { PostItemData, MediaItemData } from "@/api/task";
 import { Temporal } from "@js-temporal/polyfill";
 import { sanitizeTags } from "@/lib/utils/tag_sanitizer";
 import { generateDeterministicVariantKey } from "@/lib/utils/track";
-import { cleanTrackMetadata, deriveTrackFormat, normalizeIncomingTrack, type TrackFormatFields } from "@/lib/utils/track-format";
-import { DeleteService } from "@/services/delete";
+import { deriveTrackFormat, normalizeIncomingTrack, type TrackFormatFields } from "@/lib/utils/track-format";
+import { normalizeExternalId, assertUniqueExternalIds } from "@/lib/utils/media-identity";
+import { validateMediaComposition } from "@/lib/validation/media-composition";
 
-
+import { MediaService } from "@/services/media";
 
 type TagRecord = typeof Tag.$inferSelect;
 type TagLookup = Map<string, TagRecord>;
 type TrackMetadataFields = {
-    language?: string;
-    codecs?: string;
+    language?: string | null;
+    codec?: string | null;
 };
 
-function getTrackMetadataFields(track: Record<string, any>): TrackMetadataFields {
-    const meta = (track.metadata ?? {}) as Record<string, any>;
-    const language = typeof track.language === "string" ? track.language : typeof meta.language === "string" ? meta.language : undefined;
-    const codecs =
-        typeof track.codec === "string"
-            ? track.codec
-            : typeof meta.codecs === "string"
-              ? meta.codecs
-              : typeof meta.codec === "string"
-                ? meta.codec
-                : undefined;
-    return { language, codecs };
+function getTrackMetadataFields(track: { language?: unknown; codec?: unknown }): TrackMetadataFields {
+    return {
+        language: typeof track.language === "string" ? track.language : null,
+        codec: typeof track.codec === "string" ? track.codec : null,
+    };
 }
 
 async function loadTagLookup(executor: DbExecutor, libraryId: string): Promise<TagLookup> {
@@ -193,9 +187,12 @@ function prepareIncomingTracks(tracks: IncomingTrack[]): PreparedTrack[] {
                 purpose: track.purpose,
                 quality: track.quality,
                 priority: normalized.priority,
+                is_original: normalized.is_original,
                 metadata: track.metadata,
                 language: normalized.language ?? undefined,
                 codec: normalized.codec ?? undefined,
+                width: normalized.width,
+                height: normalized.height,
             },
             null,
         );
@@ -256,8 +253,8 @@ function hasTrackPayloadChanged(existing: ExistingTrack, incoming: PreparedTrack
         existing.is_original !== incoming.is_original ||
         existing.quality !== incoming.quality ||
         existing.sync_status === SyncStatus.FAILED ||
-        existing.language !== (metadataFields.language || null) ||
-        existing.codec !== (metadataFields.codecs || null) ||
+        existing.language !== metadataFields.language ||
+        existing.codec !== metadataFields.codec ||
         existing.container !== incoming.format.container ||
         existing.is_fragmented !== incoming.format.is_fragmented ||
         existing.stream_layout !== incoming.format.stream_layout ||
@@ -303,7 +300,12 @@ async function syncPreparedTrack(
                 update_time: now,
             })
             .where(eq(Track.id, existing.id));
-        await DeleteService.softDeleteFileIfUnreferenced(oldFileId, tx, now);
+        if (oldFileId) {
+            await tx
+                .update(File)
+                .set({ delete_status: DeleteStatus.DELETED, delete_time: now })
+                .where(and(eq(File.id, oldFileId), eq(File.delete_status, DeleteStatus.ACTIVE)));
+        }
         return false;
     }
 
@@ -321,8 +323,8 @@ async function syncPreparedTrack(
             sync_status: SyncStatus.PENDING,
             variant_key: incoming.variant_key,
             is_default: incoming.is_default,
-            language: metadataFields.language || null,
-            codec: metadataFields.codecs || null,
+            language: metadataFields.language,
+            codec: metadataFields.codec,
             duration: incoming.duration,
             width: incoming.width,
             height: incoming.height,
@@ -347,15 +349,16 @@ async function syncPreparedTrack(
             .set({
                 ...presentationUpdates,
                 source_url: incoming.url,
+                file_id: null,
                 is_original: incoming.is_original,
+                is_generated: false,
                 quality: incoming.quality,
                 priority: incoming.priority,
                 metadata: incoming.metadata,
                 sync_status: SyncStatus.PENDING,
-                file_id: null,
                 last_error: null,
-                language: metadataFields.language || null,
-                codec: metadataFields.codecs || null,
+                language: metadataFields.language,
+                codec: metadataFields.codec,
                 duration: incoming.duration,
                 width: incoming.width,
                 height: incoming.height,
@@ -369,7 +372,12 @@ async function syncPreparedTrack(
                 update_time: now,
             })
             .where(eq(Track.id, existing.id));
-        await DeleteService.softDeleteFileIfUnreferenced(oldFileId, tx, now);
+        if (oldFileId) {
+            await tx
+                .update(File)
+                .set({ delete_status: DeleteStatus.DELETED, delete_time: now })
+                .where(and(eq(File.id, oldFileId), eq(File.delete_status, DeleteStatus.ACTIVE)));
+        }
         return true;
     }
 
@@ -388,6 +396,29 @@ export const TaskService = {
      * Step 1: Save metadata to DB (Synchronization & Deduplication)
      */
     async saveMetadata(postData: PostItemData, targetLibraryId: string, workflowRunId: string, tx: Transaction) {
+        const postExternalId = normalizeExternalId(postData.external_id, "post.external_id");
+        const mediaItems = postData.media.map((media, index) => ({
+            ...media,
+            external_id: normalizeExternalId(media.external_id, `media[${index}].external_id`),
+        }));
+        assertUniqueExternalIds(
+            mediaItems.map((media) => media.external_id),
+            `media in post ${postExternalId}`,
+        );
+        for (const [index, media] of mediaItems.entries()) {
+            const compositionError = validateMediaComposition(
+                media.type,
+                prepareIncomingTracks(media.tracks).map((track) => ({
+                    type: track.type,
+                    purpose: track.purpose ?? TrackPurpose.CONTENT,
+                    is_default: track.is_default,
+                })),
+            );
+            if (compositionError) {
+                throw new Error(`media[${index}] ${compositionError}`);
+            }
+        }
+
         // 1. Author logic
         let authorId: string | null = null;
         if (postData.author.external_id && postData.platform) {
@@ -429,13 +460,15 @@ export const TaskService = {
         let postId: string;
         let existingPost = null;
 
-        if (postData.external_id) {
-            existingPost = await tx.query.Post.findFirst({
-                where: {
-                    eid: postData.external_id,
-                    source: postData.platform,
-                },
-            });
+        existingPost = await tx.query.Post.findFirst({
+            where: {
+                eid: postExternalId,
+                source: postData.platform,
+            },
+        });
+
+        if (existingPost && existingPost.library_id !== targetLibraryId) {
+            throw new Error(`Post ${postExternalId} belongs to a different library`);
         }
 
         if (existingPost && (existingPost.delete_status === "DELETED" || existingPost.recycle_time !== null)) {
@@ -456,9 +489,9 @@ export const TaskService = {
                 description: postData.description,
                 tags: postData.tags,
                 author_name: postData.author.name,
-                author_id: authorId,
-                media_count: postData.media.length,
+                media_count: mediaItems.length,
                 library_id: targetLibraryId,
+                update_time: Temporal.Now.instant(),
             };
             if (postData.published_time) postUpdateData.published_time = postData.published_time;
 
@@ -466,9 +499,8 @@ export const TaskService = {
             await tx.update(Post).set(postUpdateData).where(eq(Post.id, postId));
         } else {
             // Post not exists, create new one
-            const eid = postData.external_id || crypto.randomUUID();
             const postInsertData: typeof Post.$inferInsert = {
-                eid: eid,
+                eid: postExternalId,
                 source: postData.platform,
                 title: postData.title,
                 description: postData.description,
@@ -476,9 +508,9 @@ export const TaskService = {
                 author_name: postData.author.name,
                 author_external_id: postData.author.external_id || "",
                 author_id: authorId,
-                published_time: postData.published_time ?? null,
-                media_count: postData.media.length,
+                media_count: mediaItems.length,
                 library_id: targetLibraryId,
+                update_time: Temporal.Now.instant(),
                 url: postData.url,
                 sync_status: SyncStatus.PENDING,
                 last_error: null,
@@ -486,29 +518,22 @@ export const TaskService = {
             };
             const results = await tx.insert(Post).values(postInsertData).returning({ id: Post.id, eid: Post.eid });
             postId = results[0].id;
-            if (!postData.external_id) postData.external_id = results[0].eid;
             hasPendingTasks = true;
         }
 
         const tagLookup =
-            postData.tags?.length || postData.media.some((media) => media.tags?.length)
-                ? await loadTagLookup(tx, targetLibraryId)
-                : undefined;
+            postData.tags?.length || mediaItems.some((media) => media.tags?.length) ? await loadTagLookup(tx, targetLibraryId) : undefined;
 
         // Sync relational tags for post
         await syncEntityTags(tx, targetLibraryId, "post", postId, postData.tags || [], TagSource.SCRAPER, "post.tags", tagLookup);
 
         // 3. Media sync
-        const mediaEidSet = new Set(postData.media.map((media) => media.external_id).filter((eid): eid is string => Boolean(eid)));
+        const mediaEidSet = new Set(mediaItems.map((media) => media.external_id));
         const postMediaRecords = await tx.select().from(Media).where(eq(Media.post_id, postId));
         const activeMediaRecords = postMediaRecords.filter((media) => media.delete_status === DeleteStatus.ACTIVE);
         const previouslyDeletedMediaRecords = postMediaRecords.filter((media) => media.delete_status === DeleteStatus.DELETED);
 
-        const mediaToDelete = activeMediaRecords.filter((media) => {
-            if (postData.media.length === 0) return true;
-            if (mediaEidSet.size > 0) return !mediaEidSet.has(media.eid);
-            return media.sort_order >= postData.media.length;
-        });
+        const mediaToDelete = activeMediaRecords.filter((media) => !mediaEidSet.has(media.eid));
 
         const mediaToDeleteIds = new Set(mediaToDelete.map((media) => media.id));
         if (mediaToDelete.length > 0) {
@@ -520,6 +545,7 @@ export const TaskService = {
                 .set({
                     delete_status: DeleteStatus.DELETED,
                     delete_time: deleteTime,
+                    update_time: deleteTime,
                 })
                 .where(and(inArray(Media.id, deletedMediaIds), eq(Media.delete_status, DeleteStatus.ACTIVE)));
 
@@ -534,16 +560,14 @@ export const TaskService = {
                 .set({
                     delete_status: DeleteStatus.DELETED,
                     delete_time: deleteTime,
+                    update_time: deleteTime,
                 })
                 .where(and(inArray(Track.media_id, deletedMediaIds), eq(Track.delete_status, DeleteStatus.ACTIVE)));
 
             if (fileIds.length > 0) {
                 await tx
                     .update(File)
-                    .set({
-                        delete_status: DeleteStatus.DELETED,
-                        delete_time: deleteTime,
-                    })
+                    .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
                     .where(and(inArray(File.id, fileIds), eq(File.delete_status, DeleteStatus.ACTIVE)));
             }
 
@@ -562,15 +586,15 @@ export const TaskService = {
             tracksByMediaId.set(track.media_id, mediaTracks);
         }
 
-        const findMedia = (records: (typeof Media.$inferSelect)[], mediaData: MediaItemData, index: number) =>
-            records.find((media) => (mediaData.external_id ? media.eid === mediaData.external_id : media.sort_order === index));
+        const findMedia = (records: (typeof Media.$inferSelect)[], mediaData: MediaItemData) =>
+            records.find((media) => media.eid === mediaData.external_id);
 
-        for (const [index, mediaData] of postData.media.entries()) {
+        for (const [index, mediaData] of mediaItems.entries()) {
             const incomingPublishedTime = mediaData.published_time;
             const fallbackPublishedTime = incomingPublishedTime ?? postData.published_time;
-            const media = findMedia(retainedActiveMedia, mediaData, index);
+            const media = findMedia(retainedActiveMedia, mediaData);
 
-            if (!media && findMedia(deletedMediaRecords, mediaData, index)) {
+            if (!media && findMedia(deletedMediaRecords, mediaData)) {
                 continue;
             }
 
@@ -582,7 +606,7 @@ export const TaskService = {
                 const insertedMedia = await tx
                     .insert(Media)
                     .values({
-                        eid: mediaData.external_id || "",
+                        eid: mediaData.external_id,
                         post_id: postId,
                         library_id: targetLibraryId,
                         source: postData.platform,
@@ -592,6 +616,7 @@ export const TaskService = {
                         sort_order: index,
                         published_time: fallbackPublishedTime,
                         sync_status: SyncStatus.PENDING,
+                        update_time: Temporal.Now.instant(),
                     })
                     .returning({ id: Media.id });
                 mediaId = insertedMedia[0].id;
@@ -612,9 +637,11 @@ export const TaskService = {
 
                 const updateData: Partial<typeof Media.$inferInsert> = {
                     sort_order: index,
+                    library_id: targetLibraryId,
                     title: mediaData.title || "",
                     description: mediaData.description || "",
                     type: mediaData.type,
+                    update_time: Temporal.Now.instant(),
                 };
                 if (incomingPublishedTime || (!media.published_time && fallbackPublishedTime)) {
                     updateData.published_time = incomingPublishedTime ?? fallbackPublishedTime;
@@ -644,22 +671,21 @@ export const TaskService = {
                     ...new Set(obsoleteTracks.map((track) => track.file_id).filter((id): id is string => Boolean(id))),
                 ];
 
-                if (obsoleteFileIds.length > 0) {
-                    await tx
-                        .update(File)
-                        .set({
-                            delete_status: DeleteStatus.DELETED,
-                            delete_time: deleteTime,
-                        })
-                        .where(and(inArray(File.id, obsoleteFileIds), eq(File.delete_status, DeleteStatus.ACTIVE)));
-                }
                 await tx
                     .update(Track)
                     .set({
                         delete_status: DeleteStatus.DELETED,
                         delete_time: deleteTime,
+                        update_time: deleteTime,
                     })
                     .where(and(inArray(Track.id, obsoleteTrackIds), eq(Track.delete_status, DeleteStatus.ACTIVE)));
+
+                if (obsoleteFileIds.length > 0) {
+                    await tx
+                        .update(File)
+                        .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
+                        .where(and(inArray(File.id, obsoleteFileIds), eq(File.delete_status, DeleteStatus.ACTIVE)));
+                }
             }
 
             const trackGroups = new Map<string, { type: TrackType; purpose: TrackPurpose; defaultKey?: string }>();
@@ -722,6 +748,7 @@ export const TaskService = {
                     sync_status: SyncStatus.IN_PROGRESS,
                     workflow_run_id: workflowRunId,
                     last_error: null,
+                    update_time: Temporal.Now.instant(),
                 })
                 .where(eq(Post.id, postId));
         }
@@ -737,28 +764,23 @@ export const TaskService = {
         const mediaRecords = await db
             .select()
             .from(Media)
-            .where(and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE)))
+            .where(and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
             .limit(1);
         const m = mediaRecords[0];
-        if (!m || !m.post_id) return;
-        return this.processMedia(m.post_id, m.sort_order, { external_id: m.eid }, signal);
+        if (!m) return;
+        return this.processMedia(m.id, signal);
     },
 
     /**
      * Step 2: Process individual media
      */
-    async processMedia(postId: string, index: number, mediaData: Partial<MediaItemData> & { external_id?: string }, signal?: AbortSignal) {
+    async processMedia(mediaId: string, signal?: AbortSignal) {
         signal?.throwIfAborted();
         const mediaRecords = await db
             .select()
             .from(Media)
-            .where(
-                and(
-                    eq(Media.post_id, postId),
-                    eq(Media.delete_status, DeleteStatus.ACTIVE),
-                    mediaData.external_id ? eq(Media.eid, mediaData.external_id) : eq(Media.sort_order, index),
-                ),
-            );
+            .where(and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
+            .limit(1);
         const m = mediaRecords[0];
         if (!m) return;
 
@@ -769,23 +791,42 @@ export const TaskService = {
             async (lockSignal) => {
                 try {
                     lockSignal.throwIfAborted();
-                    await db.update(Media).set({ sync_status: SyncStatus.IN_PROGRESS }).where(eq(Media.id, m.id));
+                    await db
+                        .update(Media)
+                        .set({ sync_status: SyncStatus.IN_PROGRESS, update_time: Temporal.Now.instant() })
+                        .where(and(eq(Media.id, m.id), eq(Media.delete_status, DeleteStatus.ACTIVE)));
 
                     // Fetch again to ensure we get latest active tracks
                     const tracks = await db
                         .select()
                         .from(Track)
                         .where(and(eq(Track.media_id, m.id), eq(Track.delete_status, DeleteStatus.ACTIVE)));
-
                     let allCompleted = true;
 
                     for (const mf of tracks) {
                         lockSignal.throwIfAborted();
-                        // Already completed or no source url, skipping
+                        // Already completed or no source URL, skipping.
                         if (mf.sync_status === SyncStatus.COMPLETED || !mf.source_url) continue;
 
+                        const [activeMedia] = await db
+                            .select({ id: Media.id })
+                            .from(Media)
+                            .where(and(eq(Media.id, m.id), eq(Media.delete_status, DeleteStatus.ACTIVE)))
+                            .limit(1);
+                        if (!activeMedia) return;
+
+                        const [activeTrack] = await db
+                            .select({ id: Track.id })
+                            .from(Track)
+                            .where(and(eq(Track.id, mf.id), eq(Track.media_id, m.id), eq(Track.delete_status, DeleteStatus.ACTIVE)))
+                            .limit(1);
+                        if (!activeTrack) continue;
+
                         // Mark as IN_PROGRESS
-                        await db.update(Track).set({ sync_status: SyncStatus.IN_PROGRESS }).where(eq(Track.id, mf.id));
+                        await db
+                            .update(Track)
+                            .set({ sync_status: SyncStatus.IN_PROGRESS, update_time: Temporal.Now.instant() })
+                            .where(and(eq(Track.id, mf.id), eq(Track.media_id, m.id), eq(Track.delete_status, DeleteStatus.ACTIVE)));
 
                         try {
                             const response = await downloadStream(mf.source_url, { signal: lockSignal });
@@ -826,7 +867,9 @@ export const TaskService = {
                                     prefix = `track_${mf.variant_key}`;
                                 }
 
-                                const path = `v2/p/${postId.slice(-2)}/${postId}/${index}_${prefix}.${ext}`;
+                                const path = m.post_id
+                                    ? `v2/p/${m.post_id.slice(-2)}/${m.post_id}/media_${m.id}/${prefix}.${ext}`
+                                    : `v2/m/${m.id.slice(-2)}/${m.id}/${prefix}.${ext}`;
 
                                 const S3Data = responseBody;
                                 await uploadToS3(
@@ -838,6 +881,13 @@ export const TaskService = {
                                     lockSignal,
                                 );
                                 lockSignal.throwIfAborted();
+
+                                const [activeTrackBeforePersist] = await db
+                                    .select({ id: Track.id })
+                                    .from(Track)
+                                    .where(and(eq(Track.id, mf.id), eq(Track.media_id, m.id), eq(Track.delete_status, DeleteStatus.ACTIVE)))
+                                    .limit(1);
+                                if (!activeTrackBeforePersist) return;
 
                                 const size = contentLength ? parseInt(contentLength) : null;
 
@@ -883,12 +933,12 @@ export const TaskService = {
                                     },
                                 });
 
-                                const width = typeof mf.metadata?.width === "number" ? mf.metadata.width : null;
-                                const height = typeof mf.metadata?.height === "number" ? mf.metadata.height : null;
-                                const duration = typeof mf.metadata?.duration === "number" ? mf.metadata.duration : null;
-                                const bandwidth = typeof mf.metadata?.bandwidth === "number" ? mf.metadata.bandwidth : null;
+                                const width = mf.width;
+                                const height = mf.height;
+                                const duration = mf.duration;
+                                const bandwidth = mf.bandwidth;
 
-                                await db
+                                const updatedTracks = await db
                                     .update(Track)
                                     .set({
                                         file_id: fileResults[0].id,
@@ -905,21 +955,48 @@ export const TaskService = {
                                         height: height,
                                         duration: duration,
                                         bandwidth: bandwidth,
+                                        update_time: Temporal.Now.instant(),
                                     })
-                                    .where(eq(Track.id, mf.id));
+                                    .where(and(eq(Track.id, mf.id), eq(Track.media_id, m.id), eq(Track.delete_status, DeleteStatus.ACTIVE)))
+                                    .returning({ id: Track.id });
+
+                                if (updatedTracks.length === 0) {
+                                    await db
+                                        .update(File)
+                                        .set({ delete_status: DeleteStatus.DELETED, delete_time: Temporal.Now.instant() })
+                                        .where(and(eq(File.id, fileResults[0].id), eq(File.delete_status, DeleteStatus.ACTIVE)));
+                                    return;
+                                }
+                                if (mf.file_id && mf.file_id !== fileResults[0].id) {
+                                    await db
+                                        .update(File)
+                                        .set({ delete_status: DeleteStatus.DELETED, delete_time: Temporal.Now.instant() })
+                                        .where(and(eq(File.id, mf.file_id), eq(File.delete_status, DeleteStatus.ACTIVE)));
+                                }
                             }
                         } catch (e) {
                             if (lockSignal.aborted) throw e;
                             const errorMsg = e instanceof Error ? e.message : String(e);
-                            await db.update(Track).set({ sync_status: SyncStatus.FAILED, last_error: errorMsg }).where(eq(Track.id, mf.id));
+                            await db
+                                .update(Track)
+                                .set({
+                                    sync_status: SyncStatus.FAILED,
+                                    last_error: errorMsg,
+                                    update_time: Temporal.Now.instant(),
+                                })
+                                .where(and(eq(Track.id, mf.id), eq(Track.media_id, m.id), eq(Track.delete_status, DeleteStatus.ACTIVE)));
                             allCompleted = false;
                             throw e;
                         }
                     }
 
-                    if (allCompleted) {
+                    const completionError = await MediaService.getMediaCompletionError(m.id, true);
+                    if (allCompleted && !completionError) {
                         lockSignal.throwIfAborted();
-                        await db.update(Media).set({ sync_status: SyncStatus.COMPLETED, last_error: null }).where(eq(Media.id, m.id));
+                        await db
+                            .update(Media)
+                            .set({ sync_status: SyncStatus.COMPLETED, last_error: null, update_time: Temporal.Now.instant() })
+                            .where(and(eq(Media.id, m.id), eq(Media.delete_status, DeleteStatus.ACTIVE)));
 
                         // Trigger cover generation asynchronously after main media file completed
                         if (m.type === MediaType.IMAGE || m.type === MediaType.LIVE_PHOTO || m.type === MediaType.VIDEO) {
@@ -941,30 +1018,40 @@ export const TaskService = {
                             .update(Media)
                             .set({
                                 sync_status: SyncStatus.FAILED,
-                                last_error: "Some files failed to process",
+                                last_error: completionError ?? "Some files failed to process",
+                                update_time: Temporal.Now.instant(),
                             })
-                            .where(eq(Media.id, m.id));
+                            .where(and(eq(Media.id, m.id), eq(Media.delete_status, DeleteStatus.ACTIVE)));
 
-                        await db
-                            .update(Post)
-                            .set({
-                                sync_status: SyncStatus.FAILED,
-                                last_error: `Media item ${m.id} failed to process: Some files failed to process`,
-                            })
-                            .where(eq(Post.id, postId));
+                        if (m.post_id) {
+                            await db
+                                .update(Post)
+                                .set({
+                                    sync_status: SyncStatus.FAILED,
+                                    last_error: `Media item ${m.id} failed to process: ${completionError ?? "Some files failed to process"}`,
+                                    update_time: Temporal.Now.instant(),
+                                })
+                                .where(and(eq(Post.id, m.post_id), eq(Post.delete_status, DeleteStatus.ACTIVE)));
+                        }
                     }
                 } catch (e) {
                     if (lockSignal.aborted) throw e;
                     const errorMsg = e instanceof Error ? e.message : String(e);
-                    await db.update(Media).set({ sync_status: SyncStatus.FAILED, last_error: errorMsg }).where(eq(Media.id, m.id));
-
                     await db
-                        .update(Post)
-                        .set({
-                            sync_status: SyncStatus.FAILED,
-                            last_error: `Media item ${m.id} failed to process: ${errorMsg}`,
-                        })
-                        .where(eq(Post.id, postId));
+                        .update(Media)
+                        .set({ sync_status: SyncStatus.FAILED, last_error: errorMsg, update_time: Temporal.Now.instant() })
+                        .where(and(eq(Media.id, m.id), eq(Media.delete_status, DeleteStatus.ACTIVE)));
+
+                    if (m.post_id) {
+                        await db
+                            .update(Post)
+                            .set({
+                                sync_status: SyncStatus.FAILED,
+                                last_error: `Media item ${m.id} failed to process: ${errorMsg}`,
+                                update_time: Temporal.Now.instant(),
+                            })
+                            .where(and(eq(Post.id, m.post_id), eq(Post.delete_status, DeleteStatus.ACTIVE)));
+                    }
 
                     throw e; // Re-throw to trigger upstream retry
                 }
@@ -1063,27 +1150,29 @@ export const TaskService = {
      */
     async retrySync(options: { postIds?: string[]; mediaIds?: string[] }) {
         const resolvedPostIds = new Set<string>(options.postIds || []);
+        const requestedMediaIds = new Set(options.mediaIds || []);
 
-        // Resolve media ids to post ids
-        if (options.mediaIds && options.mediaIds.length > 0) {
-            const mediaList = await db.select({ post_id: Media.post_id }).from(Media).where(inArray(Media.id, options.mediaIds));
-            for (const m of mediaList) {
-                if (m.post_id) {
-                    resolvedPostIds.add(m.post_id);
-                }
-            }
+        // Resolve media ids to post ids and retain independent media for direct retry.
+        const requestedMedia =
+            requestedMediaIds.size > 0
+                ? await db
+                      .select({ id: Media.id, post_id: Media.post_id, library_id: Media.library_id })
+                      .from(Media)
+                      .where(and(inArray(Media.id, [...requestedMediaIds]), eq(Media.delete_status, DeleteStatus.ACTIVE)))
+                : [];
+        for (const media of requestedMedia) {
+            if (media.post_id) resolvedPostIds.add(media.post_id);
         }
 
+        const standaloneMedia = requestedMedia.filter((media) => media.post_id === null);
         const postIds = Array.from(resolvedPostIds);
-        if (postIds.length === 0) return { count: 0 };
-
-        // Fetch posts
-        const posts = await db
-            .select()
-            .from(Post)
-            .where(and(inArray(Post.id, postIds), eq(Post.delete_status, DeleteStatus.ACTIVE)));
-
-        if (posts.length === 0) return { count: 0 };
+        const posts =
+            postIds.length > 0
+                ? await db
+                      .select()
+                      .from(Post)
+                      .where(and(inArray(Post.id, postIds), eq(Post.delete_status, DeleteStatus.ACTIVE)))
+                : [];
 
         let requeuedCount = 0;
 
@@ -1096,7 +1185,7 @@ export const TaskService = {
                     .from(Media)
                     .where(and(eq(Media.post_id, post.id), eq(Media.delete_status, DeleteStatus.ACTIVE)));
 
-                const mediaIds = postMedia.map((m) => m.id);
+                const mediaIds = postMedia.map((media) => media.id);
 
                 if (mediaIds.length > 0) {
                     await tx
@@ -1104,6 +1193,7 @@ export const TaskService = {
                         .set({
                             sync_status: SyncStatus.PENDING,
                             last_error: null,
+                            update_time: Temporal.Now.instant(),
                         })
                         .where(and(inArray(Track.media_id, mediaIds), eq(Track.sync_status, SyncStatus.FAILED)));
 
@@ -1112,6 +1202,7 @@ export const TaskService = {
                         .set({
                             sync_status: SyncStatus.PENDING,
                             last_error: null,
+                            update_time: Temporal.Now.instant(),
                         })
                         .where(and(eq(Media.post_id, post.id), eq(Media.sync_status, SyncStatus.FAILED)));
                 }
@@ -1122,15 +1213,16 @@ export const TaskService = {
                         sync_status: SyncStatus.IN_PROGRESS,
                         workflow_run_id: customWorkflowRunId,
                         last_error: null,
+                        update_time: Temporal.Now.instant(),
                     })
                     .where(eq(Post.id, post.id));
 
-                const unitSpecs = postMedia.map((m) => ({
-                    unitKey: `media:${m.id}`,
+                const unitSpecs = postMedia.map((media) => ({
+                    unitKey: `media:${media.id}`,
                     kind: AsyncTaskUnitKind.MEDIA_DOWNLOAD,
                     subjectType: AsyncSubjectType.MEDIA,
-                    subjectId: m.id,
-                    inputSnapshot: { post_id: post.id, media_id: m.id },
+                    subjectId: media.id,
+                    inputSnapshot: { post_id: post.id, media_id: media.id },
                 }));
 
                 await JobManager.enqueueTaskWithUnits(
@@ -1148,6 +1240,60 @@ export const TaskService = {
 
             requeuedCount++;
         }
+
+        for (const media of standaloneMedia) {
+            const customWorkflowRunId = crypto.randomUUID();
+
+            await db.transaction(async (tx) => {
+                const mediaRows = await tx
+                    .select({ id: Media.id })
+                    .from(Media)
+                    .where(and(eq(Media.id, media.id), eq(Media.delete_status, DeleteStatus.ACTIVE)));
+                if (mediaRows.length === 0) return;
+
+                await tx
+                    .update(Track)
+                    .set({
+                        sync_status: SyncStatus.PENDING,
+                        last_error: null,
+                        update_time: Temporal.Now.instant(),
+                    })
+                    .where(and(eq(Track.media_id, media.id), eq(Track.sync_status, SyncStatus.FAILED)));
+
+                await tx
+                    .update(Media)
+                    .set({
+                        sync_status: SyncStatus.PENDING,
+                        last_error: null,
+                        update_time: Temporal.Now.instant(),
+                    })
+                    .where(and(eq(Media.id, media.id), eq(Media.sync_status, SyncStatus.FAILED)));
+
+                await JobManager.enqueueTaskWithUnits(
+                    {
+                        type: AsyncTaskType.POST_PROCESS,
+                        libraryId: media.library_id,
+                        ownerId: null,
+                        inputSnapshot: { media_ids: [media.id], workflow_run_id: customWorkflowRunId },
+                        idempotencyKey: `media_process:${media.id}:${customWorkflowRunId}`,
+                    },
+                    [
+                        {
+                            unitKey: `media:${media.id}`,
+                            kind: AsyncTaskUnitKind.MEDIA_DOWNLOAD,
+                            subjectType: AsyncSubjectType.MEDIA,
+                            subjectId: media.id,
+                            inputSnapshot: { media_id: media.id },
+                        },
+                    ],
+                    tx,
+                );
+            });
+
+            requeuedCount++;
+        }
+
+        if (requeuedCount === 0) return { count: 0 };
 
         jobRunner.wake();
         return { count: requeuedCount };
@@ -1222,6 +1368,47 @@ export const TaskService = {
             });
 
             sweptCount = stuckPostIds.length;
+        }
+
+        const stuckStandaloneMedia = await db
+            .select({ id: Media.id })
+            .from(Media)
+            .where(
+                and(
+                    isNull(Media.post_id),
+                    eq(Media.sync_status, SyncStatus.IN_PROGRESS),
+                    or(
+                        and(isNotNull(Media.update_time), lt(Media.update_time, threshold)),
+                        and(isNull(Media.update_time), lt(Media.create_time, threshold)),
+                    ),
+                ),
+            );
+
+        if (stuckStandaloneMedia.length > 0) {
+            const mediaIds = stuckStandaloneMedia.map((media) => media.id);
+            await db.transaction(async (tx) => {
+                await tx
+                    .update(Media)
+                    .set({
+                        sync_status: SyncStatus.FAILED,
+                        last_error: "Independent media sync timed out",
+                        update_time: Temporal.Now.instant(),
+                    })
+                    .where(inArray(Media.id, mediaIds));
+
+                await tx
+                    .update(Track)
+                    .set({
+                        sync_status: SyncStatus.FAILED,
+                        last_error: "Independent media sync timed out",
+                        update_time: Temporal.Now.instant(),
+                    })
+                    .where(
+                        and(inArray(Track.media_id, mediaIds), inArray(Track.sync_status, [SyncStatus.PENDING, SyncStatus.IN_PROGRESS])),
+                    );
+            });
+
+            sweptCount += stuckStandaloneMedia.length;
         }
 
         return { sweptCount };

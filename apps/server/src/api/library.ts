@@ -206,7 +206,7 @@ router.post("/move-items", requireAuth, validate("json", LibraryMoveItemsBodySch
     const body = c.req.valid("json");
 
     const targetLibraries = await db
-        .select({ id: Library.id })
+        .select({ id: Library.id, owner_id: Library.owner_id })
         .from(Library)
         .where(and(eq(Library.id, body.target_library_id), eq(Library.delete_status, DeleteStatus.ACTIVE)))
         .limit(1);
@@ -214,12 +214,15 @@ router.post("/move-items", requireAuth, validate("json", LibraryMoveItemsBodySch
     if (targetLibraries.length === 0) {
         return c.json(error(Code.NOT_FOUND, "Target library not found"));
     }
+    if (targetLibraries[0].owner_id !== user.id) {
+        return c.json(error(Code.FORBIDDEN, "You do not have access to the target library"), 403);
+    }
 
     const moved = await db.transaction(async (tx) => {
         const selectedPosts =
             body.post_ids.length > 0
                 ? await tx
-                      .select({ id: Post.id, author_id: Post.author_id })
+                      .select({ id: Post.id, author_id: Post.author_id, library_id: Post.library_id })
                       .from(Post)
                       .where(and(inArray(Post.id, body.post_ids), eq(Post.delete_status, DeleteStatus.ACTIVE)))
                 : [];
@@ -231,13 +234,27 @@ router.post("/move-items", requireAuth, validate("json", LibraryMoveItemsBodySch
         const selectedMedia =
             body.media_ids.length > 0
                 ? await tx
-                      .select({ id: Media.id, post_id: Media.post_id })
+                      .select({ id: Media.id, post_id: Media.post_id, library_id: Media.library_id })
                       .from(Media)
                       .where(and(inArray(Media.id, body.media_ids), eq(Media.delete_status, DeleteStatus.ACTIVE)))
                 : [];
 
         if (selectedMedia.length !== body.media_ids.length) {
             throw new Error("One or more media items were not found or not active");
+        }
+
+        const sourceLibraryIds = uniqueIds([
+            ...selectedPosts.map((post) => post.library_id),
+            ...selectedMedia.map((media) => media.library_id),
+        ]);
+        if (sourceLibraryIds.length > 0) {
+            const sourceLibraries = await tx
+                .select({ owner_id: Library.owner_id })
+                .from(Library)
+                .where(and(inArray(Library.id, sourceLibraryIds), eq(Library.delete_status, DeleteStatus.ACTIVE)));
+            if (sourceLibraries.length !== sourceLibraryIds.length || sourceLibraries.some((library) => library.owner_id !== user.id)) {
+                throw new Error("You do not have access to all source libraries");
+            }
         }
 
         const attachedMediaIds = getAttachedMediaIds(selectedMedia);

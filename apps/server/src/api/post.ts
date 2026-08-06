@@ -816,6 +816,7 @@ router.post("/create", requireAuth, validate("json", CreatePostSchema), async (c
                 media_count: totalMediaCount,
                 sync_status: SyncStatus.PENDING,
                 create_time: now,
+                update_time: now,
                 delete_status: DeleteStatus.ACTIVE,
             });
 
@@ -852,6 +853,7 @@ router.post("/create", requireAuth, validate("json", CreatePostSchema), async (c
                             type: mediaDraft.type,
                             sync_status: SyncStatus.PENDING,
                             create_time: now,
+                            update_time: now,
                         });
 
                         for (const track of assignTrackPriorities(mediaDraft.tracks)) {
@@ -869,8 +871,11 @@ router.post("/create", requireAuth, validate("json", CreatePostSchema), async (c
                                 },
                                 fileId,
                                 tx,
+                                { deferCompositionCheck: true },
                             );
                         }
+
+                        await MediaService.assertMediaReady(mediaId, tx);
 
                         if (mediaDraft.tag_ids && mediaDraft.tag_ids.length > 0) {
                             await replaceMediaTagsTx(tx, mediaId, body.library_id, mediaDraft.tag_ids);

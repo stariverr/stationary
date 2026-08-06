@@ -669,7 +669,7 @@ const PresignUploadSchema = v.object({
     type: v.enum(TrackType),
     purpose: v.enum(TrackPurpose),
     quality: v.enum(Quality),
-    priority: v.optional(v.pipe(v.number(), v.integer()), 0),
+    priority: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
     fileName: v.pipe(v.string(), v.nonEmpty("fileName is required")),
 });
 
@@ -719,7 +719,7 @@ const RegisterTrackSchema = v.object({
     type: v.enum(TrackType),
     purpose: v.enum(TrackPurpose),
     quality: v.enum(Quality),
-    priority: v.optional(v.pipe(v.number(), v.integer()), 0),
+    priority: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
     source_url: v.optional(v.string()),
     metadata: v.optional(v.any()),
     variant_key: v.optional(v.string()),
@@ -860,7 +860,7 @@ router.post("/:id/tracks/:trackId/delete", requireAuth, async (c) => {
 });
 
 const UpdateTrackMetadataSchema = v.object({
-    priority: v.optional(v.pipe(v.number(), v.integer())),
+    priority: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
     quality: v.optional(v.enum(Quality)),
     display_name: v.optional(v.nullable(v.string())),
     variant_key: v.optional(v.string()),
@@ -1017,8 +1017,11 @@ router.post("/:id/tracks/from-draft", requireAuth, validate("json", AddTracksFro
                     },
                     fileId,
                     tx,
+                    { deferCompositionCheck: true },
                 );
             }
+
+            await MediaService.assertMediaReady(id, tx);
         });
     } catch (e) {
         if (e instanceof DraftFileUnavailableError) {
