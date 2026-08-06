@@ -19,6 +19,7 @@ import { Temporal } from "@js-temporal/polyfill";
 import { cleanTrackMetadata, deriveTrackFormat } from "@/lib/utils/track-format";
 
 import { MediaService } from "@/services/media";
+import { DeleteService } from "@/services/delete";
 
 export interface FileData {
     path: string;
@@ -491,37 +492,7 @@ export const TrackService = {
     },
 
     async deleteTrack(mediaId: string, trackId: string) {
-        return db.transaction(async (tx) => {
-            const now = Temporal.Now.instant();
-
-            const [trackRecord] = await tx
-                .select()
-                .from(Track)
-                .where(and(eq(Track.id, trackId), eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)));
-
-            if (!trackRecord) {
-                throw new Error("Track not found");
-            }
-
-            await tx
-                .update(Track)
-                .set({
-                    delete_status: DeleteStatus.DELETED,
-                    delete_time: now,
-                    update_time: now,
-                })
-                .where(eq(Track.id, trackId));
-
-            await MediaService.assertMediaComposition(mediaId, tx);
-            if (trackRecord.file_id) {
-                await tx
-                    .update(File)
-                    .set({ delete_status: DeleteStatus.DELETED, delete_time: now })
-                    .where(and(eq(File.id, trackRecord.file_id), eq(File.delete_status, DeleteStatus.ACTIVE)));
-            }
-
-            return { success: true };
-        });
+        return DeleteService.deleteTrack(mediaId, trackId);
     },
 
     async updateTrackMetadata(mediaId: string, trackId: string, updates: UpdateTrackMetadataInput) {

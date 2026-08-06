@@ -9,6 +9,7 @@ import { Tag, PostTag, MediaTag, TagStatus, TagSource } from "@/db/schema";
 import { and, eq, sql, inArray } from "drizzle-orm";
 import { normalizeTagName } from "@/lib/utils/tag_sanitizer";
 import { Temporal } from "@js-temporal/polyfill";
+import { DeleteService } from "@/services/delete";
 
 const router = new Hono();
 
@@ -246,21 +247,7 @@ router.post("/delete/:id", requireAuth, async (c) => {
     }
 
     try {
-        const result = await db.transaction(async (tx) => {
-            const tagDeleted = await tx.delete(Tag).where(eq(Tag.id, id)).returning({ id: Tag.id });
-            if (tagDeleted.length === 0) return { tagDeleted: 0 };
-
-            await tx.delete(PostTag).where(eq(PostTag.tag_id, id));
-            await tx.delete(MediaTag).where(eq(MediaTag.tag_id, id));
-
-            // Dissociate aliases
-            await tx
-                .update(Tag)
-                .set({ canonical_tag_id: null, update_time: sql`now()` })
-                .where(eq(Tag.canonical_tag_id, id));
-
-            return { tagDeleted: 1 };
-        });
+        const result = await DeleteService.deleteTag(id);
 
         if (result.tagDeleted === 0) {
             return c.json(error(Code.NOT_FOUND, "Tag not found"), 404);
