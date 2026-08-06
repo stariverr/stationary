@@ -201,7 +201,7 @@ const PresignUploadSchema = v.object({
     type: v.enum(TrackType),
     purpose: v.enum(TrackPurpose),
     quality: v.enum(Quality),
-    priority: v.optional(v.pipe(v.number(), v.integer()), 0),
+    priority: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
     fileName: v.pipe(v.string(), v.minLength(1)),
 });
 
@@ -379,7 +379,7 @@ const RegisterTrackSchema = v.object({
     type: v.enum(TrackType),
     purpose: v.enum(TrackPurpose),
     quality: v.enum(Quality),
-    priority: v.optional(v.pipe(v.number(), v.integer()), 0),
+    priority: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
     source_url: v.optional(v.string()),
     metadata: v.optional(v.any()),
     variant_key: v.optional(v.string()),
@@ -417,7 +417,7 @@ const ReplaceFileSchema = v.object({
 });
 
 const UpdateTrackMetadataSchema = v.object({
-    priority: v.optional(v.pipe(v.number(), v.integer())),
+    priority: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
     quality: v.optional(v.enum(Quality)),
     display_name: v.optional(v.nullable(v.string())),
     variant_key: v.optional(v.string()),
@@ -444,37 +444,28 @@ const SegmentBaseSchema = v.object({
 });
 
 const TrackMetadataSchema = v.object({
-    codecs: v.optional(v.nullable(v.string())),
-    bandwidth: v.optional(v.nullable(v.number())),
-    width: v.optional(v.nullable(v.number())),
-    height: v.optional(v.nullable(v.number())),
-    duration: v.optional(v.nullable(v.number())),
-    language: v.optional(v.nullable(v.string())),
-    label: v.optional(v.nullable(v.string())),
     format: v.optional(v.nullable(v.string())),
-    type: v.optional(v.nullable(v.picklist(["mp4", "fmp4"]))),
     segment_base: v.optional(v.nullable(SegmentBaseSchema)),
 });
 
 const TrackSchema = v.object({
-    url: v.string(),
+    url: v.pipe(v.string(), v.trim(), v.minLength(1)),
     type: v.enum(TrackType),
     purpose: v.optional(v.enum(TrackPurpose), TrackPurpose.CONTENT),
     is_original: v.optional(v.boolean(), true),
     quality: v.optional(v.enum(Quality), Quality.HIGH),
-    priority: v.optional(v.number(), 0),
     metadata: v.optional(v.nullable(TrackMetadataSchema)),
     ...TrackFormatFields,
 });
 
 const MediaItemSchema = v.object({
-    external_id: v.optional(v.string()),
+    external_id: v.pipe(v.string(), v.trim(), v.minLength(1)),
     title: v.optional(v.nullable(v.string())),
     description: v.optional(v.nullable(v.string())),
     type: v.enum(MediaType),
-    tracks: v.optional(v.array(TrackSchema), []),
+    tracks: v.pipe(v.array(TrackSchema), v.minLength(1)),
     tags: v.optional(v.array(v.string()), []),
-    duration: v.optional(v.nullable(v.number())),
+    duration: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
     published_time: v.optional(v.string()),
     create_time: v.optional(v.string()),
 });
@@ -483,7 +474,7 @@ const PostItemSchema = v.object({
     title: v.string(),
     url: v.optional(v.string()),
     description: v.optional(v.string(), ""),
-    external_id: v.optional(v.string(), ""),
+    external_id: v.pipe(v.string(), v.trim(), v.minLength(1)),
     tags: v.optional(v.array(v.string()), []),
     author: AuthorSchema,
     platform: v.enum(PostSource),
@@ -495,8 +486,6 @@ const PostItemSchema = v.object({
 const CreateTaskSchema = v.object({
     library_id: v.pipe(v.string(), v.uuid()),
     posts: v.array(PostItemSchema),
-    media: v.array(MediaItemSchema),
-    force: v.optional(v.boolean()),
 });
 
 const RetrySyncSchema = v.object({
@@ -1208,6 +1197,14 @@ const routes: RouteItem[] = [
         path: "/api/task/sweep-orphan-tags",
         method: "post",
         summary: "Clean up orphan tags under the media library",
+        tags: ["Task"],
+        requiresAuth: false,
+        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
+    },
+    {
+        path: "/api/task/sweep-media-track-integrity",
+        method: "post",
+        summary: "Reconcile logical Media, Track, and File references",
         tags: ["Task"],
         requiresAuth: false,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),

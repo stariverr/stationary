@@ -6094,6 +6094,7 @@
                   },
                   "priority": {
                     "type": "integer",
+                    "minimum": 0,
                     "default": 0
                   },
                   "fileName": {
@@ -6224,6 +6225,7 @@
                   },
                   "priority": {
                     "type": "integer",
+                    "minimum": 0,
                     "default": 0
                   },
                   "source_url": {
@@ -6738,7 +6740,8 @@
                 "type": "object",
                 "properties": {
                   "priority": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0
                   },
                   "quality": {
                     "enum": [
@@ -6975,7 +6978,7 @@
                         },
                         "external_id": {
                           "type": "string",
-                          "default": ""
+                          "minLength": 1
                         },
                         "tags": {
                           "type": "array",
@@ -7022,7 +7025,8 @@
                             "type": "object",
                             "properties": {
                               "external_id": {
-                                "type": "string"
+                                "type": "string",
+                                "minLength": 1
                               },
                               "title": {
                                 "type": "string",
@@ -7048,7 +7052,8 @@
                                   "type": "object",
                                   "properties": {
                                     "url": {
-                                      "type": "string"
+                                      "type": "string",
+                                      "minLength": 1
                                     },
                                     "type": {
                                       "enum": [
@@ -7083,50 +7088,10 @@
                                       "type": "string",
                                       "default": "HIGH"
                                     },
-                                    "priority": {
-                                      "type": "number",
-                                      "default": 0
-                                    },
                                     "metadata": {
                                       "type": "object",
                                       "properties": {
-                                        "codecs": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "bandwidth": {
-                                          "type": "number",
-                                          "nullable": true
-                                        },
-                                        "width": {
-                                          "type": "number",
-                                          "nullable": true
-                                        },
-                                        "height": {
-                                          "type": "number",
-                                          "nullable": true
-                                        },
-                                        "duration": {
-                                          "type": "number",
-                                          "nullable": true
-                                        },
-                                        "language": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "label": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
                                         "format": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "type": {
-                                          "enum": [
-                                            "mp4",
-                                            "fmp4"
-                                          ],
                                           "type": "string",
                                           "nullable": true
                                         },
@@ -7255,7 +7220,7 @@
                                     "type"
                                   ]
                                 },
-                                "default": []
+                                "minItems": 1
                               },
                               "tags": {
                                 "type": "array",
@@ -7266,6 +7231,7 @@
                               },
                               "duration": {
                                 "type": "number",
+                                "minimum": 0,
                                 "nullable": true
                               },
                               "published_time": {
@@ -7276,7 +7242,9 @@
                               }
                             },
                             "required": [
-                              "type"
+                              "external_id",
+                              "type",
+                              "tracks"
                             ]
                           }
                         },
@@ -7289,284 +7257,17 @@
                       },
                       "required": [
                         "title",
+                        "external_id",
                         "author",
                         "platform",
                         "media"
                       ]
                     }
-                  },
-                  "media": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "external_id": {
-                          "type": "string"
-                        },
-                        "title": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "description": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "type": {
-                          "enum": [
-                            "IMAGE",
-                            "VIDEO",
-                            "LIVE_PHOTO",
-                            "AUDIO",
-                            "PDF"
-                          ],
-                          "type": "string"
-                        },
-                        "tracks": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "url": {
-                                "type": "string"
-                              },
-                              "type": {
-                                "enum": [
-                                  "IMAGE",
-                                  "VIDEO",
-                                  "AUDIO",
-                                  "SUBTITLE",
-                                  "PDF"
-                                ],
-                                "type": "string"
-                              },
-                              "purpose": {
-                                "enum": [
-                                  "CONTENT",
-                                  "COVER",
-                                  "THUMBNAIL",
-                                  "PREVIEW"
-                                ],
-                                "type": "string",
-                                "default": "CONTENT"
-                              },
-                              "is_original": {
-                                "type": "boolean",
-                                "default": true
-                              },
-                              "quality": {
-                                "enum": [
-                                  "LOW",
-                                  "MEDIUM",
-                                  "HIGH"
-                                ],
-                                "type": "string",
-                                "default": "HIGH"
-                              },
-                              "priority": {
-                                "type": "number",
-                                "default": 0
-                              },
-                              "metadata": {
-                                "type": "object",
-                                "properties": {
-                                  "codecs": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "bandwidth": {
-                                    "type": "number",
-                                    "nullable": true
-                                  },
-                                  "width": {
-                                    "type": "number",
-                                    "nullable": true
-                                  },
-                                  "height": {
-                                    "type": "number",
-                                    "nullable": true
-                                  },
-                                  "duration": {
-                                    "type": "number",
-                                    "nullable": true
-                                  },
-                                  "language": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "label": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "format": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "type": {
-                                    "enum": [
-                                      "mp4",
-                                      "fmp4"
-                                    ],
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "segment_base": {
-                                    "type": "object",
-                                    "properties": {
-                                      "initialization": {
-                                        "type": "string",
-                                        "nullable": true
-                                      },
-                                      "index_range": {
-                                        "type": "string",
-                                        "nullable": true
-                                      }
-                                    },
-                                    "required": [],
-                                    "nullable": true
-                                  }
-                                },
-                                "required": [],
-                                "nullable": true
-                              },
-                              "container": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "is_fragmented": {
-                                "type": "boolean",
-                                "nullable": true
-                              },
-                              "stream_layout": {
-                                "enum": [
-                                  "SINGLE",
-                                  "MUXED",
-                                  "VIDEO_ONLY",
-                                  "AUDIO_ONLY",
-                                  "TEXT_ONLY"
-                                ],
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "has_video": {
-                                "type": "boolean",
-                                "nullable": true
-                              },
-                              "has_audio": {
-                                "type": "boolean",
-                                "nullable": true
-                              },
-                              "streams": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "index": {
-                                      "type": "integer",
-                                      "minimum": 0
-                                    },
-                                    "id": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "type": {
-                                      "enum": [
-                                        "VIDEO",
-                                        "AUDIO",
-                                        "SUBTITLE"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "codec": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "language": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "label": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "role": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "width": {
-                                      "type": "integer",
-                                      "minimum": 1,
-                                      "nullable": true
-                                    },
-                                    "height": {
-                                      "type": "integer",
-                                      "minimum": 1,
-                                      "nullable": true
-                                    },
-                                    "bandwidth": {
-                                      "type": "number",
-                                      "minimum": 0,
-                                      "nullable": true
-                                    },
-                                    "channels": {
-                                      "type": "integer",
-                                      "minimum": 1,
-                                      "nullable": true
-                                    },
-                                    "sample_rate": {
-                                      "type": "integer",
-                                      "minimum": 1,
-                                      "nullable": true
-                                    },
-                                    "is_default": {
-                                      "type": "boolean"
-                                    }
-                                  },
-                                  "required": [
-                                    "index",
-                                    "type"
-                                  ]
-                                },
-                                "nullable": true
-                              }
-                            },
-                            "required": [
-                              "url",
-                              "type"
-                            ]
-                          },
-                          "default": []
-                        },
-                        "tags": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          },
-                          "default": []
-                        },
-                        "duration": {
-                          "type": "number",
-                          "nullable": true
-                        },
-                        "published_time": {
-                          "type": "string"
-                        },
-                        "create_time": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "type"
-                      ]
-                    }
-                  },
-                  "force": {
-                    "type": "boolean"
                   }
                 },
                 "required": [
                   "library_id",
-                  "posts",
-                  "media"
+                  "posts"
                 ]
               }
             }
@@ -7898,6 +7599,45 @@
     "/api/task/sweep-orphan-tags": {
       "post": {
         "summary": "Clean up orphan tags under the media library",
+        "tags": [
+          "Task"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "Status code, 0 indicates success"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "Status description"
+                    },
+                    "data": {
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/task/sweep-media-track-integrity": {
+      "post": {
+        "summary": "Reconcile logical Media, Track, and File references",
         "tags": [
           "Task"
         ],
