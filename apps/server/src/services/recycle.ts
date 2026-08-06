@@ -25,7 +25,7 @@ export const RecycleService = {
 
             const updatedPost = await tx
                 .update(Post)
-                .set({ recycle_time: recycleTime })
+                .set({ recycle_time: recycleTime, update_time: recycleTime })
                 .where(and(eq(Post.id, postId), eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time)))
                 .returning({ id: Post.id });
 
@@ -35,7 +35,7 @@ export const RecycleService = {
 
             const updatedMedia = await tx
                 .update(Media)
-                .set({ recycle_time: recycleTime })
+                .set({ recycle_time: recycleTime, update_time: recycleTime })
                 .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
                 .returning({ id: Media.id });
 
@@ -65,7 +65,7 @@ export const RecycleService = {
 
             const restoredPost = await tx
                 .update(Post)
-                .set({ recycle_time: null })
+                .set({ recycle_time: null, update_time: Temporal.Now.instant() })
                 .where(and(eq(Post.id, postId), eq(Post.delete_status, DeleteStatus.ACTIVE), isNotNull(Post.recycle_time)))
                 .returning({ id: Post.id });
 
@@ -75,7 +75,7 @@ export const RecycleService = {
 
             const restoredMedia = await tx
                 .update(Media)
-                .set({ recycle_time: null })
+                .set({ recycle_time: null, update_time: Temporal.Now.instant() })
                 .where(
                     and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE), eq(Media.recycle_time, post.recycle_time)),
                 )

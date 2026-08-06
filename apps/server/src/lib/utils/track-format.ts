@@ -142,6 +142,7 @@ export const REDUNDANT_METADATA_KEYS = new Set([
     "has_video",
     "has_audio",
     "type",
+    "source_track_id",
     "width",
     "height",
     "duration",

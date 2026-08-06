@@ -1,6 +1,7 @@
 import { TrackPurpose, TrackStreamLayout, TrackType, type TrackMetadata, type Stream } from "@/db/schema";
 import { isDashCompatibleFormat, isProgressiveMuxedFormat, type TrackFormatFields } from "@/lib/utils/track-format";
 import { Quality } from "../types";
+import { createMediaSignature } from "./media-signer";
 
 export interface PlaybackTrackInput {
     track_id: string;
@@ -24,6 +25,7 @@ export interface PlaybackTrackInput {
     mime_type: string | null;
     width: number | null;
     height: number | null;
+    bandwidth?: number | null;
 }
 
 export interface PlaybackVariant {
@@ -151,9 +153,9 @@ const finiteNumber = (...values: unknown[]): number | null => {
 const variantMetrics = (track: PlaybackTrackInput) => {
     const stream = findStream(track, TrackType.VIDEO);
     return {
-        width: finiteNumber(stream?.width, track.metadata.width, track.width),
-        height: finiteNumber(stream?.height, track.metadata.height, track.height),
-        bandwidth: finiteNumber(stream?.bandwidth, track.metadata.bandwidth),
+        width: finiteNumber(stream?.width, track.width),
+        height: finiteNumber(stream?.height, track.height),
+        bandwidth: finiteNumber(track.bandwidth),
         frame_rate: finiteNumber(track.metadata.frame_rate),
     };
 };
@@ -169,16 +171,16 @@ const toVariant = (track: PlaybackTrackInput, url: string, mimeType: string | nu
         mime_type: mimeType,
         quality: track.quality,
         label: variantLabel(track, metrics.height),
-        codec: track.codec || findStream(track, TrackType.VIDEO)?.codec || track.metadata.codecs || null,
+        codec: track.codec || findStream(track, TrackType.VIDEO)?.codec || null,
         ...metrics,
     };
 };
 
 const audioFields = (track: PlaybackTrackInput, stream?: Stream) => {
-    const language = stream?.language ?? track.language ?? track.metadata.language ?? null;
-    const codec = stream?.codec ?? track.codec ?? track.metadata.codecs ?? null;
-    const explicitLabel = stream?.label || track.display_name || track.metadata.label || stream?.language || track.language;
-    const qualityLabel = track.quality && !["HIGH", "MEDIUM", "LOW", "ORIGINAL"].includes(track.quality.toUpperCase()) ? track.quality : null;
+    const language = stream?.language ?? track.language ?? null;
+    const codec = stream?.codec ?? track.codec ?? null;
+    const explicitLabel = stream?.label || track.display_name || stream?.language || track.language;
+    const qualityLabel = track.quality;
     const fallbackLabel = codec ? `Audio (${String(codec).toUpperCase()})` : "Audio Track";
 
     return {
@@ -198,12 +200,10 @@ const toExternalSubtitle = (track: PlaybackTrackInput): PlaybackSubtitleTrack =>
     url: track.url,
     mime_type: track.mime_type,
     language: track.language,
-    label: track.display_name || track.language || track.metadata.label || "Subtitle",
+    label: track.display_name || track.language || "Subtitle",
     format: typeof track.metadata.format === "string" ? track.metadata.format : null,
     selectable: true,
 });
-
-import { createMediaSignature } from "./media-signer";
 
 function resolveDashPlayback(
     mediaId: string,

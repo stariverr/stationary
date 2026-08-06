@@ -1,4 +1,4 @@
-import { and, eq, not } from "drizzle-orm";
+import { and, eq, not, isNull } from "drizzle-orm";
 import { db, Transaction } from "@/global/db";
 import {
     DeleteStatus,
@@ -6,7 +6,6 @@ import {
     Track,
     SyncStatus,
     Media,
-    Post,
     TrackType,
     TrackPurpose,
     TrackStreamLayout,
@@ -18,7 +17,7 @@ import { generateDeterministicVariantKey } from "@/lib/utils/track";
 import { Quality } from "@/lib/types";
 import { Temporal } from "@js-temporal/polyfill";
 import { cleanTrackMetadata, deriveTrackFormat } from "@/lib/utils/track-format";
-import { DeleteService } from "@/services/delete";
+
 import { MediaService } from "@/services/media";
 
 export interface FileData {
@@ -27,6 +26,9 @@ export interface FileData {
     mime_type: string;
     extension: string;
     size: number;
+    width?: number | null;
+    height?: number | null;
+    duration?: number | null;
 }
 
 export interface UpsertTrackInput {
@@ -34,6 +36,7 @@ export interface UpsertTrackInput {
     purpose: TrackPurpose;
     quality: Quality;
     priority: number;
+    is_original?: boolean;
     source_url?: string;
     metadata?: TrackMetadata | Record<string, unknown>;
     variant_key?: string;
@@ -106,7 +109,11 @@ function resolveFormatUpdate(
 
 async function resolveFileRecord(tx: Transaction, fileDataOrId: FileData | string) {
     if (typeof fileDataOrId === "string") {
-        const [existingFile] = await tx.select().from(File).where(eq(File.id, fileDataOrId)).limit(1);
+        const [existingFile] = await tx
+            .select()
+            .from(File)
+            .where(and(eq(File.id, fileDataOrId), eq(File.delete_status, DeleteStatus.ACTIVE)))
+            .limit(1);
         if (!existingFile) {
             throw new Error(`File ${fileDataOrId} not found`);
         }
@@ -193,6 +200,21 @@ function extractTrackAttributes(input: UpsertTrackInput, fileRecord: typeof File
     };
 }
 
+async function assertSourceTrackBelongsToMedia(tx: Transaction, mediaId: string, sourceTrackId: string, currentTrackId?: string) {
+    if (sourceTrackId === currentTrackId) {
+        throw new Error("A track cannot reference itself as its source");
+    }
+
+    const [sourceTrack] = await tx
+        .select({ id: Track.id })
+        .from(Track)
+        .where(and(eq(Track.id, sourceTrackId), eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)))
+        .limit(1);
+    if (!sourceTrack) {
+        throw new Error("source_track_id must reference an active track in the same media");
+    }
+}
+
 export const TrackService = {
     async listTracks(mediaId: string) {
         return db
@@ -201,11 +223,46 @@ export const TrackService = {
                 file: File,
             })
             .from(Track)
-            .leftJoin(File, eq(Track.file_id, File.id))
+            .leftJoin(File, and(eq(Track.file_id, File.id), eq(File.delete_status, DeleteStatus.ACTIVE)))
             .where(and(eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)));
     },
 
-    async upsertTrack(mediaId: string, trackInfo: UpsertTrackInput, fileDataOrId: FileData | string, tx: Transaction) {
+    async upsertTrack(
+        mediaId: string,
+        trackInfo: UpsertTrackInput,
+        fileDataOrId: FileData | string,
+        tx: Transaction,
+        options: { deferCompositionCheck?: boolean } = {},
+    ) {
+        const [media] = await tx
+            .select({ id: Media.id })
+            .from(Media)
+            .where(and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
+            .limit(1);
+        if (!media) {
+            throw new Error(`Media ${mediaId} not found or is inactive`);
+        }
+
+        if (trackInfo.priority < 0 || !Number.isFinite(trackInfo.priority)) {
+            throw new Error("Track priority must be a non-negative finite number");
+        }
+        if (trackInfo.width !== undefined && trackInfo.width !== null && trackInfo.width < 1) {
+            throw new Error("Track width must be positive");
+        }
+        if (trackInfo.height !== undefined && trackInfo.height !== null && trackInfo.height < 1) {
+            throw new Error("Track height must be positive");
+        }
+        if (trackInfo.duration !== undefined && trackInfo.duration !== null && trackInfo.duration < 0) {
+            throw new Error("Track duration must be non-negative");
+        }
+        if (trackInfo.bandwidth !== undefined && trackInfo.bandwidth !== null && trackInfo.bandwidth < 0) {
+            throw new Error("Track bandwidth must be non-negative");
+        }
+
+        if (trackInfo.source_track_id) {
+            await assertSourceTrackBelongsToMedia(tx, mediaId, trackInfo.source_track_id);
+        }
+
         const now = Temporal.Now.instant();
 
         // 1. Resolve or insert physical File record
@@ -219,9 +276,12 @@ export const TrackService = {
                     purpose: trackInfo.purpose,
                     quality: trackInfo.quality,
                     priority: trackInfo.priority,
+                    is_original: trackInfo.is_original ?? true,
                     metadata: trackInfo.metadata,
                     language: trackInfo.language,
                     codec: trackInfo.codec,
+                    width: trackInfo.width,
+                    height: trackInfo.height,
                 },
                 fileRecord,
             );
@@ -268,7 +328,7 @@ export const TrackService = {
                 .set({
                     file_id: fileRecord.id,
                     is_generated: false,
-                    is_original: true,
+                    is_original: trackInfo.is_original ?? true,
                     source_url: trackInfo.source_url ?? existingTrack.source_url,
                     metadata,
                     variant_key,
@@ -303,7 +363,7 @@ export const TrackService = {
                     file_id: fileRecord.id,
                     type: trackInfo.type,
                     purpose: trackInfo.purpose,
-                    is_original: true,
+                    is_original: trackInfo.is_original ?? true,
                     is_generated: false,
                     quality: trackInfo.quality,
                     priority: trackInfo.priority,
@@ -334,12 +394,19 @@ export const TrackService = {
             resultTrack = inserted;
         }
 
-        // 4. Mark media and post sync status as COMPLETED
+        // 4. Recompute aggregate status after the Track write. Batch importers can defer
+        // the strict check until all tracks in the composition have been written.
         await MediaService.syncMediaAndPostStatus(mediaId, tx, now);
+        if (!options.deferCompositionCheck) {
+            await MediaService.assertMediaComposition(mediaId, tx);
+        }
 
-        // 5. Soft-delete old file if it is no longer referenced anywhere
+        // 5. Soft-delete the old file owned by the previous Track version
         if (oldFileId && oldFileId !== fileRecord.id) {
-            await DeleteService.softDeleteFileIfUnreferenced(oldFileId, tx, now);
+            await tx
+                .update(File)
+                .set({ delete_status: DeleteStatus.DELETED, delete_time: now })
+                .where(and(eq(File.id, oldFileId), eq(File.delete_status, DeleteStatus.ACTIVE)));
         }
 
         // 6. Return updated track with physical File object
@@ -352,6 +419,15 @@ export const TrackService = {
     async replaceFile(mediaId: string, trackId: string, fileData: FileData) {
         return db.transaction(async (tx) => {
             const now = Temporal.Now.instant();
+
+            const [media] = await tx
+                .select({ id: Media.id })
+                .from(Media)
+                .where(and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
+                .limit(1);
+            if (!media) {
+                throw new Error(`Media ${mediaId} not found or is inactive`);
+            }
 
             const [existingTrack] = await tx
                 .select()
@@ -371,6 +447,9 @@ export const TrackService = {
                 metadata: finalMetadata,
                 file: newFile,
             });
+            const width = fileData.width !== undefined ? fileData.width : existingTrack.width;
+            const height = fileData.height !== undefined ? fileData.height : existingTrack.height;
+            const duration = fileData.duration !== undefined ? fileData.duration : existingTrack.duration;
 
             const [updatedTrack] = await tx
                 .update(Track)
@@ -383,7 +462,12 @@ export const TrackService = {
                     has_video: format.has_video,
                     has_audio: format.has_audio,
                     streams: format.streams,
-                    codec: typeof finalMetadata.codecs === "string" ? finalMetadata.codecs : null,
+                    codec: existingTrack.codec,
+                    width,
+                    height,
+                    duration,
+                    sync_status: SyncStatus.COMPLETED,
+                    last_error: null,
                     is_stale: false,
                     update_time: now,
                 })
@@ -391,8 +475,13 @@ export const TrackService = {
                 .returning();
 
             if (oldFileId && oldFileId !== newFile.id) {
-                await DeleteService.softDeleteFileIfUnreferenced(oldFileId, tx, now);
+                await tx
+                    .update(File)
+                    .set({ delete_status: DeleteStatus.DELETED, delete_time: now })
+                    .where(and(eq(File.id, oldFileId), eq(File.delete_status, DeleteStatus.ACTIVE)));
             }
+
+            await MediaService.syncMediaAndPostStatus(mediaId, tx, now);
 
             return {
                 track: updatedTrack,
@@ -419,10 +508,17 @@ export const TrackService = {
                 .set({
                     delete_status: DeleteStatus.DELETED,
                     delete_time: now,
+                    update_time: now,
                 })
                 .where(eq(Track.id, trackId));
 
-            await DeleteService.softDeleteFileIfUnreferenced(trackRecord.file_id, tx, now);
+            await MediaService.assertMediaComposition(mediaId, tx);
+            if (trackRecord.file_id) {
+                await tx
+                    .update(File)
+                    .set({ delete_status: DeleteStatus.DELETED, delete_time: now })
+                    .where(and(eq(File.id, trackRecord.file_id), eq(File.delete_status, DeleteStatus.ACTIVE)));
+            }
 
             return { success: true };
         });
@@ -439,6 +535,14 @@ export const TrackService = {
 
             if (!trackRecord) {
                 throw new Error("Track not found");
+            }
+
+            if (updates.priority !== undefined && (updates.priority < 0 || !Number.isFinite(updates.priority))) {
+                throw new Error("Track priority must be a non-negative finite number");
+            }
+
+            if (updates.source_track_id) {
+                await assertSourceTrackBelongsToMedia(tx, mediaId, updates.source_track_id, trackId);
             }
 
             const finalMetadata =
@@ -481,6 +585,9 @@ export const TrackService = {
             }
 
             const [updated] = await tx.update(Track).set(setParams).where(eq(Track.id, trackId)).returning();
+
+            await MediaService.syncMediaAndPostStatus(mediaId, tx, now);
+            await MediaService.assertMediaComposition(mediaId, tx);
 
             return updated;
         });

@@ -1,5 +1,5 @@
-import { and, count, eq, inArray, or } from "drizzle-orm";
-import { db, Transaction } from "@/global/db";
+import { and, count, eq, inArray, isNull } from "drizzle-orm";
+import { db } from "@/global/db";
 import { Post, Media, Track, File, Library, Author, DeleteStatus, PostTag, MediaTag } from "@/db/schema";
 
 import { RecycleService } from "./recycle";
@@ -36,26 +36,26 @@ export const DeleteService = {
 
             // 3. Perform synchronous updates
             await tx.delete(PostTag).where(eq(PostTag.post_id, postId));
-            await tx.update(Post).set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime }).where(eq(Post.id, postId));
+            await tx
+                .update(Post)
+                .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
+                .where(eq(Post.id, postId));
             if (mediaIds.length > 0) {
                 await tx
                     .update(Media)
-                    .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
+                    .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
                     .where(inArray(Media.id, mediaIds));
                 await tx
                     .update(Track)
-                    .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
+                    .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
                     .where(inArray(Track.media_id, mediaIds));
             }
-            // 4. Soft-delete associated files
-            // NOTE: Currently assumes 1:1 mapping between Media/Track and File.
-            // If deduplication or shared file references are introduced in the future,
-            // verify references with canPurgeFile() or dynamic file_usage mappings before marking File as DELETED.
+            // 4. Each Track owns its File in the current model.
             if (fileIds.length > 0) {
                 await tx
                     .update(File)
                     .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
-                    .where(inArray(File.id, fileIds));
+                    .where(and(inArray(File.id, fileIds), eq(File.delete_status, DeleteStatus.ACTIVE)));
             }
 
             return { postUpdated: 1, mediaUpdated: mediaIds.length, fileUpdated: fileIds.length };
@@ -67,7 +67,7 @@ export const DeleteService = {
         const deleteTime = Temporal.Now.instant();
         return db.transaction(async (tx) => {
             const medias = await tx
-                .select({ id: Media.id })
+                .select({ id: Media.id, post_id: Media.post_id })
                 .from(Media)
                 .where(and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE)))
                 .limit(1);
@@ -80,15 +80,31 @@ export const DeleteService = {
             const fileIds = tracks.map((mf) => mf.file_id).filter((fid): fid is string => !!fid);
 
             await tx.delete(MediaTag).where(eq(MediaTag.media_id, mediaId));
-            await tx.update(Media).set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime }).where(eq(Media.id, mediaId));
-            await tx.update(Track).set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime }).where(eq(Track.media_id, mediaId));
-            // NOTE: Assumes 1:1 mapping between Media/Track and File.
-            // Check canPurgeFile() if physical file sharing is supported later.
+            await tx
+                .update(Media)
+                .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
+                .where(eq(Media.id, mediaId));
+            await tx
+                .update(Track)
+                .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
+                .where(eq(Track.media_id, mediaId));
+            // Each Track owns its File in the current model.
             if (fileIds.length > 0) {
                 await tx
                     .update(File)
                     .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
-                    .where(inArray(File.id, fileIds));
+                    .where(and(inArray(File.id, fileIds), eq(File.delete_status, DeleteStatus.ACTIVE)));
+            }
+
+            if (medias[0]?.post_id) {
+                const [activeCount] = await tx
+                    .select({ count: count() })
+                    .from(Media)
+                    .where(and(eq(Media.post_id, medias[0].post_id), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)));
+                await tx
+                    .update(Post)
+                    .set({ media_count: activeCount?.count ?? 0, update_time: deleteTime })
+                    .where(eq(Post.id, medias[0].post_id));
             }
 
             return { mediaUpdated: 1, fileUpdated: fileIds.length };
@@ -118,12 +134,15 @@ export const DeleteService = {
             const library = libs[0];
             if (!library) return { libraryUpdated: 0 };
 
-            await tx.update(Library).set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime }).where(eq(Library.id, libraryId));
+            await tx
+                .update(Library)
+                .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
+                .where(eq(Library.id, libraryId));
             if (library.cover_file_id) {
                 await tx
                     .update(File)
                     .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
-                    .where(eq(File.id, library.cover_file_id));
+                    .where(and(eq(File.id, library.cover_file_id), eq(File.delete_status, DeleteStatus.ACTIVE)));
             }
 
             return { libraryUpdated: 1 };
@@ -146,15 +165,17 @@ export const DeleteService = {
             if (!author) return { authorUpdated: 0 };
 
             // Soft Delete Author
-            await tx.update(Author).set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime }).where(eq(Author.id, authorId));
+            await tx
+                .update(Author)
+                .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
+                .where(eq(Author.id, authorId));
 
             const fileIds = [author.avatar_file_id, author.avatar_thumb_file_id].filter((fid): fid is string => !!fid);
-            // Soft Delete Author Avatar File
             if (fileIds.length > 0) {
                 await tx
                     .update(File)
                     .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
-                    .where(inArray(File.id, fileIds));
+                    .where(and(inArray(File.id, fileIds), eq(File.delete_status, DeleteStatus.ACTIVE)));
             }
 
             // Empty author_id of posts
@@ -165,51 +186,4 @@ export const DeleteService = {
         });
     },
 
-    /** Check if File can be purged (it is not referenced by any active entity) */
-    async canPurgeFile(fileId: string, tx?: Transaction): Promise<boolean> {
-        const executor = tx || db;
-        const [authorCount, libraryCount, mediaFileCount] = await Promise.all([
-            executor
-                .select({ count: count() })
-                .from(Author)
-                .where(
-                    and(
-                        or(eq(Author.avatar_file_id, fileId), eq(Author.avatar_thumb_file_id, fileId)),
-                        eq(Author.delete_status, DeleteStatus.ACTIVE),
-                    ),
-                ),
-            executor
-                .select({ count: count() })
-                .from(Library)
-                .where(and(eq(Library.cover_file_id, fileId), eq(Library.delete_status, DeleteStatus.ACTIVE))),
-            executor
-                .select({ count: count() })
-                .from(Track)
-                .where(and(eq(Track.file_id, fileId), eq(Track.delete_status, DeleteStatus.ACTIVE))),
-        ]);
-
-        const authors = authorCount[0]?.count ?? 0;
-        const libraries = libraryCount[0]?.count ?? 0;
-        const tracks = mediaFileCount[0]?.count ?? 0;
-
-        return authors + libraries + tracks === 0;
-    },
-
-    /** Soft-delete file if it is no longer referenced by any active entity */
-    async softDeleteFileIfUnreferenced(fileId: string | null, tx?: Transaction, deleteTime = Temporal.Now.instant()) {
-        if (!fileId) return false;
-        const canPurge = await this.canPurgeFile(fileId, tx);
-        if (!canPurge) return false;
-
-        const executor = tx || db;
-        const deleted = await executor
-            .update(File)
-            .set({
-                delete_status: DeleteStatus.DELETED,
-                delete_time: deleteTime,
-            })
-            .where(and(eq(File.id, fileId), eq(File.delete_status, DeleteStatus.ACTIVE)))
-            .returning({ id: File.id });
-        return deleted.length > 0;
-    },
 };

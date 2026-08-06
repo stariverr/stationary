@@ -1,4 +1,4 @@
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or, isNull } from "drizzle-orm";
 import { db, Transaction } from "@/global/db";
 import {
     Media,
@@ -9,7 +9,9 @@ import {
     SyncStatus,
     TrackPurpose,
     TrackType,
+    MediaType,
     Post,
+    Tag,
     type TrackMetadata,
 } from "@/db/schema";
 import { Temporal } from "@js-temporal/polyfill";
@@ -31,6 +33,7 @@ import {
     type HlsSubtitleVariant,
 } from "@/lib/utils/hls-manifest";
 import { isDashCompatibleFormat } from "@/lib/utils/track-format";
+import { validateMediaComposition } from "@/lib/validation/media-composition";
 
 export interface PreviewItem {
     url: string | null;
@@ -42,9 +45,28 @@ const buildUrl = (bucket: string | null | undefined, path: string | null | undef
     bucket && path ? buildCdnUrl(bucket, path) : null;
 
 export async function replaceMediaTagsTx(tx: Transaction, mediaId: string, libraryId: string, tagIds: string[]) {
+    const [media] = await tx
+        .select({ id: Media.id, library_id: Media.library_id, delete_status: Media.delete_status })
+        .from(Media)
+        .where(eq(Media.id, mediaId))
+        .limit(1);
+    if (!media || media.delete_status !== DeleteStatus.ACTIVE || media.library_id !== libraryId) {
+        throw new Error("Media does not belong to the supplied active library");
+    }
+
+    const newIds = new Set(tagIds);
+    if (newIds.size > 0) {
+        const validTags = await tx
+            .select({ id: Tag.id })
+            .from(Tag)
+            .where(and(eq(Tag.library_id, libraryId), inArray(Tag.id, [...newIds])));
+        if (validTags.length !== newIds.size) {
+            throw new Error("One or more tags do not belong to the media library");
+        }
+    }
+
     const existing = await tx.select({ tag_id: MediaTag.tag_id }).from(MediaTag).where(eq(MediaTag.media_id, mediaId));
     const existingIds = new Set(existing.map((r) => r.tag_id));
-    const newIds = new Set(tagIds);
 
     const toDelete = Array.from(existingIds).filter((id) => !newIds.has(id));
     const toInsert = Array.from(newIds).filter((id) => !existingIds.has(id));
@@ -62,7 +84,78 @@ export async function replaceMediaTagsTx(tx: Transaction, mediaId: string, libra
     }
 }
 
+const requiredContentTypes = (mediaType: MediaType): TrackType[] => {
+    if (mediaType === MediaType.LIVE_PHOTO) return [TrackType.IMAGE, TrackType.VIDEO];
+    if (mediaType === MediaType.IMAGE) return [TrackType.IMAGE];
+    if (mediaType === MediaType.VIDEO) return [TrackType.VIDEO];
+    if (mediaType === MediaType.AUDIO) return [TrackType.AUDIO];
+    if (mediaType === MediaType.PDF) return [TrackType.PDF];
+    return [];
+};
+
 export const MediaService = {
+    async getMediaCompletionError(mediaId: string, requireFiles = true, tx?: Transaction): Promise<string | null> {
+        const executor = tx ?? db;
+        const [media] = await executor
+            .select({ id: Media.id, type: Media.type })
+            .from(Media)
+            .where(and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
+            .limit(1);
+        if (!media) return "Media not found or is inactive";
+
+        const tracks = await executor
+            .select({
+                type: Track.type,
+                purpose: Track.purpose,
+                is_default: Track.is_default,
+                sync_status: Track.sync_status,
+                file_id: Track.file_id,
+                file_delete_status: DbFile.delete_status,
+            })
+            .from(Track)
+            .leftJoin(DbFile, eq(Track.file_id, DbFile.id))
+            .where(and(eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)));
+
+        const compositionError = validateMediaComposition(
+            media.type,
+            tracks.map((track) => ({
+                type: track.type,
+                purpose: track.purpose,
+                is_default: track.is_default,
+            })),
+        );
+        if (compositionError) return compositionError;
+
+        if (!requireFiles) return null;
+
+        for (const requiredType of requiredContentTypes(media.type)) {
+            const ready = tracks.some(
+                (track) =>
+                    track.type === requiredType &&
+                    track.purpose === TrackPurpose.CONTENT &&
+                    track.is_default &&
+                    track.sync_status === SyncStatus.COMPLETED &&
+                    track.file_id !== null &&
+                    track.file_delete_status === DeleteStatus.ACTIVE,
+            );
+            if (!ready) {
+                return `${media.type} media requires a completed default ${requiredType} CONTENT track with an active file`;
+            }
+        }
+
+        return null;
+    },
+
+    async assertMediaComposition(mediaId: string, tx: Transaction): Promise<void> {
+        const compositionError = await this.getMediaCompletionError(mediaId, false, tx);
+        if (compositionError) throw new Error(compositionError);
+    },
+
+    async assertMediaReady(mediaId: string, tx: Transaction): Promise<void> {
+        const completionError = await this.getMediaCompletionError(mediaId, true, tx);
+        if (completionError) throw new Error(completionError);
+    },
+
     async updateInfo(
         id: string,
         fields: {
@@ -78,7 +171,11 @@ export const MediaService = {
         if (fields.description !== undefined) updateFields.description = fields.description;
         if (fields.published_time !== undefined) updateFields.published_time = fields.published_time;
 
-        const updated = await db.update(Media).set(updateFields).where(eq(Media.id, id)).returning();
+        const updated = await db
+            .update(Media)
+            .set(updateFields)
+            .where(and(eq(Media.id, id), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
+            .returning();
         return updated[0];
     },
 
@@ -90,20 +187,54 @@ export const MediaService = {
     },
 
     async syncMediaAndPostStatus(mediaId: string, tx: Transaction, now = Temporal.Now.instant()) {
+        const completionError = await this.getMediaCompletionError(mediaId, true, tx);
+        if (completionError) {
+            await tx
+                .update(Media)
+                .set({
+                    sync_status: SyncStatus.PENDING,
+                    last_error: completionError,
+                    update_time: now,
+                })
+                .where(and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE)));
+
+            const [media] = await tx
+                .select({ post_id: Media.post_id })
+                .from(Media)
+                .where(and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE)))
+                .limit(1);
+            if (media?.post_id) {
+                await tx
+                    .update(Post)
+                    .set({
+                        sync_status: SyncStatus.PENDING,
+                        last_error: completionError,
+                        update_time: now,
+                    })
+                    .where(and(eq(Post.id, media.post_id), eq(Post.delete_status, DeleteStatus.ACTIVE)));
+            }
+            return false;
+        }
+
         await tx
             .update(Media)
             .set({
                 sync_status: SyncStatus.COMPLETED,
+                last_error: null,
                 update_time: now,
             })
-            .where(eq(Media.id, mediaId));
+            .where(and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE)));
 
-        const [media] = await tx.select({ post_id: Media.post_id }).from(Media).where(eq(Media.id, mediaId)).limit(1);
+        const [media] = await tx
+            .select({ post_id: Media.post_id })
+            .from(Media)
+            .where(and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE)))
+            .limit(1);
         if (media?.post_id) {
             const activeMedias = await tx
                 .select({ sync_status: Media.sync_status })
                 .from(Media)
-                .where(and(eq(Media.post_id, media.post_id), eq(Media.delete_status, DeleteStatus.ACTIVE)));
+                .where(and(eq(Media.post_id, media.post_id), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)));
 
             const allCompleted = activeMedias.every((m) => m.sync_status === SyncStatus.COMPLETED);
             if (allCompleted) {
@@ -111,11 +242,13 @@ export const MediaService = {
                     .update(Post)
                     .set({
                         sync_status: SyncStatus.COMPLETED,
+                        last_error: null,
                         update_time: now,
                     })
-                    .where(eq(Post.id, media.post_id));
+                    .where(and(eq(Post.id, media.post_id), eq(Post.delete_status, DeleteStatus.ACTIVE)));
             }
         }
+        return true;
     },
 
     /**

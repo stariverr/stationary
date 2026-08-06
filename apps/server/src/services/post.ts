@@ -1,6 +1,6 @@
 import { and, count, eq, isNull, inArray } from "drizzle-orm";
 import { db, Transaction } from "@/global/db";
-import { DeleteStatus, Media, Post, PostTag } from "@/db/schema";
+import { DeleteStatus, Media, Post, PostTag, Tag } from "@/db/schema";
 
 import { Temporal } from "@js-temporal/polyfill";
 
@@ -15,14 +15,33 @@ import { Temporal } from "@js-temporal/polyfill";
  * @param tagIds - List of new tag IDs to associate
  */
 export async function replacePostTagsTx(tx: Transaction, postId: string, libraryId: string, tagIds: string[]) {
+    const [post] = await tx
+        .select({ id: Post.id, library_id: Post.library_id, delete_status: Post.delete_status })
+        .from(Post)
+        .where(eq(Post.id, postId))
+        .limit(1);
+    if (!post || post.delete_status !== DeleteStatus.ACTIVE || post.library_id !== libraryId) {
+        throw new Error("Post does not belong to the supplied active library");
+    }
+
+    const newIds = new Set(tagIds);
+    if (newIds.size > 0) {
+        const validTags = await tx
+            .select({ id: Tag.id })
+            .from(Tag)
+            .where(and(eq(Tag.library_id, libraryId), inArray(Tag.id, [...newIds])));
+        if (validTags.length !== newIds.size) {
+            throw new Error("One or more tags do not belong to the post library");
+        }
+    }
+
     // 1. Fetch current tag associations for the post
     const existing = await tx.select({ tag_id: PostTag.tag_id }).from(PostTag).where(eq(PostTag.post_id, postId));
     const existingIds = new Set(existing.map((r) => r.tag_id));
-    const newIds = new Set(tagIds);
 
     // 2. Identify associations to remove and to add
-    const toDelete = Array.from(existingIds).filter((id) => !newIds.has(id));
-    const toInsert = Array.from(newIds).filter((id) => !existingIds.has(id));
+    const toDelete = Array.from(existingIds.difference(newIds));
+    const toInsert = Array.from(newIds.difference(existingIds));
 
     // 3. Perform batch deletions for removed tags
     if (toDelete.length > 0) {
@@ -60,7 +79,7 @@ export const PostService = {
             url?: string | null;
         },
     ) {
-        const updateFields: any = {
+        const updateFields: Partial<typeof Post.$inferSelect> = {
             update_time: Temporal.Now.instant(),
         };
         if (fields.title !== undefined) updateFields.title = fields.title;
@@ -68,7 +87,11 @@ export const PostService = {
         if (fields.published_time !== undefined) updateFields.published_time = fields.published_time;
         if (fields.url !== undefined) updateFields.url = fields.url;
 
-        const updated = await db.update(Post).set(updateFields).where(eq(Post.id, id)).returning();
+        const updated = await db
+            .update(Post)
+            .set(updateFields)
+            .where(and(eq(Post.id, id), eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time)))
+            .returning();
         return updated[0];
     },
 
@@ -100,6 +123,20 @@ export const PostService = {
      */
     async bindMedia(postId: string, libraryId: string, mediaIds: string[]) {
         return db.transaction(async (tx) => {
+            const [post] = await tx
+                .select({ id: Post.id })
+                .from(Post)
+                .where(
+                    and(
+                        eq(Post.id, postId),
+                        eq(Post.library_id, libraryId),
+                        eq(Post.delete_status, DeleteStatus.ACTIVE),
+                        isNull(Post.recycle_time),
+                    ),
+                )
+                .limit(1);
+            if (!post) return { error: "Post not found or does not belong to the library" };
+
             // Deduplicate input media IDs to avoid redundant processing
             const uniqueMediaIds = Array.from(new Set(mediaIds));
 

@@ -13,9 +13,12 @@ export function generateDeterministicVariantKey(
         purpose: string;
         quality: string;
         priority: number;
-        metadata?: any;
+        is_original?: boolean;
+        metadata?: Record<string, unknown>;
         language?: string | null;
         codec?: string | null;
+        width?: number | null;
+        height?: number | null;
     },
     file?: {
         extension?: string | null;
@@ -26,26 +29,25 @@ export function generateDeterministicVariantKey(
     } | null,
 ): string {
     const type = track.type.toUpperCase();
-    const quality = (track.quality || "ORIGINAL").toUpperCase();
+    const isOriginal = track.is_original ?? false;
     const priority = track.priority ?? 0;
     const metadata = track.metadata || {};
 
-    // Leverage physical File properties (fallback to metadata)
-    const width = file?.width ?? metadata.width ?? 0;
-    const height = file?.height ?? metadata.height ?? 0;
-    const lang = (track.language ?? metadata.language ?? "unknown").toLowerCase().replace(/_/g, "-");
-    const codecStr = (track.codec ?? metadata.codecs ?? "").toLowerCase();
+    const width = track.width ?? file?.width ?? 0;
+    const height = track.height ?? file?.height ?? 0;
+    const lang = (track.language ?? "unknown").toLowerCase().replace(/_/g, "-");
+    const codecStr = (track.codec ?? "").toLowerCase();
 
     let key = "";
 
     if (type === "SUBTITLE") {
-        const format = (metadata.format ?? file?.extension ?? "vtt").toLowerCase();
+        const format = (typeof metadata.format === "string" ? metadata.format : file?.extension ?? "vtt").toLowerCase();
         key = `${lang}-${format}`;
     } else if (type === "AUDIO") {
         const codec = codecStr.replace(/[^a-z0-9]/g, "") || "aac";
         key = `${lang}-${codec}`;
     } else if (type === "VIDEO") {
-        if (quality === "ORIGINAL" && priority === 0) {
+        if (isOriginal && priority === 0) {
             key = "original-video";
         } else {
             const h = height ? `${height}p` : "video";
@@ -54,10 +56,10 @@ export function generateDeterministicVariantKey(
         }
     } else {
         // IMAGE
-        if (quality === "ORIGINAL" && priority === 0) {
+        if (isOriginal && priority === 0) {
             key = "original";
         } else {
-            const ext = (file?.extension ?? metadata.format ?? "jpeg").toLowerCase();
+            const ext = (file?.extension ?? (typeof metadata.format === "string" ? metadata.format : "jpeg")).toLowerCase();
             key = width && height ? `${ext}-${width}x${height}` : `${ext}-image`;
         }
     }

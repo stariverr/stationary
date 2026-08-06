@@ -10,14 +10,14 @@ import {
     MediaType,
     type TrackMetadata,
 } from "@/db/schema";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, isNull } from "drizzle-orm";
 import { renderCoverFrame } from "@/lib/utils/cover_renderer";
 import { RECIPE_VERSION } from "@/lib/utils/cover_profiles";
 import { uploadToS3 } from "@/lib/utils/media";
 import { s3 } from "@/global/s3";
 import { env } from "@/global/env";
 import { Quality } from "@/lib/types";
-import { DeleteService } from "@/services/delete";
+
 import { Temporal } from "@js-temporal/polyfill";
 
 export interface ResolvedCoverSource {
@@ -114,6 +114,7 @@ export const CoverService = {
                     eq(Track.media_id, media.id),
                     eq(Track.purpose, TrackPurpose.CONTENT),
                     eq(Track.delete_status, DeleteStatus.ACTIVE),
+                    eq(Track.sync_status, SyncStatus.COMPLETED),
                     eq(DbFile.delete_status, DeleteStatus.ACTIVE),
                 ),
             );
@@ -147,8 +148,8 @@ export const CoverService = {
      */
     async generateCover(params: GenerateCoverParams): Promise<GenerateCoverResult> {
         const { media, quality, source } = params;
+        const sourceTrackId = params.sourceTrackId || source.track.id;
 
-        // Strictly use internal S3 file for rendering
         const sourceUrlForFFmpeg = await s3.getPresignedUrl(source.filePath, {
             bucket: source.fileBucket,
             expiresInSeconds: 900,
@@ -174,12 +175,33 @@ export const CoverService = {
         const qualityLower = quality.toLowerCase();
         const sourceFileId = params.sourceFileId || source.fileId;
         const s3Key = media.post_id
-            ? `v2/p/${media.post_id.slice(-2)}/${media.post_id}/${media.sort_order}_cover/${qualityLower}/v${RECIPE_VERSION}-${sourceFileId}.avif`
+            ? `v2/p/${media.post_id.slice(-2)}/${media.post_id}/media_${media.id}/cover/${qualityLower}/v${RECIPE_VERSION}-${sourceFileId}.avif`
             : `v2/m/${shard}/${media.id}/cover/${qualityLower}/v${RECIPE_VERSION}-${sourceFileId}.avif`;
 
         await uploadToS3(s3Key, renderResult.buffer, "image/avif", env.S3_BUCKET, renderResult.size);
 
         const newFileId = await db.transaction(async (tx) => {
+            const [activeMedia] = await tx
+                .select({ id: Media.id })
+                .from(Media)
+                .where(and(eq(Media.id, media.id), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
+                .limit(1);
+            if (!activeMedia) throw new Error("Media was deleted before cover persistence");
+
+            const [activeSourceTrack] = await tx
+                .select({ id: Track.id })
+                .from(Track)
+                .where(
+                    and(
+                        eq(Track.id, sourceTrackId),
+                        eq(Track.media_id, media.id),
+                        eq(Track.delete_status, DeleteStatus.ACTIVE),
+                        eq(Track.sync_status, SyncStatus.COMPLETED),
+                    ),
+                )
+                .limit(1);
+            if (!activeSourceTrack) throw new Error("Cover source track is no longer available");
+
             const fileResults = await tx
                 .insert(DbFile)
                 .values({
@@ -204,7 +226,6 @@ export const CoverService = {
             const createdFileId = fileResults[0].id;
             const variantKey = `cover:${qualityLower}:recipe:${RECIPE_VERSION}`;
             const metadata: TrackMetadata = {
-                source_track_id: params.sourceTrackId || source.track.id,
                 source_file_id: sourceFileId,
                 recipe_version: RECIPE_VERSION,
                 generation_mode: source.track.type === TrackType.VIDEO ? "VIDEO_FRAME" : "TRANSCODE",
@@ -237,7 +258,7 @@ export const CoverService = {
                         height: renderResult.height,
                         is_generated: true,
                         is_original: false,
-                        source_track_id: source.track.id,
+                        source_track_id: sourceTrackId,
                         update_time: completedNow,
                     })
                     .where(eq(Track.id, existingCoverTrack.id));
@@ -259,7 +280,7 @@ export const CoverService = {
                         variant_key: variantKey,
                         is_generated: true,
                         is_original: false,
-                        source_track_id: source.track.id,
+                        source_track_id: sourceTrackId,
                         create_time: completedNow,
                         update_time: completedNow,
                     })
@@ -275,7 +296,7 @@ export const CoverService = {
                             height: renderResult.height,
                             is_generated: true,
                             is_original: false,
-                            source_track_id: source.track.id,
+                            source_track_id: sourceTrackId,
                             update_time: completedNow,
                             delete_status: DeleteStatus.ACTIVE,
                             delete_time: null,
@@ -284,13 +305,10 @@ export const CoverService = {
             }
 
             if (oldFileIdToDelete) {
-                const canPurge = await DeleteService.canPurgeFile(oldFileIdToDelete, tx);
-                if (canPurge) {
-                    await tx
-                        .update(DbFile)
-                        .set({ delete_status: DeleteStatus.DELETED, delete_time: completedNow })
-                        .where(eq(DbFile.id, oldFileIdToDelete));
-                }
+                await tx
+                    .update(DbFile)
+                    .set({ delete_status: DeleteStatus.DELETED, delete_time: completedNow })
+                    .where(and(eq(DbFile.id, oldFileIdToDelete), eq(DbFile.delete_status, DeleteStatus.ACTIVE)));
             }
 
             return createdFileId;
