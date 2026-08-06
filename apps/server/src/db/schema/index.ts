@@ -4,6 +4,7 @@ import {
     text,
     pgEnum,
     integer,
+    bigint,
     jsonb,
     uuid,
     boolean,
@@ -319,6 +320,7 @@ export const Post = pgTable(
         recycle_time: temporal("recycle_time"),
     },
     (table) => [
+        check("post_eid_non_empty", sql`btrim(${table.eid}) <> ''`),
         uniqueIndex("post_source_eid_unique").on(table.source, table.eid),
         index("post_library_delete_time_idx").on(table.library_id, table.delete_time),
     ],
@@ -390,7 +392,7 @@ export const Media = pgTable(
         sort_order: integer("sort_order").notNull(),
         eid: text("eid").notNull(),
         /** Post ID
-         * - Can be null, if media is dependent.
+         * - Can be null for an independent media asset.
          */
         post_id: uuid("post_id"),
         library_id: uuid("library_id").notNull(),
@@ -398,22 +400,6 @@ export const Media = pgTable(
         title: text("title").notNull(),
         description: text("description").notNull(),
         type: MediaTypeEnum("type").notNull(),
-        /** Primary Media URL
-         * @deprecated
-         */
-        primary_url: text("primary_url").default(""),
-        /** Alternative Media URL
-         * @deprecated
-         */
-        alternative_url: text("alternative_url").default(""),
-        /** Live Photo Original URL
-         * @deprecated
-         */
-        live_photo_url: text("live_photo_url").default(""),
-        /** Video Cover URL
-         * @deprecated
-         */
-        cover_url: text("cover_url").default(""),
         /** Original published time on the source platform */
         // TODO: Change it to not null
         published_time: temporal("published_time"),
@@ -429,6 +415,12 @@ export const Media = pgTable(
         recycle_time: temporal("recycle_time"),
     },
     (table) => [
+        uniqueIndex("media_post_source_eid_active_unique")
+            .on(table.post_id, table.source, table.eid)
+            .where(sql`${table.post_id} IS NOT NULL AND ${table.delete_status} = 'ACTIVE'`),
+        uniqueIndex("media_library_source_eid_independent_active_unique")
+            .on(table.library_id, table.source, table.eid)
+            .where(sql`${table.post_id} IS NULL AND ${table.delete_status} = 'ACTIVE'`),
         uniqueIndex("media_post_sort_unique")
             .on(table.post_id, table.sort_order)
             .where(sql`delete_status = 'ACTIVE'`),
@@ -457,6 +449,7 @@ export interface MediaStream {
 export type Stream = MediaStream;
 
 export interface TrackMetadata {
+    source_file_id?: string;
     /** DASH / fMP4 segment index info */
     segment_base?: {
         initialization?: string;
@@ -510,7 +503,7 @@ export const Track = pgTable(
         has_video: boolean("has_video").default(false).notNull(),
         has_audio: boolean("has_audio").default(false).notNull(),
         streams: jsonb("streams").$type<MediaStream[]>().default([]).notNull(),
-        variant_key: varchar("variant_key", { length: 255 }).default("temp-migration").notNull(),
+        variant_key: varchar("variant_key", { length: 255 }).notNull(),
         is_default: boolean("is_default").default(false).notNull(),
         is_primary: boolean("is_primary").default(false).notNull(),
         display_name: text("display_name"),
@@ -532,6 +525,7 @@ export const Track = pgTable(
         delete_status: DeleteStatusEnum("delete_status").default(DeleteStatus.ACTIVE).notNull(),
     },
     (table) => [
+        check("track_variant_key_non_empty", sql`btrim(${table.variant_key}) <> ''`),
         uniqueIndex("track_media_type_purpose_variant_key_active_unique")
             .on(table.media_id, table.type, table.purpose, table.variant_key)
             .where(sql`delete_status = 'ACTIVE'`),
@@ -593,7 +587,7 @@ export const File = pgTable("file", {
     // TODO: determine nullability
     hash: text("hash"), // SHA-256 for deduplication
     // TODO: determine nullability
-    size: integer("size"),
+    size: bigint("size", { mode: "number" }),
     mime_type: text("mime_type").notNull(),
     // TODO: determine nullability
     extension: text("extension"),
