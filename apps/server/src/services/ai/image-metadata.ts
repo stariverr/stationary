@@ -73,5 +73,5 @@ export async function describeImageWithModel(
         ],
     });
 
-    return normalizeImageAiMetadata(output);
+    return normalizeImageAiMetadata(output as any);
 }

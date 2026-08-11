@@ -2,6 +2,8 @@ import { db } from "@/global/db";
 import { JobManager } from "@/infra/jobs/manager";
 import { jobRunner } from "@/infra/jobs/runner";
 import { createIdempotencyKey } from "@/lib/utils/hash";
+import { AsyncTaskType, AsyncTaskUnitKind, AsyncSubjectType } from "@/db/schema";
+import type { DiscoveredUnitSpec } from "@/infra/jobs/types";
 import type { PostItemData } from "@/api/schemas/ingest";
 import { saveIngestMetadata } from "./persistence";
 
@@ -30,60 +32,38 @@ export const IngestPipeline = {
             };
         }
 
-        // 1. Enqueue Avatar download job if needed
+        const unitSpecs: DiscoveredUnitSpec[] = postData.media.map((m, idx) => ({
+            unitKey: `media:${m.external_id || idx}`,
+            kind: AsyncTaskUnitKind.MEDIA_DOWNLOAD,
+            subjectType: AsyncSubjectType.POST,
+            subjectId: saveResult.postId,
+            inputSnapshot: { post_id: saveResult.postId, media_index: idx },
+        }));
+
         if (saveResult.authorId && postData.author.avatar_file_url) {
-            const avatarIdempotencyKey = createIdempotencyKey("AVATAR_DOWNLOAD", saveResult.authorId, postData.author.avatar_file_url);
-            await JobManager.createJob(
-                {
-                    type: "AVATAR_DOWNLOAD",
-                    library_id: targetLibraryId,
-                    input_snapshot: {
-                        author_id: saveResult.authorId,
-                        url: postData.author.avatar_file_url,
-                    },
-                    idempotency_key: avatarIdempotencyKey,
-                },
-                [
-                    {
-                        kind: "AVATAR_DOWNLOAD",
-                        subject_type: "AUTHOR",
-                        subject_id: saveResult.authorId,
-                        unit_key: "AVATAR:ORIGINAL",
-                        input_snapshot: {
-                            url: postData.author.avatar_file_url,
-                        },
-                    },
-                ],
-            );
+            unitSpecs.push({
+                unitKey: `avatar:${saveResult.authorId}`,
+                kind: AsyncTaskUnitKind.AVATAR_DOWNLOAD,
+                subjectType: AsyncSubjectType.AUTHOR,
+                subjectId: saveResult.authorId,
+                inputSnapshot: { author_id: saveResult.authorId, avatar_url: postData.author.avatar_file_url },
+            });
         }
 
-        // 2. Enqueue Media download / post-processing job
-        const mediaIdempotencyKey = createIdempotencyKey("MEDIA_DOWNLOAD", saveResult.postId, workflowRunId);
-        const masterTaskId = await JobManager.createJob(
-            {
-                type: "POST_PROCESS",
-                library_id: targetLibraryId,
-                input_snapshot: {
-                    post_id: saveResult.postId,
-                    workflow_run_id: workflowRunId,
-                },
-                idempotency_key: mediaIdempotencyKey,
+        await JobManager.enqueueTaskWithUnits({
+            type: AsyncTaskType.POST_PROCESS,
+            libraryId: targetLibraryId,
+            inputSnapshot: {
+                post_id: saveResult.postId,
+                workflow_run_id: workflowRunId,
             },
-            [
-                {
-                    kind: "MEDIA_DOWNLOAD",
-                    subject_type: "POST",
-                    subject_id: saveResult.postId,
-                    unit_key: `POST:${saveResult.postId}`,
-                    input_snapshot: {
-                        post_id: saveResult.postId,
-                    },
-                },
-            ],
-        );
+            idempotencyKey: createIdempotencyKey("POST_PROCESS", {
+                postId: saveResult.postId,
+                workflowRunId,
+            }),
+        }, unitSpecs);
 
-        // Signal job runner to pick up task immediately
-        jobRunner.kickoffTask(masterTaskId);
+        jobRunner.wake();
 
         return {
             workflowRunId,

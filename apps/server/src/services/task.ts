@@ -37,6 +37,13 @@ export const TaskService = {
     },
 
     /**
+     * Copy author avatar between authors
+     */
+    async copyAuthorAvatar(sourceAuthorId: string, targetAuthorId: string, signal?: AbortSignal) {
+        return processAvatar(targetAuthorId, "", signal);
+    },
+
+    /**
      * Sweep entity sync statuses stuck in IN_PROGRESS
      */
     async sweepStuckTasks(thresholdMinutes = 30) {
