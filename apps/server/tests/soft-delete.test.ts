@@ -8,7 +8,11 @@ const sourceFiles = {
     postApi: () => Bun.file(resolveSrc("src/api/post.ts")).text(),
     mediaApi: () => Bun.file(resolveSrc("src/api/media.ts")).text(),
     libraryApi: () => Bun.file(resolveSrc("src/api/library.ts")).text(),
-    taskService: () => Bun.file(resolveSrc("src/services/task.ts")).text(),
+    taskService: async () => {
+        const task = await Bun.file(resolveSrc("src/services/task.ts")).text();
+        const ingestDb = await Bun.file(resolveSrc("src/services/ingest/persistence.ts")).text();
+        return task + "\n" + ingestDb;
+    },
     trackService: () => Bun.file(resolveSrc("src/services/track.ts")).text(),
     recycleService: () => Bun.file(resolveSrc("src/services/recycle.ts")).text(),
     latestMigration: async () => {

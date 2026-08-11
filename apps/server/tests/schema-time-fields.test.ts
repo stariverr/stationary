@@ -7,7 +7,11 @@ const sourceFiles = {
     schema: () => Bun.file(resolveSrc("src/db/schema/index.ts")).text(),
     postApi: () => Bun.file(resolveSrc("src/api/post.ts")).text(),
     mediaApi: () => Bun.file(resolveSrc("src/api/media.ts")).text(),
-    taskService: () => Bun.file(resolveSrc("src/services/task.ts")).text(),
+    taskService: async () => {
+        const task = await Bun.file(resolveSrc("src/services/task.ts")).text();
+        const ingestDb = await Bun.file(resolveSrc("src/services/ingest/persistence.ts")).text();
+        return task + "\n" + ingestDb;
+    },
     latestMigration: async () => {
         const proc = Bun.spawn(["find", resolveSrc("drizzle"), "-name", "migration.sql", "-print"], {
             stdout: "pipe",

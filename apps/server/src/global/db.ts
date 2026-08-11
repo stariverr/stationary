@@ -25,4 +25,7 @@ export const db = drizzle({
     relations,
 });
 
-export type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+export type DB = typeof db;
+export type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+export type Transaction = Tx;
+export type DbClient = DB | Tx;

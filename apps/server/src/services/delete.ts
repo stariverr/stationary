@@ -64,7 +64,6 @@ export const DeleteService = {
                     .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
                     .where(inArray(Track.media_id, mediaIds));
             }
-            // 4. Each Track owns its File in the current model.
             if (fileIds.length > 0) {
                 await tx
                     .update(File)
@@ -102,7 +101,7 @@ export const DeleteService = {
                 .update(Track)
                 .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
                 .where(eq(Track.media_id, mediaId));
-            // Each Track owns its File in the current model.
+
             if (fileIds.length > 0) {
                 await tx
                     .update(File)
@@ -160,21 +159,15 @@ export const DeleteService = {
         });
     },
 
-    /** Delete Library
-     *
-     * Delete is allowed only when the library is empty (no active Posts or Media).
-     * Cascades soft-delete to associated Authors and hard-delete to Tags and Access records.
-     */
+    /** Delete Library */
     async deleteLibrary(libraryId: string) {
         const deleteTime = Temporal.Now.instant();
 
-        // 1. Fast-fail check outside transaction
         const hasContent = await RecycleService.libraryHasContent(libraryId);
         if (hasContent) {
             throw new Error("Library is not empty");
         }
 
-        // 2. Perform soft-delete and cascade cleanups in transaction
         return db.transaction(async (tx) => {
             const libs = await tx
                 .select({ id: Library.id, cover_file_id: Library.cover_file_id })
@@ -196,7 +189,6 @@ export const DeleteService = {
                     .where(and(eq(File.id, library.cover_file_id), eq(File.delete_status, DeleteStatus.ACTIVE)));
             }
 
-            // Cascade soft-delete Authors of this library
             const authors = await tx
                 .select({
                     id: Author.id,
@@ -225,7 +217,6 @@ export const DeleteService = {
                 }
             }
 
-            // Cascade hard-delete Tags belonging to this library
             const tags = await tx
                 .select({ id: Tag.id })
                 .from(Tag)
@@ -238,7 +229,6 @@ export const DeleteService = {
                 await tx.delete(Tag).where(inArray(Tag.id, tagIds));
             }
 
-            // Clean up library access rules
             await tx.delete(LibraryUserAccess).where(eq(LibraryUserAccess.library_id, libraryId));
             await tx.delete(LibraryGroupAccess).where(eq(LibraryGroupAccess.library_id, libraryId));
 
@@ -266,7 +256,6 @@ export const DeleteService = {
             const author = authors[0];
             if (!author) return { authorUpdated: 0 };
 
-            // Soft Delete Author
             await tx
                 .update(Author)
                 .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
@@ -280,15 +269,13 @@ export const DeleteService = {
                     .where(and(inArray(File.id, fileIds), eq(File.delete_status, DeleteStatus.ACTIVE)));
             }
 
-            // Empty author_id of posts
-            // This update also includes soft deleted posts
             await tx.update(Post).set({ author_id: null }).where(eq(Post.author_id, authorId));
 
             return { authorUpdated: 1 };
         });
     },
 
-    /** Delete Tag and remove its post/media tag relations & dissociate canonical tag references */
+    /** Delete Tag */
     async deleteTag(tagId: string) {
         return db.transaction(async (tx) => {
             const tagDeleted = await tx.delete(Tag).where(eq(Tag.id, tagId)).returning({ id: Tag.id });
@@ -297,7 +284,6 @@ export const DeleteService = {
             await tx.delete(PostTag).where(eq(PostTag.tag_id, tagId));
             await tx.delete(MediaTag).where(eq(MediaTag.tag_id, tagId));
 
-            // Dissociate aliases
             await tx
                 .update(Tag)
                 .set({ canonical_tag_id: null, update_time: sql`now()` })
