@@ -1,4 +1,4 @@
-import { and, count, eq, isNull, inArray } from "drizzle-orm";
+import { and, count, eq, isNull, inArray, sql } from "drizzle-orm";
 import { db, Transaction } from "@/global/db";
 import { DeleteStatus, Media, Post, PostTag, Tag } from "@/db/schema";
 
@@ -97,6 +97,7 @@ export const PostService = {
 
     /**
      * Wraps the tag replacement helper inside a database transaction.
+     * Fast-fails outside transaction if no changes are needed.
      *
      * @param id - The ID of the post
      * @param libraryId - The ID of the library the post belongs to
@@ -104,6 +105,15 @@ export const PostService = {
      * @returns The resolved list of tag IDs
      */
     async replaceTags(id: string, libraryId: string, tagIds: string[]) {
+        if (tagIds.length === 0) {
+            const existingCount = await db
+                .select({ count: count() })
+                .from(PostTag)
+                .where(eq(PostTag.post_id, id))
+                .then((res) => res[0]?.count ?? 0);
+            if (existingCount === 0) return [];
+        }
+
         return db.transaction(async (tx) => {
             await replacePostTagsTx(tx, id, libraryId, tagIds);
             return tagIds;
@@ -134,6 +144,7 @@ export const PostService = {
                         isNull(Post.recycle_time),
                     ),
                 )
+                .for("update")
                 .limit(1);
             if (!post) return { error: "Post not found or does not belong to the library" };
 
@@ -231,8 +242,7 @@ export const PostService = {
     },
 
     /**
-     * Reorders the media items associated with a post.
-     * Uses a temporary negative ordering technique to bypass potential unique key constraint violations.
+     * Reorders the media items associated with a post using FOR UPDATE row locking and a single bulk UPDATE statement (CASE WHEN).
      *
      * @param postId - ID of the target post
      * @param mediaIds - Ordered list of media IDs representing the new order
@@ -240,6 +250,17 @@ export const PostService = {
      */
     async reorderMedia(postId: string, mediaIds: string[]) {
         return db.transaction(async (tx) => {
+            // Pessimistic lock on the parent post to prevent concurrent reordering race conditions
+            const [post] = await tx
+                .select({ id: Post.id })
+                .from(Post)
+                .where(and(eq(Post.id, postId), eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time)))
+                .for("update");
+
+            if (!post) {
+                return { error: "Post not found or is in recycle bin" };
+            }
+
             const uniqueMediaIds = Array.from(new Set(mediaIds));
 
             // Fetch currently active media items attached to the post
@@ -262,26 +283,16 @@ export const PostService = {
                 }
             }
 
-            // Phase 1: Move items to a temporary, conflicts-free sort index range (negative numbers).
-            // This prevents unique key constraint violations (e.g. unique constraint on post_id + sort_order)
-            // while shifting orders.
-            for (let i = 0; i < uniqueMediaIds.length; i++) {
-                await tx
-                    .update(Media)
-                    .set({ sort_order: -1000 - i })
-                    .where(eq(Media.id, uniqueMediaIds[i]));
-            }
+            // Perform single SQL bulk update using CASE WHEN to update all sort orders in 1 query
+            const now = Temporal.Now.instant();
+            const caseStatements = uniqueMediaIds.map((id, index) => sql`WHEN id = ${id} THEN ${index}`);
 
-            // Phase 2: Shift items to their final, target sort indexes.
-            for (let i = 0; i < uniqueMediaIds.length; i++) {
-                await tx
-                    .update(Media)
-                    .set({
-                        sort_order: i,
-                        update_time: Temporal.Now.instant(),
-                    })
-                    .where(eq(Media.id, uniqueMediaIds[i]));
-            }
+            await tx.execute(sql`
+                UPDATE media
+                SET sort_order = CASE ${sql.join(caseStatements, sql` `)} END,
+                    update_time = ${now.toString()}::timestamptz
+                WHERE post_id = ${postId} AND delete_status = 'ACTIVE' AND recycle_time IS NULL
+            `);
 
             return { success: true };
         });
@@ -290,7 +301,7 @@ export const PostService = {
     /**
      * Unbind a media item from a post
      * Resets the media item's post association, re-indexes the remaining media items
-     * to keep sort order contiguous, and updates the post's cached media count.
+     * in a single bulk UPDATE query to keep sort order contiguous, and updates the post's cached media count.
      *
      * @param postId - ID of the post
      * @param mediaId - ID of the media item to remove
@@ -298,6 +309,17 @@ export const PostService = {
      */
     async unbindMedia(postId: string, mediaId: string) {
         return db.transaction(async (tx) => {
+            // Pessimistic lock on the parent post to prevent concurrent reordering race conditions
+            const [post] = await tx
+                .select({ id: Post.id })
+                .from(Post)
+                .where(and(eq(Post.id, postId), eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time)))
+                .for("update");
+
+            if (!post) {
+                return { error: "Post not found or is in recycle bin" };
+            }
+
             // Fetch target media item details
             const mediaRows = await tx
                 .select({
@@ -332,47 +354,32 @@ export const PostService = {
 
             // Fetch the remaining media items still associated with the post
             const remainingMedias = await tx
-                .select({ id: Media.id, sort_order: Media.sort_order })
+                .select({ id: Media.id })
                 .from(Media)
                 .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
                 .orderBy(Media.sort_order);
 
-            // Phase 1: Reorder remaining items to negative range to avoid database conflicts
-            for (let i = 0; i < remainingMedias.length; i++) {
-                await tx
-                    .update(Media)
-                    .set({ sort_order: -1000 - i })
-                    .where(eq(Media.id, remainingMedias[i].id));
+            if (remainingMedias.length > 0) {
+                const now = Temporal.Now.instant();
+                const caseStatements = remainingMedias.map((m, index) => sql`WHEN id = ${m.id} THEN ${index}`);
+                await tx.execute(sql`
+                    UPDATE media
+                    SET sort_order = CASE ${sql.join(caseStatements, sql` `)} END,
+                        update_time = ${now.toString()}::timestamptz
+                    WHERE post_id = ${postId} AND delete_status = 'ACTIVE' AND recycle_time IS NULL
+                `);
             }
-
-            // Phase 2: Set final contiguous sort order starting from 0
-            for (let i = 0; i < remainingMedias.length; i++) {
-                await tx
-                    .update(Media)
-                    .set({
-                        sort_order: i,
-                        update_time: Temporal.Now.instant(),
-                    })
-                    .where(eq(Media.id, remainingMedias[i].id));
-            }
-
-            // Recalculate total remaining active media count
-            const totalActiveCount = await tx
-                .select({ count: count() })
-                .from(Media)
-                .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
-                .then((rows) => rows[0].count);
 
             // Sync the updated count back to the post metadata
             await tx
                 .update(Post)
                 .set({
-                    media_count: totalActiveCount,
+                    media_count: remainingMedias.length,
                     update_time: Temporal.Now.instant(),
                 })
                 .where(eq(Post.id, postId));
 
-            return { success: true, remaining: totalActiveCount };
+            return { success: true, remaining: remainingMedias.length };
         });
     },
 };
