@@ -829,14 +829,27 @@ router.post("/create", requireAuth, validate("json", CreatePostSchema), async (c
             if (body.media_items && body.media_items.length > 0) {
                 for (const item of body.media_items) {
                     if (item.kind === "existing") {
-                        await tx
+                        const updated = await tx
                             .update(Media)
                             .set({
                                 post_id: postId,
                                 sort_order: sortOrder++,
                                 update_time: now,
                             })
-                            .where(eq(Media.id, item.media_id));
+                            .where(
+                                and(
+                                    eq(Media.id, item.media_id),
+                                    eq(Media.library_id, body.library_id),
+                                    eq(Media.delete_status, DeleteStatus.ACTIVE),
+                                    isNull(Media.post_id),
+                                    isNull(Media.recycle_time),
+                                ),
+                            )
+                            .returning({ id: Media.id });
+
+                        if (updated.length === 0) {
+                            throw new Error(`Media item ${item.media_id} is invalid or already bound to another post`);
+                        }
                     } else if (item.kind === "draft") {
                         const mediaDraft = item.draft;
                         const mediaId = uuidv7();
