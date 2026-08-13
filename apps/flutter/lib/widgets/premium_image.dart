@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'dart:typed_data';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../services/media_decoder.dart';
