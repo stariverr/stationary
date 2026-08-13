@@ -2589,6 +2589,7 @@ class _PostCardItemState extends State<PostCardItem> {
                               child: Image.network(
                                 coverUrl,
                                 fit: BoxFit.cover,
+                                filterQuality: FilterQuality.medium,
                                 errorBuilder: (context, error, stackTrace) =>
                                     Container(
                                       color: isDark

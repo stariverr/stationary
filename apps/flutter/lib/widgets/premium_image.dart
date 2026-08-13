@@ -25,6 +25,7 @@ class PremiumImage extends StatefulWidget {
   final double? width;
   final double? height;
   final BorderRadiusGeometry? borderRadius;
+  final FilterQuality filterQuality;
 
   const PremiumImage({
     super.key,
@@ -34,6 +35,7 @@ class PremiumImage extends StatefulWidget {
     this.width,
     this.height,
     this.borderRadius,
+    this.filterQuality = FilterQuality.medium,
   });
 
   @override
@@ -140,6 +142,7 @@ class _PremiumImageState extends State<PremiumImage> {
               fit: widget.fit,
               width: widget.width,
               height: widget.height,
+              filterQuality: widget.filterQuality,
             ),
             ColoredBox(
               color: Colors.black26,
@@ -166,6 +169,7 @@ class _PremiumImageState extends State<PremiumImage> {
               fit: widget.fit,
               width: widget.width,
               height: widget.height,
+              filterQuality: widget.filterQuality,
               errorBuilder: (context, error, stackTrace) => Container(
                 width: widget.width,
                 height: widget.height,
@@ -236,6 +240,7 @@ class _PremiumImageState extends State<PremiumImage> {
         fit: widget.fit,
         width: widget.width,
         height: widget.height,
+        filterQuality: widget.filterQuality,
       );
     } else {
       final activeFallbackUrl = _previousImageUrl ?? widget.placeholderUrl;
@@ -246,6 +251,7 @@ class _PremiumImageState extends State<PremiumImage> {
         fit: widget.fit,
         width: widget.width,
         height: widget.height,
+        filterQuality: widget.filterQuality,
         frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
           if (wasSynchronouslyLoaded) return child;
           return AnimatedOpacity(
@@ -263,6 +269,7 @@ class _PremiumImageState extends State<PremiumImage> {
               fit: widget.fit,
               width: widget.width,
               height: widget.height,
+              filterQuality: widget.filterQuality,
               errorBuilder: (context, error, stackTrace) => Container(
                 width: widget.width,
                 height: widget.height,
@@ -300,6 +307,7 @@ class _PremiumImageState extends State<PremiumImage> {
               fit: widget.fit,
               width: widget.width,
               height: widget.height,
+              filterQuality: widget.filterQuality,
               errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
             ),
             mainImage,

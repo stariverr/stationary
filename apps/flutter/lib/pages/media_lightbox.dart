@@ -470,6 +470,7 @@ class _LightboxImageState extends State<LightboxImage> {
               initialScale: PhotoViewComputedScale.contained,
               minScale: PhotoViewComputedScale.contained,
               maxScale: PhotoViewComputedScale.covered * 4.0,
+              filterQuality: FilterQuality.high,
               backgroundDecoration: const BoxDecoration(color: Colors.black),
               onTapUp: (context, details, controllerValue) {
                 widget.onTap?.call();
@@ -513,6 +514,7 @@ class _LightboxImageState extends State<LightboxImage> {
       initialScale: PhotoViewComputedScale.contained,
       minScale: PhotoViewComputedScale.contained,
       maxScale: PhotoViewComputedScale.covered * 4.0,
+      filterQuality: FilterQuality.high,
       backgroundDecoration: const BoxDecoration(color: Colors.black),
       onTapUp: (context, details, controllerValue) {
         widget.onTap?.call();

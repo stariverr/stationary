@@ -382,6 +382,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                                   child: Image.network(
                                     item.coverUrl ?? item.url!,
                                     fit: BoxFit.cover,
+                                    filterQuality: FilterQuality.medium,
                                     errorBuilder: (context, error, stackTrace) => Icon(
                                       item.type == 'VIDEO'
                                           ? LucideIcons.film
@@ -840,6 +841,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                           imageUrl: item.url!,
                           placeholderUrl: initialCover,
                           fit: BoxFit.contain,
+                          filterQuality: FilterQuality.high,
                         )
                       else
                         const Center(child: Text('Unsupported Media')),
