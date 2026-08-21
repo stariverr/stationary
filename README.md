@@ -72,7 +72,8 @@ stationary/
 ├── apps/
 │   ├── server/       # Bun + Hono API backend, Drizzle ORM, DB Task Queue Engine
 │   ├── web/          # Nuxt 4 + Vue 3 SPA/SSR, Tailwind CSS v4, Swiper, Plyr
-│   └── flutter/      # Flutter multi-platform client application
+│   ├── flutter/      # Flutter multi-platform client application
+│   └── apple/        # Native iOS 18+/iPadOS/macOS app (SwiftUI, Liquid Glass, Swift 6)
 └── docs/             # Technical specifications & architecture blueprints
 ```
 
@@ -81,6 +82,7 @@ stationary/
 | **`apps/server`** | Bun, Hono, Drizzle ORM, PostgreSQL, Redis, `@ai-sdk/google` | REST APIs, authentication (Better Auth), task execution engine, S3 asset handling |
 | **`apps/web`** | Nuxt 4, Vue 3, Pinia, Vue Query, Tailwind CSS v4, dash.js | Web desktop client, Card-on-Canvas layout, DASH video player, HEIC renderer |
 | **`apps/flutter`** | Flutter, Dart, Chewie, PhotoView | Mobile and desktop cross-platform application |
+| **`apps/apple`** | SwiftUI, Swift 6, AVKit, Liquid Glass Theme | Native iOS/iPadOS/macOS multiplatform app with Liquid Glass UI, Post List & Detail |
 
 ---
 

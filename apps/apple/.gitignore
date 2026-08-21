@@ -1,0 +1,14 @@
+.build/
+.build*/
+.derivedData/
+DerivedData/
+build/
+*.build/
+*.dSYM/
+*.xcuserstate
+xcuserdata/
+*.xcuserdatad/
+*.xccheckout
+*.xcscmblueprint
+*.ipa
+*.xcarchive

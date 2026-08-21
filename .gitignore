@@ -26,3 +26,19 @@ temp/
 
 # Server
 apps/server/drizzle
+
+# Apple / Swift / Xcode
+.derivedData/
+DerivedData/
+build/
+*.build/
+*.dSYM/
+*.xcuserstate
+xcuserdata/
+*.xcuserdatad/
+*.xccheckout
+*.xcscmblueprint
+*.ipa
+*.xcarchive
+.build/
+.build*/
