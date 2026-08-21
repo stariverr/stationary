@@ -18,8 +18,6 @@ import { s3 } from "@/global/s3";
 import { env } from "@/global/env";
 import { Quality } from "@/lib/types";
 
-import { Temporal } from "@js-temporal/polyfill";
-
 export interface ResolvedCoverSource {
     track: typeof Track.$inferSelect;
     fileId: string;

@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "crypto";
-import { Temporal } from "@js-temporal/polyfill";
+
 import { env } from "@/global/env";
 
 const DEFAULT_TTL_SECONDS = 14400; // 4 hours

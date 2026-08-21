@@ -17,7 +17,6 @@ import {
 
 import { RecycleService } from "./recycle";
 import { MediaService } from "./media";
-import { Temporal } from "@js-temporal/polyfill";
 
 export const DeleteService = {
     /** Delete Post and its media and files */
@@ -113,7 +112,9 @@ export const DeleteService = {
                 const [activeCount] = await tx
                     .select({ count: count() })
                     .from(Media)
-                    .where(and(eq(Media.post_id, medias[0].post_id), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)));
+                    .where(
+                        and(eq(Media.post_id, medias[0].post_id), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)),
+                    );
                 await tx
                     .update(Post)
                     .set({ media_count: activeCount?.count ?? 0, update_time: deleteTime })
@@ -217,10 +218,7 @@ export const DeleteService = {
                 }
             }
 
-            const tags = await tx
-                .select({ id: Tag.id })
-                .from(Tag)
-                .where(eq(Tag.library_id, libraryId));
+            const tags = await tx.select({ id: Tag.id }).from(Tag).where(eq(Tag.library_id, libraryId));
 
             if (tags.length > 0) {
                 const tagIds = tags.map((t) => t.id);

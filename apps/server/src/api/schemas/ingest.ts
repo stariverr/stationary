@@ -1,12 +1,6 @@
 import * as v from "valibot";
-import { Temporal } from "@js-temporal/polyfill";
-import {
-    TrackType,
-    TrackPurpose,
-    TrackStreamLayout,
-    PostSource,
-    MediaType,
-} from "@/db/schema";
+
+import { TrackType, TrackPurpose, TrackStreamLayout, PostSource, MediaType } from "@/db/schema";
 import { Quality } from "@/lib/types";
 
 export const AuthorSchema = v.object({

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Temporal } from "@js-temporal/polyfill";
+
 import {
     AsyncOutcomeCode,
     AsyncSubjectType,

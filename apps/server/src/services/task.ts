@@ -2,7 +2,7 @@ import type { Transaction } from "@/global/db";
 import { db } from "@/global/db";
 import { Post, Media, Track, SyncStatus } from "@/db/schema";
 import { eq, and, lt, inArray } from "drizzle-orm";
-import { Temporal } from "@js-temporal/polyfill";
+
 import type { PostItemData } from "@/api/schemas/ingest";
 import { saveIngestMetadata } from "./ingest/persistence";
 import { processMediaById, processMedia, processAvatar } from "./ingest/downloader";

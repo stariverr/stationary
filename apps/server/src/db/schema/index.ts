@@ -17,7 +17,7 @@ import {
     real,
 } from "drizzle-orm/pg-core";
 import { v7 as createUuidV7 } from "uuid";
-import { Temporal } from "@js-temporal/polyfill";
+
 import { sql } from "drizzle-orm";
 import { Quality } from "@/lib/types";
 

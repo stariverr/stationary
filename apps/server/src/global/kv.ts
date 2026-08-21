@@ -1,7 +1,6 @@
 // src/global/kv.ts
 import { env } from "./env";
 import { createClient, type RedisClientType } from "redis";
-import { Temporal } from "@js-temporal/polyfill";
 
 export type RedisClient = RedisClientType;
 export type KVValue = string | ArrayBuffer | ReadableStream;

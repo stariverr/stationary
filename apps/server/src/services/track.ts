@@ -15,7 +15,7 @@ import {
 
 import { generateDeterministicVariantKey } from "@/lib/utils/track";
 import { Quality } from "@/lib/types";
-import { Temporal } from "@js-temporal/polyfill";
+
 import { cleanTrackMetadata, deriveTrackFormat } from "@/lib/utils/track-format";
 
 import { MediaService } from "@/services/media";

@@ -1,24 +1,12 @@
 import { db } from "@/global/db";
-import {
-    Post,
-    Media,
-    Track,
-    Author,
-    File,
-    DeleteStatus,
-    SyncStatus,
-    TrackType,
-    TrackPurpose,
-    MediaType,
-    AsyncTaskType,
-} from "@/db/schema";
+import { Post, Media, Track, Author, File, DeleteStatus, SyncStatus, TrackType, TrackPurpose, MediaType, AsyncTaskType } from "@/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
 import { downloadStream, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
 import { extractSegmentBase } from "@/lib/utils/mp4-segment";
 import { withLock } from "@/lib/utils/lock";
 import { env } from "@/global/env";
 import { JobManager } from "@/infra/jobs/manager";
-import { Temporal } from "@js-temporal/polyfill";
+
 import { deriveTrackFormat } from "@/lib/utils/track-format";
 import { MediaService } from "@/services/media";
 
@@ -100,10 +88,7 @@ export async function processMedia(mediaId: string, signal?: AbortSignal) {
                             responseBody = response.body;
 
                             let segmentBase: { initialization: string; index_range: string } | undefined;
-                            if (
-                                (mf.type === TrackType.VIDEO || mf.type === TrackType.AUDIO) &&
-                                responseBody instanceof ReadableStream
-                            ) {
+                            if ((mf.type === TrackType.VIDEO || mf.type === TrackType.AUDIO) && responseBody instanceof ReadableStream) {
                                 const res = await extractSegmentBase(responseBody);
                                 segmentBase = res.segment_base;
                                 responseBody = res.stream;

@@ -10,7 +10,7 @@ import { and, eq, desc } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 
 import { v7 as uuidv7 } from "uuid";
-import { Temporal } from "@js-temporal/polyfill";
+
 import { env } from "@/global/env";
 import crypto from "crypto";
 import { buildCdnUrl } from "@/lib/utils/cdn";
@@ -80,75 +80,70 @@ const PresignDraftSchema = v.object({
     fileName: v.pipe(v.string(), v.nonEmpty("fileName is required")),
 });
 
-router.post(
-    "/draft/presign",
-    requireAuth,
-    validate("json", PresignDraftSchema),
-    async (c) => {
-        const { library_id, fileName } = c.req.valid("json");
-        const user = c.get("user");
-        if (!user) {
-            return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
-        }
+router.post("/draft/presign", requireAuth, validate("json", PresignDraftSchema), async (c) => {
+    const { library_id, fileName } = c.req.valid("json");
+    const user = c.get("user");
+    if (!user) {
+        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+    }
 
-        const accessErr = await checkLibraryAccess(c, library_id);
-        if (accessErr) return accessErr;
+    const accessErr = await checkLibraryAccess(c, library_id);
+    if (accessErr) return accessErr;
 
-        const ext = getFileExtension(fileName) || "bin";
-        const fileId = uuidv7();
-        const path = `v2/l/${library_id.slice(-2)}/${library_id}/drafts/${fileId}.${ext}`;
-        const mimeType = getMimeTypeByExt(ext);
+    const ext = getFileExtension(fileName) || "bin";
+    const fileId = uuidv7();
+    const path = `v2/l/${library_id.slice(-2)}/${library_id}/drafts/${fileId}.${ext}`;
+    const mimeType = getMimeTypeByExt(ext);
 
-        const uploadUrl = await s3.getUploadPresignedUrl(path, {
-            bucket: env.S3_BUCKET,
-            contentType: mimeType,
-            expiresInSeconds: 3600, // 1 hour expiration
-        });
+    const uploadUrl = await s3.getUploadPresignedUrl(path, {
+        bucket: env.S3_BUCKET,
+        contentType: mimeType,
+        expiresInSeconds: 3600, // 1 hour expiration
+    });
 
-        // Token expires in 1 hour
-        const expiresAt = Temporal.Now.instant().add({ hours: 1 }).epochMilliseconds;
-        const uploadToken = generateUploadToken(library_id, path, expiresAt);
+    // Token expires in 1 hour
+    const expiresAt = Temporal.Now.instant().add({ hours: 1 }).epochMilliseconds;
+    const uploadToken = generateUploadToken(library_id, path, expiresAt);
 
-        // Pre-create pending draft file and db file records
-        const draftFileId = await db.transaction(async (tx) => {
-            const [newFile] = await tx
-                .insert(DbFile)
-                .values({
-                    path: path,
-                    bucket: env.S3_BUCKET,
-                    mime_type: mimeType,
-                    extension: ext,
-                    size: 0,
-                    delete_status: DeleteStatus.ACTIVE,
-                })
-                .returning();
-
-            const [newDraft] = await tx
-                .insert(DraftFile)
-                .values({
-                    file_id: newFile.id,
-                    library_id: library_id,
-                    owner_id: user.id,
-                    original_name: fileName,
-                    status: DraftFileStatus.PENDING,
-                })
-                .returning();
-
-            return newDraft.id;
-        });
-
-        return c.json(
-            success(Code.SUCCESS, {
-                url: uploadUrl,
+    // Pre-create pending draft file and db file records
+    const draftFileId = await db.transaction(async (tx) => {
+        const [newFile] = await tx
+            .insert(DbFile)
+            .values({
                 path: path,
                 bucket: env.S3_BUCKET,
                 mime_type: mimeType,
-                upload_token: uploadToken,
-                draft_file_id: draftFileId,
-            }),
-        );
-    },
-);
+                extension: ext,
+                size: 0,
+                delete_status: DeleteStatus.ACTIVE,
+            })
+            .returning();
+
+        const [newDraft] = await tx
+            .insert(DraftFile)
+            .values({
+                file_id: newFile.id,
+                library_id: library_id,
+                owner_id: user.id,
+                original_name: fileName,
+                status: DraftFileStatus.PENDING,
+            })
+            .returning();
+
+        return newDraft.id;
+    });
+
+    return c.json(
+        success(Code.SUCCESS, {
+            url: uploadUrl,
+            path: path,
+            bucket: env.S3_BUCKET,
+            mime_type: mimeType,
+            upload_token: uploadToken,
+            draft_file_id: draftFileId,
+        }),
+    );
+});
 
 // 2. Confirm Upload and Register as DraftFile
 const ConfirmDraftSchema = v.object({
@@ -162,94 +157,89 @@ const ConfirmDraftSchema = v.object({
     upload_token: v.pipe(v.string(), v.nonEmpty()),
 });
 
-router.post(
-    "/draft/confirm",
-    requireAuth,
-    validate("json", ConfirmDraftSchema),
-    async (c) => {
-        const body = c.req.valid("json");
-        const user = c.get("user");
-        if (!user) {
-            return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+router.post("/draft/confirm", requireAuth, validate("json", ConfirmDraftSchema), async (c) => {
+    const body = c.req.valid("json");
+    const user = c.get("user");
+    if (!user) {
+        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+    }
+
+    const accessErr = await checkLibraryAccess(c, body.library_id);
+    if (accessErr) return accessErr;
+
+    // Verify upload token
+    const isValidToken = verifyUploadToken(body.library_id, body.path, body.upload_token);
+    if (!isValidToken) {
+        return c.json(error(Code.INVALID_PARAMETER, "Invalid or expired upload token"), 400);
+    }
+
+    const fileExtension = getFileExtension(body.fileName) || "bin";
+    const pathExtension = getFileExtension(body.path);
+    const expectedMimeType = getMimeTypeByExt(fileExtension);
+    const expectedPathPrefix = `v2/l/${body.library_id.slice(-2)}/${body.library_id}/drafts/`;
+    if (body.bucket !== env.S3_BUCKET) {
+        return c.json(error(Code.INVALID_PARAMETER, "Draft upload bucket does not match the presigned upload"), 400);
+    }
+    if (!body.path.startsWith(expectedPathPrefix) || pathExtension !== fileExtension) {
+        return c.json(error(Code.INVALID_PARAMETER, "Draft upload path does not match the selected file"), 400);
+    }
+    if (body.mime_type !== expectedMimeType) {
+        return c.json(error(Code.INVALID_PARAMETER, "Draft MIME type does not match the selected file"), 400);
+    }
+
+    const draftRow = await db
+        .select()
+        .from(DraftFile)
+        .where(and(eq(DraftFile.id, body.draft_file_id), eq(DraftFile.library_id, body.library_id)))
+        .limit(1)
+        .then((rows) => rows[0]);
+
+    if (!draftRow) {
+        return c.json(error(Code.NOT_FOUND, "Draft file not found"), 404);
+    }
+    if (draftRow.status !== DraftFileStatus.PENDING) {
+        return c.json(error(Code.ALREADY_EXISTS, "Draft file is already confirmed or deleted"), 409);
+    }
+
+    const result = await db.transaction(async (tx) => {
+        const [updatedFile] = await tx
+            .update(DbFile)
+            .set({
+                size: body.size,
+            })
+            .where(eq(DbFile.id, draftRow.file_id))
+            .returning();
+
+        if (!updatedFile) {
+            throw new Error("Physical file record not found for draft file");
         }
 
-        const accessErr = await checkLibraryAccess(c, body.library_id);
-        if (accessErr) return accessErr;
+        const [updatedDraft] = await tx
+            .update(DraftFile)
+            .set({
+                status: DraftFileStatus.DRAFT,
+                update_time: Temporal.Now.instant(),
+            })
+            .where(and(eq(DraftFile.id, draftRow.id), eq(DraftFile.status, DraftFileStatus.PENDING)))
+            .returning();
 
-        // Verify upload token
-        const isValidToken = verifyUploadToken(body.library_id, body.path, body.upload_token);
-        if (!isValidToken) {
-            return c.json(error(Code.INVALID_PARAMETER, "Invalid or expired upload token"), 400);
+        if (!updatedDraft) {
+            throw new Error("Draft file was modified or already confirmed by another request");
         }
 
-        const fileExtension = getFileExtension(body.fileName) || "bin";
-        const pathExtension = getFileExtension(body.path);
-        const expectedMimeType = getMimeTypeByExt(fileExtension);
-        const expectedPathPrefix = `v2/l/${body.library_id.slice(-2)}/${body.library_id}/drafts/`;
-        if (body.bucket !== env.S3_BUCKET) {
-            return c.json(error(Code.INVALID_PARAMETER, "Draft upload bucket does not match the presigned upload"), 400);
-        }
-        if (!body.path.startsWith(expectedPathPrefix) || pathExtension !== fileExtension) {
-            return c.json(error(Code.INVALID_PARAMETER, "Draft upload path does not match the selected file"), 400);
-        }
-        if (body.mime_type !== expectedMimeType) {
-            return c.json(error(Code.INVALID_PARAMETER, "Draft MIME type does not match the selected file"), 400);
-        }
+        return {
+            id: updatedDraft.id,
+            file_id: updatedFile.id,
+            name: updatedDraft.original_name,
+            size: updatedFile.size ?? body.size,
+            mime_type: updatedFile.mime_type,
+            url: buildCdnUrl(updatedFile.bucket, updatedFile.path),
+            create_time: updatedDraft.create_time.toString(),
+        };
+    });
 
-        const draftRow = await db
-            .select()
-            .from(DraftFile)
-            .where(and(eq(DraftFile.id, body.draft_file_id), eq(DraftFile.library_id, body.library_id)))
-            .limit(1)
-            .then((rows) => rows[0]);
-
-        if (!draftRow) {
-            return c.json(error(Code.NOT_FOUND, "Draft file not found"), 404);
-        }
-        if (draftRow.status !== DraftFileStatus.PENDING) {
-            return c.json(error(Code.ALREADY_EXISTS, "Draft file is already confirmed or deleted"), 409);
-        }
-
-        const result = await db.transaction(async (tx) => {
-            const [updatedFile] = await tx
-                .update(DbFile)
-                .set({
-                    size: body.size,
-                })
-                .where(eq(DbFile.id, draftRow.file_id))
-                .returning();
-
-            if (!updatedFile) {
-                throw new Error("Physical file record not found for draft file");
-            }
-
-            const [updatedDraft] = await tx
-                .update(DraftFile)
-                .set({
-                    status: DraftFileStatus.DRAFT,
-                    update_time: Temporal.Now.instant(),
-                })
-                .where(and(eq(DraftFile.id, draftRow.id), eq(DraftFile.status, DraftFileStatus.PENDING)))
-                .returning();
-
-            if (!updatedDraft) {
-                throw new Error("Draft file was modified or already confirmed by another request");
-            }
-
-            return {
-                id: updatedDraft.id,
-                file_id: updatedFile.id,
-                name: updatedDraft.original_name,
-                size: updatedFile.size ?? body.size,
-                mime_type: updatedFile.mime_type,
-                url: buildCdnUrl(updatedFile.bucket, updatedFile.path),
-                create_time: updatedDraft.create_time.toString(),
-            };
-        });
-
-        return c.json(success(Code.SUCCESS, result));
-    },
-);
+    return c.json(success(Code.SUCCESS, result));
+});
 
 // 3. List Draft Files in a Library
 router.get("/draft/files", requireAuth, async (c) => {
@@ -319,115 +309,110 @@ const CommitMediaSchema = v.object({
     media_drafts: v.pipe(v.array(MediaDraftSchema), v.minLength(1, "At least one media group is required")),
 });
 
-router.post(
-    "/draft/commit-media",
-    requireAuth,
-    validate("json", CommitMediaSchema),
-    async (c) => {
-        const { library_id, media_drafts } = c.req.valid("json");
+router.post("/draft/commit-media", requireAuth, validate("json", CommitMediaSchema), async (c) => {
+    const { library_id, media_drafts } = c.req.valid("json");
 
-        const accessErr = await checkLibraryAccess(c, library_id);
-        if (accessErr) return accessErr;
+    const accessErr = await checkLibraryAccess(c, library_id);
+    if (accessErr) return accessErr;
 
-        const compositionError = validateMediaDraft(media_drafts);
-        if (compositionError) {
-            return c.json(error(Code.INVALID_PARAMETER, compositionError), 400);
+    const compositionError = validateMediaDraft(media_drafts);
+    if (compositionError) {
+        return c.json(error(Code.INVALID_PARAMETER, compositionError), 400);
+    }
+
+    // Collect all draft_file_ids
+    const draftIds: string[] = [];
+    for (const group of media_drafts) {
+        for (const t of group.tracks) {
+            draftIds.push(t.draft_file_id);
         }
+    }
 
-        // Collect all draft_file_ids
-        const draftIds: string[] = [];
-        for (const group of media_drafts) {
-            for (const t of group.tracks) {
-                draftIds.push(t.draft_file_id);
-            }
+    // Verify draft files belong to this library and are DRAFT status
+    const draftRows = await db
+        .select({ draft: DraftFile, file: DbFile })
+        .from(DraftFile)
+        .innerJoin(DbFile, eq(DraftFile.file_id, DbFile.id))
+        .where(and(eq(DraftFile.library_id, library_id), eq(DraftFile.status, DraftFileStatus.DRAFT)));
+
+    const activeDraftMap = new Map(
+        draftRows.map(({ draft, file }) => [
+            draft.id,
+            {
+                name: draft.original_name,
+                mime_type: file.mime_type,
+            },
+        ]),
+    );
+    for (const draftId of draftIds) {
+        if (!activeDraftMap.has(draftId)) {
+            return c.json(error(Code.INVALID_PARAMETER, `Draft file ${draftId} is invalid or already consumed`), 400);
         }
+    }
+    const fileTypeError = validateDraftTrackFileTypes(media_drafts, activeDraftMap);
+    if (fileTypeError) {
+        return c.json(error(Code.INVALID_PARAMETER, fileTypeError), 400);
+    }
 
-        // Verify draft files belong to this library and are DRAFT status
-        const draftRows = await db
-            .select({ draft: DraftFile, file: DbFile })
-            .from(DraftFile)
-            .innerJoin(DbFile, eq(DraftFile.file_id, DbFile.id))
-            .where(and(eq(DraftFile.library_id, library_id), eq(DraftFile.status, DraftFileStatus.DRAFT)));
+    const mediaIds: string[] = [];
 
-        const activeDraftMap = new Map(
-            draftRows.map(({ draft, file }) => [
-                draft.id,
-                {
-                    name: draft.original_name,
-                    mime_type: file.mime_type,
-                },
-            ]),
-        );
-        for (const draftId of draftIds) {
-            if (!activeDraftMap.has(draftId)) {
-                return c.json(error(Code.INVALID_PARAMETER, `Draft file ${draftId} is invalid or already consumed`), 400);
-            }
-        }
-        const fileTypeError = validateDraftTrackFileTypes(media_drafts, activeDraftMap);
-        if (fileTypeError) {
-            return c.json(error(Code.INVALID_PARAMETER, fileTypeError), 400);
-        }
+    try {
+        await db.transaction(async (tx) => {
+            const now = Temporal.Now.instant();
 
-        const mediaIds: string[] = [];
+            for (const group of media_drafts) {
+                const mediaId = uuidv7();
 
-        try {
-            await db.transaction(async (tx) => {
-                const now = Temporal.Now.instant();
+                await tx.insert(Media).values({
+                    id: mediaId,
+                    eid: mediaId,
+                    sort_order: 0,
+                    library_id: library_id,
+                    source: PostSource.UNKNOWN,
+                    title: group.title,
+                    description: group.description || "",
+                    type: group.type,
+                    sync_status: SyncStatus.PENDING,
+                    create_time: now,
+                    update_time: now,
+                });
 
-                for (const group of media_drafts) {
-                    const mediaId = uuidv7();
+                for (const track of assignTrackPriorities(group.tracks)) {
+                    const fileId = await consumeDraftFile(tx, track.draft_file_id, library_id);
 
-                    await tx.insert(Media).values({
-                        id: mediaId,
-                        eid: mediaId,
-                        sort_order: 0,
-                        library_id: library_id,
-                        source: PostSource.UNKNOWN,
-                        title: group.title,
-                        description: group.description || "",
-                        type: group.type,
-                        sync_status: SyncStatus.PENDING,
-                        create_time: now,
-                        update_time: now,
-                    });
-
-                    for (const track of assignTrackPriorities(group.tracks)) {
-                        const fileId = await consumeDraftFile(tx, track.draft_file_id, library_id);
-
-                        await TrackService.upsertTrack(
-                            mediaId,
-                            {
-                                type: track.type,
-                                purpose: track.purpose,
-                                quality: track.quality,
-                                priority: track.priority,
-                                is_default: track.is_default,
-                                language: track.language || null,
-                            },
-                            fileId,
-                            tx,
-                            { deferCompositionCheck: true },
-                        );
-                    }
-
-                    await MediaService.assertMediaReady(mediaId, tx);
-
-                    if (group.tag_ids && group.tag_ids.length > 0) {
-                        await replaceMediaTagsTx(tx, mediaId, library_id, group.tag_ids);
-                    }
-
-                    mediaIds.push(mediaId);
+                    await TrackService.upsertTrack(
+                        mediaId,
+                        {
+                            type: track.type,
+                            purpose: track.purpose,
+                            quality: track.quality,
+                            priority: track.priority,
+                            is_default: track.is_default,
+                            language: track.language || null,
+                        },
+                        fileId,
+                        tx,
+                        { deferCompositionCheck: true },
+                    );
                 }
-            });
-        } catch (e) {
-            if (e instanceof DraftFileUnavailableError) {
-                return c.json(error(Code.ALREADY_EXISTS, e.message), 409);
-            }
-            throw e;
-        }
 
-        return c.json(success(Code.SUCCESS, { media_ids: mediaIds }));
-    },
-);
+                await MediaService.assertMediaReady(mediaId, tx);
+
+                if (group.tag_ids && group.tag_ids.length > 0) {
+                    await replaceMediaTagsTx(tx, mediaId, library_id, group.tag_ids);
+                }
+
+                mediaIds.push(mediaId);
+            }
+        });
+    } catch (e) {
+        if (e instanceof DraftFileUnavailableError) {
+            return c.json(error(Code.ALREADY_EXISTS, e.message), 409);
+        }
+        throw e;
+    }
+
+    return c.json(success(Code.SUCCESS, { media_ids: mediaIds }));
+});
 
 export default router;

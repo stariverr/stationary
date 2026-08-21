@@ -3,7 +3,7 @@ import { Library, DeleteStatus, AsyncTaskType } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
 import { Quality } from "@/lib/types";
-import { Temporal } from "@js-temporal/polyfill";
+
 import { JobManager } from "@/infra/jobs/manager";
 import { initJobHandlers } from "@/services/job_handlers";
 

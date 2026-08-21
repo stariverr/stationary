@@ -1,7 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { DraftFile, DraftFileStatus, File as DbFile, DeleteStatus } from "@/db/schema";
 import type { Transaction } from "@/global/db";
-import { Temporal } from "@js-temporal/polyfill";
 
 export class DraftFileUnavailableError extends Error {
     constructor(public readonly draftFileId: string) {

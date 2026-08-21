@@ -1,7 +1,7 @@
 import { type Transaction } from "@/global/db";
 import { Post, Media, Track, Author, File, DeleteStatus, SyncStatus, TrackPurpose, TagSource, TrackType } from "@/db/schema";
 import { eq, and, not, inArray } from "drizzle-orm";
-import { Temporal } from "@js-temporal/polyfill";
+
 import { normalizeExternalId, assertUniqueExternalIds } from "@/lib/utils/media-identity";
 import { validateMediaComposition } from "@/lib/validation/media-composition";
 import type { PostItemData, MediaItemData } from "@/api/schemas/ingest";

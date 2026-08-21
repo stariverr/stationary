@@ -1,4 +1,3 @@
-import { Temporal } from "@js-temporal/polyfill";
 import * as v from "valibot";
 
 export const toIsoTimestamp = (value: Temporal.Instant | string | null | undefined) => {

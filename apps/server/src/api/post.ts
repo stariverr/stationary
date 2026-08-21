@@ -40,7 +40,6 @@ import {
 } from "@/lib/validation/media-composition";
 import { validate } from "@/lib/validation/validator";
 import { MediaService, type PreviewItem } from "@/services/media";
-import { Temporal } from "@js-temporal/polyfill";
 
 const router = new Hono();
 const activePostFilter = and(eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time));
