@@ -13,7 +13,7 @@ import {
 } from "@/infra/jobs/policy";
 import { createIdempotencyKey } from "@/lib/utils/hash";
 import { LockAcquisitionError, isLockAcquisitionError } from "@/lib/utils/lock";
-import { initJobHandlers } from "@/services/job_handlers";
+import { initJobHandlers } from "@/infra/jobs/register-handlers";
 
 describe("Job engine contracts", () => {
     test("all persisted task types have a registered handler", () => {

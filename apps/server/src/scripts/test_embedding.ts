@@ -1,6 +1,6 @@
 import { db } from "@/global/db";
 import { Library, User } from "@/db/schema";
-import { AiService } from "@/services/ai/service";
+import { AiService } from "@/features/ai/service";
 import { eq } from "drizzle-orm";
 
 async function main() {

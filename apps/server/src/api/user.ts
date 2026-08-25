@@ -4,7 +4,7 @@ import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
 import * as v from "valibot";
 import { validate } from "@/lib/validation/validator";
-import { ApiTokenService } from "@/services/apiToken";
+import { ApiTokenService } from "@/features/auth/api-token";
 
 const router = new Hono<AuthEnv>();
 

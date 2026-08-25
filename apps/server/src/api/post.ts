@@ -12,34 +12,23 @@ import {
     PostSource,
     TrackPurpose,
     Author,
-    SyncStatus,
     MediaType,
     PostTag,
     Tag,
     TagStatus,
     Library,
-    DraftFile,
-    DraftFileStatus,
 } from "@/db/schema";
 import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lte, exists, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { RecycleService } from "@/services/recycle";
-import { DeleteService } from "@/services/delete";
-import { PostService, replacePostTagsTx } from "@/services/post";
-import { replaceMediaTagsTx } from "@/services/media";
+import { PostService } from "@/features/post/post-service";
+import { deletePost, restorePost, trashPost } from "@/features/post/lifecycle";
+import { assertPostAccess, PostAccessError } from "@/features/post/access";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { toIsoTimestamp, FormTimestampSchema } from "@/lib/utils/time";
-import { v7 as uuidv7 } from "uuid";
-import { TrackService } from "@/services/track";
-import { consumeDraftFile, DraftFileUnavailableError } from "@/services/draft-file";
-import {
-    assignTrackPriorities,
-    validateDraftMediaGroups,
-    validateDraftTrackFileTypes,
-    MediaDraftSchema,
-} from "@/lib/validation/media-composition";
 import { validate } from "@/lib/validation/validator";
-import { MediaService, type PreviewItem } from "@/services/media";
+import { MediaService, type PreviewItem } from "@/features/media/queries";
+import { CreatePostSchema } from "@/features/post/schema";
+import { CreatePostError, createPost } from "@/features/post/create-post";
 
 const router = new Hono();
 const activePostFilter = and(eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time));
@@ -527,7 +516,7 @@ router.post("/trash/:id", requireAuth, async (c) => {
     const access = await checkPostAccess(c, id);
     if (access.errorResponse) return access.errorResponse;
 
-    const result = await RecycleService.recyclePost(id);
+    const result = await trashPost(id);
     if (result.postUpdated === 0) {
         return c.json(error(Code.NOT_FOUND, "Post not found"), 404);
     }
@@ -544,7 +533,7 @@ router.post("/restore/:id", requireAuth, async (c) => {
     const access = await checkPostAccess(c, id);
     if (access.errorResponse) return access.errorResponse;
 
-    const result = await RecycleService.restorePost(id);
+    const result = await restorePost(id);
     if (result.postUpdated === 0) {
         return c.json(error(Code.NOT_FOUND, "Post not found"), 404);
     }
@@ -561,7 +550,7 @@ router.post("/delete/:id", requireAuth, async (c) => {
     const access = await checkPostAccess(c, id);
     if (access.errorResponse) return access.errorResponse;
 
-    const result = await DeleteService.deletePost(id);
+    const result = await deletePost(id);
     if (result.postUpdated === 0) {
         return c.json(error(Code.NOT_FOUND, "Post not found"), 404);
     }
@@ -581,35 +570,20 @@ async function checkPostAccess(
         };
     }
 
-    const postRows = await db.select().from(Post).where(eq(Post.id, postId)).limit(1);
-    const post = postRows[0];
+    try {
+        const post = await assertPostAccess(postId, {
+            ownerId: user.id,
+            scopedLibraryId: c.get("apiToken")?.library_id,
+        });
+        return { post, errorResponse: null };
+    } catch (cause) {
+        if (!(cause instanceof PostAccessError)) throw cause;
 
-    if (!post || post.delete_status !== DeleteStatus.ACTIVE || post.recycle_time !== null) {
-        return {
-            post: null,
-            errorResponse: c.json(error(Code.NOT_FOUND, "Post not found or is in recycle bin"), 404),
-        };
+        if (cause.kind === "NOT_FOUND") {
+            return { post: null, errorResponse: c.json(error(Code.NOT_FOUND, cause.message), 404) };
+        }
+        return { post: null, errorResponse: c.json(error(Code.FORBIDDEN, cause.message), 403) };
     }
-
-    const libraryList = await db.select().from(Library).where(eq(Library.id, post.library_id)).limit(1);
-    const library = libraryList[0];
-
-    if (!library || library.owner_id !== user.id) {
-        return {
-            post: null,
-            errorResponse: c.json(error(Code.FORBIDDEN, "You do not have access to this library"), 403),
-        };
-    }
-
-    const apiToken = c.get("apiToken");
-    if (apiToken && apiToken.library_id && apiToken.library_id !== post.library_id) {
-        return {
-            post: null,
-            errorResponse: c.json(error(Code.FORBIDDEN, "API token scope restricted to another library"), 403),
-        };
-    }
-
-    return { post, errorResponse: null };
 }
 
 const PostUpdateInfoSchema = v.pipe(
@@ -706,25 +680,6 @@ router.post("/:id/media/:mediaId/remove", requireAuth, async (c) => {
     return c.json(success(Code.SUCCESS, result));
 });
 
-const CreatePostMediaItemSchema = v.variant("kind", [
-    v.object({
-        kind: v.literal("existing"),
-        media_id: v.pipe(v.string(), v.uuid()),
-    }),
-    v.object({
-        kind: v.literal("draft"),
-        draft: MediaDraftSchema,
-    }),
-]);
-
-const CreatePostSchema = v.object({
-    library_id: v.pipe(v.string(), v.uuid()),
-    title: v.pipe(v.string(), v.nonEmpty("Title is required")),
-    description: v.optional(v.string(), ""),
-    tag_ids: v.optional(v.array(v.pipe(v.string(), v.uuid())), []),
-    media_items: v.optional(v.array(CreatePostMediaItemSchema)),
-});
-
 router.post("/create", requireAuth, validate("json", CreatePostSchema), async (c) => {
     const body = c.req.valid("json");
     const user = c.get("user");
@@ -732,194 +687,20 @@ router.post("/create", requireAuth, validate("json", CreatePostSchema), async (c
         return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
     }
 
-    const libraryList = await db.select().from(Library).where(eq(Library.id, body.library_id)).limit(1);
-    const library = libraryList[0];
-    if (!library || library.owner_id !== user.id) {
-        return c.json(error(Code.FORBIDDEN, "You do not have access to this library"), 403);
-    }
-
-    const mediaIds = body.media_items?.filter((item) => item.kind === "existing").map((item) => item.media_id) || [];
-    const mediaDrafts = body.media_items?.filter((item) => item.kind === "draft").map((item) => item.draft) || [];
-
-    if (mediaDrafts.length > 0) {
-        const compositionError = validateDraftMediaGroups(mediaDrafts);
-        if (compositionError) {
-            return c.json(error(Code.INVALID_PARAMETER, compositionError), 400);
-        }
-    }
-
-    if (mediaIds.length > 0) {
-        const mediaList = await db
-            .select()
-            .from(Media)
-            .where(and(inArray(Media.id, mediaIds), eq(Media.library_id, body.library_id)));
-        if (mediaList.length !== mediaIds.length) {
-            return c.json(error(Code.INVALID_PARAMETER, "Some media items are invalid or do not belong to this library"), 400);
-        }
-        for (const media of mediaList) {
-            if (media.post_id !== null) {
-                return c.json(error(Code.INVALID_PARAMETER, `Media ${media.title} is already linked to a post`), 400);
-            }
-        }
-    }
-
-    const draftIds = mediaDrafts.flatMap((g) => g.tracks.map((t) => t.draft_file_id));
-    if (draftIds.length > 0) {
-        const draftRows = await db
-            .select({ draft: DraftFile, file: DbFile })
-            .from(DraftFile)
-            .innerJoin(DbFile, eq(DraftFile.file_id, DbFile.id))
-            .where(
-                and(
-                    eq(DraftFile.library_id, body.library_id),
-                    eq(DraftFile.status, DraftFileStatus.DRAFT),
-                    inArray(DraftFile.id, draftIds),
-                ),
-            );
-
-        const activeDraftMap = new Map(
-            draftRows.map(({ draft, file }) => [
-                draft.id,
-                {
-                    name: draft.original_name,
-                    mime_type: file.mime_type,
-                },
-            ]),
-        );
-
-        if (draftRows.length !== draftIds.length) {
-            const missingId = draftIds.find((id) => !activeDraftMap.has(id));
-            return c.json(error(Code.INVALID_PARAMETER, `Draft file ${missingId} is invalid or already consumed`), 400);
-        }
-
-        const fileTypeError = validateDraftTrackFileTypes(mediaDrafts, activeDraftMap);
-        if (fileTypeError) {
-            return c.json(error(Code.INVALID_PARAMETER, fileTypeError), 400);
-        }
-    }
-
-    const postId = uuidv7();
-
     try {
-        await db.transaction(async (tx) => {
-            const now = Temporal.Now.instant();
-            const totalMediaCount = body.media_items && body.media_items.length > 0 ? body.media_items.length : 0;
-
-            await tx.insert(Post).values({
-                id: postId,
-                eid: postId,
-                library_id: body.library_id,
-                source: PostSource.UNKNOWN,
-                title: body.title,
-                description: body.description,
-                media_count: totalMediaCount,
-                sync_status: SyncStatus.PENDING,
-                create_time: now,
-                update_time: now,
-                delete_status: DeleteStatus.ACTIVE,
-            });
-
-            if (body.tag_ids && body.tag_ids.length > 0) {
-                await replacePostTagsTx(tx, postId, body.library_id, body.tag_ids);
-            }
-
-            let sortOrder = 0;
-
-            if (body.media_items && body.media_items.length > 0) {
-                for (const item of body.media_items) {
-                    if (item.kind === "existing") {
-                        const updated = await tx
-                            .update(Media)
-                            .set({
-                                post_id: postId,
-                                sort_order: sortOrder++,
-                                update_time: now,
-                            })
-                            .where(
-                                and(
-                                    eq(Media.id, item.media_id),
-                                    eq(Media.library_id, body.library_id),
-                                    eq(Media.delete_status, DeleteStatus.ACTIVE),
-                                    isNull(Media.post_id),
-                                    isNull(Media.recycle_time),
-                                ),
-                            )
-                            .returning({ id: Media.id });
-
-                        if (updated.length === 0) {
-                            throw new Error(`Media item ${item.media_id} is invalid or already bound to another post`);
-                        }
-                    } else if (item.kind === "draft") {
-                        const mediaDraft = item.draft;
-                        const mediaId = uuidv7();
-
-                        await tx.insert(Media).values({
-                            id: mediaId,
-                            eid: mediaId,
-                            post_id: postId,
-                            sort_order: sortOrder++,
-                            library_id: body.library_id,
-                            source: PostSource.UNKNOWN,
-                            title: mediaDraft.title,
-                            description: mediaDraft.description,
-                            type: mediaDraft.type,
-                            sync_status: SyncStatus.PENDING,
-                            create_time: now,
-                            update_time: now,
-                        });
-
-                        for (const track of assignTrackPriorities(mediaDraft.tracks)) {
-                            const fileId = await consumeDraftFile(tx, track.draft_file_id, body.library_id);
-
-                            await TrackService.upsertTrack(
-                                mediaId,
-                                {
-                                    type: track.type,
-                                    purpose: track.purpose,
-                                    quality: track.quality,
-                                    priority: track.priority,
-                                    is_default: track.is_default,
-                                    language: track.language || null,
-                                },
-                                fileId,
-                                tx,
-                                { deferCompositionCheck: true },
-                            );
-                        }
-
-                        await MediaService.assertMediaReady(mediaId, tx);
-
-                        if (mediaDraft.tag_ids && mediaDraft.tag_ids.length > 0) {
-                            await replaceMediaTagsTx(tx, mediaId, body.library_id, mediaDraft.tag_ids);
-                        }
-                    }
-                }
-            }
-
-            const activeMedias = await tx
-                .select({ sync_status: Media.sync_status })
-                .from(Media)
-                .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE)));
-
-            const allCompleted = activeMedias.every((m) => m.sync_status === SyncStatus.COMPLETED);
-            if (allCompleted) {
-                await tx
-                    .update(Post)
-                    .set({
-                        sync_status: SyncStatus.COMPLETED,
-                        update_time: now,
-                    })
-                    .where(eq(Post.id, postId));
-            }
-        });
+        const result = await createPost(body, user.id);
+        return c.json(success(Code.SUCCESS, { post_id: result.postId }));
     } catch (e) {
-        if (e instanceof DraftFileUnavailableError) {
+        if (!(e instanceof CreatePostError)) throw e;
+
+        if (e.kind === "FORBIDDEN") {
+            return c.json(error(Code.FORBIDDEN, e.message), 403);
+        }
+        if (e.kind === "CONFLICT") {
             return c.json(error(Code.ALREADY_EXISTS, e.message), 409);
         }
-        throw e;
+        return c.json(error(Code.INVALID_PARAMETER, e.message), 400);
     }
-
-    return c.json(success(Code.SUCCESS, { post_id: postId }));
 });
 
 export default router;

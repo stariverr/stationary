@@ -7,7 +7,6 @@ import {
     Media,
     Track,
     Post,
-    File as DbFile,
     PostSource,
     DeleteStatus,
     TrackType,
@@ -19,8 +18,6 @@ import {
     Tag,
     MediaTag,
     TagStatus,
-    DraftFile,
-    DraftFileStatus,
     MediaType,
     AsyncTaskType,
     TrackStreamLayout,
@@ -31,24 +28,21 @@ import { and, eq, ilike, SQL, count, asc, desc, or, isNull, inArray } from "driz
 import { Quality } from "@/lib/types";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { verifyMediaSignature } from "@/lib/utils/media-signer";
-import { RecycleService } from "@/services/recycle";
-import { DeleteService } from "@/services/delete";
-import { MediaService } from "@/services/media";
-import { TrackService } from "@/services/track";
+import { MediaService } from "@/features/media/queries";
+import { TrackService } from "@/features/media/track";
 import { v7 as uuidv7 } from "uuid";
 import { env } from "@/global/env";
 import { JobManager } from "@/infra/jobs/manager";
 import { buildCdnUrl } from "@/lib/utils/cdn";
-import { consumeDraftFile, DraftFileUnavailableError } from "@/services/draft-file";
 import { FormTimestampSchema, toIsoTimestamp } from "@/lib/utils/time";
-import {
-    assignTrackPriorities,
-    validateNoDuplicateDraftFileIds,
-    validateDraftTrackFileTypes,
-    validateMediaComposition,
-} from "@/lib/validation/media-composition";
 import { getAllowedTrackTypesForFile, getFileExtension, getMimeTypeByExt } from "@/lib/utils/file";
 import { validate } from "@/lib/validation/validator";
+import { AddTracksFromDraftSchema } from "@/features/media/schema";
+import { AddTracksFromDraftError, addTracksFromDraft } from "@/features/media/add-tracks-from-draft";
+import { deleteMedia, restoreMedia, trashMedia } from "@/features/media/lifecycle";
+import { assertMediaAccess, MediaAccessError } from "@/features/media/access";
+import { replaceMediaTags } from "@/features/media/tags";
+import { updateMediaInfo } from "@/features/media/update-info";
 
 const router = new Hono<AuthEnv>();
 
@@ -268,7 +262,7 @@ router.post("/trash/:id", requireAuth, async (c) => {
     const access = await checkMediaAccess(c, id);
     if (access.errorResponse) return access.errorResponse;
 
-    const result = await RecycleService.recycleMedia(id);
+    const result = await trashMedia(id);
     if (result.mediaUpdated === 0) {
         return c.json(error(Code.NOT_FOUND, "Media not found"), 404);
     }
@@ -285,7 +279,7 @@ router.post("/restore/:id", requireAuth, async (c) => {
     const access = await checkMediaOwnership(c, id, true);
     if (access.errorResponse) return access.errorResponse;
 
-    const result = await RecycleService.restoreMedia(id);
+    const result = await restoreMedia(id);
     if (result.mediaUpdated === 0) {
         return c.json(error(Code.NOT_FOUND, "Media not found"), 404);
     }
@@ -302,7 +296,7 @@ router.post("/delete/:id", requireAuth, async (c) => {
     const access = await checkMediaOwnership(c, id, true);
     if (access.errorResponse) return access.errorResponse;
 
-    const result = await DeleteService.deleteMedia(id);
+    const result = await deleteMedia(id);
     if (result.mediaUpdated === 0) {
         return c.json(error(Code.NOT_FOUND, "Media not found"), 404);
     }
@@ -574,35 +568,24 @@ async function checkMediaOwnership(
         };
     }
 
-    const mediaRows = await db.select().from(Media).where(eq(Media.id, mediaId)).limit(1);
-    const media = mediaRows[0];
+    try {
+        const media = await assertMediaAccess(
+            mediaId,
+            {
+                ownerId: user.id,
+                scopedLibraryId: c.get("apiToken")?.library_id,
+            },
+            { allowRecycled },
+        );
+        return { media, errorResponse: null };
+    } catch (cause) {
+        if (!(cause instanceof MediaAccessError)) throw cause;
 
-    if (!media || media.delete_status !== DeleteStatus.ACTIVE || (!allowRecycled && media.recycle_time !== null)) {
-        return {
-            media: null,
-            errorResponse: c.json(error(Code.NOT_FOUND, "Media not found or is in recycle bin"), 404),
-        };
+        if (cause.kind === "NOT_FOUND") {
+            return { media: null, errorResponse: c.json(error(Code.NOT_FOUND, cause.message), 404) };
+        }
+        return { media: null, errorResponse: c.json(error(Code.FORBIDDEN, cause.message), 403) };
     }
-
-    const libraryList = await db.select().from(Library).where(eq(Library.id, media.library_id)).limit(1);
-    const library = libraryList[0];
-
-    if (!library || library.owner_id !== user.id) {
-        return {
-            media: null,
-            errorResponse: c.json(error(Code.FORBIDDEN, "You do not have access to this library"), 403),
-        };
-    }
-
-    const apiToken = c.get("apiToken");
-    if (apiToken && apiToken.library_id && apiToken.library_id !== media.library_id) {
-        return {
-            media: null,
-            errorResponse: c.json(error(Code.FORBIDDEN, "API token scope restricted to another library"), 403),
-        };
-    }
-
-    return { media, errorResponse: null };
 }
 
 const MediaUpdateInfoSchema = v.pipe(
@@ -621,7 +604,7 @@ router.post("/update-info/:id", requireAuth, validate("json", MediaUpdateInfoSch
     const access = await checkMediaAccess(c, id);
     if (access.errorResponse) return access.errorResponse;
 
-    const updated = await MediaService.updateInfo(id, body);
+    const updated = await updateMediaInfo(id, body);
     return c.json(success(Code.SUCCESS, updated));
 });
 
@@ -637,7 +620,7 @@ router.post("/:id/tags/replace", requireAuth, validate("json", MediaReplaceTagsS
     if (access.errorResponse) return access.errorResponse;
     const media = access.media!;
 
-    const resolvedTagIds = await MediaService.replaceTags(id, media.library_id, tags);
+    const resolvedTagIds = await replaceMediaTags(id, media.library_id, tags);
     return c.json(success(Code.SUCCESS, { tag_ids: resolvedTagIds }));
 });
 
@@ -903,126 +886,24 @@ router.post("/:id/tracks/:trackId/update", requireAuth, validate("json", UpdateT
     return c.json(success(Code.SUCCESS, updated));
 });
 
-const AddTracksFromDraftSchema = v.object({
-    tracks: v.pipe(
-        v.array(
-            v.object({
-                draft_file_id: v.pipe(v.string(), v.uuid()),
-                type: v.enum(TrackType),
-                purpose: v.enum(TrackPurpose),
-                quality: v.enum(Quality),
-                is_default: v.optional(v.boolean(), false),
-                language: v.optional(v.nullable(v.string())),
-            }),
-        ),
-        v.minLength(1),
-    ),
-});
-
 router.post("/:id/tracks/from-draft", requireAuth, validate("json", AddTracksFromDraftSchema), async (c) => {
     const id = c.req.param("id")!;
-    const { tracks } = c.req.valid("json");
 
     const access = await checkMediaAccess(c, id);
     if (!access.media || access.errorResponse) return access.errorResponse;
-    const media = access.media;
-
-    const draftIdError = validateNoDuplicateDraftFileIds(tracks);
-    if (draftIdError) {
-        return c.json(error(Code.INVALID_PARAMETER, draftIdError), 400);
-    }
-
-    const incomingDefaultGroups = new Set(tracks.filter((track) => track.is_default).map((track) => `${track.type}:${track.purpose}`));
-    const existingTracks = await db
-        .select({
-            type: Track.type,
-            purpose: Track.purpose,
-            is_default: Track.is_default,
-            priority: Track.priority,
-        })
-        .from(Track)
-        .where(and(eq(Track.media_id, id), eq(Track.delete_status, DeleteStatus.ACTIVE)));
-
-    const prioritizedTracks = assignTrackPriorities(tracks, existingTracks);
-    const effectiveTracks = [
-        ...existingTracks.map((track) => ({
-            ...track,
-            is_default: incomingDefaultGroups.has(`${track.type}:${track.purpose}`) ? false : track.is_default,
-        })),
-        ...prioritizedTracks,
-    ];
-    const compositionError = validateMediaComposition(media.type, effectiveTracks);
-    if (compositionError) {
-        return c.json(error(Code.INVALID_PARAMETER, compositionError), 400);
-    }
-
-    const draftIds = tracks.map((t) => t.draft_file_id);
-    const draftRows = await db
-        .select({ draft: DraftFile, file: DbFile })
-        .from(DraftFile)
-        .innerJoin(DbFile, eq(DraftFile.file_id, DbFile.id))
-        .where(and(eq(DraftFile.library_id, media.library_id), eq(DraftFile.status, DraftFileStatus.DRAFT)));
-
-    const activeDraftMap = new Map(
-        draftRows.map(({ draft, file }) => [
-            draft.id,
-            {
-                name: draft.original_name,
-                mime_type: file.mime_type,
-            },
-        ]),
-    );
-
-    for (const draftId of draftIds) {
-        if (!activeDraftMap.has(draftId)) {
-            return c.json(error(Code.INVALID_PARAMETER, `Draft file ${draftId} is invalid or already consumed`), 400);
-        }
-    }
-
-    const fileTypeError = validateDraftTrackFileTypes(
-        [
-            {
-                type: media.type,
-                tracks,
-            },
-        ],
-        activeDraftMap,
-    );
-    if (fileTypeError) {
-        return c.json(error(Code.INVALID_PARAMETER, fileTypeError), 400);
-    }
 
     try {
-        await db.transaction(async (tx) => {
-            for (const track of prioritizedTracks) {
-                const fileId = await consumeDraftFile(tx, track.draft_file_id, media.library_id);
-
-                await TrackService.upsertTrack(
-                    id,
-                    {
-                        type: track.type,
-                        purpose: track.purpose,
-                        quality: track.quality,
-                        priority: track.priority,
-                        is_default: track.is_default,
-                        language: track.language || null,
-                    },
-                    fileId,
-                    tx,
-                    { deferCompositionCheck: true },
-                );
+        const result = await addTracksFromDraft(access.media, c.req.valid("json"));
+        return c.json(success(Code.SUCCESS, result));
+    } catch (cause) {
+        if (cause instanceof AddTracksFromDraftError) {
+            if (cause.kind === "CONFLICT") {
+                return c.json(error(Code.ALREADY_EXISTS, cause.message), 409);
             }
-
-            await MediaService.assertMediaReady(id, tx);
-        });
-    } catch (e) {
-        if (e instanceof DraftFileUnavailableError) {
-            return c.json(error(Code.ALREADY_EXISTS, e.message), 409);
+            return c.json(error(Code.INVALID_PARAMETER, cause.message), 400);
         }
-        throw e;
+        throw cause;
     }
-
-    return c.json(success(Code.SUCCESS, { success: true }));
 });
 
 export default router;

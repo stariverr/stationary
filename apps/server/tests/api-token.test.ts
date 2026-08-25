@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ApiTokenService } from "../src/services/apiToken";
+import { ApiTokenService } from "../src/features/auth/api-token";
 import { createHash } from "crypto";
 import * as v from "valibot";
 

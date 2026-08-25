@@ -5,7 +5,7 @@ import { User, ExternalApiToken } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { Code } from "@/lib/code";
 import { error } from "@/lib/response";
-import { ApiTokenService } from "@/services/apiToken";
+import { ApiTokenService } from "@/features/auth/api-token";
 
 export type AuthEnv = {
     Variables: {

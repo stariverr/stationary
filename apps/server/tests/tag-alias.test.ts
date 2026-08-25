@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { sanitizeTagAliases } from "../src/lib/utils/tag_sanitizer";
-import { TagCreateBodySchema, TagUpdateBodySchema } from "../src/api/tag";
+import { TagCreateBodySchema, TagUpdateBodySchema } from "../src/features/tag/schema";
 import * as v from "valibot";
 
 describe("tag alias sanitization utility", () => {

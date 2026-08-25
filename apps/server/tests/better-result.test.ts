@@ -16,7 +16,7 @@ import {
     DraftFileError,
     PhysicalFileNotFoundError,
 } from "../src/lib/errors";
-import { DraftFileUnavailableError } from "../src/services/draft-file";
+import { DraftFileUnavailableError } from "../src/features/import/draft-file";
 
 describe("better-result v3 integration in Stationary", () => {
     test("TaggedError classes instantiate with typed payloads and getters", () => {

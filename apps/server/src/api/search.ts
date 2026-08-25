@@ -4,7 +4,7 @@ import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
 import * as v from "valibot";
 import { validate } from "@/lib/validation/validator";
-import { HybridSearchService } from "@/services/ai/search";
+import { HybridSearchService } from "@/features/ai/search";
 import { MediaType, PostSource } from "@/db/schema";
 
 const router = new Hono<AuthEnv>();

@@ -1,7 +1,7 @@
 import { db } from "@/global/db";
 import { Post, DeleteStatus } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { AiEnrichmentService } from "@/services/ai/enrich";
+import { AiEnrichmentService } from "@/features/ai/enrich";
 
 async function runBackfill() {
     console.log("[BACKFILL] Starting batch AI enrichment backfill for all active posts...");

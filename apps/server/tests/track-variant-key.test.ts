@@ -5,7 +5,7 @@ import { generateDeterministicVariantKey, normalizeVariantKey } from "../src/lib
 const resolveSrc = (relativePath: string) => join(import.meta.dir, "..", relativePath);
 
 const sourceFiles = {
-    trackService: () => Bun.file(resolveSrc("src/services/track.ts")).text(),
+    trackService: () => Bun.file(resolveSrc("src/features/media/track.ts")).text(),
     mediaApi: () => Bun.file(resolveSrc("src/api/media.ts")).text(),
 };
 
@@ -94,8 +94,8 @@ describe("Track Variant Key Generation", () => {
     });
 });
 
-describe("TrackService & API Static Compliance", () => {
-    test("TrackService exposes replaceFile and upsertTrack using physical columns", async () => {
+describe("Media track module & API Static Compliance", () => {
+    test("media track module exposes replaceFile and upsertTrack using physical columns", async () => {
         const content = await sourceFiles.trackService();
         expect(content).toContain("replaceFile(mediaId: string, trackId: string, fileData: FileData)");
         expect(content).toContain("is_stale");

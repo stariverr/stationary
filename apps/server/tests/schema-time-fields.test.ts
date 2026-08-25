@@ -7,11 +7,7 @@ const sourceFiles = {
     schema: () => Bun.file(resolveSrc("src/db/schema/index.ts")).text(),
     postApi: () => Bun.file(resolveSrc("src/api/post.ts")).text(),
     mediaApi: () => Bun.file(resolveSrc("src/api/media.ts")).text(),
-    taskService: async () => {
-        const task = await Bun.file(resolveSrc("src/services/task.ts")).text();
-        const ingestDb = await Bun.file(resolveSrc("src/services/ingest/persistence.ts")).text();
-        return task + "\n" + ingestDb;
-    },
+    ingestPersistence: () => Bun.file(resolveSrc("src/features/ingest/persistence.ts")).text(),
     latestMigration: async () => {
         const proc = Bun.spawn(["find", resolveSrc("drizzle"), "-name", "migration.sql", "-print"], {
             stdout: "pipe",
@@ -32,11 +28,11 @@ describe("post and media time fields", () => {
         expect(schema).toContain('published_time: temporal("published_time")');
     });
 
-    test("task service writes source timestamps to published_time instead of create_time", async () => {
-        const taskService = await sourceFiles.taskService();
+    test("ingest persistence writes source timestamps to published_time instead of create_time", async () => {
+        const ingestPersistence = await sourceFiles.ingestPersistence();
 
-        expect(taskService).toContain("published_time:");
-        expect(taskService).not.toContain("Temporal.Now.instant().epochMilliseconds");
+        expect(ingestPersistence).toContain("published_time:");
+        expect(ingestPersistence).not.toContain("Temporal.Now.instant().epochMilliseconds");
     });
 
     test("post and media API responses include published_time", async () => {

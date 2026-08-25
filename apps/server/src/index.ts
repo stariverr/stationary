@@ -13,7 +13,7 @@ import importRouter from "@/api/import";
 import { jobsApp } from "@/api/jobs";
 import { jobRunner } from "@/infra/jobs/runner";
 import { JobSweeper } from "@/infra/jobs/sweeper";
-import { initJobHandlers } from "@/services/job_handlers";
+import { initJobHandlers } from "@/infra/jobs/register-handlers";
 // 1. Initialize Task Handlers Strategy Registry
 initJobHandlers();
 

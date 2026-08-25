@@ -7,7 +7,7 @@ import {
     validateMediaComposition,
     type MediaCompositionTrack,
 } from "../src/lib/validation/media-composition";
-import { consumeDraftFile, deleteDraftFile, DraftFileUnavailableError } from "../src/services/draft-file";
+import { consumeDraftFile, deleteDraftFile, DraftFileUnavailableError } from "../src/features/import/draft-file";
 import { getAllowedTrackTypesForFile, getMimeTypeByExt } from "../src/lib/utils/file";
 
 const primaryTrack = (type: TrackType): MediaCompositionTrack => ({

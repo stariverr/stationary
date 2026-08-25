@@ -7,28 +7,21 @@ import { Code } from "@/lib/code";
 import {
     DeleteStatus,
     Library,
-    Media,
-    Post,
-    Tag,
-    PostTag,
-    MediaTag,
-    Author,
     AsyncTask,
     AsyncTaskType,
     AsyncTaskStatus,
-    AsyncTaskUnitKind,
-    AsyncSubjectType,
 } from "@/db/schema";
 import { Quality } from "@/lib/types";
 
-import { and, eq, ilike, SQL, count, inArray, isNull, sql, desc } from "drizzle-orm";
+import { and, eq, ilike, SQL, count, sql, desc } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
-import { DeleteService } from "@/services/delete";
 import { JobManager } from "@/infra/jobs/manager";
+import { LibraryMoveItemsBodySchema } from "@/features/library/schema";
+import { LibraryDeleteError, LibraryMoveError } from "@/features/library/errors";
+import { moveLibraryItems } from "@/features/library/move-items";
+import { deleteLibrary } from "@/features/library/delete-library";
 
 const router = new Hono<AuthEnv>();
-
-export const uniqueIds = (ids: string[]) => Array.from(new Set(ids));
 
 export const LibraryIdParamSchema = v.object({
     id: v.pipe(v.string(), v.uuid("Invalid library ID format")),
@@ -62,20 +55,6 @@ export const LibraryUpdateBodySchema = v.strictObject({
     name: v.optional(v.pipe(v.string(), v.nonEmpty("Name is required"))),
     description: v.optional(v.string()),
 });
-
-export const LibraryMoveItemsBodySchema = v.pipe(
-    v.strictObject({
-        post_ids: v.optional(v.array(v.pipe(v.string(), v.uuid("Invalid post ID format"))), []),
-        media_ids: v.optional(v.array(v.pipe(v.string(), v.uuid("Invalid media ID format"))), []),
-        target_library_id: v.pipe(v.string(), v.uuid("Invalid target_library_id format")),
-    }),
-    v.check((body) => body.post_ids.length > 0 || body.media_ids.length > 0, "At least one post or media id is required"),
-    v.transform((data) => ({
-        target_library_id: data.target_library_id,
-        post_ids: uniqueIds(data.post_ids),
-        media_ids: uniqueIds(data.media_ids),
-    })),
-);
 
 export const LibraryAiConfigSchema = v.object({
     ai_provider: v.optional(v.nullable(v.picklist(["gemini", "openai"]))),
@@ -113,9 +92,6 @@ export const LibraryCoverConfigBodySchema = v.object({
         }),
     ),
 });
-
-export const getAttachedMediaIds = (media: Pick<typeof Media.$inferSelect, "id" | "post_id">[]) =>
-    media.filter((item) => item.post_id !== null).map((item) => item.id);
 
 function maskKey(key: string | null | undefined): string | null {
     if (!key) return null;
@@ -184,336 +160,60 @@ router.post("/update", requireAuth, validate("json", LibraryUpdateBodySchema), a
 
 router.post("/delete/:id", requireAuth, validate("param", LibraryIdParamSchema), async (c) => {
     const { id } = c.req.valid("param");
+    const user = c.get("user");
+    if (!user) {
+        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+    }
 
-    const result = await DeleteService.deleteLibrary(id);
-    return result.match({
-        ok: (data) => {
-            if (data.libraryUpdated === 0) {
-                return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
+    try {
+        const result = await deleteLibrary(id, {
+            ownerId: user.id,
+            scopedLibraryId: c.get("apiToken")?.library_id,
+        });
+        return c.json(success(Code.SUCCESS, result));
+    } catch (cause) {
+        if (cause instanceof LibraryDeleteError) {
+            if (cause.kind === "NOT_FOUND") {
+                return c.json(error(Code.NOT_FOUND, cause.message), 404);
             }
-            return c.json(success(Code.SUCCESS, data));
-        },
-        err: (err) =>
-            err.match({
-                LibraryNotEmptyError: () =>
-                    c.json(error(Code.LIBRARY_NOT_EMPTY, "Please empty posts and media in this library before deleting it."), 400),
-                InternalError: (e) => c.json(error(Code.INTERNAL_SERVER_ERROR, e.message), 500),
-            }),
-    });
+            if (cause.kind === "FORBIDDEN") {
+                return c.json(error(Code.FORBIDDEN, cause.message), 403);
+            }
+            if (cause.kind === "NOT_EMPTY") {
+                return c.json(error(Code.LIBRARY_NOT_EMPTY, "Please empty posts and media in this library before deleting it."), 400);
+            }
+            return c.json(error(Code.INTERNAL_SERVER_ERROR, cause.message), 500);
+        }
+
+        const message = cause instanceof Error ? cause.message : String(cause);
+        return c.json(error(Code.INTERNAL_SERVER_ERROR, message), 500);
+    }
 });
 
 router.post("/move-items", requireAuth, validate("json", LibraryMoveItemsBodySchema), async (c) => {
     const user = c.get("user");
     if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
-    const body = c.req.valid("json");
 
-    const targetLibraries = await db
-        .select({ id: Library.id, owner_id: Library.owner_id })
-        .from(Library)
-        .where(and(eq(Library.id, body.target_library_id), eq(Library.delete_status, DeleteStatus.ACTIVE)))
-        .limit(1);
+    try {
+        const result = await moveLibraryItems(c.req.valid("json"), {
+            ownerId: user.id,
+            scopedLibraryId: c.get("apiToken")?.library_id,
+        });
+        return c.json(success(Code.SUCCESS, result));
+    } catch (cause) {
+        if (cause instanceof LibraryMoveError) {
+            if (cause.kind === "NOT_FOUND") {
+                return c.json(error(Code.NOT_FOUND, cause.message), 404);
+            }
+            if (cause.kind === "FORBIDDEN") {
+                return c.json(error(Code.FORBIDDEN, cause.message), 403);
+            }
+            return c.json(error(Code.INVALID_PARAMETER, cause.message), 400);
+        }
 
-    if (targetLibraries.length === 0) {
-        return c.json(error(Code.NOT_FOUND, "Target library not found"));
+        const message = cause instanceof Error ? cause.message : String(cause);
+        return c.json(error(Code.INTERNAL_SERVER_ERROR, message), 500);
     }
-    if (targetLibraries[0].owner_id !== user.id) {
-        return c.json(error(Code.FORBIDDEN, "You do not have access to the target library"), 403);
-    }
-
-    const moved = await db.transaction(async (tx) => {
-        const selectedPosts =
-            body.post_ids.length > 0
-                ? await tx
-                      .select({ id: Post.id, author_id: Post.author_id, library_id: Post.library_id })
-                      .from(Post)
-                      .where(and(inArray(Post.id, body.post_ids), eq(Post.delete_status, DeleteStatus.ACTIVE)))
-                : [];
-
-        if (selectedPosts.length !== body.post_ids.length) {
-            throw new Error("One or more posts were not found or not active");
-        }
-
-        const selectedMedia =
-            body.media_ids.length > 0
-                ? await tx
-                      .select({ id: Media.id, post_id: Media.post_id, library_id: Media.library_id })
-                      .from(Media)
-                      .where(and(inArray(Media.id, body.media_ids), eq(Media.delete_status, DeleteStatus.ACTIVE)))
-                : [];
-
-        if (selectedMedia.length !== body.media_ids.length) {
-            throw new Error("One or more media items were not found or not active");
-        }
-
-        const sourceLibraryIds = uniqueIds([
-            ...selectedPosts.map((post) => post.library_id),
-            ...selectedMedia.map((media) => media.library_id),
-        ]);
-        if (sourceLibraryIds.length > 0) {
-            const sourceLibraries = await tx
-                .select({ owner_id: Library.owner_id })
-                .from(Library)
-                .where(and(inArray(Library.id, sourceLibraryIds), eq(Library.delete_status, DeleteStatus.ACTIVE)));
-            if (sourceLibraries.length !== sourceLibraryIds.length || sourceLibraries.some((library) => library.owner_id !== user.id)) {
-                throw new Error("You do not have access to all source libraries");
-            }
-        }
-
-        const attachedMediaIds = getAttachedMediaIds(selectedMedia);
-        if (attachedMediaIds.length > 0) {
-            throw new Error("Only independent media can be moved directly");
-        }
-
-        const sourceAuthorIds = uniqueIds(selectedPosts.map((p) => p.author_id).filter((id): id is string => !!id));
-
-        const sourceAuthors =
-            sourceAuthorIds.length > 0
-                ? await tx
-                      .select()
-                      .from(Author)
-                      .where(and(inArray(Author.id, sourceAuthorIds), eq(Author.delete_status, DeleteStatus.ACTIVE)))
-                : [];
-
-        // Match or clone authors in target library
-        const authorMap = new Map<string, string>();
-        const avatarCopyJobs: Array<{ sourceAuthorId: string; targetAuthorId: string }> = [];
-
-        if (sourceAuthors.length > 0) {
-            const targetAuthors = await tx
-                .select()
-                .from(Author)
-                .where(and(eq(Author.library_id, body.target_library_id), eq(Author.delete_status, DeleteStatus.ACTIVE)));
-
-            for (const sa of sourceAuthors) {
-                const matched = targetAuthors.find((ta) => ta.platform === sa.platform && ta.eid === sa.eid);
-                if (matched) {
-                    authorMap.set(sa.id, matched.id);
-                } else {
-                    const newAuthorId = crypto.randomUUID();
-                    await tx.insert(Author).values({
-                        id: newAuthorId,
-                        library_id: body.target_library_id,
-                        eid: sa.eid,
-                        short_eid: sa.short_eid,
-                        nickname: sa.nickname,
-                        signature: sa.signature,
-                        platform: sa.platform,
-                        avatar_file_id: null,
-                        avatar_thumb_file_id: null,
-                        delete_status: DeleteStatus.ACTIVE,
-                    });
-                    authorMap.set(sa.id, newAuthorId);
-                    if (sa.avatar_file_id || sa.avatar_thumb_file_id) {
-                        avatarCopyJobs.push({
-                            sourceAuthorId: sa.id,
-                            targetAuthorId: newAuthorId,
-                        });
-                    }
-                }
-            }
-        }
-
-        // 1. Gather all tags associated with the posts and media
-        const postTags =
-            body.post_ids.length > 0
-                ? await tx
-                      .select({
-                          post_id: PostTag.post_id,
-                          tag_name: Tag.name,
-                          tag_normalized: Tag.normalized_name,
-                          tag_color: Tag.color,
-                          tag_status: Tag.status,
-                          tag_source: Tag.source,
-                          tag_source_field: Tag.source_field,
-                      })
-                      .from(PostTag)
-                      .innerJoin(Tag, eq(PostTag.tag_id, Tag.id))
-                      .where(inArray(PostTag.post_id, body.post_ids))
-                : [];
-
-        // Resolve all media items being moved (both direct and post-attached)
-        const postMediaRows =
-            body.post_ids.length > 0 ? await tx.select({ id: Media.id }).from(Media).where(inArray(Media.post_id, body.post_ids)) : [];
-        const postMediaIds = postMediaRows.map((m) => m.id);
-        const allMovedMediaIds = uniqueIds([...body.media_ids, ...postMediaIds]);
-
-        const mediaTags =
-            allMovedMediaIds.length > 0
-                ? await tx
-                      .select({
-                          media_id: MediaTag.media_id,
-                          tag_name: Tag.name,
-                          tag_normalized: Tag.normalized_name,
-                          tag_color: Tag.color,
-                          tag_status: Tag.status,
-                          tag_source: Tag.source,
-                          tag_source_field: Tag.source_field,
-                      })
-                      .from(MediaTag)
-                      .innerJoin(Tag, eq(MediaTag.tag_id, Tag.id))
-                      .where(inArray(MediaTag.media_id, allMovedMediaIds))
-                : [];
-
-        // 2. Determine target tags that need to be queried/upserted in the target library
-        const uniqueTagsMap = new Map<
-            string,
-            {
-                name: string;
-                color: string | null;
-                status: any;
-                source: any;
-                sourceField: string | null;
-            }
-        >();
-
-        for (const pt of postTags) {
-            if (!uniqueTagsMap.has(pt.tag_normalized)) {
-                uniqueTagsMap.set(pt.tag_normalized, {
-                    name: pt.tag_name,
-                    color: pt.tag_color,
-                    status: pt.tag_status,
-                    source: pt.tag_source,
-                    sourceField: pt.tag_source_field,
-                });
-            }
-        }
-        for (const mt of mediaTags) {
-            if (!uniqueTagsMap.has(mt.tag_normalized)) {
-                uniqueTagsMap.set(mt.tag_normalized, {
-                    name: mt.tag_name,
-                    color: mt.tag_color,
-                    status: mt.tag_status,
-                    source: mt.tag_source,
-                    sourceField: mt.tag_source_field,
-                });
-            }
-        }
-
-        const targetTagMap = new Map<string, string>(); // normalized_name -> targetTagId
-        if (uniqueTagsMap.size > 0) {
-            // Fetch target library existing tags
-            const existingTargetTags = await tx.select().from(Tag).where(eq(Tag.library_id, body.target_library_id));
-
-            for (const [normName, info] of uniqueTagsMap.entries()) {
-                const matched = existingTargetTags.find((t) => t.normalized_name === normName);
-                if (matched) {
-                    targetTagMap.set(normName, matched.id);
-                } else {
-                    // Create in target library
-                    const inserted = await tx
-                        .insert(Tag)
-                        .values({
-                            name: info.name,
-                            normalized_name: normName,
-                            color: info.color,
-                            library_id: body.target_library_id,
-                            status: info.status,
-                            source: info.source,
-                            source_field: info.sourceField,
-                        })
-                        .returning({ id: Tag.id });
-                    if (inserted[0]) {
-                        targetTagMap.set(normName, inserted[0].id);
-                    }
-                }
-            }
-        }
-
-        // 3. Move posts and media items
-        let posts = 0;
-        let media = 0;
-        let postMedia = 0;
-
-        if (body.post_ids.length > 0) {
-            for (const post of selectedPosts) {
-                const targetAuthorId = post.author_id ? authorMap.get(post.author_id) : null;
-                await tx
-                    .update(Post)
-                    .set({
-                        library_id: body.target_library_id,
-                        author_id: targetAuthorId || null,
-                    })
-                    .where(eq(Post.id, post.id));
-            }
-            posts = selectedPosts.length;
-
-            const updatedPostMedia = await tx
-                .update(Media)
-                .set({ library_id: body.target_library_id })
-                .where(inArray(Media.post_id, body.post_ids))
-                .returning({ id: Media.id });
-            postMedia = updatedPostMedia.length;
-        }
-
-        if (body.media_ids.length > 0) {
-            const updatedMedia = await tx
-                .update(Media)
-                .set({ library_id: body.target_library_id })
-                .where(and(inArray(Media.id, body.media_ids), isNull(Media.post_id)))
-                .returning({ id: Media.id });
-            media = updatedMedia.length;
-        }
-
-        // 4. Re-link tag relations
-        if (postTags.length > 0) {
-            await tx.delete(PostTag).where(inArray(PostTag.post_id, body.post_ids));
-            const newPostTags = postTags
-                .map((pt) => {
-                    const targetId = targetTagMap.get(pt.tag_normalized);
-                    return targetId ? { post_id: pt.post_id, tag_id: targetId } : null;
-                })
-                .filter((pt): pt is { post_id: string; tag_id: string } => !!pt);
-            if (newPostTags.length > 0) {
-                await tx.insert(PostTag).values(newPostTags);
-            }
-        }
-
-        if (mediaTags.length > 0) {
-            await tx.delete(MediaTag).where(inArray(MediaTag.media_id, allMovedMediaIds));
-            const newMediaTags = mediaTags
-                .map((mt) => {
-                    const targetId = targetTagMap.get(mt.tag_normalized);
-                    return targetId ? { media_id: mt.media_id, tag_id: targetId } : null;
-                })
-                .filter((mt): mt is { media_id: string; tag_id: string } => !!mt);
-            if (newMediaTags.length > 0) {
-                await tx.insert(MediaTag).values(newMediaTags);
-            }
-        }
-
-        return { posts, media, post_media: postMedia, avatarCopyJobs };
-    });
-
-    // Trigger background DB task to copy avatars asynchronously outside of the long DB transaction
-    if (moved.avatarCopyJobs.length > 0) {
-        const uniqueAvatarCopyJobs = Array.from(
-            new Map(moved.avatarCopyJobs.map((job) => [`${job.sourceAuthorId}:${job.targetAuthorId}`, job])).values(),
-        );
-        const unitSpecs = uniqueAvatarCopyJobs.map((job) => ({
-            unitKey: `avatar_copy:${job.sourceAuthorId}:${job.targetAuthorId}`,
-            kind: AsyncTaskUnitKind.AVATAR_COPY,
-            subjectType: AsyncSubjectType.AUTHOR,
-            subjectId: job.targetAuthorId,
-            inputSnapshot: { sourceAuthorId: job.sourceAuthorId, targetAuthorId: job.targetAuthorId },
-        }));
-
-        await JobManager.enqueueTaskWithUnits(
-            {
-                type: AsyncTaskType.AVATAR_COPY,
-                ownerId: user.id,
-                inputSnapshot: { count: uniqueAvatarCopyJobs.length },
-            },
-            unitSpecs,
-        );
-    }
-
-    return c.json(
-        success(Code.SUCCESS, {
-            posts: moved.posts,
-            media: moved.media,
-            post_media: moved.post_media,
-        }),
-    );
 });
 
 // GET Library AI Config

@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { Quality } from "@/lib/types";
 
 import { JobManager } from "@/infra/jobs/manager";
-import { initJobHandlers } from "@/services/job_handlers";
+import { initJobHandlers } from "@/infra/jobs/register-handlers";
 
 export async function backfillCoverConfig() {
     console.log("[MIGRATION] Starting backfill of Library cover configuration...");

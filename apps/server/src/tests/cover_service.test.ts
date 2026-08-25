@@ -40,7 +40,7 @@ describe("Cover Photo Multi-Quality Service Tests", () => {
 
 
     test("rankCoverCandidateTrack prefers supported formats and primary/default tracks over vvic/jxl", () => {
-        const { rankCoverCandidateTrack } = require("@/services/cover");
+        const { rankCoverCandidateTrack } = require("@/features/media/cover");
 
         const unrenderableTrack: any = {
             track: { type: TrackType.IMAGE, is_primary: false, is_default: false, priority: 1 },

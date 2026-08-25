@@ -12,7 +12,7 @@ import {
 import { db } from "@/global/db";
 import { enqueueTaskWithUnits, settleTaskUnit } from "@/infra/jobs/store";
 import { TaskRetryReason } from "@/infra/jobs/types";
-import { initJobHandlers } from "@/services/job_handlers";
+import { initJobHandlers } from "@/infra/jobs/register-handlers";
 import { eq } from "drizzle-orm";
 
 const databaseTest = process.env.RUN_JOB_DB_TESTS === "1" ? test : test.skip;

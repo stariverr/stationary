@@ -8,13 +8,9 @@ const sourceFiles = {
     postApi: () => Bun.file(resolveSrc("src/api/post.ts")).text(),
     mediaApi: () => Bun.file(resolveSrc("src/api/media.ts")).text(),
     libraryApi: () => Bun.file(resolveSrc("src/api/library.ts")).text(),
-    taskService: async () => {
-        const task = await Bun.file(resolveSrc("src/services/task.ts")).text();
-        const ingestDb = await Bun.file(resolveSrc("src/services/ingest/persistence.ts")).text();
-        return task + "\n" + ingestDb;
-    },
-    trackService: () => Bun.file(resolveSrc("src/services/track.ts")).text(),
-    recycleService: () => Bun.file(resolveSrc("src/services/recycle.ts")).text(),
+    ingestPersistence: () => Bun.file(resolveSrc("src/features/ingest/persistence.ts")).text(),
+    trackService: () => Bun.file(resolveSrc("src/features/media/track.ts")).text(),
+    libraryDelete: () => Bun.file(resolveSrc("src/features/library/delete-library.ts")).text(),
     latestMigration: async () => {
         const proc = Bun.spawn(["find", resolveSrc("drizzle"), "-name", "migration.sql", "-print"], {
             stdout: "pipe",
@@ -64,23 +60,23 @@ describe("soft deletion lifecycle", () => {
 
     test("library deletion is blocked while any active post or media remains", async () => {
         const libraryApi = await sourceFiles.libraryApi();
-        const recycleService = await sourceFiles.recycleService();
+        const libraryDelete = await sourceFiles.libraryDelete();
         const clean = (str: string) => str.replace(/\s+/g, "");
 
-        expect(clean(libraryApi)).toContain(clean("DeleteService.deleteLibrary(id)"));
+        expect(clean(libraryApi)).toContain(clean("deleteLibrary(id,"));
         expect(clean(libraryApi)).toContain(clean("Please empty posts and media in this library before deleting it."));
-        expect(clean(recycleService)).toContain(clean("eq(Post.library_id,libraryId)"));
-        expect(clean(recycleService)).toContain(clean("eq(Post.delete_status,DeleteStatus.ACTIVE)"));
-        expect(clean(recycleService)).toContain(clean("eq(Media.library_id,libraryId)"));
-        expect(clean(recycleService)).toContain(clean("eq(Media.delete_status,DeleteStatus.ACTIVE)"));
+        expect(clean(libraryDelete)).toContain(clean("eq(Post.library_id,libraryId)"));
+        expect(clean(libraryDelete)).toContain(clean("eq(Post.delete_status,DeleteStatus.ACTIVE)"));
+        expect(clean(libraryDelete)).toContain(clean("eq(Media.library_id,libraryId)"));
+        expect(clean(libraryDelete)).toContain(clean("eq(Media.delete_status,DeleteStatus.ACTIVE)"));
     });
 
     test("scraper sync soft-deletes missing media instead of hard-deleting files", async () => {
-        const taskService = await sourceFiles.taskService();
+        const ingestPersistence = await sourceFiles.ingestPersistence();
 
-        expect(taskService).toContain("delete_time: deleteTime");
-        expect(taskService).not.toContain("db.delete(Media)");
-        expect(taskService).not.toContain("db.delete(MediaFile)");
+        expect(ingestPersistence).toContain("delete_time: deleteTime");
+        expect(ingestPersistence).not.toContain("db.delete(Media)");
+        expect(ingestPersistence).not.toContain("db.delete(MediaFile)");
     });
 
     test("track replacement and deletion perform 1:1 file soft-deletion", async () => {

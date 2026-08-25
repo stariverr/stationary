@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import * as v from "valibot";
+import { LibraryMoveItemsBodySchema } from "../src/features/library/schema";
+import { getAttachedMediaIds, uniqueIds } from "../src/features/library/move-items";
 
 const resolveSrc = (relativePath: string) => join(import.meta.dir, "..", relativePath);
 
@@ -56,7 +58,7 @@ describe("library item movement", () => {
         const postId = "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b4";
         const mediaId = "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b5";
 
-        const parsed = v.safeParse(libraryApi.LibraryMoveItemsBodySchema, {
+        const parsed = v.safeParse(LibraryMoveItemsBodySchema, {
             post_ids: [postId],
             media_ids: [mediaId],
             target_library_id: targetLibraryId,
@@ -69,7 +71,7 @@ describe("library item movement", () => {
         const libraryApi = await import("../src/api/library");
         const targetLibraryId = "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3";
 
-        const parsed = v.safeParse(libraryApi.LibraryMoveItemsBodySchema, {
+        const parsed = v.safeParse(LibraryMoveItemsBodySchema, {
             post_ids: [],
             media_ids: [],
             target_library_id: targetLibraryId,
@@ -82,7 +84,7 @@ describe("library item movement", () => {
         const libraryApi = await import("../src/api/library");
 
         expect(
-            libraryApi.getAttachedMediaIds([
+            getAttachedMediaIds([
                 { id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b4", post_id: null },
                 {
                     id: "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b5",
@@ -96,7 +98,7 @@ describe("library item movement", () => {
         const libraryApi = await import("../src/api/library");
         const id = "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b4";
 
-        expect(libraryApi.uniqueIds([id, id])).toEqual([id]);
+        expect(uniqueIds([id, id])).toEqual([id]);
     });
 
     test("exposes an action-style move-items endpoint", async () => {
@@ -108,12 +110,12 @@ describe("library item movement", () => {
     });
 
     test("moves post media with their parent posts", async () => {
-        const source = await Bun.file(resolveSrc("src/api/library.ts")).text();
+        const source = await Bun.file(resolveSrc("src/features/library/move-items.ts")).text();
         const clean = (str: string) => str.replace(/\s+/g, "");
 
         expect(clean(source)).toContain(clean(".update(Post)"));
         expect(clean(source)).toContain(clean(".update(Media)"));
-        expect(clean(source)).toContain(clean("inArray(Media.post_id, body.post_ids)"));
+        expect(clean(source)).toContain(clean("inArray(Media.post_id, input.post_ids)"));
     });
 });
 
