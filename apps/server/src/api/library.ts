@@ -185,18 +185,21 @@ router.post("/update", requireAuth, validate("json", LibraryUpdateBodySchema), a
 router.post("/delete/:id", requireAuth, validate("param", LibraryIdParamSchema), async (c) => {
     const { id } = c.req.valid("param");
 
-    try {
-        const result = await DeleteService.deleteLibrary(id);
-        if (result.libraryUpdated === 0) {
-            return c.json(error(Code.NOT_FOUND, "Library not found"));
-        }
-        return c.json(success(Code.SUCCESS, result));
-    } catch (e: any) {
-        if (e.message === "Library is not empty") {
-            return c.json(error(Code.LIBRARY_NOT_EMPTY, "Please empty posts and media in this library before deleting it."));
-        }
-        throw e;
-    }
+    const result = await DeleteService.deleteLibrary(id);
+    return result.match({
+        ok: (data) => {
+            if (data.libraryUpdated === 0) {
+                return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
+            }
+            return c.json(success(Code.SUCCESS, data));
+        },
+        err: (err) =>
+            err.match({
+                LibraryNotEmptyError: () =>
+                    c.json(error(Code.LIBRARY_NOT_EMPTY, "Please empty posts and media in this library before deleting it."), 400),
+                InternalError: (e) => c.json(error(Code.INTERNAL_SERVER_ERROR, e.message), 500),
+            }),
+    });
 });
 
 router.post("/move-items", requireAuth, validate("json", LibraryMoveItemsBodySchema), async (c) => {

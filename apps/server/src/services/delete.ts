@@ -14,7 +14,9 @@ import {
     LibraryUserAccess,
     LibraryGroupAccess,
 } from "@/db/schema";
-
+import { Result } from "better-result";
+import { LibraryNotEmptyError, NotFoundError, MediaCompositionError, InternalError } from "@/lib/errors";
+import { getErrorMessage } from "@/lib/utils/error";
 import { RecycleService } from "./recycle";
 import { MediaService } from "./media";
 
@@ -127,114 +129,143 @@ export const DeleteService = {
 
     /** Delete Track and its file */
     async deleteTrack(mediaId: string, trackId: string) {
-        return db.transaction(async (tx) => {
+        return Result.gen(async function* () {
             const now = Temporal.Now.instant();
 
-            const [trackRecord] = await tx
-                .select()
-                .from(Track)
-                .where(and(eq(Track.id, trackId), eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)));
+            const txResult = yield* Result.await(
+                Result.tryPromise({
+                    try: () =>
+                        db.transaction(async (tx) => {
+                            const [trackRecord] = await tx
+                                .select()
+                                .from(Track)
+                                .where(
+                                    and(eq(Track.id, trackId), eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)),
+                                );
 
-            if (!trackRecord) {
-                throw new Error("Track not found");
-            }
+                            if (!trackRecord) {
+                                throw new NotFoundError({ resource: "Track", id: trackId, message: "Track not found" });
+                            }
 
-            await tx
-                .update(Track)
-                .set({
-                    delete_status: DeleteStatus.DELETED,
-                    delete_time: now,
-                    update_time: now,
-                })
-                .where(eq(Track.id, trackId));
+                            await tx
+                                .update(Track)
+                                .set({
+                                    delete_status: DeleteStatus.DELETED,
+                                    delete_time: now,
+                                    update_time: now,
+                                })
+                                .where(eq(Track.id, trackId));
 
-            await MediaService.assertMediaComposition(mediaId, tx);
-            if (trackRecord.file_id) {
-                await tx
-                    .update(File)
-                    .set({ delete_status: DeleteStatus.DELETED, delete_time: now })
-                    .where(and(eq(File.id, trackRecord.file_id), eq(File.delete_status, DeleteStatus.ACTIVE)));
-            }
+                            await MediaService.assertMediaComposition(mediaId, tx);
+                            if (trackRecord.file_id) {
+                                await tx
+                                    .update(File)
+                                    .set({ delete_status: DeleteStatus.DELETED, delete_time: now })
+                                    .where(and(eq(File.id, trackRecord.file_id), eq(File.delete_status, DeleteStatus.ACTIVE)));
+                            }
 
-            return { success: true };
+                            return { success: true };
+                        }),
+                    catch: (err) =>
+                        err instanceof NotFoundError ? err : new MediaCompositionError({ mediaId, message: getErrorMessage(err) }),
+                }),
+            );
+
+            return Result.ok(txResult);
         });
     },
 
     /** Delete Library */
     async deleteLibrary(libraryId: string) {
-        const deleteTime = Temporal.Now.instant();
+        return Result.gen(async function* () {
+            const deleteTime = Temporal.Now.instant();
 
-        const hasContent = await RecycleService.libraryHasContent(libraryId);
-        if (hasContent) {
-            throw new Error("Library is not empty");
-        }
+            const hasContent = yield* Result.await(
+                Result.tryPromise({
+                    try: () => RecycleService.libraryHasContent(libraryId),
+                    catch: (err) => new InternalError({ message: getErrorMessage(err), cause: err }),
+                }),
+            );
 
-        return db.transaction(async (tx) => {
-            const libs = await tx
-                .select({ id: Library.id, cover_file_id: Library.cover_file_id })
-                .from(Library)
-                .where(and(eq(Library.id, libraryId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
-                .limit(1);
-            const library = libs[0];
-            if (!library) return { libraryUpdated: 0 };
-
-            await tx
-                .update(Library)
-                .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
-                .where(eq(Library.id, libraryId));
-
-            if (library.cover_file_id) {
-                await tx
-                    .update(File)
-                    .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
-                    .where(and(eq(File.id, library.cover_file_id), eq(File.delete_status, DeleteStatus.ACTIVE)));
+            if (hasContent) {
+                yield* new LibraryNotEmptyError({ libraryId, message: "Library is not empty" });
             }
 
-            const authors = await tx
-                .select({
-                    id: Author.id,
-                    avatar_file_id: Author.avatar_file_id,
-                    avatar_thumb_file_id: Author.avatar_thumb_file_id,
-                })
-                .from(Author)
-                .where(and(eq(Author.library_id, libraryId), eq(Author.delete_status, DeleteStatus.ACTIVE)));
+            const txResult = yield* Result.await(
+                Result.tryPromise({
+                    try: () =>
+                        db.transaction(async (tx) => {
+                            const libs = await tx
+                                .select({ id: Library.id, cover_file_id: Library.cover_file_id })
+                                .from(Library)
+                                .where(and(eq(Library.id, libraryId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
+                                .limit(1);
+                            const library = libs[0];
+                            if (!library) return { libraryUpdated: 0 };
 
-            if (authors.length > 0) {
-                const authorIds = authors.map((a) => a.id);
-                await tx
-                    .update(Author)
-                    .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
-                    .where(inArray(Author.id, authorIds));
+                            await tx
+                                .update(Library)
+                                .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
+                                .where(eq(Library.id, libraryId));
 
-                const avatarFileIds = authors
-                    .flatMap((a) => [a.avatar_file_id, a.avatar_thumb_file_id])
-                    .filter((fid): fid is string => !!fid);
+                            if (library.cover_file_id) {
+                                await tx
+                                    .update(File)
+                                    .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
+                                    .where(and(eq(File.id, library.cover_file_id), eq(File.delete_status, DeleteStatus.ACTIVE)));
+                            }
 
-                if (avatarFileIds.length > 0) {
-                    await tx
-                        .update(File)
-                        .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
-                        .where(and(inArray(File.id, avatarFileIds), eq(File.delete_status, DeleteStatus.ACTIVE)));
-                }
-            }
+                            const authors = await tx
+                                .select({
+                                    id: Author.id,
+                                    avatar_file_id: Author.avatar_file_id,
+                                    avatar_thumb_file_id: Author.avatar_thumb_file_id,
+                                })
+                                .from(Author)
+                                .where(and(eq(Author.library_id, libraryId), eq(Author.delete_status, DeleteStatus.ACTIVE)));
 
-            const tags = await tx.select({ id: Tag.id }).from(Tag).where(eq(Tag.library_id, libraryId));
+                            if (authors.length > 0) {
+                                const authorIds = authors.map((a) => a.id);
+                                await tx
+                                    .update(Author)
+                                    .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
+                                    .where(inArray(Author.id, authorIds));
 
-            if (tags.length > 0) {
-                const tagIds = tags.map((t) => t.id);
-                await tx.delete(PostTag).where(inArray(PostTag.tag_id, tagIds));
-                await tx.delete(MediaTag).where(inArray(MediaTag.tag_id, tagIds));
-                await tx.delete(Tag).where(inArray(Tag.id, tagIds));
-            }
+                                const avatarFileIds = authors
+                                    .flatMap((a) => [a.avatar_file_id, a.avatar_thumb_file_id])
+                                    .filter((fid): fid is string => !!fid);
 
-            await tx.delete(LibraryUserAccess).where(eq(LibraryUserAccess.library_id, libraryId));
-            await tx.delete(LibraryGroupAccess).where(eq(LibraryGroupAccess.library_id, libraryId));
+                                if (avatarFileIds.length > 0) {
+                                    await tx
+                                        .update(File)
+                                        .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
+                                        .where(and(inArray(File.id, avatarFileIds), eq(File.delete_status, DeleteStatus.ACTIVE)));
+                                }
+                            }
 
-            return {
-                libraryUpdated: 1,
-                authorUpdated: authors.length,
-                tagUpdated: tags.length,
-            };
+                            const tags = await tx.select({ id: Tag.id }).from(Tag).where(eq(Tag.library_id, libraryId));
+
+                            if (tags.length > 0) {
+                                const tagIds = tags.map((t) => t.id);
+                                await tx.delete(PostTag).where(inArray(PostTag.tag_id, tagIds));
+                                await tx.delete(MediaTag).where(inArray(MediaTag.tag_id, tagIds));
+                                await tx.delete(Tag).where(inArray(Tag.id, tagIds));
+                            }
+
+                            await tx.delete(LibraryUserAccess).where(eq(LibraryUserAccess.library_id, libraryId));
+                            await tx.delete(LibraryGroupAccess).where(eq(LibraryGroupAccess.library_id, libraryId));
+
+                            return {
+                                libraryUpdated: 1,
+                                authorUpdated: authors.length,
+                                tagUpdated: tags.length,
+                            };
+                        }),
+                    catch: (err) => new InternalError({ message: getErrorMessage(err), cause: err }),
+                }),
+            );
+
+            return Result.ok(txResult);
         });
     },
 

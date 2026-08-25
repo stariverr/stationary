@@ -1,7 +1,7 @@
 import { Context, Hono } from "hono";
 import { db } from "@/global/db";
 import * as v from "valibot";
-import { success, error } from "@/lib/response";
+import { success, error, respondWithResult } from "@/lib/response";
 import { Code } from "@/lib/code";
 import {
     Media,
@@ -529,11 +529,7 @@ router.get("/:id/hls/:trackId/manifest.m3u8", validate("param", GetHlsVariantReq
     });
 });
 
-async function verifyMediaStreamAccess(
-    c: Context,
-    mediaId: string,
-    trackId?: string,
-): Promise<{ ok: boolean; errorResponse: any }> {
+async function verifyMediaStreamAccess(c: Context, mediaId: string, trackId?: string): Promise<{ ok: boolean; errorResponse: any }> {
     const expires = c.req.query("expires");
     const sig = c.req.query("sig");
 
@@ -851,12 +847,8 @@ router.post("/:id/tracks/:trackId/delete", requireAuth, async (c) => {
     const access = await checkMediaAccess(c, id);
     if (access.errorResponse) return access.errorResponse;
 
-    try {
-        const result = await TrackService.deleteTrack(id, trackId);
-        return c.json(success(Code.SUCCESS, result));
-    } catch (e: any) {
-        return c.json(error(Code.INVALID_PARAMETER, e.message || "Delete failed"), 400);
-    }
+    const result = await TrackService.deleteTrack(id, trackId);
+    return respondWithResult(c, result);
 });
 
 const UpdateTrackMetadataSchema = v.object({

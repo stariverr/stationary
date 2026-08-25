@@ -1,11 +1,18 @@
 import { and, eq } from "drizzle-orm";
 import { DraftFile, DraftFileStatus, File as DbFile, DeleteStatus } from "@/db/schema";
 import type { Transaction } from "@/global/db";
+import { TaggedError } from "better-result";
+import { Code } from "@/lib/code";
 
-export class DraftFileUnavailableError extends Error {
-    constructor(public readonly draftFileId: string) {
-        super(`Draft file ${draftFileId} is invalid or already consumed`);
-        this.name = "DraftFileUnavailableError";
+export class DraftFileUnavailableError extends TaggedError("DraftFileUnavailableError")<{
+    draftFileId: string;
+    message?: string;
+}> {
+    get code(): Code {
+        return Code.INVALID_PARAMETER;
+    }
+    get httpStatus(): number {
+        return 400;
     }
 }
 
@@ -20,7 +27,10 @@ export async function consumeDraftFile(tx: Transaction, draftFileId: string, lib
         .returning({ file_id: DraftFile.file_id });
 
     if (!updatedDraft) {
-        throw new DraftFileUnavailableError(draftFileId);
+        throw new DraftFileUnavailableError({
+            draftFileId,
+            message: `Draft file ${draftFileId} is invalid or already consumed`,
+        });
     }
 
     return updatedDraft.file_id;
