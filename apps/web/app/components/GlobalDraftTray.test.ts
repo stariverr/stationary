@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 describe("merge tracks dialog", () => {
     test("uses an explicit wide desktop max width and viewport-safe height", async () => {
-        const component = await Bun.file("app/components/GlobalDraftTray.vue").text();
+        const component = await Bun.file("app/components/DraftMergeDialog.vue").text();
 
         expect(component).toContain("sm:max-w-5xl");
         expect(component).toContain("max-h-[calc(100dvh-1rem)]");
@@ -11,7 +11,7 @@ describe("merge tracks dialog", () => {
     });
 
     test("uses separate mobile cards and a stable desktop table", async () => {
-        const component = await Bun.file("app/components/GlobalDraftTray.vue").text();
+        const component = await Bun.file("app/components/DraftMergeDialog.vue").text();
 
         expect(component).toContain("min-w-[900px]");
         expect(component).toContain("lg:block");
@@ -20,7 +20,7 @@ describe("merge tracks dialog", () => {
     });
 
     test("disables commit while the composition is invalid", async () => {
-        const component = await Bun.file("app/components/GlobalDraftTray.vue").text();
+        const component = await Bun.file("app/components/DraftMergeDialog.vue").text();
 
         expect(component).toContain(':disabled="!mergeTitle.trim() || Boolean(mergeCompositionError)"');
         expect(component).toContain('role="alert"');
