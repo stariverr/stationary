@@ -19,10 +19,10 @@ export class PostAccessError extends Error {
     }
 }
 
-export async function assertPostAccess(postId: string, auth: PostAccessAuth) {
+export async function assertPostAccess(postId: string, auth: PostAccessAuth, options: { allowRecycled?: boolean } = {}) {
     const [post] = await db.select().from(Post).where(eq(Post.id, postId)).limit(1);
 
-    if (!post || post.delete_status !== DeleteStatus.ACTIVE || post.recycle_time !== null) {
+    if (!post || post.delete_status !== DeleteStatus.ACTIVE || (!options.allowRecycled && post.recycle_time !== null)) {
         throw new PostAccessError("NOT_FOUND", "Post not found or is in recycle bin");
     }
 

@@ -8,6 +8,7 @@ import user from "@/api/user";
 import library from "@/api/library";
 import search from "@/api/search";
 import tag from "@/api/tag";
+import trash from "@/api/trash";
 import authRouter from "@/api/auth";
 import importRouter from "@/api/import";
 import { jobsApp } from "@/api/jobs";
@@ -84,6 +85,7 @@ app.route("/api/user", user);
 app.route("/api/library", library);
 app.route("/api/search", search);
 app.route("/api/tag", tag);
+app.route("/api/trash", trash);
 app.route("/api/jobs", jobsApp);
 
 const port = 9400;

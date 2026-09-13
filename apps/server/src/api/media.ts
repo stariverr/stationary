@@ -210,7 +210,7 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
 
 router.get("/detail/:id", requireAuth, async (c) => {
     const id = c.req.param("id")!;
-    const access = await checkMediaAccess(c, id);
+    const access = await checkMediaAccess(c, id, true);
     if (access.errorResponse) return access.errorResponse;
     const media = access.media!;
 
@@ -551,8 +551,9 @@ async function verifyMediaStreamAccess(c: Context, mediaId: string, trackId?: st
 async function checkMediaAccess(
     c: Context,
     mediaId: string,
+    allowRecycled = false,
 ): Promise<{ media: typeof Media.$inferSelect; errorResponse: null } | { media: null; errorResponse: any }> {
-    return checkMediaOwnership(c, mediaId, false);
+    return checkMediaOwnership(c, mediaId, allowRecycled);
 }
 
 async function checkMediaOwnership(

@@ -4,20 +4,7 @@ import * as v from "valibot";
 import { error, success } from "@/lib/response";
 import { Code } from "@/lib/code";
 import { requireAuth } from "@/lib/auth/middleware";
-import {
-    Media,
-    Post,
-    File as DbFile,
-    DeleteStatus,
-    PostSource,
-    TrackPurpose,
-    Author,
-    MediaType,
-    PostTag,
-    Tag,
-    TagStatus,
-    Library,
-} from "@/db/schema";
+import { Media, Post, File as DbFile, DeleteStatus, PostSource, Author, MediaType, PostTag, Tag, TagStatus } from "@/db/schema";
 import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lte, exists, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { PostService } from "@/features/post/post-service";
@@ -379,7 +366,7 @@ export const PostDetailResponseBodySchema = v.object({
 
 router.get("/detail/:id", requireAuth, validate("param", PostDetailRequestPathParamSchema), async (c) => {
     const id = c.req.valid("param").id;
-    const access = await checkPostAccess(c, id);
+    const access = await checkPostAccess(c, id, true);
     if (access.errorResponse) return access.errorResponse;
     const postData = access.post!;
 
@@ -463,10 +450,17 @@ router.get(
         const postId = c.req.valid("param").id;
         const { page, limit, keyword, type } = c.req.valid("query");
 
-        const access = await checkPostAccess(c, postId);
+        const access = await checkPostAccess(c, postId, true);
         if (access.errorResponse) return access.errorResponse;
+        const post = access.post!;
 
-        const conditions: SQL[] = [eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)];
+        const conditions: SQL[] = [eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE)];
+
+        if (post.recycle_time !== null) {
+            conditions.push(or(isNull(Media.recycle_time), eq(Media.recycle_time, post.recycle_time))!);
+        } else {
+            conditions.push(isNull(Media.recycle_time));
+        }
 
         if (type) {
             conditions.push(eq(Media.type, type));
@@ -530,7 +524,7 @@ router.post("/restore/:id", requireAuth, async (c) => {
         return c.json(error(Code.INVALID_PARAMETER, "post id is required"), 400);
     }
 
-    const access = await checkPostAccess(c, id);
+    const access = await checkPostAccess(c, id, true);
     if (access.errorResponse) return access.errorResponse;
 
     const result = await restorePost(id);
@@ -547,7 +541,7 @@ router.post("/delete/:id", requireAuth, async (c) => {
         return c.json(error(Code.INVALID_PARAMETER, "post id is required"), 400);
     }
 
-    const access = await checkPostAccess(c, id);
+    const access = await checkPostAccess(c, id, true);
     if (access.errorResponse) return access.errorResponse;
 
     const result = await deletePost(id);
@@ -561,6 +555,7 @@ router.post("/delete/:id", requireAuth, async (c) => {
 async function checkPostAccess(
     c: Context,
     postId: string,
+    allowRecycled = false,
 ): Promise<{ post: typeof Post.$inferSelect; errorResponse: null } | { post: null; errorResponse: any }> {
     const user = c.get("user");
     if (!user) {
@@ -571,10 +566,14 @@ async function checkPostAccess(
     }
 
     try {
-        const post = await assertPostAccess(postId, {
-            ownerId: user.id,
-            scopedLibraryId: c.get("apiToken")?.library_id,
-        });
+        const post = await assertPostAccess(
+            postId,
+            {
+                ownerId: user.id,
+                scopedLibraryId: c.get("apiToken")?.library_id,
+            },
+            { allowRecycled },
+        );
         return { post, errorResponse: null };
     } catch (cause) {
         if (!(cause instanceof PostAccessError)) throw cause;
