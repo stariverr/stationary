@@ -10,14 +10,22 @@ if (!env.DB_URL) {
 export const pool = new Pool({
     connectionString: env.DB_URL,
     keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
     max: env.DB_POOL_MAX,
     idleTimeoutMillis: env.DB_IDLE_TIMEOUT_MS,
     connectionTimeoutMillis: 10_000,
 });
 
-// Essential: Prevent idle client disconnect errors from crashing the Bun process
+// 1. Prevent idle client disconnect errors from crashing the Bun process
 pool.on("error", (err) => {
-    console.warn(`[DB Pool] Idle client connection disconnected/error: ${err.message}`);
+    console.warn(`[DB Pool] Idle client disconnected/error: ${err.message}`);
+});
+
+// 2. Prevent active/acquired client disconnect errors from crashing the Bun process
+pool.on("connect", (client) => {
+    client.on("error", (err) => {
+        console.warn(`[DB Client] Connection error: ${err.message}`);
+    });
 });
 
 export const db = drizzle({

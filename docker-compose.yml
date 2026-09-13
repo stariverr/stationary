@@ -1,0 +1,38 @@
+services:
+  stationary:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stationary
+    restart: unless-stopped
+    ports:
+      - "${PORT:-4000}:4000"
+    environment:
+      SERVER_ENV: production
+      NODE_ENV: production
+      DB_URL: ${DB_URL}
+      REDIS_URL: ${REDIS_URL}
+      AUTH_SECRET: ${AUTH_SECRET}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:4000}
+      TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-http://localhost:4000}
+      NUXT_API_BASE_URL: http://127.0.0.1:9400
+      NUXT_PUBLIC_API_BASE_URL: ${NUXT_PUBLIC_API_BASE_URL:-}
+      NUXT_PUBLIC_APP_URL: ${NUXT_PUBLIC_APP_URL:-http://localhost:4000}
+      NUXT_PUBLIC_CDN_BASE_URL: ${CDN_BASE_URL:-http://localhost:4000}
+      CDN_BASE_URL: ${CDN_BASE_URL:-http://localhost:4000}
+      STORAGE_IS_PUBLIC: ${STORAGE_IS_PUBLIC:-false}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      RESEND_EMAIL_SENDER: ${RESEND_EMAIL_SENDER}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      S3_REGION: ${S3_REGION:-auto}
+      S3_BUCKET: ${S3_BUCKET}
+      TIKHUB_API_BASE_URL: ${TIKHUB_API_BASE_URL:-}
+      TIKHUB_API_KEY: ${TIKHUB_API_KEY:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-1x00000000000000000000AA}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-1x0000000000000000000000000000000AA}

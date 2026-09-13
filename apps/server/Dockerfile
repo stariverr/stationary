@@ -12,6 +12,8 @@ RUN --mount=type=cache,id=stationary-server-bun,target=/root/.bun/install/cache 
     bun install --frozen-lockfile --filter @stationary/server
 
 COPY apps/server/tsconfig.json apps/server/tsconfig.json
+COPY apps/server/drizzle.config.ts apps/server/drizzle.config.ts
+COPY apps/server/drizzle apps/server/drizzle
 COPY apps/server/src apps/server/src
 WORKDIR /app/apps/server
 RUN bun run build

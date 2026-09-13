@@ -117,6 +117,55 @@ bun run dev
 
 ---
 
+## 🐳 Docker Compose Deployment (Single-Host / Self-Hosted)
+
+Frontend and backend are merged into a single high-performance Docker image (`Dockerfile`). An embedded **Caddy** gateway transparently routes `/api/*` to the Hono backend and all other requests to the Nuxt frontend, exposing **a single port (4000)** with zero CORS issues:
+
+```bash
+# 1. Prepare environment file
+cp .env.example .env
+# Edit .env with your external DB_URL, REDIS_URL, S3 credentials, etc.
+
+# 2. Build and start the unified container in the background
+bun run docker:up   # Or: docker compose up -d
+
+# 3. View logs
+bun run docker:logs # Or: docker compose logs -f
+```
+
+Access endpoint:
+- **Stationary App (Web & API)**: `http://localhost:4000`
+
+---
+
+## ☸️ Kubernetes & GitOps (k3s + ArgoCD + GitHub Actions)
+
+Stationary includes a complete GitOps deployment setup for Kubernetes / k3s:
+
+- **CI/CD**: GitHub Actions (`.github/workflows/deploy.yaml`) builds and pushes the single unified image to GHCR (`ghcr.io/stariverr/stationary`) and updates the Kustomize image tag.
+- **GitOps**: ArgoCD monitors `deploy/k8s/overlays/production` and automatically reconciles changes to the cluster.
+- **Ingress**: Uses Traefik (default in k3s) to route all incoming traffic directly to port 4000 on the unified `stationary` service.
+
+Apply the ArgoCD application to your cluster:
+```bash
+# 1. Create stationary secrets in k3s
+kubectl create secret generic stationary-secrets -n stationary \
+  --from-literal=DB_URL="postgresql://..." \
+  --from-literal=REDIS_URL="redis://..." \
+  --from-literal=AUTH_SECRET="..." \
+  --from-literal=RESEND_API_KEY="..." \
+  --from-literal=RESEND_EMAIL_SENDER="..." \
+  --from-literal=S3_ENDPOINT="..." \
+  --from-literal=S3_ACCESS_KEY_ID="..." \
+  --from-literal=S3_SECRET_ACCESS_KEY="..." \
+  --from-literal=S3_BUCKET="..." \
+  --from-literal=CDN_BASE_URL="..."
+
+# 2. Register ArgoCD Application
+kubectl apply -f deploy/argocd/application.yaml
+```
+
+
 ## 📚 Documentation
 
 Detailed specifications and architectural guides are available in the [`docs/`](./docs) directory:

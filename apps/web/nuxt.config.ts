@@ -56,16 +56,16 @@ export default defineNuxtConfig({
         storesDirs: ["./app/stores"],
     },
     runtimeConfig: {
+        apiBaseUrl: process.env.NUXT_API_BASE_URL || process.env.NUXT_PUBLIC_API_BASE_URL || "http://localhost:9400",
         public: {
             apiBaseUrl: process.env.NUXT_PUBLIC_API_BASE_URL || "http://localhost:9400",
             cdnBaseUrl: process.env.NUXT_PUBLIC_CDN_BASE_URL || "http://localhost:9400",
             appUrl: process.env.NUXT_PUBLIC_APP_URL || "http://localhost:4000",
-            imageProvider: process.env.NUXT_PUBLIC_IMAGE_PROVIDER || "cloudflare",
             turnstileSiteKey: process.env.NUXT_PUBLIC_TURNSTILE_SITE_KEY || "1x00000000000000000000AA",
         },
     },
     nitro: {
-        preset: "cloudflare-module",
+        preset: process.env.NITRO_PRESET || "cloudflare-module",
         // TODO: temporarily add this to fix the build error: Nitro's global replace plugin naively replaces 'typeof window' inside unhead's iife.mjs string literals, which corrupts the output syntax and crashes Rollup.
         replace: {
             "typeof window": "typeof window",

@@ -1,0 +1,16 @@
+{
+    admin off
+    auto_https off
+}
+
+:4000 {
+    # Route all API and authentication traffic to Hono backend
+    handle /api/* {
+        reverse_proxy 127.0.0.1:9400
+    }
+
+    # Route all other web UI and SSR traffic to Nuxt
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}

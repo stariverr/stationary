@@ -115,6 +115,57 @@ bun run dev
 
 ---
 
+## 🐳 Docker Compose 联合部署 (单机 / 私有化部署)
+
+前端与后端已合并打包为单一高性能 Docker 镜像（根目录 `Dockerfile`）。容器内置轻量级 **Caddy** 网关，统一对外暴露**单一端口（4000）**，透明将 `/api/*` 路由至后端 Hono，其余请求路由至 Nuxt 前端，彻底杜绝跨域与双端口困扰：
+
+```bash
+# 1. 准备环境变量文件
+cp .env.example .env
+# 编辑 .env 配置外部 DB_URL、REDIS_URL、S3 等参数
+
+# 2. 构建并在后台启动统一容器服务
+bun run docker:up   # 或: docker compose up -d
+
+# 3. 查看实时日志
+bun run docker:logs # 或: docker compose logs -f
+```
+
+访问入口：
+- **Stationary 统一入口 (Web & API)**：`http://localhost:4000`
+
+---
+
+## ☸️ Kubernetes & GitOps 编排 (k3s + ArgoCD + GitHub Actions)
+
+Stationary 提供基于 k3s 与 ArgoCD 的现代化 GitOps 持续交付配置：
+
+- **CI/CD**：GitHub Actions (`.github/workflows/deploy.yaml`) 负责自动构建单一整合镜像并推送至 GHCR (`ghcr.io/stariverr/stationary`)，自动更新 Kustomize 镜像版本。
+- **GitOps**：ArgoCD 监听 `deploy/k8s/overlays/production` 目录，自动化同步状态至 k3s 集群并保障状态自愈。
+- **网关路由**：适配 k3s 内置 Traefik Ingress Controller，将外部流量直通 `stationary:4000` 服务。
+
+在 k3s 集群中注册并启用 ArgoCD Application：
+```bash
+# 1. 在 stationary 命名空间下创建 Secret（连接外部数据库/Redis及各项密钥）
+kubectl create namespace stationary
+kubectl create secret generic stationary-secrets -n stationary \
+  --from-literal=DB_URL="postgresql://..." \
+  --from-literal=REDIS_URL="redis://..." \
+  --from-literal=AUTH_SECRET="..." \
+  --from-literal=RESEND_API_KEY="..." \
+  --from-literal=RESEND_EMAIL_SENDER="..." \
+  --from-literal=S3_ENDPOINT="..." \
+  --from-literal=S3_ACCESS_KEY_ID="..." \
+  --from-literal=S3_SECRET_ACCESS_KEY="..." \
+  --from-literal=S3_BUCKET="..." \
+  --from-literal=CDN_BASE_URL="..."
+
+# 2. 应用 ArgoCD Application
+kubectl apply -f deploy/argocd/application.yaml
+```
+
+---
+
 ## 📚 系统文档
 
 [`docs/`](./) 目录下包含完整的系统架构与技术设计文档：

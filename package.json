@@ -11,7 +11,11 @@
         "build:server": "bun --cwd apps/server build",
         "build:web": "bun --cwd apps/web build",
         "db:migrate": "bun --cwd apps/server db:migrate",
-        "typecheck": "bun --filter \"*\" typecheck"
+        "typecheck": "bun --filter \"*\" typecheck",
+        "docker:build": "docker compose build",
+        "docker:up": "docker compose up -d",
+        "docker:down": "docker compose down",
+        "docker:logs": "docker compose logs -f"
     },
     "trustedDependencies": [
         "@parcel/watcher",
