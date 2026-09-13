@@ -19,7 +19,10 @@
         "auto_expand_tooltip": "Beitrag automatisch im Vollbildmodus öffnen",
         "expand": "Erweitern",
         "copy_link": "Link kopieren",
-        "settings": "Einstellungen"
+        "settings": "Einstellungen",
+        "toggle_sidebar": "Seitenleiste umschalten",
+        "post_collections": "Beitragssammlungen",
+        "media_assets": "Medienelemente"
     },
     "grid": {
         "showing_items": "Zeige {count} Elemente",
@@ -114,6 +117,86 @@
             "update_failed": "Beitragsdetails konnten nicht aktualisiert werden",
             "add_tag_failed": "Tag konnte nicht hinzugefügt werden",
             "remove_tag_failed": "Tag konnte nicht entfernt werden"
+        }
+    },
+    "trash": {
+        "title": "Papierkorb",
+        "tabs": {
+            "all": "Alle",
+            "posts": "Beiträge",
+            "media": "Medien"
+        },
+        "search_placeholder": "Gelöschte Elemente durchsuchen...",
+        "views": {
+            "grid": "Rasteransicht",
+            "table": "Tabellenansicht"
+        },
+        "table": {
+            "preview": "Vorschau",
+            "name": "Name / Beschreibung",
+            "type": "Typ",
+            "author_source": "Autor / Plattform",
+            "recycled_time": "Gelöscht am",
+            "actions": "Aktionen"
+        },
+        "actions": {
+            "preview": "Details anzeigen",
+            "restore": "Wiederherstellen",
+            "permanent_delete": "Endgültig löschen",
+            "empty_trash": "Papierkorb leeren",
+            "batch_restore": "Ausgewählte wiederherstellen",
+            "batch_delete": "Ausgewählte löschen",
+            "select_all": "Aktuelle Seite auswählen",
+            "deselect_all": "Auswahl aufheben",
+            "selection_mode": "Mehrfachauswahl",
+            "n_items_selected": "{count} ausgewählt",
+            "select_item": "{name} auswählen"
+        },
+        "item_type": {
+            "post": "Beitrag",
+            "image": "Bild",
+            "video": "Video",
+            "live_photo": "Live-Foto",
+            "audio": "Audio",
+            "pdf": "PDF"
+        },
+        "untitled_post": "Unbenannter Beitrag",
+        "untitled_media": "Unbenanntes Medium",
+        "recycled_at": "Gelöscht: {time}",
+        "empty_state": {
+            "title": "Papierkorb ist leer",
+            "desc": "Keine gelöschten Elemente in dieser Bibliothek"
+        },
+        "dialogs": {
+            "delete_single_title": "Dieses Element endgültig löschen?",
+            "delete_single_desc": "Diese Aktion kann nicht rückgängig gemacht werden. Das Element und die zugehörigen Dateien werden dauerhaft gelöscht.",
+            "delete_batch_title": "{count} ausgewählte Elemente endgültig löschen?",
+            "delete_batch_desc": "Diese Aktion kann nicht rückgängig gemacht werden. Alle ausgewählten Elemente und zugehörigen Dateien werden dauerhaft gelöscht.",
+            "empty_title": "Den gesamten Papierkorb leeren?",
+            "empty_desc": "Diese Aktion löscht alle Beiträge und Medien im Papierkorb dieser Bibliothek endgültig. Gelöschte Daten können nicht wiederhergestellt werden.",
+            "confirm_delete": "Endgültig löschen",
+            "confirm_empty": "Papierkorb leeren"
+        },
+        "toasts": {
+            "restore_success": "Element erfolgreich wiederhergestellt",
+            "restore_failed": "Wiederherstellung fehlgeschlagen",
+            "delete_success": "Element endgültig gelöscht",
+            "delete_failed": "Löschen fehlgeschlagen",
+            "empty_success": "Papierkorb wurde geleert",
+            "empty_failed": "Papierkorb konnte nicht geleert werden"
+        },
+        "preview": {
+            "title": "Papierkorb-Vorschau",
+            "badge": "Papierkorb",
+            "original_link": "Originalbeitrag aufrufen",
+            "no_media": "Keine Medien gefunden",
+            "loading": "Medien werden geladen...",
+            "restore": "Wiederherstellen",
+            "permanent_delete": "Endgültig löschen",
+            "counter": "{current} / {total}",
+            "media_item_title": "Medium {index}",
+            "thumb_alt": "Miniaturansicht",
+            "media_alt": "Medienelement"
         }
     }
 }

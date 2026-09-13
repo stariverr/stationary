@@ -19,7 +19,10 @@
         "auto_expand_tooltip": "投稿の詳細を自動的に全画面表示にする",
         "expand": "展開",
         "copy_link": "リンクをコピー",
-        "settings": "設定"
+        "settings": "設定",
+        "toggle_sidebar": "サイドバーを切り替え",
+        "post_collections": "投稿コレクション",
+        "media_assets": "メディア素材"
     },
     "grid": {
         "showing_items": "{count} 件を表示中",
@@ -114,6 +117,86 @@
             "update_failed": "投稿の詳細を更新できませんでした",
             "add_tag_failed": "タグを追加できませんでした",
             "remove_tag_failed": "タグを削除できませんでした"
+        }
+    },
+    "trash": {
+        "title": "ゴミ箱",
+        "tabs": {
+            "all": "すべて",
+            "posts": "投稿",
+            "media": "メディア"
+        },
+        "search_placeholder": "ゴミ箱内のコンテンツを検索...",
+        "views": {
+            "grid": "グリッド表示",
+            "table": "リスト表示"
+        },
+        "table": {
+            "preview": "プレビュー",
+            "name": "名前 / 説明",
+            "type": "タイプ",
+            "author_source": "作成者 / プラットフォーム",
+            "recycled_time": "削除日時",
+            "actions": "操作"
+        },
+        "actions": {
+            "preview": "詳細を表示",
+            "restore": "復元",
+            "permanent_delete": "完全に削除",
+            "empty_trash": "ゴミ箱を空にする",
+            "batch_restore": "選択項目を復元",
+            "batch_delete": "選択項目を削除",
+            "select_all": "現在のページを全選択",
+            "deselect_all": "選択を解除",
+            "selection_mode": "一括選択",
+            "n_items_selected": "{count} 件選択中",
+            "select_item": "{name} を選択"
+        },
+        "item_type": {
+            "post": "投稿",
+            "image": "画像",
+            "video": "動画",
+            "live_photo": "Live Photos",
+            "audio": "音声",
+            "pdf": "PDF"
+        },
+        "untitled_post": "無題の投稿",
+        "untitled_media": "無題のメディア",
+        "recycled_at": "削除日時：{time}",
+        "empty_state": {
+            "title": "ゴミ箱は空です",
+            "desc": "ゴミ箱に移動されたアイテムはありません"
+        },
+        "dialogs": {
+            "delete_single_title": "このアイテムを完全に削除しますか？",
+            "delete_single_desc": "この操作は元に戻せません。このアイテムと関連ファイルは完全に消去されます。",
+            "delete_batch_title": "選択した {count} 件のアイテムを完全に削除しますか？",
+            "delete_batch_desc": "この操作は元に戻せません。選択したすべてのアイテムと関連ファイルは完全に消去されます。",
+            "empty_title": "ゴミ箱を空にしますか？",
+            "empty_desc": "このライブラリのゴミ箱にあるすべての投稿とメディアが完全に削除されます。データは復元できません。",
+            "confirm_delete": "完全に削除",
+            "confirm_empty": "ゴミ箱を空にする"
+        },
+        "toasts": {
+            "restore_success": "アイテムを復元しました",
+            "restore_failed": "アイテムの復元に失敗しました",
+            "delete_success": "アイテムを完全に削除しました",
+            "delete_failed": "アイテムの削除に失敗しました",
+            "empty_success": "ゴミ箱を空にしました",
+            "empty_failed": "ゴミ箱を空にできませんでした"
+        },
+        "preview": {
+            "title": "ゴミ箱のプレビュー",
+            "badge": "ゴミ箱",
+            "original_link": "元の投稿を表示",
+            "no_media": "メディアが見つかりません",
+            "loading": "メディアを読み込み中...",
+            "restore": "復元",
+            "permanent_delete": "完全に削除",
+            "counter": "{current} / {total}",
+            "media_item_title": "メディア {index}",
+            "thumb_alt": "サムネイル",
+            "media_alt": "メディアアセット"
         }
     }
 }

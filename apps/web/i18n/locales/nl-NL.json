@@ -19,7 +19,10 @@
         "auto_expand_tooltip": "Berichtdetails automatisch uitklappen naar volledig scherm",
         "expand": "Uitklappen",
         "copy_link": "Link kopiëren",
-        "settings": "Instellingen"
+        "settings": "Instellingen",
+        "toggle_sidebar": "Zijbalk in-/uitschakelen",
+        "post_collections": "Berichtenverzamelingen",
+        "media_assets": "Media-items"
     },
     "grid": {
         "showing_items": "Toont {count} items",
@@ -114,6 +117,86 @@
             "update_failed": "Berichtdetails konden niet worden bijgewerkt",
             "add_tag_failed": "Tag kon niet worden toegevoegd",
             "remove_tag_failed": "Tag kon niet worden verwijderd"
+        }
+    },
+    "trash": {
+        "title": "Prullenbak",
+        "tabs": {
+            "all": "Alles",
+            "posts": "Berichten",
+            "media": "Media"
+        },
+        "search_placeholder": "Verwijderde items zoeken...",
+        "views": {
+            "grid": "Rasterweergave",
+            "table": "Tabelweergave"
+        },
+        "table": {
+            "preview": "Voorbeeld",
+            "name": "Naam / Beschrijving",
+            "type": "Type",
+            "author_source": "Auteur / Platform",
+            "recycled_time": "Verwijderd op",
+            "actions": "Acties"
+        },
+        "actions": {
+            "preview": "Details bekijken",
+            "restore": "Herstellen",
+            "permanent_delete": "Permanent verwijderen",
+            "empty_trash": "Prullenbak legen",
+            "batch_restore": "Selectie herstellen",
+            "batch_delete": "Selectie verwijderen",
+            "select_all": "Huidige pagina selecteren",
+            "deselect_all": "Selectie opheffen",
+            "selection_mode": "Batchselectie",
+            "n_items_selected": "{count} geselecteerd",
+            "select_item": "{name} selecteren"
+        },
+        "item_type": {
+            "post": "Bericht",
+            "image": "Afbeelding",
+            "video": "Video",
+            "live_photo": "Live Photo",
+            "audio": "Audio",
+            "pdf": "PDF"
+        },
+        "untitled_post": "Naamloos bericht",
+        "untitled_media": "Naamloze media",
+        "recycled_at": "Verwijderd: {time}",
+        "empty_state": {
+            "title": "Prullenbak is leeg",
+            "desc": "Geen verwijderde items in deze bibliotheek"
+        },
+        "dialogs": {
+            "delete_single_title": "Dit item permanent verwijderen?",
+            "delete_single_desc": "Deze actie kan niet ongedaan worden gemaakt. Het item en bijbehorende bestanden worden permanent gewist.",
+            "delete_batch_title": "{count} geselecteerde items permanent verwijderen?",
+            "delete_batch_desc": "Deze actie kan niet ongedaan worden gemaakt. Alle geselecteerde items en bijbehorende bestanden worden permanent gewist.",
+            "empty_title": "De hele prullenbak legen?",
+            "empty_desc": "Deze actie verwijdert permanent alle berichten en media in de prullenbak van deze bibliotheek. Gegevens kunnen niet worden hersteld.",
+            "confirm_delete": "Permanent verwijderen",
+            "confirm_empty": "Prullenbak legen"
+        },
+        "toasts": {
+            "restore_success": "Item succesvol hersteld",
+            "restore_failed": "Herstellen van item mislukt",
+            "delete_success": "Item permanent verwijderd",
+            "delete_failed": "Verwijderen van item mislukt",
+            "empty_success": "Prullenbak is geleegd",
+            "empty_failed": "Prullenbak kon niet worden geleegd"
+        },
+        "preview": {
+            "title": "Prullenbakvoorbeeld",
+            "badge": "Prullenbak",
+            "original_link": "Oorspronkelijk bericht bekijken",
+            "no_media": "Geen media gevonden",
+            "loading": "Media laden...",
+            "restore": "Herstellen",
+            "permanent_delete": "Permanent verwijderen",
+            "counter": "{current} / {total}",
+            "media_item_title": "Media {index}",
+            "thumb_alt": "Miniatuur",
+            "media_alt": "Media-item"
         }
     }
 }

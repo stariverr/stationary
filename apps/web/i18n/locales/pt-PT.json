@@ -19,7 +19,10 @@
         "auto_expand_tooltip": "Expandir automaticamente os detalhes da publicação para ecrã inteiro",
         "expand": "Expandir",
         "copy_link": "Copiar ligação",
-        "settings": "Configurações"
+        "settings": "Configurações",
+        "toggle_sidebar": "Alternar barra lateral",
+        "post_collections": "Coleções de publicações",
+        "media_assets": "Recursos multimédia"
     },
     "grid": {
         "showing_items": "A mostrar {count} itens",
@@ -114,6 +117,86 @@
             "update_failed": "Não foi possível atualizar os detalhes da publicação",
             "add_tag_failed": "Não foi possível adicionar a etiqueta",
             "remove_tag_failed": "Não foi possível remover a etiqueta"
+        }
+    },
+    "trash": {
+        "title": "Lixo",
+        "tabs": {
+            "all": "Tudo",
+            "posts": "Publicações",
+            "media": "Multimédia"
+        },
+        "search_placeholder": "Pesquisar itens eliminados...",
+        "views": {
+            "grid": "Vista em grelha",
+            "table": "Vista em tabela"
+        },
+        "table": {
+            "preview": "Pré-visualização",
+            "name": "Nome / Descrição",
+            "type": "Tipo",
+            "author_source": "Autor / Plataforma",
+            "recycled_time": "Eliminado em",
+            "actions": "Ações"
+        },
+        "actions": {
+            "preview": "Ver detalhes",
+            "restore": "Restaurar",
+            "permanent_delete": "Eliminar permanentemente",
+            "empty_trash": "Esvaziar lixo",
+            "batch_restore": "Restaurar selecionados",
+            "batch_delete": "Eliminar selecionados",
+            "select_all": "Selecionar página",
+            "deselect_all": "Desmarcar tudo",
+            "selection_mode": "Seleção em massa",
+            "n_items_selected": "{count} selecionado(s)",
+            "select_item": "Selecionar {name}"
+        },
+        "item_type": {
+            "post": "Publicação",
+            "image": "Imagem",
+            "video": "Vídeo",
+            "live_photo": "Live Photo",
+            "audio": "Áudio",
+            "pdf": "PDF"
+        },
+        "untitled_post": "Publicação sem título",
+        "untitled_media": "Multimédia sem título",
+        "recycled_at": "Eliminado: {time}",
+        "empty_state": {
+            "title": "O lixo está vazio",
+            "desc": "Sem itens eliminados nesta biblioteca"
+        },
+        "dialogs": {
+            "delete_single_title": "Eliminar este item permanentemente?",
+            "delete_single_desc": "Esta ação não pode ser desfeita. O item e os seus ficheiros associados serão permanentemente apagados.",
+            "delete_batch_title": "Eliminar permanentemente os {count} itens selecionados?",
+            "delete_batch_desc": "Esta ação não pode ser desfeita. Todos os itens selecionados e os ficheiros associados serão permanentemente apagados.",
+            "empty_title": "Esvaziar todo o lixo?",
+            "empty_desc": "Esta ação eliminará permanentemente todas as publicações e multimédia no lixo desta biblioteca. Os dados não poderão ser recuperados.",
+            "confirm_delete": "Eliminar permanentemente",
+            "confirm_empty": "Esvaziar lixo"
+        },
+        "toasts": {
+            "restore_success": "Item restaurado com sucesso",
+            "restore_failed": "Falha ao restaurar o item",
+            "delete_success": "Item eliminado permanentemente",
+            "delete_failed": "Falha ao eliminar o item",
+            "empty_success": "O lixo foi esvaziado",
+            "empty_failed": "Falha ao esvaziar o lixo"
+        },
+        "preview": {
+            "title": "Pré-visualização do lixo",
+            "badge": "Lixo",
+            "original_link": "Ver publicação original",
+            "no_media": "Nenhuma multimédia encontrada",
+            "loading": "A carregar multimédia...",
+            "restore": "Restaurar",
+            "permanent_delete": "Eliminar permanentemente",
+            "counter": "{current} / {total}",
+            "media_item_title": "Multimédia {index}",
+            "thumb_alt": "Miniatura",
+            "media_alt": "Ficheiro multimédia"
         }
     }
 }

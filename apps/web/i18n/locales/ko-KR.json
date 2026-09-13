@@ -19,7 +19,10 @@
         "auto_expand_tooltip": "게시물 상세 내용을 자동으로 전체 화면으로 확장합니다",
         "expand": "확장",
         "copy_link": "링크 복사",
-        "settings": "설정"
+        "settings": "설정",
+        "toggle_sidebar": "사이드바 전환",
+        "post_collections": "게시물 모음",
+        "media_assets": "미디어 에셋"
     },
     "grid": {
         "showing_items": "{count}개 항목 표시",
@@ -114,6 +117,86 @@
             "update_failed": "게시물 상세를 업데이트할 수 없습니다",
             "add_tag_failed": "태그를 추가할 수 없습니다",
             "remove_tag_failed": "태그를 삭제할 수 없습니다"
+        }
+    },
+    "trash": {
+        "title": "휴지통",
+        "tabs": {
+            "all": "전체",
+            "posts": "게시물",
+            "media": "미디어"
+        },
+        "search_placeholder": "휴지통 항목 검색...",
+        "views": {
+            "grid": "그리드 보기",
+            "table": "목록 보기"
+        },
+        "table": {
+            "preview": "미리보기",
+            "name": "이름 / 설명",
+            "type": "유형",
+            "author_source": "작성자 / 플랫폼",
+            "recycled_time": "삭제 시간",
+            "actions": "작업"
+        },
+        "actions": {
+            "preview": "세부 정보 보기",
+            "restore": "복원",
+            "permanent_delete": "영구 삭제",
+            "empty_trash": "휴지통 비우기",
+            "batch_restore": "선택 항목 복원",
+            "batch_delete": "선택 항목 삭제",
+            "select_all": "현재 페이지 전체 선택",
+            "deselect_all": "선택 해제",
+            "selection_mode": "일괄 선택",
+            "n_items_selected": "{count}개 선택됨",
+            "select_item": "{name} 선택"
+        },
+        "item_type": {
+            "post": "게시물",
+            "image": "이미지",
+            "video": "동영상",
+            "live_photo": "라이브 포토",
+            "audio": "오디오",
+            "pdf": "PDF"
+        },
+        "untitled_post": "제목 없는 게시물",
+        "untitled_media": "제목 없는 미디어",
+        "recycled_at": "삭제 시간: {time}",
+        "empty_state": {
+            "title": "휴지통이 비어 있습니다",
+            "desc": "휴지통으로 이동된 항목이 없습니다"
+        },
+        "dialogs": {
+            "delete_single_title": "이 항목을 영구 삭제하시겠습니까?",
+            "delete_single_desc": "이 작업은 취소할 수 없습니다. 이 항목 및 관련 파일이 완전히 삭제됩니다.",
+            "delete_batch_title": "선택한 {count}개 항목을 영구 삭제하시겠습니까?",
+            "delete_batch_desc": "이 작업은 취소할 수 없습니다. 선택한 모든 항목 및 관련 파일이 완전히 삭제됩니다.",
+            "empty_title": "휴지통을 완전히 비우시겠습니까?",
+            "empty_desc": "현재 라이브러리 휴지통에 있는 모든 게시물과 미디어가 영구 삭제됩니다. 삭제된 데이터는 복구할 수 없습니다.",
+            "confirm_delete": "영구 삭제",
+            "confirm_empty": "휴지통 비우기"
+        },
+        "toasts": {
+            "restore_success": "항목을 성공적으로 복원했습니다",
+            "restore_failed": "항목 복원에 실패했습니다",
+            "delete_success": "항목이 영구 삭제되었습니다",
+            "delete_failed": "항목 삭제에 실패했습니다",
+            "empty_success": "휴지통을 비웠습니다",
+            "empty_failed": "휴지통 비우기에 실패했습니다"
+        },
+        "preview": {
+            "title": "휴지통 미리보기",
+            "badge": "휴지통",
+            "original_link": "원본 게시물 보기",
+            "no_media": "미디어가 없습니다",
+            "loading": "미디어 불러오는 중...",
+            "restore": "복원",
+            "permanent_delete": "영구 삭제",
+            "counter": "{current} / {total}",
+            "media_item_title": "미디어 {index}",
+            "thumb_alt": "축소판",
+            "media_alt": "미디어 에셋"
         }
     }
 }

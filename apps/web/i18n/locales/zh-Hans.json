@@ -28,8 +28,6 @@
         "classic_search_tooltip": "仅使用常规关键字搜索",
         "settings": "设置",
         "more": "更多",
-        "immersive_view": "沉浸式视图",
-        "standard_view": "标准视图",
         "post_collections": "帖子合集",
         "media_assets": "媒体素材",
         "filters": "高级筛选",
@@ -58,7 +56,26 @@
         "edit": "编辑",
         "save": "保存",
         "cancel": "取消",
-        "variants": "变体"
+        "variants": "变体",
+        "toggle_sidebar": "切换侧边栏",
+        "no_results": "未找到匹配结果",
+        "no_results_desc": "请尝试调整搜索关键词或筛选条件。",
+        "no_media_title": "暂无媒体资源",
+        "no_media_desc": "上传文件或导入帖子以丰富您的媒体库。",
+        "no_posts_title": "暂无帖子内容",
+        "no_posts_desc": "创建或导入帖子以开始使用。",
+        "items_selected": "已选择 {count} 项",
+        "move_items_to": "移动 {summary} 至",
+        "choose_items_to_move": "选择要移动的项目",
+        "deselect_visible": "取消勾选当前页",
+        "select_visible": "勾选当前页",
+        "link_to_post": "关联到帖子",
+        "move": "移动",
+        "choose_library": "选择目标媒体库",
+        "no_target_library": "无其他媒体库",
+        "library_switch": "媒体库列表",
+        "create_library": "新建媒体库",
+        "log_out": "退出登录"
     },
     "grid": {
         "showing_items": "显示 {count} 项",
@@ -98,8 +115,6 @@
         "general": {
             "title": "常规设置",
             "desc": "基本应用偏好和显示设置。",
-            "expand_detail": "沉浸式展开详情",
-            "expand_detail_desc": "在信息流中自动以沉浸式展示帖子详情。",
             "language": "界面语言",
             "language_desc": "选择您的首选语言。",
             "other_title": "系统工具",
@@ -552,6 +567,46 @@
             "merge_failed": "提交合并媒体失败",
             "unsupported_files_kept": "有 {count} 个文件被保留在草稿箱中",
             "unsupported_files_kept_desc": "字幕和其他辅助文件必须作为轨道添加到兼容的媒体中。"
+        },
+        "view_in_drafts": "前往草稿箱",
+        "total_size": "总容量",
+        "table_headers": {
+            "file": "文件名",
+            "type": "类型",
+            "size": "大小",
+            "date": "上传时间",
+            "actions": "操作"
+        },
+        "delete_confirm": {
+            "single_title": "删除草稿文件",
+            "single_desc": "确定要永久删除草稿文件 “{name}” 吗？此操作无法撤销。",
+            "batch_title": "批量删除草稿文件",
+            "batch_desc": "确定要永久删除已选中的 {count} 个草稿文件吗？此操作无法撤销。"
+        },
+        "quick_import": "独立转正",
+        "preview": "预览",
+        "refresh": "刷新",
+        "search_empty": "未找到匹配的草稿文件",
+        "clear_search": "清除搜索",
+        "batch_select": "批量选择",
+        "exit_batch_select": "退出多选",
+        "no_selection_hint": "点击卡片或复选框选择草稿",
+        "filters": {
+            "all": "全部",
+            "image": "图片",
+            "video": "视频",
+            "audio": "音频",
+            "subtitle": "字幕"
+        },
+        "inspector": {
+            "title": "草稿详情",
+            "batch_title": "批量编排 ({count})",
+            "empty_title": "未选择草稿",
+            "empty_desc": "在左侧点击任意卡片，即可在此处查看实时视听预览与技术属性。",
+            "toggle_panel": "检查器面板",
+            "fullscreen": "全屏画廊",
+            "merge_action": "开始智能多轨合成",
+            "selected_files": "已勾选文件 ({count})"
         }
     },
     "auth": {
@@ -828,6 +883,87 @@
         "pagination": {
             "showing": "显示 {current} 条，共 {total} 条",
             "page": "第 {page} 页，共 {pages} 页"
+        }
+    },
+    "trash": {
+        "title": "回收站",
+        "desc": "已删除的帖子和媒体素材将在此保留，您可以随时恢复或彻底删除它们。",
+        "tabs": {
+            "all": "全部",
+            "posts": "帖子",
+            "media": "媒体素材"
+        },
+        "search_placeholder": "搜索回收站内容...",
+        "views": {
+            "grid": "网格视图",
+            "table": "列表视图"
+        },
+        "table": {
+            "preview": "预览",
+            "name": "名称 / 描述",
+            "type": "类型",
+            "author_source": "作者 / 平台",
+            "recycled_time": "删除时间",
+            "actions": "操作"
+        },
+        "actions": {
+            "preview": "查看详情",
+            "restore": "恢复",
+            "permanent_delete": "彻底删除",
+            "empty_trash": "清空回收站",
+            "batch_restore": "恢复所选",
+            "batch_delete": "删除所选",
+            "select_all": "全选当前页",
+            "deselect_all": "取消选择",
+            "selection_mode": "批量选择",
+            "n_items_selected": "已选择 {count} 项",
+            "select_item": "选择 {name}"
+        },
+        "item_type": {
+            "post": "帖子",
+            "image": "图片",
+            "video": "视频",
+            "live_photo": "实况照片",
+            "audio": "音频",
+            "pdf": "PDF"
+        },
+        "untitled_post": "无标题帖子",
+        "untitled_media": "未命名媒体",
+        "recycled_at": "删除时间：{time}",
+        "empty_state": {
+            "title": "回收站为空",
+            "desc": "没有已移入回收站的内容"
+        },
+        "dialogs": {
+            "delete_single_title": "彻底删除该项目？",
+            "delete_single_desc": "此操作无法撤销。该项目及其关联的原始文件将被永久删除。",
+            "delete_batch_title": "彻底删除所选的 {count} 项内容？",
+            "delete_batch_desc": "此操作无法撤销。选中的所有项目及其关联的文件将被永久删除。",
+            "empty_title": "清空整个回收站？",
+            "empty_desc": "此操作将彻底删除当前媒体库回收站中的所有帖子和媒体素材。数据一旦删除将无法找回，请谨慎操作。",
+            "confirm_delete": "确认彻底删除",
+            "confirm_empty": "确认清空"
+        },
+        "toasts": {
+            "restore_success": "已成功恢复项目",
+            "restore_failed": "恢复失败，请重试",
+            "delete_success": "已彻底删除项目",
+            "delete_failed": "删除失败，请重试",
+            "empty_success": "回收站已清空",
+            "empty_failed": "清空回收站失败"
+        },
+        "preview": {
+            "title": "回收站内容预览",
+            "badge": "回收站",
+            "original_link": "访问原文",
+            "no_media": "暂无媒体素材",
+            "loading": "正在加载媒体...",
+            "restore": "恢复",
+            "permanent_delete": "彻底删除",
+            "counter": "{current} / {total}",
+            "media_item_title": "媒体 {index}",
+            "thumb_alt": "缩略图",
+            "media_alt": "媒体素材"
         }
     }
 }

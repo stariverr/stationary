@@ -19,7 +19,10 @@
         "auto_expand_tooltip": "Expandir automáticamente los detalles de la publicación a pantalla completa",
         "expand": "Expandir",
         "copy_link": "Copiar enlace",
-        "settings": "Configuración"
+        "settings": "Configuración",
+        "toggle_sidebar": "Alternar barra lateral",
+        "post_collections": "Colecciones de posts",
+        "media_assets": "Archivos multimedia"
     },
     "grid": {
         "showing_items": "Mostrando {count} elementos",
@@ -114,6 +117,86 @@
             "update_failed": "No se pudieron actualizar los detalles de la publicación",
             "add_tag_failed": "No se pudo añadir la etiqueta",
             "remove_tag_failed": "No se pudo eliminar la etiqueta"
+        }
+    },
+    "trash": {
+        "title": "Papelera",
+        "tabs": {
+            "all": "Todo",
+            "posts": "Publicaciones",
+            "media": "Contenido"
+        },
+        "search_placeholder": "Buscar elementos eliminados...",
+        "views": {
+            "grid": "Vista de cuadrícula",
+            "table": "Vista de tabla"
+        },
+        "table": {
+            "preview": "Vista previa",
+            "name": "Nombre / Descripción",
+            "type": "Tipo",
+            "author_source": "Autor / Plataforma",
+            "recycled_time": "Fecha de eliminación",
+            "actions": "Acciones"
+        },
+        "actions": {
+            "preview": "Ver detalles",
+            "restore": "Restaurar",
+            "permanent_delete": "Eliminar permanentemente",
+            "empty_trash": "Vaciar papelera",
+            "batch_restore": "Restaurar seleccionados",
+            "batch_delete": "Eliminar seleccionados",
+            "select_all": "Seleccionar página",
+            "deselect_all": "Deseleccionar todo",
+            "selection_mode": "Selección múltiple",
+            "n_items_selected": "{count} seleccionado(s)",
+            "select_item": "Seleccionar {name}"
+        },
+        "item_type": {
+            "post": "Publicación",
+            "image": "Imagen",
+            "video": "Vídeo",
+            "live_photo": "Live Photo",
+            "audio": "Audio",
+            "pdf": "PDF"
+        },
+        "untitled_post": "Publicación sin título",
+        "untitled_media": "Contenido sin título",
+        "recycled_at": "Eliminado: {time}",
+        "empty_state": {
+            "title": "La papelera está vacía",
+            "desc": "No hay elementos eliminados en esta biblioteca"
+        },
+        "dialogs": {
+            "delete_single_title": "¿Eliminar este elemento permanentemente?",
+            "delete_single_desc": "Esta acción no se puede deshacer. El elemento y sus archivos asociados se borrarán para siempre.",
+            "delete_batch_title": "¿Eliminar permanentemente los {count} elementos seleccionados?",
+            "delete_batch_desc": "Esta acción no se puede deshacer. Todos los elementos seleccionados y sus archivos asociados se borrarán para siempre.",
+            "empty_title": "¿Vaciar toda la papelera?",
+            "empty_desc": "Esta acción eliminará permanentemente todas las publicaciones y archivos en la papelera de esta biblioteca. Los datos no se podrán recuperar.",
+            "confirm_delete": "Eliminar permanentemente",
+            "confirm_empty": "Vaciar papelera"
+        },
+        "toasts": {
+            "restore_success": "Elemento restaurado con éxito",
+            "restore_failed": "Error al restaurar el elemento",
+            "delete_success": "Elemento eliminado permanentemente",
+            "delete_failed": "Error al eliminar el elemento",
+            "empty_success": "Se ha vaciado la papelera",
+            "empty_failed": "Error al vaciar la papelera"
+        },
+        "preview": {
+            "title": "Vista previa de papelera",
+            "badge": "Papelera",
+            "original_link": "Ver publicación original",
+            "no_media": "No se encontró contenido",
+            "loading": "Cargando contenido...",
+            "restore": "Restaurar",
+            "permanent_delete": "Eliminar permanentemente",
+            "counter": "{current} / {total}",
+            "media_item_title": "Contenido {index}",
+            "thumb_alt": "Miniatura",
+            "media_alt": "Archivo multimedia"
         }
     }
 }

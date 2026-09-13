@@ -25,8 +25,7 @@
         "ai_search_tooltip": "開啟 AI 智能/語義搜尋",
         "classic_search_tooltip": "僅使用常規關鍵字搜尋",
         "settings": "設定",
-        "immersive_view": "沉浸式視圖",
-        "standard_view": "標準視圖",
+        "more": "更多",
         "post_collections": "貼文合集",
         "media_assets": "媒體素材",
         "filters": "進階篩选",
@@ -51,7 +50,8 @@
         "edit": "編輯",
         "save": "儲存",
         "cancel": "取消",
-        "variants": "變體"
+        "variants": "變體",
+        "toggle_sidebar": "切換側邊欄"
     },
     "grid": {
         "showing_items": "顯示 {count} 項",
@@ -88,8 +88,6 @@
         "general": {
             "title": "常規設定",
             "desc": "基本應用偏好和顯示設定。",
-            "expand_detail": "沉浸式展開詳情",
-            "expand_detail_desc": "在資訊流中自動以沉浸式展示貼文詳情。",
             "language": "介面語言",
             "language_desc": "選擇您的首選語言。",
             "other_title": "系統工具",
@@ -634,6 +632,86 @@
             "update_failed": "無法更新貼文詳情",
             "add_tag_failed": "無法新增標籤",
             "remove_tag_failed": "無法移除標籤"
+        }
+    },
+    "trash": {
+        "title": "垃圾桶",
+        "tabs": {
+            "all": "全部",
+            "posts": "貼文",
+            "media": "媒體素材"
+        },
+        "search_placeholder": "搜尋垃圾桶內容...",
+        "views": {
+            "grid": "網格檢視",
+            "table": "列表檢視"
+        },
+        "table": {
+            "preview": "預覽",
+            "name": "名稱 / 描述",
+            "type": "類型",
+            "author_source": "作者 / 平台",
+            "recycled_time": "刪除時間",
+            "actions": "操作"
+        },
+        "actions": {
+            "preview": "查看詳情",
+            "restore": "復原",
+            "permanent_delete": "徹底刪除",
+            "empty_trash": "清空垃圾桶",
+            "batch_restore": "復原所選",
+            "batch_delete": "刪除所選",
+            "select_all": "全選目前頁",
+            "deselect_all": "取消選擇",
+            "selection_mode": "批次選擇",
+            "n_items_selected": "已選擇 {count} 項",
+            "select_item": "選擇 {name}"
+        },
+        "item_type": {
+            "post": "貼文",
+            "image": "圖片",
+            "video": "影片",
+            "live_photo": "實況相片",
+            "audio": "音訊",
+            "pdf": "PDF"
+        },
+        "untitled_post": "無標題貼文",
+        "untitled_media": "未命名媒體",
+        "recycled_at": "刪除時間：{time}",
+        "empty_state": {
+            "title": "垃圾桶為空",
+            "desc": "沒有已移入垃圾桶的內容"
+        },
+        "dialogs": {
+            "delete_single_title": "徹底刪除該項目？",
+            "delete_single_desc": "此操作無法復原。該項目及其關聯的原始檔案將被永久刪除。",
+            "delete_batch_title": "徹底刪除所選的 {count} 項內容？",
+            "delete_batch_desc": "此操作無法復原。選中的所有項目及其關聯的檔案將被永久刪除。",
+            "empty_title": "清空整個垃圾桶？",
+            "empty_desc": "此操作將徹底刪除目前媒體庫垃圾桶中的所有貼文和媒體素材。資料一旦刪除將無法找回，請謹慎操作。",
+            "confirm_delete": "確認徹底刪除",
+            "confirm_empty": "確認清空"
+        },
+        "toasts": {
+            "restore_success": "已成功復原項目",
+            "restore_failed": "復原失敗，請重試",
+            "delete_success": "已徹底刪除項目",
+            "delete_failed": "刪除失敗，請重試",
+            "empty_success": "垃圾桶已清空",
+            "empty_failed": "清空垃圾桶失敗"
+        },
+        "preview": {
+            "title": "垃圾桶內容預覽",
+            "badge": "垃圾桶",
+            "original_link": "前往原文",
+            "no_media": "暫無媒體素材",
+            "loading": "正在載入媒體...",
+            "restore": "復原",
+            "permanent_delete": "徹底刪除",
+            "counter": "{current} / {total}",
+            "media_item_title": "媒體 {index}",
+            "thumb_alt": "縮圖",
+            "media_alt": "媒體素材"
         }
     }
 }

@@ -19,7 +19,10 @@
         "auto_expand_tooltip": "Déployer automatiquement les détails du post en plein écran",
         "expand": "Déployer",
         "copy_link": "Copier le lien",
-        "settings": "Paramètres"
+        "settings": "Paramètres",
+        "toggle_sidebar": "Basculer la barre latérale",
+        "post_collections": "Collections de publications",
+        "media_assets": "Médias"
     },
     "grid": {
         "showing_items": "Affichage de {count} éléments",
@@ -114,6 +117,86 @@
             "update_failed": "Impossible de mettre à jour les détails de la publication",
             "add_tag_failed": "Impossible d’ajouter le tag",
             "remove_tag_failed": "Impossible de supprimer le tag"
+        }
+    },
+    "trash": {
+        "title": "Corbeille",
+        "tabs": {
+            "all": "Tous",
+            "posts": "Publications",
+            "media": "Médias"
+        },
+        "search_placeholder": "Rechercher dans la corbeille...",
+        "views": {
+            "grid": "Vue en grille",
+            "table": "Vue en liste"
+        },
+        "table": {
+            "preview": "Aperçu",
+            "name": "Nom / Description",
+            "type": "Type",
+            "author_source": "Auteur / Plateforme",
+            "recycled_time": "Supprimé le",
+            "actions": "Actions"
+        },
+        "actions": {
+            "preview": "Voir les détails",
+            "restore": "Restaurer",
+            "permanent_delete": "Supprimer définitivement",
+            "empty_trash": "Vider la corbeille",
+            "batch_restore": "Restaurer la sélection",
+            "batch_delete": "Supprimer la sélection",
+            "select_all": "Sélectionner la page",
+            "deselect_all": "Désélectionner tout",
+            "selection_mode": "Sélection groupée",
+            "n_items_selected": "{count} sélectionné(s)",
+            "select_item": "Sélectionner {name}"
+        },
+        "item_type": {
+            "post": "Publication",
+            "image": "Image",
+            "video": "Vidéo",
+            "live_photo": "Live Photo",
+            "audio": "Audio",
+            "pdf": "PDF"
+        },
+        "untitled_post": "Publication sans titre",
+        "untitled_media": "Média sans titre",
+        "recycled_at": "Supprimé : {time}",
+        "empty_state": {
+            "title": "La corbeille est vide",
+            "desc": "Aucun élément supprimé dans cette bibliothèque"
+        },
+        "dialogs": {
+            "delete_single_title": "Supprimer définitivement cet élément ?",
+            "delete_single_desc": "Cette action est irréversible. L'élément et ses fichiers associés seront définitivement effacés.",
+            "delete_batch_title": "Supprimer définitivement les {count} éléments sélectionnés ?",
+            "delete_batch_desc": "Cette action est irréversible. Tous les éléments sélectionnés et leurs fichiers associés seront définitivement effacés.",
+            "empty_title": "Vider toute la corbeille ?",
+            "empty_desc": "Cette action supprimera définitivement toutes les publications et tous les médias de la corbeille. Les données ne pourront pas être récupérées.",
+            "confirm_delete": "Supprimer définitivement",
+            "confirm_empty": "Vider la corbeille"
+        },
+        "toasts": {
+            "restore_success": "Élément restauré avec succès",
+            "restore_failed": "Échec de la restauration de l'élément",
+            "delete_success": "Élément définitivement supprimé",
+            "delete_failed": "Échec de la suppression de l'élément",
+            "empty_success": "La corbeille a été vidée",
+            "empty_failed": "Impossible de vider la corbeille"
+        },
+        "preview": {
+            "title": "Aperçu de la corbeille",
+            "badge": "Corbeille",
+            "original_link": "Voir la publication originale",
+            "no_media": "Aucun média trouvé",
+            "loading": "Chargement des médias...",
+            "restore": "Restaurer",
+            "permanent_delete": "Supprimer définitivement",
+            "counter": "{current} / {total}",
+            "media_item_title": "Média {index}",
+            "thumb_alt": "Miniature",
+            "media_alt": "Élément multimédia"
         }
     }
 }

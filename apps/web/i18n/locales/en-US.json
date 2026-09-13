@@ -28,8 +28,6 @@
         "classic_search_tooltip": "Perform traditional keyword search only",
         "settings": "Settings",
         "more": "More",
-        "immersive_view": "Immersive View",
-        "standard_view": "Standard View",
         "post_collections": "Post Collections",
         "media_assets": "Media Assets",
         "filters": "Filters",
@@ -58,7 +56,26 @@
         "edit": "Edit",
         "save": "Save",
         "cancel": "Cancel",
-        "variants": "Variants"
+        "variants": "Variants",
+        "toggle_sidebar": "Toggle sidebar",
+        "no_results": "No results found",
+        "no_results_desc": "Try adjusting your search query or filters.",
+        "no_media_title": "No media assets",
+        "no_media_desc": "Upload files or import posts to populate your library.",
+        "no_posts_title": "No posts yet",
+        "no_posts_desc": "Create or import posts to get started.",
+        "items_selected": "{count} selected",
+        "move_items_to": "Move {summary} to",
+        "choose_items_to_move": "Choose items to move",
+        "deselect_visible": "Deselect visible",
+        "select_visible": "Select visible",
+        "link_to_post": "Link to Post",
+        "move": "Move",
+        "choose_library": "Choose library",
+        "no_target_library": "No target library",
+        "library_switch": "Libraries",
+        "create_library": "Create Library",
+        "log_out": "Log out"
     },
     "grid": {
         "showing_items": "Showing {count} items",
@@ -98,8 +115,6 @@
         "general": {
             "title": "General Settings",
             "desc": "Basic application preferences and display settings.",
-            "expand_detail": "Immersive Detail by Default",
-            "expand_detail_desc": "Automatically show post details in immersive mode in the feed.",
             "language": "Interface Language",
             "language_desc": "Select your preferred language.",
             "other_title": "System Tools",
@@ -552,6 +567,46 @@
             "merge_failed": "Failed to commit merged media",
             "unsupported_files_kept": "{count} file(s) kept in the Draft Box",
             "unsupported_files_kept_desc": "Subtitle and other auxiliary files must be added as tracks to compatible media."
+        },
+        "view_in_drafts": "View in Drafts",
+        "total_size": "Total Size",
+        "table_headers": {
+            "file": "File",
+            "type": "Type",
+            "size": "Size",
+            "date": "Uploaded",
+            "actions": "Actions"
+        },
+        "delete_confirm": {
+            "single_title": "Delete Draft File",
+            "single_desc": "Are you sure you want to permanently delete \"{name}\"? This action cannot be undone.",
+            "batch_title": "Delete Draft Files",
+            "batch_desc": "Are you sure you want to permanently delete {count} selected draft files? This action cannot be undone."
+        },
+        "quick_import": "Import As Media",
+        "preview": "Preview",
+        "refresh": "Refresh",
+        "search_empty": "No matching draft files found",
+        "clear_search": "Clear Search",
+        "batch_select": "Select",
+        "exit_batch_select": "Done",
+        "no_selection_hint": "Click cards or checkboxes to select drafts",
+        "filters": {
+            "all": "All",
+            "image": "Images",
+            "video": "Videos",
+            "audio": "Audios",
+            "subtitle": "Subtitles"
+        },
+        "inspector": {
+            "title": "Draft Details",
+            "batch_title": "Batch Compose ({count})",
+            "empty_title": "No Draft Selected",
+            "empty_desc": "Click any asset on the left to preview live media and technical metadata.",
+            "toggle_panel": "Inspector Panel",
+            "fullscreen": "Fullscreen Gallery",
+            "merge_action": "Compose Multi-Track",
+            "selected_files": "Selected Files ({count})"
         }
     },
     "auth": {
@@ -828,6 +883,87 @@
         "pagination": {
             "showing": "Showing {current} of {total}",
             "page": "Page {page} of {pages}"
+        }
+    },
+    "trash": {
+        "title": "Recycle Bin",
+        "desc": "Deleted posts and media assets are retained here. You can restore or permanently delete them at any time.",
+        "tabs": {
+            "all": "All",
+            "posts": "Posts",
+            "media": "Media Assets"
+        },
+        "search_placeholder": "Search deleted items...",
+        "views": {
+            "grid": "Grid View",
+            "table": "Table View"
+        },
+        "table": {
+            "preview": "Preview",
+            "name": "Name / Description",
+            "type": "Type",
+            "author_source": "Author / Platform",
+            "recycled_time": "Deleted At",
+            "actions": "Actions"
+        },
+        "actions": {
+            "preview": "Preview Details",
+            "restore": "Restore",
+            "permanent_delete": "Permanently Delete",
+            "empty_trash": "Empty Trash",
+            "batch_restore": "Restore Selected",
+            "batch_delete": "Delete Selected",
+            "select_all": "Select Page",
+            "deselect_all": "Deselect All",
+            "selection_mode": "Batch Select",
+            "n_items_selected": "{count} selected",
+            "select_item": "Select {name}"
+        },
+        "item_type": {
+            "post": "Post",
+            "image": "Image",
+            "video": "Video",
+            "live_photo": "Live Photo",
+            "audio": "Audio",
+            "pdf": "PDF"
+        },
+        "untitled_post": "Untitled post",
+        "untitled_media": "Untitled media",
+        "recycled_at": "Deleted: {time}",
+        "empty_state": {
+            "title": "Trash is Empty",
+            "desc": "No deleted items in this library"
+        },
+        "dialogs": {
+            "delete_single_title": "Permanently delete this item?",
+            "delete_single_desc": "This action cannot be undone. The item and its associated files will be permanently erased.",
+            "delete_batch_title": "Permanently delete {count} selected items?",
+            "delete_batch_desc": "This action cannot be undone. All selected items and their associated files will be permanently erased.",
+            "empty_title": "Empty the entire recycle bin?",
+            "empty_desc": "This action will permanently delete all posts and media in this library's trash. Data cannot be recovered.",
+            "confirm_delete": "Permanently Delete",
+            "confirm_empty": "Empty Trash"
+        },
+        "toasts": {
+            "restore_success": "Item restored successfully",
+            "restore_failed": "Failed to restore item",
+            "delete_success": "Item permanently deleted",
+            "delete_failed": "Failed to delete item",
+            "empty_success": "Trash has been emptied",
+            "empty_failed": "Failed to empty trash"
+        },
+        "preview": {
+            "title": "Trash Preview",
+            "badge": "Trash",
+            "original_link": "Original Post",
+            "no_media": "No media found",
+            "loading": "Loading media...",
+            "restore": "Restore",
+            "permanent_delete": "Permanently Delete",
+            "counter": "{current} / {total}",
+            "media_item_title": "Media {index}",
+            "thumb_alt": "Thumbnail",
+            "media_alt": "Media asset"
         }
     }
 }

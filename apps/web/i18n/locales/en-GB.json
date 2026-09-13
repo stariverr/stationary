@@ -19,7 +19,10 @@
         "auto_expand_tooltip": "Automatically expand post details to full screen",
         "expand": "Expand",
         "copy_link": "Copy Link",
-        "settings": "Settings"
+        "settings": "Settings",
+        "toggle_sidebar": "Toggle sidebar",
+        "post_collections": "Post Collections",
+        "media_assets": "Media Assets"
     },
     "grid": {
         "showing_items": "Showing {count} items",
@@ -143,6 +146,86 @@
             "update_failed": "Could not update post details",
             "add_tag_failed": "Could not add tag",
             "remove_tag_failed": "Could not remove tag"
+        }
+    },
+    "trash": {
+        "title": "Bin",
+        "tabs": {
+            "all": "All",
+            "posts": "Posts",
+            "media": "Media"
+        },
+        "search_placeholder": "Search deleted items...",
+        "views": {
+            "grid": "Grid View",
+            "table": "Table View"
+        },
+        "table": {
+            "preview": "Preview",
+            "name": "Name / Description",
+            "type": "Type",
+            "author_source": "Author / Platform",
+            "recycled_time": "Deleted At",
+            "actions": "Actions"
+        },
+        "actions": {
+            "preview": "Preview Details",
+            "restore": "Restore",
+            "permanent_delete": "Permanently Delete",
+            "empty_trash": "Empty Bin",
+            "batch_restore": "Restore Selected",
+            "batch_delete": "Delete Selected",
+            "select_all": "Select Page",
+            "deselect_all": "Deselect All",
+            "selection_mode": "Batch Select",
+            "n_items_selected": "{count} selected",
+            "select_item": "Select {name}"
+        },
+        "item_type": {
+            "post": "Post",
+            "image": "Image",
+            "video": "Video",
+            "live_photo": "Live Photo",
+            "audio": "Audio",
+            "pdf": "PDF"
+        },
+        "untitled_post": "Untitled post",
+        "untitled_media": "Untitled media",
+        "recycled_at": "Deleted: {time}",
+        "empty_state": {
+            "title": "Bin is Empty",
+            "desc": "No deleted items in this library"
+        },
+        "dialogs": {
+            "delete_single_title": "Permanently delete this item?",
+            "delete_single_desc": "This action cannot be undone. The item and its associated files will be permanently erased.",
+            "delete_batch_title": "Permanently delete {count} selected items?",
+            "delete_batch_desc": "This action cannot be undone. All selected items and their associated files will be permanently erased.",
+            "empty_title": "Empty the entire bin?",
+            "empty_desc": "This action will permanently delete all posts and media in this library's bin. Data cannot be recovered.",
+            "confirm_delete": "Permanently Delete",
+            "confirm_empty": "Empty Bin"
+        },
+        "toasts": {
+            "restore_success": "Item restored successfully",
+            "restore_failed": "Failed to restore item",
+            "delete_success": "Item permanently deleted",
+            "delete_failed": "Failed to delete item",
+            "empty_success": "Bin has been emptied",
+            "empty_failed": "Failed to empty bin"
+        },
+        "preview": {
+            "title": "Bin Preview",
+            "badge": "Bin",
+            "original_link": "Original Post",
+            "no_media": "No media found",
+            "loading": "Loading media...",
+            "restore": "Restore",
+            "permanent_delete": "Permanently Delete",
+            "counter": "{current} / {total}",
+            "media_item_title": "Media {index}",
+            "thumb_alt": "Thumbnail",
+            "media_alt": "Media asset"
         }
     }
 }
