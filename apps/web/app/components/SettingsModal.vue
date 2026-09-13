@@ -42,7 +42,7 @@ const { locale, setLocale, locales, t } = useI18n() as unknown as NuxtI18nCompos
 const session = useSession();
 
 const userStore = useUserStore();
-const { userProfile, expandDetailByDefault } = storeToRefs(userStore);
+const { userProfile } = storeToRefs(userStore);
 const displayName = computed(() => userProfile.value?.name || "User");
 const displayImage = computed(() => userProfile.value?.image || "");
 const userEmail = computed(() => userProfile.value?.email || "");
@@ -600,16 +600,6 @@ watch(
                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent class="grid gap-6">
-                                    <div class="flex items-center justify-between">
-                                        <div class="space-y-0.5">
-                                            <Label class="text-base">{{ $t("settings.general.expand_detail") }}</Label>
-                                            <p class="text-sm text-muted-foreground">
-                                                {{ $t("settings.general.expand_detail_desc") }}
-                                            </p>
-                                        </div>
-                                        <Switch v-model="expandDetailByDefault" />
-                                    </div>
-
                                     <div class="grid gap-3">
                                         <div class="space-y-0.5">
                                             <Label class="text-base">{{ $t("settings.general.language") }}</Label>
@@ -673,7 +663,7 @@ watch(
                                             {{ userEmail }}
                                         </p>
                                         <div
-                                            class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700 uppercase tracking-wider"
+                                            class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700 uppercase tracking-wider"
                                         >
                                             {{ $t("settings.account.verified") }}
                                         </div>
@@ -845,7 +835,7 @@ watch(
                                                     <div class="flex items-center gap-2">
                                                         <span class="font-bold text-sm text-gray-900 truncate">{{ token.name }}</span>
                                                         <span
-                                                            class="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-gray-100 border text-gray-600"
+                                                            class="px-2 py-0.5 rounded text-xs font-mono font-medium bg-gray-100 border text-gray-600"
                                                         >
                                                             {{ token.prefix }}_{{ token.first_four || "" }}...{{ token.last_four }}
                                                         </span>
@@ -987,7 +977,7 @@ watch(
                                                     class="relative flex flex-col justify-between p-3.5 rounded-xl border transition-all cursor-pointer select-none group"
                                                     :class="
                                                         selectedCoverQualities.includes(item.key)
-                                                            ? 'border-zinc-900 bg-white ring-1 ring-zinc-900 shadow-sm dark:border-zinc-100 dark:bg-zinc-850 dark:ring-zinc-100'
+                                                            ? 'border-zinc-900 bg-white ring-1 ring-zinc-900 shadow-sm dark:border-zinc-100 dark:bg-zinc-800 dark:ring-zinc-100'
                                                             : 'border-zinc-200/80 bg-zinc-50/50 hover:bg-zinc-100/70 hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/50 dark:hover:bg-zinc-800'
                                                     "
                                                     @click="handleQualityToggle(item.key)"
@@ -998,7 +988,7 @@ watch(
                                                                 {{ item.label }}
                                                             </span>
                                                             <span
-                                                                class="text-[10px] font-mono px-1.5 py-0.5 rounded font-semibold transition-colors"
+                                                                class="text-xs font-mono px-1.5 py-0.5 rounded font-semibold transition-colors"
                                                                 :class="
                                                                     selectedCoverQualities.includes(item.key)
                                                                         ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
@@ -1008,7 +998,7 @@ watch(
                                                                 {{ item.res }}
                                                             </span>
                                                         </div>
-                                                        <p class="text-[11px] leading-snug mb-3 text-muted-foreground">
+                                                        <p class="text-xs leading-snug mb-3 text-muted-foreground">
                                                             {{ item.desc }}
                                                         </p>
                                                     </div>
@@ -1016,7 +1006,7 @@ watch(
                                                     <div
                                                         class="flex items-center justify-between pt-2 border-t border-zinc-200/60 dark:border-zinc-800"
                                                     >
-                                                        <span class="text-[10px] font-medium text-zinc-500">
+                                                        <span class="text-xs font-medium text-zinc-500">
                                                             {{ item.badge }}
                                                         </span>
                                                         <div
@@ -1052,7 +1042,7 @@ watch(
                                                         <h5 class="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
                                                             {{ $t("settings.general.video_cover_recovery") }}
                                                         </h5>
-                                                        <p class="text-[11px] text-muted-foreground leading-tight">
+                                                        <p class="text-xs text-muted-foreground leading-tight">
                                                             {{ $t("settings.general.video_cover_recovery_desc") }}
                                                         </p>
                                                     </div>
@@ -1113,7 +1103,7 @@ watch(
                                                             }}
                                                         </span>
                                                         <div class="flex items-center gap-2">
-                                                            <span class="font-mono text-[11px] font-bold text-zinc-700 dark:text-zinc-300">
+                                                            <span class="font-mono text-xs font-bold text-zinc-700 dark:text-zinc-300">
                                                                 <template
                                                                     v-if="!activeTask.discovery_complete && activeTask.total_units === 0"
                                                                 >
@@ -1125,7 +1115,7 @@ watch(
                                                                     }}%)
                                                                     <span
                                                                         v-if="!activeTask.discovery_complete"
-                                                                        class="text-[10px] font-normal text-muted-foreground ml-1"
+                                                                        class="text-xs font-normal text-muted-foreground ml-1"
                                                                     >
                                                                         (检索中...)
                                                                     </span>
@@ -1138,7 +1128,7 @@ watch(
                                                                 type="button"
                                                                 variant="outline"
                                                                 size="xs"
-                                                                class="h-6 px-2 text-[10px]"
+                                                                class="h-6 px-2 text-xs"
                                                                 @click="pauseJob"
                                                             >
                                                                 暂停
@@ -1148,7 +1138,7 @@ watch(
                                                                 type="button"
                                                                 variant="outline"
                                                                 size="xs"
-                                                                class="h-6 px-2 text-[10px]"
+                                                                class="h-6 px-2 text-xs"
                                                                 @click="resumeJob"
                                                             >
                                                                 继续
@@ -1158,7 +1148,7 @@ watch(
                                                                 type="button"
                                                                 variant="outline"
                                                                 size="xs"
-                                                                class="h-6 px-2 text-[10px] text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                                class="h-6 px-2 text-xs text-red-500 hover:text-red-700 hover:bg-red-50"
                                                                 @click="cancelJob"
                                                             >
                                                                 取消

@@ -5,7 +5,7 @@ import PostGrid from "@/components/PostGrid.vue";
 const route = useRoute();
 const { selectPost } = usePosts();
 
-// Sync route ID with global selection state so RightDetailPanel shows up
+// Sync route ID with global selection state so PostDetail full-screen overlay opens
 watch(
     () => route.params.id,
     (newId) => {

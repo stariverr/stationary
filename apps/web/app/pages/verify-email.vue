@@ -104,7 +104,7 @@ const handleResendOTP = async () => {
                 <!-- Branding -->
                 <div class="relative group mb-6">
                     <div
-                        class="absolute -inset-0.5 bg-linear-to-r from-emerald-500 to-teal-500 rounded-full blur opacity-30 group-hover:opacity-50 transition duration-1000"
+                        class="absolute -inset-0.5 bg-linear-to-r from-blue-500 to-teal-500 rounded-full blur opacity-30 group-hover:opacity-50 transition duration-1000"
                     ></div>
                     <img
                         src="/logo.svg"
@@ -115,7 +115,7 @@ const handleResendOTP = async () => {
 
                 <div class="w-full">
                     <div class="flex flex-col items-center text-center">
-                        <div class="w-12 h-12 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-600 mb-4">
+                        <div class="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-600 mb-4">
                             <ShieldCheck class="w-6 h-6" />
                         </div>
                         <h1 class="text-2xl font-bold text-gray-900 mb-1">{{ $t("auth.verify_email_title") }}</h1>
@@ -135,14 +135,14 @@ const handleResendOTP = async () => {
                                 maxLength="6"
                                 placeholder="123456"
                                 required
-                                class="w-full text-center tracking-[0.5em] text-xl font-mono py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all duration-200"
+                                class="w-full text-center tracking-[0.5em] text-xl font-mono py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200"
                             />
                         </div>
 
                         <button
                             type="submit"
                             :disabled="loading"
-                            class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-medium shadow-lg shadow-emerald-600/20 transition-all duration-200 active:scale-[0.99] disabled:opacity-50"
+                            class="w-full py-3 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl font-medium shadow-lg shadow-zinc-900/20 transition-all duration-200 active:scale-[0.99] disabled:opacity-50"
                         >
                             <span v-if="loading">{{ $t("auth.verifying_btn") }}</span>
                             <span v-else>{{ $t("auth.confirm_code_btn") }}</span>
@@ -153,7 +153,7 @@ const handleResendOTP = async () => {
                         <button
                             @click="handleResendOTP"
                             :disabled="resendCooldown > 0 || loading"
-                            class="text-sm text-emerald-600 font-semibold hover:underline disabled:text-gray-400 disabled:no-underline flex items-center gap-2 cursor-pointer"
+                            class="text-sm text-blue-600 font-semibold hover:underline disabled:text-gray-400 disabled:no-underline flex items-center gap-2 cursor-pointer"
                         >
                             <RotateCcw class="w-4 h-4" />
                             <span v-if="resendCooldown > 0">{{ $t("auth.resend_code_cooldown", { cooldown: resendCooldown }) }}</span>

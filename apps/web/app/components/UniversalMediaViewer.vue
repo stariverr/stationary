@@ -3,6 +3,8 @@ import { computed, ref, watch, onUnmounted } from "vue";
 import { Music, FileText, FileImage, ShieldAlert } from "@lucide/vue";
 import VideoPlayer from "./VideoPlayer.vue";
 import LivePhotoPlayer from "./LivePhotoPlayer.vue";
+import HeicImage from "./HeicImage.vue";
+import { isHeic } from "@/utils/heic-decoder";
 import type { MediaViewerItem, MediaViewerTrack } from "@/types/post";
 
 type MediaTrack = MediaViewerTrack;
@@ -17,6 +19,7 @@ const props = withDefaults(
         zoom?: number;
         rotation?: number;
         autoplay?: boolean;
+        hideTopControls?: boolean;
     }>(),
     {
         isLoading: false,
@@ -25,12 +28,17 @@ const props = withDefaults(
         zoom: 1,
         rotation: 0,
         autoplay: true,
+        hideTopControls: false,
     },
 );
 
 const emit = defineEmits<{
     (e: "click-media"): void;
     (e: "zoom-change", zoom: number): void;
+    (e: "controls-change", visible: boolean): void;
+    (e: "user-activity"): void;
+    (e: "play"): void;
+    (e: "pause"): void;
 }>();
 
 const qualityOrder: Record<string, number> = {
@@ -122,6 +130,9 @@ const contentAssetUrl = computed(() => {
 const activeSrcUrl = ref<string>("");
 const pendingSrcUrl = ref<string>("");
 const isPendingLoaded = ref<boolean>(false);
+const isCurrentHeic = computed(() => {
+    return isHeic(activeSrcUrl.value) || isHeic(pendingSrcUrl.value) || isHeic(props.media?.url);
+});
 const showLoadingSpinner = ref(false);
 let loadingTimer: ReturnType<typeof setTimeout> | null = null;
 let fadeTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -144,7 +155,12 @@ watch(
             fadeTimeout = null;
         }
 
-        const lowResCoverUrl = defaultPosterUrl.value || (props.media as any)?.poster || (props.media as any)?.thumbnail || (props.media as any)?.cover_url || "";
+        const lowResCoverUrl =
+            defaultPosterUrl.value ||
+            (props.media as any)?.poster ||
+            (props.media as any)?.thumbnail ||
+            (props.media as any)?.cover_url ||
+            "";
         const highResUrl = imageSrcUrl.value || livePhotoImageSrc.value || "";
 
         const baseLayerUrl = lowResCoverUrl || highResUrl;
@@ -272,50 +288,187 @@ watch(
     },
 );
 
-// Drag to Pan Handlers
-const handlePointerDown = (e: PointerEvent) => {
-    if (!props.interactive || props.zoom <= 1) return;
-    if (e.button !== 0) return; // Left click only
+// Unified Pointer Gesture Controller (Mouse + Touch + Pen)
+const imageContainerRef = ref<HTMLElement | null>(null);
 
-    isDragging.value = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    initialTranslateX = translateX.value;
-    initialTranslateY = translateY.value;
-    draggedDistance.value = 0;
+const activePointers = new Map<number, { x: number; y: number }>();
+let pointerDownTime = 0;
+let pointerDownX = 0;
+let pointerDownY = 0;
+let lastTapTime = 0;
+let lastTapX = 0;
+let lastTapY = 0;
+let singleTapTimeout: ReturnType<typeof setTimeout> | null = null;
+
+let initialPinchDistance = 0;
+let initialPinchZoom = 1;
+let isPinching = false;
+
+const viewerCursorClass = computed(() => {
+    if (!props.interactive) return "";
+    if (props.zoom > 1) {
+        return isDragging.value ? "cursor-grabbing" : "cursor-grab";
+    }
+    return "cursor-pointer";
+});
+
+const handlePointerDown = (e: PointerEvent) => {
+    if (!props.interactive) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return; // Left click only
 
     const target = e.currentTarget as HTMLElement;
-    target.setPointerCapture(e.pointerId);
-    e.preventDefault();
+    try {
+        target.setPointerCapture(e.pointerId);
+    } catch {}
+
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (activePointers.size === 1) {
+        pointerDownTime = performance.now();
+        pointerDownX = e.clientX;
+        pointerDownY = e.clientY;
+        startX = e.clientX;
+        startY = e.clientY;
+        initialTranslateX = translateX.value;
+        initialTranslateY = translateY.value;
+        draggedDistance.value = 0;
+        isDragging.value = props.zoom > 1;
+        isPinching = false;
+    } else if (activePointers.size === 2) {
+        // Two fingers down: pinch-to-zoom
+        isPinching = true;
+        isDragging.value = false;
+        if (singleTapTimeout) {
+            clearTimeout(singleTapTimeout);
+            singleTapTimeout = null;
+        }
+        const pts = Array.from(activePointers.values());
+        if (pts[0] && pts[1]) {
+            initialPinchDistance = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+            initialPinchZoom = props.zoom;
+        }
+    }
 };
 
 const handlePointerMove = (e: PointerEvent) => {
-    if (!isDragging.value) return;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
+    if (!activePointers.has(e.pointerId)) return;
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-    draggedDistance.value = Math.sqrt(dx * dx + dy * dy);
+    if (isPinching && activePointers.size === 2) {
+        const pts = Array.from(activePointers.values());
+        if (pts[0] && pts[1]) {
+            const currentDistance = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+            if (initialPinchDistance > 10) {
+                const scaleFactor = currentDistance / initialPinchDistance;
+                let nextZoom = Math.min(5, Math.max(0.1, initialPinchZoom * scaleFactor));
+                emit("zoom-change", parseFloat(nextZoom.toFixed(2)));
+            }
+        }
+        return;
+    }
 
-    // Adjust dx and dy based on rotation angle to keep pan direction aligned with screen
-    const angleRad = (props.rotation * Math.PI) / 180;
-    const cos = Math.cos(-angleRad);
-    const sin = Math.sin(-angleRad);
+    if (activePointers.size === 1) {
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        draggedDistance.value = Math.hypot(e.clientX - pointerDownX, e.clientY - pointerDownY);
 
-    const adjustedDx = dx * cos - dy * sin;
-    const adjustedDy = dx * sin + dy * cos;
+        if (props.zoom > 1 && isDragging.value) {
+            // Adjust dx and dy based on rotation angle to keep pan direction aligned with screen
+            const angleRad = (props.rotation * Math.PI) / 180;
+            const cos = Math.cos(-angleRad);
+            const sin = Math.sin(-angleRad);
 
-    translateX.value = initialTranslateX + adjustedDx;
-    translateY.value = initialTranslateY + adjustedDy;
+            const adjustedDx = dx * cos - dy * sin;
+            const adjustedDy = dx * sin + dy * cos;
+
+            translateX.value = initialTranslateX + adjustedDx;
+            translateY.value = initialTranslateY + adjustedDy;
+        }
+    }
+};
+
+const handleDoubleTap = (clientX: number, clientY: number) => {
+    if (!props.interactive) return;
+    const nextZoom = props.zoom > 1 ? 1 : 2;
+
+    if (nextZoom > 1) {
+        const el = imageContainerRef.value;
+        if (el) {
+            const rect = el.getBoundingClientRect();
+            const mx = clientX - rect.left;
+            const my = clientY - rect.top;
+            const cx = rect.width / 2;
+            const cy = rect.height / 2;
+            const rx = mx - cx;
+            const ry = my - cy;
+
+            isInternalZoom = true;
+            translateX.value = rx - (rx - translateX.value) * (nextZoom / props.zoom);
+            translateY.value = ry - (ry - translateY.value) * (nextZoom / props.zoom);
+        }
+    }
+
+    emit("zoom-change", nextZoom);
 };
 
 const handlePointerUp = (e: PointerEvent) => {
-    if (!isDragging.value) return;
-    isDragging.value = false;
+    if (!activePointers.has(e.pointerId)) return;
+
     const target = e.currentTarget as HTMLElement;
     try {
         target.releasePointerCapture(e.pointerId);
-    } catch (err) {
-        // ignore
+    } catch {}
+
+    const wasPinching = isPinching;
+    activePointers.delete(e.pointerId);
+
+    if (activePointers.size === 0) {
+        isDragging.value = false;
+        isPinching = false;
+
+        const elapsedTime = performance.now() - pointerDownTime;
+        const isCleanTap = !wasPinching && draggedDistance.value < 10 && elapsedTime < 350;
+
+        if (isCleanTap) {
+            const now = performance.now();
+            const timeSinceLastTap = now - lastTapTime;
+            const distFromLastTap = Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY);
+
+            if (timeSinceLastTap < 300 && distFromLastTap < 30) {
+                // Double Tap / Double Click detected
+                if (singleTapTimeout) {
+                    clearTimeout(singleTapTimeout);
+                    singleTapTimeout = null;
+                }
+                lastTapTime = 0;
+                handleDoubleTap(e.clientX, e.clientY);
+                return;
+            }
+
+            lastTapTime = now;
+            lastTapX = e.clientX;
+            lastTapY = e.clientY;
+
+            if (singleTapTimeout) clearTimeout(singleTapTimeout);
+            singleTapTimeout = setTimeout(() => {
+                singleTapTimeout = null;
+                if (props.interactive) {
+                    emit("click-media");
+                }
+            }, 250);
+        }
+    }
+};
+
+const handlePointerCancel = (e: PointerEvent) => {
+    activePointers.delete(e.pointerId);
+    if (activePointers.size === 0) {
+        isDragging.value = false;
+        isPinching = false;
+        if (singleTapTimeout) {
+            clearTimeout(singleTapTimeout);
+            singleTapTimeout = null;
+        }
     }
 };
 
@@ -364,57 +517,28 @@ const handleWheel = (e: WheelEvent) => {
     }
 };
 
-// Double click to toggle zoom
-const handleDoubleClick = (e: MouseEvent) => {
-    e.stopPropagation();
-    if (!props.interactive) return;
-    e.preventDefault();
-
-    const nextZoom = props.zoom > 1 ? 1 : 2;
-
-    if (nextZoom > 1) {
-        // Zoom towards double click point
-        const target = e.currentTarget as HTMLElement;
-        const rect = target.getBoundingClientRect();
-        const mx = e.clientX - rect.left;
-        const my = e.clientY - rect.top;
-        const cx = rect.width / 2;
-        const cy = rect.height / 2;
-        const rx = mx - cx;
-        const ry = my - cy;
-
-        isInternalZoom = true;
-        translateX.value = rx - (rx - translateX.value) * (nextZoom / props.zoom);
-        translateY.value = ry - (ry - translateY.value) * (nextZoom / props.zoom);
+onUnmounted(() => {
+    clearLoadingTimer();
+    if (fadeTimeout) {
+        clearTimeout(fadeTimeout);
+        fadeTimeout = null;
     }
-
-    emit("zoom-change", nextZoom);
-};
-
-// Handle clicks and prevent detail panel toggle during panning
-const handleImageClick = (e: MouseEvent) => {
-    e.stopPropagation();
-    if (props.zoom > 1) {
-        // Zoomed in: ignore click if dragged, otherwise do nothing
-        return;
+    if (singleTapTimeout) {
+        clearTimeout(singleTapTimeout);
+        singleTapTimeout = null;
     }
-    emit("click-media");
-};
+});
 </script>
 
 <template>
-    <div
-        class="relative flex h-full w-full items-center justify-center bg-black select-none"
-        :class="{ 'cursor-zoom-in': props.interactive }"
-        @click="props.interactive && emit('click-media')"
-    >
+    <div class="relative flex h-full w-full items-center justify-center bg-black select-none" :class="viewerCursorClass">
         <!-- Floating Glassmorphism Loading Indicator (Only shown after 200ms delay for slow loads when no image is visible) -->
         <div
             v-if="(isLoading && !activeSrcUrl) || showLoadingSpinner"
             class="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-xs z-30 pointer-events-none transition-opacity duration-300"
         >
             <div class="flex items-center gap-2.5 px-4 py-2 rounded-full bg-zinc-950/85 border border-white/15 shadow-2xl backdrop-blur-xl">
-                <div class="w-4 h-4 rounded-full border-2 border-emerald-400/30 border-t-emerald-400 animate-spin shrink-0"></div>
+                <div class="w-4 h-4 rounded-full border-2 border-blue-400/30 border-t-blue-400 animate-spin shrink-0"></div>
                 <span class="text-xs font-semibold text-white/90">{{ $t("post_detail.viewer.loading") }}</span>
             </div>
         </div>
@@ -440,6 +564,12 @@ const handleImageClick = (e: MouseEvent) => {
                         :width="media.width ?? undefined"
                         :height="media.height ?? undefined"
                         :autoplay="props.autoplay"
+                        :hide-top-controls="props.hideTopControls"
+                        @click-player="emit('click-media')"
+                        @controls-change="emit('controls-change', $event)"
+                        @user-activity="emit('user-activity')"
+                        @play="emit('play')"
+                        @pause="emit('pause')"
                         class="w-full h-full"
                     />
                     <div v-else class="text-zinc-500 flex flex-col items-center gap-2">
@@ -452,27 +582,38 @@ const handleImageClick = (e: MouseEvent) => {
             <!-- 2. LIVE PHOTO -->
             <template v-else-if="media.type === 'LIVE_PHOTO'">
                 <div
+                    ref="imageContainerRef"
                     class="w-full h-full flex items-center justify-center relative overflow-hidden touch-none"
                     @pointerdown="handlePointerDown"
                     @pointermove="handlePointerMove"
                     @pointerup="handlePointerUp"
-                    @pointercancel="handlePointerUp"
+                    @pointercancel="handlePointerCancel"
                     @wheel="handleWheel"
-                    @dblclick="handleDoubleClick"
-                    @click="handleImageClick"
                 >
                     <!-- Ambient Blur Backdrop -->
-                    <img
-                        v-if="defaultPosterUrl || livePhotoImageSrc"
-                        :src="defaultPosterUrl || livePhotoImageSrc"
-                        class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
-                        aria-hidden="true"
-                    />
+                    <template v-if="defaultPosterUrl || livePhotoImageSrc">
+                        <HeicImage
+                            v-if="isHeic(defaultPosterUrl || livePhotoImageSrc)"
+                            :src="(defaultPosterUrl || livePhotoImageSrc)!"
+                            no-spinner
+                            class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
+                            aria-hidden="true"
+                        />
+                        <img
+                            v-else
+                            :src="(defaultPosterUrl || livePhotoImageSrc)!"
+                            class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
+                            aria-hidden="true"
+                        />
+                    </template>
                     <LivePhotoPlayer
                         :src="livePhotoImageSrc || defaultPosterUrl"
                         :live-src="livePhotoVideoSrc"
                         :hide-badge="props.hideBadge"
-                        class="relative z-10 max-w-full max-h-full object-contain shadow-2xl"
+                        badge-position="top-left-below-header"
+                        :width="media.width ?? undefined"
+                        :height="media.height ?? undefined"
+                        class="relative z-10 w-full h-full max-w-full max-h-full object-contain"
                         :style="{
                             transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
                             transformOrigin: 'center center',
@@ -485,52 +626,94 @@ const handleImageClick = (e: MouseEvent) => {
             <!-- 3. IMAGE -->
             <template v-else-if="media.type === 'IMAGE'">
                 <div
+                    ref="imageContainerRef"
                     class="w-full h-full flex items-center justify-center relative overflow-hidden touch-none"
                     @pointerdown="handlePointerDown"
                     @pointermove="handlePointerMove"
                     @pointerup="handlePointerUp"
-                    @pointercancel="handlePointerUp"
+                    @pointercancel="handlePointerCancel"
                     @wheel="handleWheel"
-                    @dblclick="handleDoubleClick"
-                    @click="handleImageClick"
                 >
                     <!-- Ambient Blur Backdrop -->
-                    <img
-                        v-if="activeSrcUrl || pendingSrcUrl"
-                        :src="pendingSrcUrl || activeSrcUrl"
-                        class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
-                        aria-hidden="true"
-                    />
+                    <template v-if="activeSrcUrl || pendingSrcUrl">
+                        <HeicImage
+                            v-if="isCurrentHeic"
+                            :src="(pendingSrcUrl || activeSrcUrl)!"
+                            no-spinner
+                            class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
+                            aria-hidden="true"
+                        />
+                        <img
+                            v-else
+                            :src="(pendingSrcUrl || activeSrcUrl)!"
+                            class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
+                            aria-hidden="true"
+                        />
+                    </template>
                     <!-- Base Image Layer (Always 100% visible, never unmounts, never becomes opacity-0) -->
-                    <img
-                        v-if="activeSrcUrl"
-                        :src="activeSrcUrl"
-                        :alt="media.title || $t('post_detail.viewer.preview')"
-                        class="relative z-10 w-full h-full max-w-full max-h-full object-contain shadow-2xl select-none pointer-events-none"
-                        :style="{
-                            transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
-                            transformOrigin: 'center center',
-                            transition: isDragging ? 'none' : 'transform 0.15s ease-out',
-                        }"
-                        @load="handleBaseLoaded"
-                        @error="handleBaseError"
-                        draggable="false"
-                    />
+                    <template v-if="activeSrcUrl">
+                        <HeicImage
+                            v-if="isCurrentHeic"
+                            :src="activeSrcUrl"
+                            no-spinner
+                            :alt="media.title || $t('post_detail.viewer.preview')"
+                            class="relative z-10 w-full h-full max-w-full max-h-full object-contain select-none pointer-events-none"
+                            :style="{
+                                transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
+                                transformOrigin: 'center center',
+                                transition: isDragging ? 'none' : 'transform 0.15s ease-out',
+                            }"
+                            @load="handleBaseLoaded"
+                            @error="handleBaseError"
+                            draggable="false"
+                        />
+                        <img
+                            v-else
+                            :src="activeSrcUrl"
+                            :alt="media.title || $t('post_detail.viewer.preview')"
+                            class="relative z-10 w-full h-full max-w-full max-h-full object-contain select-none pointer-events-none"
+                            :style="{
+                                transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
+                                transformOrigin: 'center center',
+                                transition: isDragging ? 'none' : 'transform 0.15s ease-out',
+                            }"
+                            @load="handleBaseLoaded"
+                            @error="handleBaseError"
+                            draggable="false"
+                        />
+                    </template>
                     <!-- High-Res Upgrade Layer (Smoothly fades in over base layer when loaded) -->
-                    <img
-                        v-if="pendingSrcUrl"
-                        :src="pendingSrcUrl"
-                        class="absolute z-20 w-full h-full max-w-full max-h-full object-contain select-none pointer-events-none transition-opacity duration-350 ease-out"
-                        :class="isPendingLoaded ? 'opacity-100' : 'opacity-0'"
-                        :style="{
-                            transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
-                            transformOrigin: 'center center',
-                            transition: isDragging ? 'none' : 'transform 0.15s ease-out, opacity 0.35s ease-out',
-                        }"
-                        @load="handlePendingLoaded"
-                        @error="handlePendingError"
-                        aria-hidden="true"
-                    />
+                    <template v-if="pendingSrcUrl">
+                        <HeicImage
+                            v-if="isCurrentHeic"
+                            :src="pendingSrcUrl"
+                            no-spinner
+                            class="absolute z-20 w-full h-full max-w-full max-h-full object-contain select-none pointer-events-none transition-opacity duration-350 ease-out"
+                            :class="isPendingLoaded ? 'opacity-100' : 'opacity-0'"
+                            :style="{
+                                transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
+                                transformOrigin: 'center center',
+                                transition: isDragging ? 'none' : 'transform 0.15s ease-out, opacity 0.35s ease-out',
+                            }"
+                            @load="handlePendingLoaded"
+                            @error="handlePendingError"
+                            aria-hidden="true"
+                        />
+                        <img
+                            v-else
+                            :src="pendingSrcUrl"
+                            class="absolute z-20 w-full h-full max-w-full max-h-full object-contain select-none pointer-events-none transition-opacity duration-350 ease-out"
+                            :class="isPendingLoaded ? 'opacity-100' : 'opacity-0'"
+                            :style="{
+                                transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
+                                transformOrigin: 'center center',
+                                transition: isDragging ? 'none' : 'transform 0.15s ease-out, opacity 0.35s ease-out',
+                            }"
+                            @load="handlePendingLoaded"
+                            @error="handlePendingError"
+                            aria-hidden="true"
+                        />
+                    </template>
                 </div>
             </template>
 
@@ -546,7 +729,7 @@ const handleImageClick = (e: MouseEvent) => {
                         <h3 class="max-w-xs truncate text-sm font-semibold text-white">
                             {{ media.title || $t("post_detail.viewer.untitled_audio") }}
                         </h3>
-                        <p class="mt-0.5 text-[10px] uppercase tracking-wider text-zinc-500">{{ $t("post_detail.viewer.audio_asset") }}</p>
+                        <p class="mt-0.5 text-xs uppercase tracking-wider text-zinc-500">{{ $t("post_detail.viewer.audio_asset") }}</p>
                     </div>
                     <audio v-if="contentAssetUrl" :src="contentAssetUrl" controls class="w-full mt-2 accent-indigo-600 outline-none" />
                 </div>
@@ -564,7 +747,7 @@ const handleImageClick = (e: MouseEvent) => {
                         <h3 class="max-w-xs truncate text-sm font-semibold text-white">
                             {{ media.title || $t("post_detail.viewer.untitled_pdf") }}
                         </h3>
-                        <p class="mt-0.5 text-[10px] uppercase tracking-wider text-zinc-500">{{ $t("post_detail.viewer.pdf_document") }}</p>
+                        <p class="mt-0.5 text-xs uppercase tracking-wider text-zinc-500">{{ $t("post_detail.viewer.pdf_document") }}</p>
                     </div>
                     <a
                         v-if="contentAssetUrl"

@@ -122,11 +122,10 @@
             MiSans VF,
             MiSans,
             sans-serif;
-        touch-action: pan-x pan-y; /* Disable global double-tap zoom and pinch zoom, preserve normal scrolling */
         -webkit-touch-callout: none; /* Disable default touch callout (link/image preview popup) on iOS by default */
     }
 
-    /* Disable text selection only on UI widgets, buttons, and list cards to prevent touch conflicts */
+    /* Disable text selection only on UI widgets and buttons to prevent touch conflicts */
     button,
     a,
     svg,
@@ -135,8 +134,7 @@
     [role="button"],
     [role="menuitem"],
     [role="tab"],
-    .select-none,
-    .group.relative.flex.flex-col {
+    .select-none {
         -webkit-user-select: none;
         user-select: none;
     }
@@ -153,14 +151,9 @@
         -webkit-touch-callout: default;
     }
 
-    /* Allow specific components to opt-in to zooming or custom touch behaviors */
-    .allow-zoom {
-        touch-action: auto !important;
-    }
-
     html,
     body {
-        @apply bg-background text-foreground;
+        @apply bg-background text-foreground antialiased;
         width: 100%;
         margin: 0;
         padding: 0;
@@ -172,6 +165,18 @@
         body {
             overflow: hidden;
             height: 100vh;
+        }
+    }
+
+    /* Honor reduced-motion: replace motion with instant state changes */
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+            scroll-behavior: auto !important;
         }
     }
 }

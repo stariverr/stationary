@@ -159,7 +159,7 @@ const mediaListWithPreview = computed(() =>
                     type="button"
                     role="tab"
                     :aria-selected="selectedType === type.value"
-                    class="shrink-0 rounded px-2 py-1 text-[11px] font-medium transition cursor-pointer"
+                    class="shrink-0 rounded px-2 py-1 text-xs font-medium transition cursor-pointer"
                     :class="
                         selectedType === type.value
                             ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-xs'
@@ -186,7 +186,7 @@ const mediaListWithPreview = computed(() =>
             >
                 <FileImage class="h-8 w-8 text-zinc-300 dark:text-zinc-700" />
                 <p class="text-xs font-medium">{{ $t("post_detail.manage.no_media_found") }}</p>
-                <p class="text-[11px] text-zinc-400 dark:text-zinc-500">{{ $t("post_detail.manage.adjust_filters_hint") }}</p>
+                <p class="text-xs text-zinc-400 dark:text-zinc-500">{{ $t("post_detail.manage.adjust_filters_hint") }}</p>
             </div>
 
             <template v-else>
@@ -197,7 +197,7 @@ const mediaListWithPreview = computed(() =>
                     class="group relative flex w-full items-center gap-3 rounded-md border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-2.5 text-left transition hover:border-zinc-400 dark:hover:border-zinc-700 cursor-pointer"
                     :class="
                         activeMediaId === item.id
-                            ? 'border-zinc-900 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-850 ring-1 ring-zinc-900/10 dark:ring-zinc-100/10'
+                            ? 'border-zinc-900 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-800 ring-1 ring-zinc-900/10 dark:ring-zinc-100/10'
                             : ''
                     "
                     @click="emit('select-media', item.id)"
@@ -229,9 +229,9 @@ const mediaListWithPreview = computed(() =>
                             <span class="truncate text-xs font-medium text-zinc-800 dark:text-zinc-200">{{
                                 item.title || fallbackTitle(item.position)
                             }}</span>
-                            <span class="shrink-0 font-mono text-[10px] text-zinc-400 dark:text-zinc-500">#{{ item.position + 1 }}</span>
+                            <span class="shrink-0 font-mono text-xs text-zinc-400 dark:text-zinc-500">#{{ item.position + 1 }}</span>
                         </span>
-                        <span class="mt-1 flex items-center gap-2 text-[10px] text-zinc-500 dark:text-zinc-400">
+                        <span class="mt-1 flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
                             <span class="rounded bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 font-medium text-zinc-600 dark:text-zinc-300">{{
                                 mediaTypeLabel(item.type)
                             }}</span>
@@ -298,7 +298,7 @@ const mediaListWithPreview = computed(() =>
         </div>
 
         <div class="flex shrink-0 items-center justify-between gap-3 border-t border-zinc-200 dark:border-zinc-800 pt-3 text-xs">
-            <span class="font-mono text-[11px] text-zinc-500 dark:text-zinc-400">{{ displayRange }}</span>
+            <span class="font-mono text-xs text-zinc-500 dark:text-zinc-400">{{ displayRange }}</span>
             <div class="flex items-center gap-1">
                 <button
                     type="button"

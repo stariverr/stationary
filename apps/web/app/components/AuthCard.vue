@@ -95,8 +95,8 @@ const getPasswordStrength = (pwd: string) => {
         textColor = "text-amber-500";
     } else if (finalScore === 3) {
         textKey = "good";
-        color = "bg-emerald-500";
-        textColor = "text-emerald-500";
+        color = "bg-blue-500";
+        textColor = "text-blue-500";
     } else if (finalScore === 4) {
         textKey = "strong";
         color = "bg-teal-500";
@@ -232,7 +232,7 @@ const handleSubmit = async () => {
                 <!-- Branding -->
                 <div class="relative group mb-3">
                     <div
-                        class="absolute -inset-0.5 bg-linear-to-r from-emerald-500 to-teal-500 rounded-full blur opacity-30 group-hover:opacity-50 transition duration-1000"
+                        class="absolute -inset-0.5 bg-linear-to-r from-blue-500 to-teal-500 rounded-full blur opacity-30 group-hover:opacity-50 transition duration-1000"
                     ></div>
                     <img
                         src="/logo.svg"
@@ -286,7 +286,7 @@ const handleSubmit = async () => {
                             type="button"
                             @click="setMode('login')"
                             class="flex-1 py-1.5 text-xs font-bold rounded-lg transition-all duration-200 cursor-pointer"
-                            :class="currentMode === 'login' ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-500 hover:text-gray-800'"
+                            :class="currentMode === 'login' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-800'"
                         >
                             {{ $t("auth.set_mode_login") }}
                         </button>
@@ -294,9 +294,7 @@ const handleSubmit = async () => {
                             type="button"
                             @click="setMode('register')"
                             class="flex-1 py-1.5 text-xs font-bold rounded-lg transition-all duration-200 cursor-pointer"
-                            :class="
-                                currentMode === 'register' ? 'bg-white text-emerald-700 shadow-sm' : 'text-gray-500 hover:text-gray-800'
-                            "
+                            :class="currentMode === 'register' ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-800'"
                         >
                             {{ $t("auth.set_mode_register") }}
                         </button>
@@ -316,7 +314,7 @@ const handleSubmit = async () => {
                                     type="email"
                                     :placeholder="$t('auth.email_placeholder')"
                                     required
-                                    class="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all duration-200"
+                                    class="w-full pl-9 pr-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200"
                                 />
                             </div>
                         </div>
@@ -335,7 +333,7 @@ const handleSubmit = async () => {
                                     :type="showPassword ? 'text' : 'password'"
                                     :placeholder="$t('auth.password_placeholder')"
                                     required
-                                    class="w-full pl-9 pr-9 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all duration-200"
+                                    class="w-full pl-9 pr-9 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200"
                                 />
                                 <button
                                     type="button"
@@ -355,7 +353,7 @@ const handleSubmit = async () => {
                             <NuxtLink
                                 v-if="currentMode === 'login'"
                                 to="/forgot-password"
-                                class="text-xs font-bold text-emerald-600 hover:text-emerald-700 hover:underline col-start-2 row-start-1 justify-self-end"
+                                class="text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline col-start-2 row-start-1 justify-self-end"
                             >
                                 {{ $t("auth.forgot_password") }}
                             </NuxtLink>
@@ -369,13 +367,13 @@ const handleSubmit = async () => {
                             <!-- Validation warning text (only visible when validation fails) -->
                             <p
                                 v-if="currentMode === 'register' && password && !/^[\x20-\x7E]*$/.test(password)"
-                                class="text-[11px] text-red-500 mt-1 col-span-2"
+                                class="text-xs text-red-500 mt-1 col-span-2"
                             >
                                 {{ $t("auth.strength_ascii_only") }}
                             </p>
                             <p
                                 v-else-if="currentMode === 'register' && password && (password.length < 8 || password.length > 20)"
-                                class="text-[11px] text-red-500 mt-1 col-span-2"
+                                class="text-xs text-red-500 mt-1 col-span-2"
                             >
                                 {{ $t("auth.strength_length_error") }}
                             </p>
@@ -390,7 +388,7 @@ const handleSubmit = async () => {
                         <button
                             type="submit"
                             :disabled="loading"
-                            class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-semibold shadow-md shadow-emerald-600/10 hover:shadow-emerald-600/20 transition-all duration-200 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+                            class="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-sm font-semibold shadow-md shadow-zinc-900/10 hover:shadow-zinc-900/20 transition-all duration-200 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
                         >
                             <span v-if="loading">
                                 {{ currentMode === "login" ? $t("auth.sign_in_loading") : $t("auth.sign_up_loading") }}

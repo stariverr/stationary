@@ -48,14 +48,8 @@ const {
     authorSearchKeyword,
     authorCache,
 } = usePosts();
-const {
-    toggleSidebar,
-    isCreatePostOpen,
-    postItemAspectRatio,
-    postItemColumns,
-    postItemTargetWidth,
-    postLayoutMode,
-} = useAppLayout();
+const { toggleSidebar, isSidebarCollapsed, isCreatePostOpen, postItemAspectRatio, postItemColumns, postItemTargetWidth, postLayoutMode } =
+    useAppLayout();
 const libraryStore = useLibraryStore();
 const tagStore = useTagStore();
 
@@ -141,11 +135,11 @@ const getPlatformStyle = (platform: string) => {
         case "XHS":
             return "bg-red-50 text-red-600 border border-red-100/60";
         case "DOUYIN":
-            return "bg-slate-900/5 text-slate-800 border border-slate-200/50";
+            return "bg-zinc-900/5 text-zinc-800 border border-zinc-200/50";
         case "BILIBILI":
             return "bg-pink-50 text-pink-600 border border-pink-100/60";
         case "X":
-            return "bg-slate-100 text-slate-700 border border-slate-200/60";
+            return "bg-zinc-100 text-zinc-700 border border-zinc-200/60";
         case "TIKTOK":
             return "bg-teal-50 text-teal-700 border border-teal-100/60";
         case "INSTAGRAM":
@@ -153,7 +147,7 @@ const getPlatformStyle = (platform: string) => {
         case "YOUTUBE":
             return "bg-rose-50 text-rose-600 border border-rose-100/60";
         default:
-            return "bg-slate-100 text-slate-500 border border-slate-200/40";
+            return "bg-zinc-100 text-zinc-500 border border-zinc-200/40";
     }
 };
 
@@ -226,6 +220,16 @@ const getTagStyle = (color: string | null) => {
 const hasActiveFilters = computed(() => {
     return !!source.value || authorIds.value.length > 0 || tagIds.value.length > 0 || !!mediaType.value;
 });
+
+const resetFilters = () => {
+    keyword.value = "";
+    source.value = undefined;
+    authorIds.value = [];
+    tagIds.value = [];
+    mediaType.value = undefined;
+    sortBy.value = "published_time";
+    sortOrder.value = "desc";
+};
 
 watch(
     () => [
@@ -518,21 +522,23 @@ onUnmounted(() => {
 <template>
     <div :style="visualViewportBottomOffsetStyle" class="flex-1 min-h-0 flex flex-col bg-white md:overflow-hidden relative">
         <!-- Header -->
-        <div
-            class="sticky top-0 z-30 h-15 sm:h-14 border-b border-gray-100/80 flex items-center gap-2 px-3 sm:px-6 shrink-0 bg-white/98 backdrop-blur-md supports-backdrop-filter:bg-white/98 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
-        >
+        <div class="z-30 h-14 border-b border-zinc-200/80 flex items-center gap-2 px-4 md:px-6 shrink-0 bg-white">
             <!-- Left side: Sidebar Toggle & Page Title -->
             <div class="flex items-center gap-3 shrink-0">
                 <button
                     @click="toggleSidebar"
-                    class="h-9 w-9 rounded-full -ml-1 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-900 active:scale-[0.95] transition-all cursor-pointer"
-                    title="Toggle Sidebar"
+                    class="h-8 w-8 rounded-lg -ml-1 items-center justify-center text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 transition-colors cursor-pointer"
+                    :class="isSidebarCollapsed ? 'flex' : 'flex md:hidden'"
+                    :title="$t('common.toggle_sidebar', 'Toggle sidebar')"
+                    :aria-label="$t('common.toggle_sidebar', 'Toggle sidebar')"
                 >
                     <Sidebar class="w-5 h-5" />
                 </button>
-                <h1 class="font-semibold text-base text-gray-900 hidden md:flex items-center gap-2 select-none whitespace-nowrap shrink-0">
+                <h1
+                    class="text-sm font-bold tracking-tight text-zinc-900 hidden md:flex items-center gap-2 select-none whitespace-nowrap shrink-0"
+                >
                     <span>{{ $t("common.post_collections", "Post Collections") }}</span>
-                    <span v-if="total" class="text-[11px] font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full font-mono">{{
+                    <span v-if="total" class="text-xs font-medium text-zinc-500 bg-zinc-100 px-2 py-0.5 rounded-full tabular-nums">{{
                         total
                     }}</span>
                 </h1>
@@ -543,18 +549,20 @@ onUnmounted(() => {
                 <!-- Search Input (Unified height and border radius, remove shadow-sm) -->
                 <div class="relative min-w-0 flex-1 sm:max-w-55 group transition-all duration-300">
                     <Search
-                        class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-600 transition-colors"
+                        class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-blue-600 transition-colors"
                     />
                     <input
                         v-model="keyword"
                         type="text"
+                        :aria-label="$t('common.search_posts', 'Search posts')"
                         :placeholder="$t('common.search', 'Search...')"
-                        class="w-full h-9 rounded-full bg-slate-50/90 border border-slate-200/80 text-slate-900 text-sm font-medium focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 block pl-9 pr-8 hover:bg-white focus:bg-white transition-all placeholder:text-slate-400"
+                        class="w-full h-9 rounded-full bg-zinc-50/90 border border-zinc-200/80 text-zinc-900 text-sm font-medium focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 block pl-9 pr-8 hover:bg-white focus:bg-white transition-all placeholder:text-zinc-400"
                     />
                     <button
                         v-if="keyword"
                         @click="clearSearch"
-                        class="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 hover:bg-slate-200 rounded-full transition-colors text-slate-400"
+                        :aria-label="$t('common.clear_search', 'Clear search')"
+                        class="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 hover:bg-zinc-200 rounded-full transition-colors text-zinc-400"
                     >
                         <X class="w-3 h-3" />
                     </button>
@@ -566,10 +574,11 @@ onUnmounted(() => {
                     :class="[
                         showFilters || hasActiveFilters
                             ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300'
-                            : 'bg-white border-slate-200/80 text-slate-600 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900',
+                            : 'bg-white border-zinc-200/80 text-zinc-600 hover:bg-zinc-50 hover:border-zinc-300 hover:text-zinc-900',
                     ]"
-                    class="flex h-9 w-9 rounded-full sm:h-9 sm:w-auto sm:rounded-full items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3.5 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 active:scale-[0.95]"
-                    title="Filters"
+                    class="flex h-9 w-9 rounded-full sm:h-9 sm:w-auto sm:rounded-full items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3.5 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950"
+                    :title="$t('common.filters', 'Filters')"
+                    :aria-label="$t('common.filters', 'Filters')"
                 >
                     <Filter class="w-3.5 h-3.5" />
                     <span class="hidden lg:inline">{{ $t("common.filters", "Filters") }}</span>
@@ -579,7 +588,7 @@ onUnmounted(() => {
                 <!-- Create Post Button moved to Left Sidebar -->
 
                 <!-- Action Toolbar Divider -->
-                <div class="h-5 w-px bg-gray-200 hidden sm:block mx-0.5"></div>
+                <div class="h-5 w-px bg-zinc-200 hidden sm:block mx-0.5"></div>
 
                 <!-- Batch Select Button (Unified height, remove shadow-sm) -->
                 <button
@@ -587,10 +596,11 @@ onUnmounted(() => {
                     :class="[
                         isSelectionMode
                             ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300'
-                            : 'bg-white border-slate-200/80 text-slate-600 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900',
+                            : 'bg-white border-zinc-200/80 text-zinc-600 hover:bg-zinc-50 hover:border-zinc-300 hover:text-zinc-900',
                     ]"
-                    class="flex h-9 w-9 rounded-full sm:h-9 sm:w-auto sm:rounded-full items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 active:scale-[0.95]"
-                    title="Batch Select"
+                    class="flex h-9 w-9 rounded-full sm:h-9 sm:w-auto sm:rounded-full items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950"
+                    :title="$t('common.batch_select', 'Batch select')"
+                    :aria-label="$t('common.batch_select', 'Batch select')"
                 >
                     <CheckSquare class="w-3.5 h-3.5" />
                     <span class="hidden lg:inline">{{ $t("common.batch_select", "Batch Select") }}</span>
@@ -603,28 +613,29 @@ onUnmounted(() => {
                         :class="[
                             showViewOptions
                                 ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-50'
-                                : 'bg-white border-slate-200/80 text-slate-600 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900',
+                                : 'bg-white border-zinc-200/80 text-zinc-600 hover:bg-zinc-50 hover:border-zinc-300 hover:text-zinc-900',
                         ]"
-                        class="flex h-9 w-9 rounded-full sm:h-9 sm:w-auto sm:rounded-full items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 active:scale-[0.95]"
+                        class="flex h-9 w-9 rounded-full sm:h-9 sm:w-auto sm:rounded-full items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950"
                         :title="$t('grid.view_options')"
+                        :aria-label="$t('grid.view_options')"
                     >
                         <SlidersHorizontal class="w-3.5 h-3.5" />
                         <span class="hidden lg:inline">{{ $t("grid.view_options") }}</span>
-                        <ChevronDown class="w-3 h-3 text-slate-400 hidden lg:inline" />
+                        <ChevronDown class="w-3 h-3 text-zinc-400 hidden lg:inline" />
                     </button>
 
                     <div
                         v-if="showViewOptions"
-                        class="absolute right-0 mt-2 w-72 sm:w-80 bg-white border border-slate-200/80 rounded-2xl shadow-[0_12px_30px_-4px_rgba(15,23,42,0.16),0_4px_12px_-2px_rgba(15,23,42,0.06)] z-50 p-4 flex flex-col gap-4 animate-in fade-in slide-in-from-top-2 duration-200"
+                        class="absolute right-0 mt-2 w-72 sm:w-80 bg-white border border-zinc-200/80 rounded-2xl shadow-[0_12px_30px_-4px_rgba(15,23,42,0.16),0_4px_12px_-2px_rgba(15,23,42,0.06)] z-50 p-4 flex flex-col gap-4 animate-in fade-in slide-in-from-top-2 duration-200"
                     >
-                        <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                            <span class="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                        <div class="flex items-center justify-between border-b border-zinc-100 pb-2.5">
+                            <span class="text-xs font-bold text-zinc-800 flex items-center gap-1.5">
                                 <SlidersHorizontal class="w-3.5 h-3.5 text-blue-600" />
                                 {{ $t("grid.view_options") }}
                             </span>
                             <button
                                 @click="showViewOptions = false"
-                                class="text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-100 cursor-pointer"
+                                class="text-zinc-400 hover:text-zinc-600 p-0.5 rounded-full hover:bg-zinc-100 cursor-pointer"
                             >
                                 <X class="w-3.5 h-3.5" />
                             </button>
@@ -633,7 +644,7 @@ onUnmounted(() => {
                         <!-- 1. Aspect Ratio Options -->
                         <div class="flex flex-col gap-2">
                             <div class="flex items-center justify-between">
-                                <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                                <span class="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
                                     {{ $t("grid.aspect_ratio") }}
                                 </span>
                             </div>
@@ -645,7 +656,7 @@ onUnmounted(() => {
                                     :class="[
                                         postItemAspectRatio === ratio
                                             ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                                            : 'bg-slate-50 text-slate-700 border-slate-200/80 hover:bg-slate-100 hover:text-slate-900',
+                                            : 'bg-zinc-50 text-zinc-700 border-zinc-200/80 hover:bg-zinc-100 hover:text-zinc-900',
                                     ]"
                                     class="h-8 rounded-lg border text-xs font-semibold transition-all cursor-pointer flex items-center justify-center"
                                 >
@@ -655,19 +666,17 @@ onUnmounted(() => {
                         </div>
 
                         <!-- 2. Discrete Card Size Segmented Control Bar -->
-                        <div class="flex flex-col gap-2 border-t border-slate-100 pt-3.5">
+                        <div class="flex flex-col gap-2 border-t border-zinc-100 pt-3.5">
                             <div class="flex items-center justify-between">
-                                <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                                <span class="text-xs font-bold text-zinc-500 uppercase tracking-wider">
                                     {{ $t("grid.card_size") }}
                                 </span>
-                                <span
-                                    class="text-[11px] font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100"
-                                >
+                                <span class="text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-100">
                                     {{ $t("grid.columns_count", { count: activeCols }, `${activeCols} 列`) }}
                                 </span>
                             </div>
                             <div
-                                class="grid gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60"
+                                class="grid gap-1 bg-zinc-100/80 p-1 rounded-xl border border-zinc-200/60"
                                 :style="{ gridTemplateColumns: `repeat(${colTicks.length}, minmax(0, 1fr))` }"
                             >
                                 <button
@@ -677,20 +686,20 @@ onUnmounted(() => {
                                     @click="activeCols = tick.col"
                                     :class="[
                                         activeCols === tick.col
-                                            ? 'bg-white text-blue-600 font-bold shadow-sm border-slate-200/80'
-                                            : 'text-slate-600 font-medium hover:text-slate-900 border-transparent hover:bg-slate-200/50',
+                                            ? 'bg-white text-blue-600 font-bold shadow-sm border-zinc-200/80'
+                                            : 'text-zinc-600 font-medium hover:text-zinc-900 border-transparent hover:bg-zinc-200/50',
                                     ]"
                                     class="h-7 rounded-lg text-xs transition-all cursor-pointer flex items-center justify-center border select-none"
                                 >
-                                    {{ tick.col }}列
+                                    {{ $t("grid.columns_count", { count: tick.col }) }}
                                 </button>
                             </div>
                         </div>
 
                         <!-- 3. Layout Mode Options -->
-                        <div class="flex flex-col gap-2 border-t border-slate-100 pt-3">
+                        <div class="flex flex-col gap-2 border-t border-zinc-100 pt-3">
                             <div class="flex items-center justify-between">
-                                <span class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                                <span class="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
                                     {{ $t("grid.layout_mode") }}
                                 </span>
                             </div>
@@ -700,7 +709,7 @@ onUnmounted(() => {
                                     :class="[
                                         postLayoutMode === 'grid'
                                             ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                                            : 'bg-slate-50 text-slate-700 border-slate-200/80 hover:bg-slate-100 hover:text-slate-900',
+                                            : 'bg-zinc-50 text-zinc-700 border-zinc-200/80 hover:bg-zinc-100 hover:text-zinc-900',
                                     ]"
                                     class="h-8 rounded-lg border text-xs font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5"
                                 >
@@ -712,7 +721,7 @@ onUnmounted(() => {
                                     :class="[
                                         postLayoutMode === 'list'
                                             ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                                            : 'bg-slate-50 text-slate-700 border-slate-200/80 hover:bg-slate-100 hover:text-slate-900',
+                                            : 'bg-zinc-50 text-zinc-700 border-zinc-200/80 hover:bg-zinc-100 hover:text-zinc-900',
                                     ]"
                                     class="h-8 rounded-lg border text-xs font-semibold transition-all cursor-pointer flex items-center justify-center gap-1.5"
                                 >
@@ -726,496 +735,578 @@ onUnmounted(() => {
             </div>
         </div>
 
-        <div
-            class="sticky top-15 sm:top-14 z-20 transition-all duration-300 ease-in-out border-b border-[#c2c6d6]/30 bg-[#f9f9ff] flex flex-col shrink-0"
-            :class="[showFilters ? 'max-h-90 p-5 opacity-100 overflow-visible' : 'max-h-0 py-0! opacity-0 border-b-0 overflow-hidden']"
-        >
-            <div class="space-y-4">
-                <!-- Platform pill tags (Horizontal Scrollable list matching Stitch, remove shadow-sm) -->
-                <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-                    <span class="text-[#424754] font-semibold text-xs whitespace-nowrap select-none mr-2"
-                        >{{ $t("common.platform", "Platform") }}:</span
-                    >
-                    <button
-                        v-for="p in platforms"
-                        :key="String(p.value)"
-                        @click="source = p.value"
-                        class="px-4 py-1.5 rounded-full border text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
-                        :class="
-                            source === p.value
-                                ? 'bg-[#151c27] border-transparent text-[#f9f9ff]'
-                                : 'bg-white border-[#c2c6d6]/60 text-[#424754] hover:bg-[#f9f9ff] hover:text-[#151c27] hover:border-[#c2c6d6]/80'
-                        "
-                    >
-                        {{ p.label }}
-                    </button>
-                </div>
-
-                <!-- Sorting and Dropdowns row -->
-                <div class="flex flex-wrap items-center gap-4 sm:gap-6 text-xs border-t border-[#c2c6d6]/30 pt-3.5">
-                    <!-- Sort by Dropdown -->
-                    <div class="flex items-center gap-2">
-                        <span class="text-[#424754] font-semibold select-none">{{ $t("common.sort_by", "Sort by") }}:</span>
-                        <div class="relative">
-                            <select
-                                v-model="sortValue"
-                                class="h-9 appearance-none bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-lg pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/10 cursor-pointer transition-all shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-                            >
-                                <option value="import_time_desc">
-                                    {{ $t("common.sort_import_time_desc", "Import Time (New -> Old)") }}
-                                </option>
-                                <option value="import_time_asc">{{ $t("common.sort_import_time_asc", "Import Time (Old -> New)") }}</option>
-                                <option value="published_time_desc">
-                                    {{ $t("common.sort_published_time_desc", "Creation Time (New -> Old)") }}
-                                </option>
-                                <option value="published_time_asc">
-                                    {{ $t("common.sort_published_time_asc", "Creation Time (Old -> New)") }}
-                                </option>
-                            </select>
-                            <ChevronDown
-                                class="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                            />
-                        </div>
-                    </div>
-
-                    <!-- Author Dropdown -->
-                    <div ref="authorDropdownRef" class="flex items-center gap-2 relative">
-                        <span class="text-[#424754] font-semibold select-none">{{ $t("common.author", "Author") }}:</span>
-                        <div class="relative">
-                            <button
-                                @click="showAuthorDropdown = !showAuthorDropdown"
-                                type="button"
-                                class="flex items-center flex-wrap gap-1.5 bg-white hover:bg-slate-50/10 border border-slate-200 hover:border-slate-300 text-[#151c27] rounded-lg py-2 px-2.5 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#0058be]/10 cursor-pointer transition-all select-none min-h-9 min-w-48 max-w-md w-auto shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-                            >
-                                <div class="flex items-center gap-1.5 pl-1 pr-1 py-0.5 text-slate-500 shrink-0 select-none">
-                                    <User class="w-3.5 h-3.5 text-slate-400" />
-                                    <span v-if="authorIds.length === 0" class="text-slate-700 font-semibold">{{
-                                        $t("common.all_authors", "All Authors")
-                                    }}</span>
-                                </div>
-                                <div v-if="authorIds.length > 0" class="flex flex-wrap gap-1.5 items-center">
-                                    <template v-if="authorIds.length <= 2">
-                                        <span
-                                            v-for="id in authorIds"
-                                            :key="id"
-                                            class="inline-flex items-center gap-1.5 bg-slate-100/90 border border-slate-200/50 text-slate-700 pl-2 pr-1 py-1 rounded text-xs font-semibold transition-all hover:bg-slate-200/50 hover:text-slate-900"
-                                            @click.stop
-                                        >
-                                            <span class="truncate max-w-16 text-slate-800">{{ getAuthorName(id) }}</span>
-                                            <span
-                                                class="text-[9px] leading-3 font-bold border px-1 py-px rounded scale-95 origin-left shrink-0 animate-in fade-in"
-                                                :class="getPlatformStyle(getAuthorPlatform(id))"
-                                            >
-                                                {{ $t(`platforms.${getAuthorPlatform(id)}`, getAuthorPlatform(id)) }}
-                                            </span>
-                                            <span
-                                                @click.stop="removeAuthor(id)"
-                                                class="text-slate-400 hover:text-slate-600 transition-all hover:bg-slate-200/80 p-0.5 rounded cursor-pointer shrink-0"
-                                            >
-                                                <X class="w-3 h-3 stroke-[2.5]" />
-                                            </span>
-                                        </span>
-                                    </template>
-                                    <template v-else>
-                                        <span
-                                            class="bg-blue-50 border border-blue-100 text-blue-600 px-2 py-0.5 rounded text-[11px] font-bold shrink-0 animate-in fade-in"
-                                        >
-                                            {{
-                                                $t("common.n_authors_selected", { count: authorIds.length }, `${authorIds.length} Selected`)
-                                            }}
-                                        </span>
-                                    </template>
-                                </div>
-                                <ChevronDown class="w-3.5 h-3.5 text-slate-400 shrink-0 ml-auto mr-1" />
-                            </button>
-
-                            <!-- Combobox Dropdown Card -->
-                            <div
-                                v-if="showAuthorDropdown"
-                                class="absolute left-0 mt-1.5 w-64 bg-white border border-slate-200/80 rounded-xl shadow-[0_12px_30px_-4px_rgba(15,23,42,0.12),0_4px_12px_-2px_rgba(15,23,42,0.04)] z-40 p-1.5 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200"
-                            >
-                                <div
-                                    class="flex items-center border border-slate-200/60 rounded-md bg-slate-50/50 px-2 h-8 gap-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/5 transition-all"
-                                >
-                                    <Search class="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                    <input
-                                        v-model="localAuthorSearch"
-                                        type="text"
-                                        :placeholder="$t('common.search_authors_placeholder', 'Search authors...')"
-                                        class="w-full text-xs font-semibold bg-transparent border-0 outline-none text-slate-700 placeholder:text-slate-400"
-                                    />
-                                    <button
-                                        v-if="localAuthorSearch"
-                                        @click="localAuthorSearch = ''"
-                                        type="button"
-                                        class="text-slate-400 hover:text-slate-600 cursor-pointer p-0.5 rounded-full hover:bg-slate-100"
-                                    >
-                                        <X class="w-3 h-3" />
-                                    </button>
-                                </div>
-                                <div class="max-h-48 overflow-y-auto flex flex-col gap-0.5 pr-0.5 scrollbar-thin">
-                                    <div
-                                        v-for="author in authors"
-                                        :key="author.id"
-                                        @click="toggleAuthor(author.id)"
-                                        class="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer select-none transition-colors group"
-                                    >
-                                        <div class="flex items-center gap-2 min-w-0">
-                                            <div
-                                                class="w-3.5 h-3.5 rounded flex items-center justify-center border shrink-0 transition-all duration-150"
-                                                :class="[
-                                                    authorIds.includes(author.id)
-                                                        ? 'border-blue-600 bg-blue-600 text-white'
-                                                        : 'border-slate-300 bg-white group-hover:border-slate-400/80',
-                                                ]"
-                                            >
-                                                <Check v-if="authorIds.includes(author.id)" class="w-2.5 h-2.5 stroke-3" />
-                                            </div>
-                                            <span class="text-xs font-semibold text-slate-700 truncate">
-                                                {{ author.nickname }}
-                                            </span>
-                                        </div>
-                                        <span
-                                            class="text-[9px] font-bold border px-1.5 py-0.5 rounded shrink-0 ml-2 shadow-[0_1px_1px_rgba(0,0,0,0.01)] transition-colors duration-150"
-                                            :class="getPlatformStyle(author.platform)"
-                                        >
-                                            {{ $t(`platforms.${author.platform}`, author.platform) }}
-                                        </span>
-                                    </div>
-                                    <div
-                                        v-if="authors.length === 0"
-                                        class="text-center py-4 text-xs text-slate-400 font-medium select-none"
-                                    >
-                                        {{ $t("common.no_authors_found", "No authors found") }}
-                                    </div>
-                                </div>
-                                <div
-                                    v-if="authorIds.length > 0"
-                                    class="border-t border-slate-100 pt-1.5 px-1 pb-0.5 shrink-0 flex items-center justify-between"
-                                >
-                                    <span class="text-[9px] text-slate-400 font-semibold pl-1 select-none">
-                                        已选 {{ authorIds.length }} 位
-                                    </span>
-                                    <button
-                                        @click="authorIds = []"
-                                        type="button"
-                                        class="text-[10px] font-bold text-rose-500 hover:text-rose-600 hover:bg-rose-50/50 px-2 py-0.5 rounded transition-colors cursor-pointer"
-                                    >
-                                        {{ $t("common.clear_all", "Clear") }}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Tag Dropdown -->
-                    <div ref="tagDropdownRef" class="flex items-center gap-2 relative">
-                        <span class="text-[#424754] font-semibold select-none">{{ $t("common.tags", "Tags") }}:</span>
-                        <div class="relative">
-                            <button
-                                @click="showTagDropdown = !showTagDropdown"
-                                type="button"
-                                class="flex items-center flex-wrap gap-1.5 bg-white hover:bg-slate-50/10 border border-slate-200 hover:border-slate-300 text-[#151c27] rounded-lg py-2 px-2.5 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#0058be]/10 cursor-pointer transition-all select-none min-h-9 min-w-48 max-w-md w-auto shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-                            >
-                                <div class="flex items-center gap-1.5 pl-1 pr-1 py-0.5 text-slate-500 shrink-0 select-none">
-                                    <TagIcon class="w-3.5 h-3.5 text-slate-400" />
-                                    <span v-if="tagIds.length === 0" class="text-slate-700 font-semibold">{{
-                                        $t("common.all_tags", "All Tags")
-                                    }}</span>
-                                </div>
-                                <div v-if="tagIds.length > 0" class="flex flex-wrap gap-1.5 items-center">
-                                    <template v-if="tagIds.length <= 2">
-                                        <span
-                                            v-for="id in tagIds"
-                                            :key="id"
-                                            class="inline-flex items-center gap-1.5 border px-2 py-1 rounded text-xs font-semibold transition-all hover:opacity-85"
-                                            :style="getTagStyle(getTagColor(id))"
-                                            @click.stop
-                                        >
-                                            <span class="truncate max-w-16 text-slate-800">{{ getTagName(id) }}</span>
-                                            <span
-                                                @click.stop="removeTag(id)"
-                                                class="text-slate-400 hover:text-slate-600 transition-all hover:bg-slate-200/80 p-0.5 rounded cursor-pointer shrink-0"
-                                            >
-                                                <X class="w-3 h-3 stroke-[2.5]" />
-                                            </span>
-                                        </span>
-                                    </template>
-                                    <template v-else>
-                                        <span
-                                            class="bg-blue-50 border border-blue-100 text-blue-600 px-2 py-0.5 rounded text-[11px] font-bold shrink-0 animate-in fade-in"
-                                        >
-                                            {{ $t("common.n_tags_selected", { count: tagIds.length }, `${tagIds.length} Selected`) }}
-                                        </span>
-                                    </template>
-                                </div>
-                                <ChevronDown class="w-3.5 h-3.5 text-slate-400 shrink-0 ml-auto mr-1" />
-                            </button>
-
-                            <!-- Combobox Dropdown Card -->
-                            <div
-                                v-if="showTagDropdown"
-                                class="absolute right-0 mt-1.5 w-64 bg-white border border-slate-200/80 rounded-xl shadow-[0_12px_30px_-4px_rgba(15,23,42,0.12),0_4px_12px_-2px_rgba(15,23,42,0.04)] z-40 p-1.5 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200"
-                            >
-                                <div
-                                    class="flex items-center border border-slate-200/60 rounded-md bg-slate-50/50 px-2 h-8 gap-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/5 transition-all"
-                                >
-                                    <Search class="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                    <input
-                                        v-model="localTagSearch"
-                                        type="text"
-                                        :placeholder="$t('common.search_tags_placeholder', 'Search tags...')"
-                                        class="w-full text-xs font-semibold bg-transparent border-0 outline-none text-slate-700 placeholder:text-slate-400"
-                                    />
-                                    <button
-                                        v-if="localTagSearch"
-                                        @click="localTagSearch = ''"
-                                        type="button"
-                                        class="text-slate-400 hover:text-slate-650 cursor-pointer p-0.5 rounded-full hover:bg-slate-100"
-                                    >
-                                        <X class="w-3 h-3" />
-                                    </button>
-                                </div>
-                                <div class="max-h-48 overflow-y-auto flex flex-col gap-0.5 pr-0.5 scrollbar-thin">
-                                    <div
-                                        v-for="tag in filteredTags"
-                                        :key="tag.id"
-                                        @click="toggleTag(tag.id)"
-                                        class="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer select-none transition-colors group"
-                                    >
-                                        <div class="flex items-center gap-2 min-w-0">
-                                            <div
-                                                class="w-3.5 h-3.5 rounded flex items-center justify-center border shrink-0 transition-all duration-150"
-                                                :class="[
-                                                    tagIds.includes(tag.id)
-                                                        ? 'border-blue-600 bg-blue-600 text-white'
-                                                        : 'border-slate-300 bg-white group-hover:border-slate-400/80',
-                                                ]"
-                                            >
-                                                <Check v-if="tagIds.includes(tag.id)" class="w-2.5 h-2.5 stroke-3" />
-                                            </div>
-                                            <span class="text-xs font-semibold text-slate-700 truncate">
-                                                {{ tag.name }}
-                                            </span>
-                                        </div>
-                                        <span
-                                            v-if="tag.color"
-                                            class="w-2 h-2 rounded-full shrink-0 ml-2 shadow-[0_1px_1px_rgba(0,0,0,0.01)]"
-                                            :style="{ backgroundColor: normalizeColor(tag.color) }"
-                                        ></span>
-                                    </div>
-                                    <div
-                                        v-if="filteredTags.length === 0"
-                                        class="text-center py-4 text-xs text-slate-400 font-medium select-none"
-                                    >
-                                        {{ $t("common.no_tags_found", "No tags found") }}
-                                    </div>
-                                </div>
-                                <div
-                                    v-if="tagIds.length > 0"
-                                    class="border-t border-slate-100 pt-1.5 px-1 pb-0.5 shrink-0 flex items-center justify-between"
-                                >
-                                    <span class="text-[9px] text-slate-400 font-semibold pl-1 select-none">
-                                        已选 {{ tagIds.length }} 个
-                                    </span>
-                                    <button
-                                        @click="tagIds = []"
-                                        type="button"
-                                        class="text-[10px] font-bold text-rose-500 hover:text-rose-600 hover:bg-rose-50/50 px-2 py-0.5 rounded transition-colors cursor-pointer"
-                                    >
-                                        {{ $t("common.clear_all", "Clear") }}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Media Type Dropdown -->
-                    <div class="flex items-center gap-2">
-                        <span class="text-[#424754] font-semibold select-none">{{ $t("common.media_type", "Media Type") }}:</span>
-                        <div class="relative">
-                            <select
-                                v-model="mediaType"
-                                class="h-9 appearance-none bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-lg pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/10 cursor-pointer transition-all shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-                            >
-                                <option :value="undefined">{{ $t("common.all_media_types", "All Types") }}</option>
-                                <option value="IMAGE">{{ $t("common.media_type_image", "Image") }}</option>
-                                <option value="VIDEO">{{ $t("common.media_type_video", "Video") }}</option>
-                                <option value="LIVE_PHOTO">{{ $t("common.media_type_live_photo", "Live Photo") }}</option>
-                                <option value="AUDIO">{{ $t("common.media_type_audio", "Audio") }}</option>
-                                <option value="PDF">{{ $t("common.media_type_pdf", "PDF") }}</option>
-                            </select>
-                            <ChevronDown
-                                class="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                            />
-                        </div>
-                    </div>
-
-                    <!-- Items per Page Dropdown -->
-                    <div class="flex items-center gap-2">
-                        <span class="text-[#424754] font-semibold select-none">{{ $t("grid.items_per_page_label", "每页显示") }}:</span>
-                        <div class="relative">
-                            <select
-                                v-model="pageSize"
-                                class="h-9 appearance-none bg-white border border-slate-200 hover:border-slate-300 text-slate-700 rounded-lg pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/10 cursor-pointer transition-all shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
-                            >
-                                <option :value="20">20</option>
-                                <option :value="50">50</option>
-                                <option :value="100">100</option>
-                            </select>
-                            <ChevronDown
-                                class="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                            />
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Content -->
-        <div ref="scrollContainer" class="flex-1 overflow-y-auto p-3 sm:p-6 pb-0 sm:pb-6">
+        <!-- Main Workplace (Seamless Split-Pane) -->
+        <div class="flex-1 flex flex-col min-h-0 min-w-0 bg-white relative overflow-hidden">
             <div
-                v-if="Array.isArray(posts)"
-                ref="gridContainer"
-                class="pb-[calc(3.75rem+env(safe-area-inset-bottom)+var(--visual-viewport-bottom-offset,0))] sm:pb-0 transition-all duration-300"
-                :class="postLayoutMode === 'list' ? 'flex flex-col gap-3' : 'grid gap-2.5 sm:gap-4'"
-                :style="postLayoutMode === 'list' ? undefined : { gridTemplateColumns: `repeat(${activeCols}, minmax(0, 1fr))` }"
+                class="transition-all duration-300 ease-in-out border-b border-zinc-200/70 bg-zinc-50/70 flex flex-col shrink-0"
+                :class="[
+                    showFilters ? 'max-h-90 p-4 sm:p-5 opacity-100 overflow-visible' : 'max-h-0 py-0! opacity-0 border-b-0 overflow-hidden',
+                ]"
             >
-                <PostCard
-                    v-for="(post, index) in posts"
-                    :key="post.id"
-                    :post="post"
-                    :is-selected="selectedPostId === post.id"
-                    :is-checked="isPostChecked(post.id)"
-                    :show-checkbox="isSelectionMode || isPostChecked(post.id)"
-                    :data-index="index"
-                    @toggle-checked="setPostChecked(post.id, $event)"
-                    @click="handlePostClick(post, $event)"
-                />
-            </div>
-        </div>
+                <div class="space-y-4">
+                    <!-- Platform pill tags -->
+                    <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+                        <span class="text-zinc-600 font-semibold text-xs whitespace-nowrap select-none mr-2"
+                            >{{ $t("common.platform", "Platform") }}:</span
+                        >
+                        <button
+                            v-for="p in platforms"
+                            :key="String(p.value)"
+                            @click="source = p.value"
+                            class="px-4 py-1.5 rounded-full border text-xs font-semibold transition-all cursor-pointer whitespace-nowrap active:scale-[0.96]"
+                            :class="
+                                source === p.value
+                                    ? 'bg-zinc-900 border-transparent text-white'
+                                    : 'bg-white border-zinc-200/80 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
+                            "
+                        >
+                            {{ p.label }}
+                        </button>
+                    </div>
 
-        <!-- Footer / Pagination -->
-        <div
-            class="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom)+var(--visual-viewport-bottom-offset,0))] right-4 z-30 h-10 px-1 bg-white/90 backdrop-blur-md border border-slate-200 rounded-full flex items-center justify-center w-max sm:relative sm:bottom-auto sm:left-auto sm:right-auto sm:translate-x-0 sm:z-auto sm:h-14 sm:px-6 sm:border-0 sm:border-t sm:border-slate-100 sm:rounded-none sm:bg-white/95 sm:w-full sm:justify-between"
-        >
-            <!-- Left side: Total items count (hidden on mobile, shown on desktop) -->
-            <div class="hidden sm:block text-slate-500 text-sm select-none font-medium">
-                {{ $t("grid.showing_items", { count: total || 0 }) }}
-            </div>
-
-            <!-- Right side: Pagination (centered on mobile, right-aligned on desktop) -->
-            <div class="flex items-center sm:gap-4">
-                <PaginationRoot
-                    :total="total || 0"
-                    :sibling-count="1"
-                    :items-per-page="count || 20"
-                    :page="page"
-                    @update:page="changePage"
-                    class="flex items-center"
-                >
-                    <PaginationList v-slot="{ items }" class="flex items-center gap-1.5">
-                        <!-- Mobile Layout: A single unified pill selector -->
-                        <div class="flex sm:hidden items-center p-0.5">
-                            <PaginationPrev as-child>
-                                <Button
-                                    variant="ghost"
-                                    class="w-8 h-8 rounded-full p-0 text-slate-600 hover:text-slate-900"
-                                    :disabled="isPrevDisabled"
-                                >
-                                    <ChevronLeft class="w-4 h-4" />
-                                </Button>
-                            </PaginationPrev>
-                            <NumberField v-if="isEditingPage" v-model="mobileJumpPage" :min="1" :max="totalPages" class="w-12 h-6">
-                                <NumberFieldInput
-                                    ref="mobileInputRef"
-                                    class="w-12 h-6 text-center p-0 bg-slate-50 border-slate-200 text-xs font-semibold tabular-nums"
-                                    @blur="finishEditingPage"
-                                    @keyup.enter="finishEditingPage"
-                                />
-                            </NumberField>
-                            <span
-                                v-else
-                                @click="startEditingPage"
-                                class="text-xs font-semibold text-slate-700 px-3 min-w-14 text-center cursor-pointer hover:bg-slate-100/80 active:bg-slate-200/50 py-1 rounded-md transition-colors select-none tabular-nums"
+                    <!-- Sorting and Dropdowns row -->
+                    <div class="flex flex-wrap items-center gap-4 sm:gap-6 text-xs border-t border-zinc-200/50 pt-3.5">
+                        <!-- Sort by Dropdown -->
+                        <div class="flex items-center gap-2">
+                            <label for="post-sort-select" class="text-zinc-600 font-semibold select-none cursor-pointer"
+                                >{{ $t("common.sort_by", "Sort by") }}:</label
                             >
-                                {{ page }} / {{ totalPages }}
-                            </span>
-                            <PaginationNext as-child>
-                                <Button
-                                    variant="ghost"
-                                    class="w-8 h-8 rounded-full p-0 text-slate-600 hover:text-slate-900"
-                                    :disabled="isNextDisabled"
+                            <div class="relative">
+                                <select
+                                    id="post-sort-select"
+                                    v-model="sortValue"
+                                    :aria-label="$t('common.sort_by', 'Sort by')"
+                                    class="h-9 appearance-none bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 rounded-lg pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/10 cursor-pointer transition-all shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
                                 >
-                                    <ChevronRight class="w-4 h-4" />
-                                </Button>
-                            </PaginationNext>
-                        </div>
-
-                        <!-- Desktop Layout: Standard items -->
-                        <div class="hidden sm:flex items-center gap-1.5">
-                            <PaginationPrev as-child>
-                                <Button
-                                    variant="outline"
-                                    class="w-9 h-9 rounded-lg border-slate-200/80 hover:bg-slate-50 text-slate-700 p-0"
-                                    :disabled="isPrevDisabled"
-                                >
-                                    <ChevronLeft class="w-4 h-4" />
-                                </Button>
-                            </PaginationPrev>
-
-                            <template v-for="(p, index) in items" :key="index">
-                                <PaginationListItem v-if="p.type === 'page'" :value="p.value" as-child>
-                                    <Button
-                                        :variant="p.value === page ? 'default' : 'outline'"
-                                        class="w-9 h-9 rounded-lg border-slate-200/80 text-slate-700 p-0 tabular-nums transition-all"
-                                        :class="
-                                            p.value === page
-                                                ? 'bg-slate-900 hover:bg-slate-800 text-white border-transparent'
-                                                : 'hover:bg-slate-50'
-                                        "
-                                    >
-                                        {{ p.value }}
-                                    </Button>
-                                </PaginationListItem>
-                                <PaginationEllipsis v-else-if="p.type === 'ellipsis'" class="w-9 h-9 flex items-center justify-center">
-                                    <MoreHorizontal class="w-4 h-4 text-gray-400" />
-                                </PaginationEllipsis>
-                            </template>
-
-                            <PaginationNext as-child>
-                                <Button
-                                    variant="outline"
-                                    class="w-9 h-9 rounded-lg border-slate-200/80 hover:bg-slate-50 text-slate-700 p-0"
-                                    :disabled="isNextDisabled"
-                                >
-                                    <ChevronRight class="w-4 h-4" />
-                                </Button>
-                            </PaginationNext>
-                        </div>
-                    </PaginationList>
-                </PaginationRoot>
-
-                <div class="hidden sm:flex items-center gap-3 border-l border-gray-200 pl-4 tabular-nums">
-                    <i18n-t
-                        tag="div"
-                        keypath="grid.page_info"
-                        scope="global"
-                        class="hidden sm:flex items-center gap-1.5 text-gray-500 text-sm"
-                    >
-                        <template #current>
-                            <NumberField v-model="jumpPage" :min="1" :max="totalPages" class="w-10 h-7">
-                                <NumberFieldInput
-                                    class="w-10 h-7 text-center p-0 bg-slate-50/50 border-slate-200 text-sm tabular-nums"
-                                    @keyup.enter="handleJump"
-                                    @blur="handleJump"
+                                    <option value="import_time_desc">
+                                        {{ $t("common.sort_import_time_desc", "Import Time (New -> Old)") }}
+                                    </option>
+                                    <option value="import_time_asc">
+                                        {{ $t("common.sort_import_time_asc", "Import Time (Old -> New)") }}
+                                    </option>
+                                    <option value="published_time_desc">
+                                        {{ $t("common.sort_published_time_desc", "Creation Time (New -> Old)") }}
+                                    </option>
+                                    <option value="published_time_asc">
+                                        {{ $t("common.sort_published_time_asc", "Creation Time (Old -> New)") }}
+                                    </option>
+                                </select>
+                                <ChevronDown
+                                    class="w-3.5 h-3.5 text-zinc-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
                                 />
-                            </NumberField>
-                        </template>
-                        <template #total>
-                            <span class="font-medium text-gray-700">{{ totalPages }}</span>
-                        </template>
-                    </i18n-t>
+                            </div>
+                        </div>
+
+                        <!-- Author Dropdown -->
+                        <div ref="authorDropdownRef" class="flex items-center gap-2 relative">
+                            <span class="text-[#424754] font-semibold select-none">{{ $t("common.author", "Author") }}:</span>
+                            <div class="relative">
+                                <button
+                                    @click="showAuthorDropdown = !showAuthorDropdown"
+                                    type="button"
+                                    class="flex items-center flex-wrap gap-1.5 bg-white hover:bg-zinc-50/10 border border-zinc-200 hover:border-zinc-300 text-[#151c27] rounded-lg py-2 px-2.5 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#0058be]/10 cursor-pointer transition-all select-none min-h-9 min-w-48 max-w-md w-auto shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                                >
+                                    <div class="flex items-center gap-1.5 pl-1 pr-1 py-0.5 text-zinc-500 shrink-0 select-none">
+                                        <User class="w-3.5 h-3.5 text-zinc-400" />
+                                        <span v-if="authorIds.length === 0" class="text-zinc-700 font-semibold">{{
+                                            $t("common.all_authors", "All Authors")
+                                        }}</span>
+                                    </div>
+                                    <div v-if="authorIds.length > 0" class="flex flex-wrap gap-1.5 items-center">
+                                        <template v-if="authorIds.length <= 2">
+                                            <span
+                                                v-for="id in authorIds"
+                                                :key="id"
+                                                class="inline-flex items-center gap-1.5 bg-zinc-100/90 border border-zinc-200/50 text-zinc-700 pl-2 pr-1 py-1 rounded text-xs font-semibold transition-all hover:bg-zinc-200/50 hover:text-zinc-900"
+                                                @click.stop
+                                            >
+                                                <span class="truncate max-w-16 text-zinc-800">{{ getAuthorName(id) }}</span>
+                                                <span
+                                                    class="text-xs leading-3 font-bold border px-1 py-px rounded scale-95 origin-left shrink-0 animate-in fade-in"
+                                                    :class="getPlatformStyle(getAuthorPlatform(id))"
+                                                >
+                                                    {{ $t(`platforms.${getAuthorPlatform(id)}`, getAuthorPlatform(id)) }}
+                                                </span>
+                                                <span
+                                                    @click.stop="removeAuthor(id)"
+                                                    class="text-zinc-400 hover:text-zinc-600 transition-all hover:bg-zinc-200/80 p-0.5 rounded cursor-pointer shrink-0"
+                                                >
+                                                    <X class="w-3 h-3 stroke-[2.5]" />
+                                                </span>
+                                            </span>
+                                        </template>
+                                        <template v-else>
+                                            <span
+                                                class="bg-blue-50 border border-blue-100 text-blue-600 px-2 py-0.5 rounded text-xs font-bold shrink-0 animate-in fade-in"
+                                            >
+                                                {{
+                                                    $t(
+                                                        "common.n_authors_selected",
+                                                        { count: authorIds.length },
+                                                        `${authorIds.length} Selected`,
+                                                    )
+                                                }}
+                                            </span>
+                                        </template>
+                                    </div>
+                                    <ChevronDown class="w-3.5 h-3.5 text-zinc-400 shrink-0 ml-auto mr-1" />
+                                </button>
+
+                                <!-- Combobox Dropdown Card -->
+                                <div
+                                    v-if="showAuthorDropdown"
+                                    class="absolute left-0 mt-1.5 w-64 bg-white border border-zinc-200/80 rounded-xl shadow-[0_12px_30px_-4px_rgba(15,23,42,0.12),0_4px_12px_-2px_rgba(15,23,42,0.04)] z-40 p-1.5 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200"
+                                >
+                                    <div
+                                        class="flex items-center border border-zinc-200/60 rounded-md bg-zinc-50/50 px-2 h-8 gap-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/5 transition-all"
+                                    >
+                                        <Search class="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                                        <input
+                                            v-model="localAuthorSearch"
+                                            type="text"
+                                            :placeholder="$t('common.search_authors_placeholder', 'Search authors...')"
+                                            class="w-full text-xs font-semibold bg-transparent border-0 outline-none text-zinc-700 placeholder:text-zinc-400"
+                                        />
+                                        <button
+                                            v-if="localAuthorSearch"
+                                            @click="localAuthorSearch = ''"
+                                            type="button"
+                                            class="text-zinc-400 hover:text-zinc-600 cursor-pointer p-0.5 rounded-full hover:bg-zinc-100"
+                                        >
+                                            <X class="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                    <div class="max-h-48 overflow-y-auto flex flex-col gap-0.5 pr-0.5 scrollbar-thin">
+                                        <div
+                                            v-for="author in authors"
+                                            :key="author.id"
+                                            @click="toggleAuthor(author.id)"
+                                            class="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-zinc-50 cursor-pointer select-none transition-colors group"
+                                        >
+                                            <div class="flex items-center gap-2 min-w-0">
+                                                <div
+                                                    class="w-3.5 h-3.5 rounded flex items-center justify-center border shrink-0 transition-all duration-150"
+                                                    :class="[
+                                                        authorIds.includes(author.id)
+                                                            ? 'border-blue-600 bg-blue-600 text-white'
+                                                            : 'border-zinc-300 bg-white group-hover:border-zinc-400/80',
+                                                    ]"
+                                                >
+                                                    <Check v-if="authorIds.includes(author.id)" class="w-2.5 h-2.5 stroke-3" />
+                                                </div>
+                                                <span class="text-xs font-semibold text-zinc-700 truncate">
+                                                    {{ author.nickname }}
+                                                </span>
+                                            </div>
+                                            <span
+                                                class="text-xs font-bold border px-1.5 py-0.5 rounded shrink-0 ml-2 shadow-[0_1px_1px_rgba(0,0,0,0.01)] transition-colors duration-150"
+                                                :class="getPlatformStyle(author.platform)"
+                                            >
+                                                {{ $t(`platforms.${author.platform}`, author.platform) }}
+                                            </span>
+                                        </div>
+                                        <div
+                                            v-if="authors.length === 0"
+                                            class="text-center py-4 text-xs text-zinc-400 font-medium select-none"
+                                        >
+                                            {{ $t("common.no_authors_found", "No authors found") }}
+                                        </div>
+                                    </div>
+                                    <div
+                                        v-if="authorIds.length > 0"
+                                        class="border-t border-zinc-100 pt-1.5 px-1 pb-0.5 shrink-0 flex items-center justify-between"
+                                    >
+                                        <span class="text-xs text-zinc-400 font-semibold pl-1 select-none">
+                                            {{ $t("common.n_authors_selected", { count: authorIds.length }) }}
+                                        </span>
+                                        <button
+                                            @click="authorIds = []"
+                                            type="button"
+                                            class="text-xs font-bold text-rose-500 hover:text-rose-600 hover:bg-rose-50/50 px-2 py-0.5 rounded transition-colors cursor-pointer"
+                                        >
+                                            {{ $t("common.clear_all", "Clear") }}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Tag Dropdown -->
+                        <div ref="tagDropdownRef" class="flex items-center gap-2 relative">
+                            <span class="text-[#424754] font-semibold select-none">{{ $t("common.tags", "Tags") }}:</span>
+                            <div class="relative">
+                                <button
+                                    @click="showTagDropdown = !showTagDropdown"
+                                    type="button"
+                                    class="flex items-center flex-wrap gap-1.5 bg-white hover:bg-zinc-50/10 border border-zinc-200 hover:border-zinc-300 text-[#151c27] rounded-lg py-2 px-2.5 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#0058be]/10 cursor-pointer transition-all select-none min-h-9 min-w-48 max-w-md w-auto shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                                >
+                                    <div class="flex items-center gap-1.5 pl-1 pr-1 py-0.5 text-zinc-500 shrink-0 select-none">
+                                        <TagIcon class="w-3.5 h-3.5 text-zinc-400" />
+                                        <span v-if="tagIds.length === 0" class="text-zinc-700 font-semibold">{{
+                                            $t("common.all_tags", "All Tags")
+                                        }}</span>
+                                    </div>
+                                    <div v-if="tagIds.length > 0" class="flex flex-wrap gap-1.5 items-center">
+                                        <template v-if="tagIds.length <= 2">
+                                            <span
+                                                v-for="id in tagIds"
+                                                :key="id"
+                                                class="inline-flex items-center gap-1.5 border px-2 py-1 rounded text-xs font-semibold transition-all hover:opacity-85"
+                                                :style="getTagStyle(getTagColor(id))"
+                                                @click.stop
+                                            >
+                                                <span class="truncate max-w-16 text-zinc-800">{{ getTagName(id) }}</span>
+                                                <span
+                                                    @click.stop="removeTag(id)"
+                                                    class="text-zinc-400 hover:text-zinc-600 transition-all hover:bg-zinc-200/80 p-0.5 rounded cursor-pointer shrink-0"
+                                                >
+                                                    <X class="w-3 h-3 stroke-[2.5]" />
+                                                </span>
+                                            </span>
+                                        </template>
+                                        <template v-else>
+                                            <span
+                                                class="bg-blue-50 border border-blue-100 text-blue-600 px-2 py-0.5 rounded text-xs font-bold shrink-0 animate-in fade-in"
+                                            >
+                                                {{ $t("common.n_tags_selected", { count: tagIds.length }, `${tagIds.length} Selected`) }}
+                                            </span>
+                                        </template>
+                                    </div>
+                                    <ChevronDown class="w-3.5 h-3.5 text-zinc-400 shrink-0 ml-auto mr-1" />
+                                </button>
+
+                                <!-- Combobox Dropdown Card -->
+                                <div
+                                    v-if="showTagDropdown"
+                                    class="absolute right-0 mt-1.5 w-64 bg-white border border-zinc-200/80 rounded-xl shadow-[0_12px_30px_-4px_rgba(15,23,42,0.12),0_4px_12px_-2px_rgba(15,23,42,0.04)] z-40 p-1.5 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200"
+                                >
+                                    <div
+                                        class="flex items-center border border-zinc-200/60 rounded-md bg-zinc-50/50 px-2 h-8 gap-1.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/5 transition-all"
+                                    >
+                                        <Search class="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                                        <input
+                                            v-model="localTagSearch"
+                                            type="text"
+                                            :placeholder="$t('common.search_tags_placeholder', 'Search tags...')"
+                                            class="w-full text-xs font-semibold bg-transparent border-0 outline-none text-zinc-700 placeholder:text-zinc-400"
+                                        />
+                                        <button
+                                            v-if="localTagSearch"
+                                            @click="localTagSearch = ''"
+                                            type="button"
+                                            class="text-zinc-400 hover:text-zinc-700 active:scale-[0.96] cursor-pointer p-0.5 rounded-full hover:bg-zinc-100"
+                                        >
+                                            <X class="w-3 h-3" />
+                                        </button>
+                                    </div>
+                                    <div class="max-h-48 overflow-y-auto flex flex-col gap-0.5 pr-0.5 scrollbar-thin">
+                                        <div
+                                            v-for="tag in filteredTags"
+                                            :key="tag.id"
+                                            @click="toggleTag(tag.id)"
+                                            class="flex items-center justify-between px-2 py-1.5 rounded-md hover:bg-zinc-50 cursor-pointer select-none transition-colors group"
+                                        >
+                                            <div class="flex items-center gap-2 min-w-0">
+                                                <div
+                                                    class="w-3.5 h-3.5 rounded flex items-center justify-center border shrink-0 transition-all duration-150"
+                                                    :class="[
+                                                        tagIds.includes(tag.id)
+                                                            ? 'border-blue-600 bg-blue-600 text-white'
+                                                            : 'border-zinc-300 bg-white group-hover:border-zinc-400/80',
+                                                    ]"
+                                                >
+                                                    <Check v-if="tagIds.includes(tag.id)" class="w-2.5 h-2.5 stroke-3" />
+                                                </div>
+                                                <span class="text-xs font-semibold text-zinc-700 truncate">
+                                                    {{ tag.name }}
+                                                </span>
+                                            </div>
+                                            <span
+                                                v-if="tag.color"
+                                                class="w-2 h-2 rounded-full shrink-0 ml-2 shadow-[0_1px_1px_rgba(0,0,0,0.01)]"
+                                                :style="{ backgroundColor: normalizeColor(tag.color) }"
+                                            ></span>
+                                        </div>
+                                        <div
+                                            v-if="filteredTags.length === 0"
+                                            class="text-center py-4 text-xs text-zinc-400 font-medium select-none"
+                                        >
+                                            {{ $t("common.no_tags_found", "No tags found") }}
+                                        </div>
+                                    </div>
+                                    <div
+                                        v-if="tagIds.length > 0"
+                                        class="border-t border-zinc-100 pt-1.5 px-1 pb-0.5 shrink-0 flex items-center justify-between"
+                                    >
+                                        <span class="text-xs text-zinc-400 font-semibold pl-1 select-none">
+                                            {{ $t("common.n_tags_selected", { count: tagIds.length }) }}
+                                        </span>
+                                        <button
+                                            @click="tagIds = []"
+                                            type="button"
+                                            class="text-xs font-bold text-rose-500 hover:text-rose-600 hover:bg-rose-50/50 px-2 py-0.5 rounded transition-colors cursor-pointer"
+                                        >
+                                            {{ $t("common.clear_all", "Clear") }}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Media Type Dropdown -->
+                        <div class="flex items-center gap-2">
+                            <label for="post-media-type-select" class="text-zinc-600 font-semibold select-none cursor-pointer"
+                                >{{ $t("common.media_type", "Media Type") }}:</label
+                            >
+                            <div class="relative">
+                                <select
+                                    id="post-media-type-select"
+                                    v-model="mediaType"
+                                    :aria-label="$t('common.media_type', 'Media Type')"
+                                    class="h-9 appearance-none bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 rounded-lg pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/10 cursor-pointer transition-all shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                                >
+                                    <option :value="undefined">{{ $t("common.all_media_types", "All Types") }}</option>
+                                    <option value="IMAGE">{{ $t("common.media_type_image", "Image") }}</option>
+                                    <option value="VIDEO">{{ $t("common.media_type_video", "Video") }}</option>
+                                    <option value="LIVE_PHOTO">{{ $t("common.media_type_live_photo", "Live Photo") }}</option>
+                                    <option value="AUDIO">{{ $t("common.media_type_audio", "Audio") }}</option>
+                                    <option value="PDF">{{ $t("common.media_type_pdf", "PDF") }}</option>
+                                </select>
+                                <ChevronDown
+                                    class="w-3.5 h-3.5 text-zinc-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                                />
+                            </div>
+                        </div>
+
+                        <!-- Items per Page Dropdown -->
+                        <div class="flex items-center gap-2">
+                            <label for="post-page-size-select" class="text-zinc-600 font-semibold select-none cursor-pointer"
+                                >{{ $t("grid.items_per_page_label", "Page size") }}:</label
+                            >
+                            <div class="relative">
+                                <select
+                                    id="post-page-size-select"
+                                    v-model="pageSize"
+                                    :aria-label="$t('grid.items_per_page_label', 'Page size')"
+                                    class="h-9 appearance-none bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-700 rounded-lg pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/10 cursor-pointer transition-all shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                                >
+                                    <option :value="20">20</option>
+                                    <option :value="50">50</option>
+                                    <option :value="100">100</option>
+                                </select>
+                                <ChevronDown
+                                    class="w-3.5 h-3.5 text-zinc-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                                />
+                            </div>
+                        </div>
+
+                        <!-- Clear Filters Button -->
+                        <button
+                            v-if="hasActiveFilters"
+                            type="button"
+                            @click="resetFilters"
+                            class="text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer ml-auto"
+                        >
+                            {{ $t("common.clear_all", "Clear filters") }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Content -->
+            <div ref="scrollContainer" class="flex-1 overflow-y-auto p-4 sm:p-6 bg-zinc-50/30">
+                <!-- Skeletons when loading -->
+                <div v-if="isLoading" class="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4">
+                    <div
+                        v-for="i in 8"
+                        :key="i"
+                        class="rounded-2xl border border-zinc-200/60 bg-white p-3.5 flex flex-col gap-3 animate-pulse"
+                    >
+                        <div class="aspect-4/3 rounded-xl bg-zinc-100 w-full"></div>
+                        <div class="h-4 bg-zinc-200/80 rounded w-3/4"></div>
+                        <div class="h-3 bg-zinc-100 rounded w-1/2"></div>
+                    </div>
+                </div>
+
+                <!-- Empty State -->
+                <div
+                    v-else-if="!posts || posts.length === 0"
+                    class="h-full min-h-72 flex flex-col items-center justify-center p-8 text-center"
+                >
+                    <div
+                        class="w-12 h-12 rounded-2xl bg-zinc-100 border border-zinc-200/60 flex items-center justify-center text-zinc-400 mb-3 shadow-xs"
+                    >
+                        <LayoutGrid class="w-6 h-6" />
+                    </div>
+                    <h2 class="text-sm font-semibold text-zinc-800 mb-1">
+                        {{
+                            keyword || hasActiveFilters
+                                ? $t("common.no_results", "No results found")
+                                : $t("common.no_posts_title", "No posts yet")
+                        }}
+                    </h2>
+                    <p class="text-xs text-zinc-500 max-w-sm mb-4">
+                        {{
+                            keyword || hasActiveFilters
+                                ? $t("common.no_results_desc", "Try adjusting your search query or filters.")
+                                : $t("common.no_posts_desc", "Create or import posts to get started.")
+                        }}
+                    </p>
+                    <Button
+                        v-if="keyword || hasActiveFilters"
+                        variant="outline"
+                        size="sm"
+                        class="h-8 text-xs cursor-pointer"
+                        @click="resetFilters"
+                    >
+                        {{ $t("common.clear_all", "Clear filters") }}
+                    </Button>
+                </div>
+
+                <!-- Posts Grid / List -->
+                <div
+                    v-else
+                    ref="gridContainer"
+                    class="pb-[calc(3.75rem+env(safe-area-inset-bottom)+var(--visual-viewport-bottom-offset,0))] sm:pb-0 transition-all duration-300"
+                    :class="postLayoutMode === 'list' ? 'flex flex-col gap-3' : 'grid gap-2.5 sm:gap-4'"
+                    :style="postLayoutMode === 'list' ? undefined : { gridTemplateColumns: `repeat(${activeCols}, minmax(0, 1fr))` }"
+                >
+                    <PostCard
+                        v-for="(post, index) in posts"
+                        :key="post.id"
+                        :post="post"
+                        :is-selected="selectedPostId === post.id"
+                        :is-checked="isPostChecked(post.id)"
+                        :show-checkbox="isSelectionMode || isPostChecked(post.id)"
+                        :data-index="index"
+                        @toggle-checked="setPostChecked(post.id, $event)"
+                        @click="handlePostClick(post, $event)"
+                    />
+                </div>
+            </div>
+
+            <!-- Footer / Pagination -->
+            <div
+                class="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom)+var(--visual-viewport-bottom-offset,0))] right-4 z-30 h-10 px-1 bg-white/90 backdrop-blur-md border border-zinc-200 rounded-full flex items-center justify-center w-max sm:relative sm:bottom-auto sm:left-auto sm:right-auto sm:translate-x-0 sm:z-auto sm:h-14 sm:px-6 sm:border-0 sm:border-t sm:border-zinc-100 sm:rounded-none sm:bg-white/95 sm:w-full sm:justify-between"
+            >
+                <!-- Left side: Total items count (hidden on mobile, shown on desktop) -->
+                <div class="hidden sm:block text-zinc-500 text-sm select-none font-medium">
+                    {{ $t("grid.showing_items", { count: total || 0 }) }}
+                </div>
+
+                <!-- Right side: Pagination (centered on mobile, right-aligned on desktop) -->
+                <div class="flex items-center sm:gap-4">
+                    <PaginationRoot
+                        :total="total || 0"
+                        :sibling-count="1"
+                        :items-per-page="count || 20"
+                        :page="page"
+                        @update:page="changePage"
+                        class="flex items-center"
+                    >
+                        <PaginationList v-slot="{ items }" class="flex items-center gap-1.5">
+                            <!-- Mobile Layout: A single unified pill selector -->
+                            <div v-if="!isSelectionMode && selectedPostCount === 0" class="flex sm:hidden items-center p-0.5">
+                                <PaginationPrev as-child>
+                                    <Button
+                                        variant="ghost"
+                                        class="w-8 h-8 rounded-full p-0 text-zinc-600 hover:text-zinc-900"
+                                        :disabled="isPrevDisabled"
+                                    >
+                                        <ChevronLeft class="w-4 h-4" />
+                                    </Button>
+                                </PaginationPrev>
+                                <NumberField v-if="isEditingPage" v-model="mobileJumpPage" :min="1" :max="totalPages" class="w-12 h-6">
+                                    <NumberFieldInput
+                                        ref="mobileInputRef"
+                                        class="w-12 h-6 text-center p-0 bg-zinc-50 border-zinc-200 text-xs font-semibold tabular-nums"
+                                        @blur="finishEditingPage"
+                                        @keyup.enter="finishEditingPage"
+                                    />
+                                </NumberField>
+                                <span
+                                    v-else
+                                    @click="startEditingPage"
+                                    class="text-xs font-semibold text-zinc-700 px-3 min-w-14 text-center cursor-pointer hover:bg-zinc-100/80 active:bg-zinc-200/50 py-1 rounded-md transition-colors select-none tabular-nums"
+                                >
+                                    {{ page }} / {{ totalPages }}
+                                </span>
+                                <PaginationNext as-child>
+                                    <Button
+                                        variant="ghost"
+                                        class="w-8 h-8 rounded-full p-0 text-zinc-600 hover:text-zinc-900"
+                                        :disabled="isNextDisabled"
+                                    >
+                                        <ChevronRight class="w-4 h-4" />
+                                    </Button>
+                                </PaginationNext>
+                            </div>
+
+                            <!-- Desktop Layout: Standard items -->
+                            <div class="hidden sm:flex items-center gap-1.5">
+                                <PaginationPrev as-child>
+                                    <Button
+                                        variant="outline"
+                                        class="w-9 h-9 rounded-lg border-zinc-200/80 hover:bg-zinc-50 text-zinc-700 p-0"
+                                        :disabled="isPrevDisabled"
+                                    >
+                                        <ChevronLeft class="w-4 h-4" />
+                                    </Button>
+                                </PaginationPrev>
+
+                                <template v-for="(p, index) in items" :key="index">
+                                    <PaginationListItem v-if="p.type === 'page'" :value="p.value" as-child>
+                                        <Button
+                                            :variant="p.value === page ? 'default' : 'outline'"
+                                            class="w-9 h-9 rounded-lg border-zinc-200/80 text-zinc-700 p-0 tabular-nums transition-all"
+                                            :class="
+                                                p.value === page
+                                                    ? 'bg-zinc-900 hover:bg-zinc-800 text-white border-transparent'
+                                                    : 'hover:bg-zinc-50'
+                                            "
+                                        >
+                                            {{ p.value }}
+                                        </Button>
+                                    </PaginationListItem>
+                                    <PaginationEllipsis v-else-if="p.type === 'ellipsis'" class="w-9 h-9 flex items-center justify-center">
+                                        <MoreHorizontal class="w-4 h-4 text-zinc-400" />
+                                    </PaginationEllipsis>
+                                </template>
+
+                                <PaginationNext as-child>
+                                    <Button
+                                        variant="outline"
+                                        class="w-9 h-9 rounded-lg border-zinc-200/80 hover:bg-zinc-50 text-zinc-700 p-0"
+                                        :disabled="isNextDisabled"
+                                    >
+                                        <ChevronRight class="w-4 h-4" />
+                                    </Button>
+                                </PaginationNext>
+                            </div>
+                        </PaginationList>
+                    </PaginationRoot>
+
+                    <div class="hidden sm:flex items-center gap-3 border-l border-zinc-200 pl-4 tabular-nums">
+                        <i18n-t
+                            tag="div"
+                            keypath="grid.page_info"
+                            scope="global"
+                            class="hidden sm:flex items-center gap-1.5 text-zinc-500 text-sm"
+                        >
+                            <template #current>
+                                <NumberField v-model="jumpPage" :min="1" :max="totalPages" class="w-10 h-7">
+                                    <NumberFieldInput
+                                        class="w-10 h-7 text-center p-0 bg-zinc-50/50 border-zinc-200 text-sm tabular-nums"
+                                        @keyup.enter="handleJump"
+                                        @blur="handleJump"
+                                    />
+                                </NumberField>
+                            </template>
+                            <template #total>
+                                <span class="font-medium text-zinc-700">{{ totalPages }}</span>
+                            </template>
+                        </i18n-t>
+                    </div>
                 </div>
             </div>
         </div>

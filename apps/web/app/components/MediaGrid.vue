@@ -24,9 +24,23 @@ import { useLibraryStore } from "@/stores/library";
 import { storeToRefs } from "pinia";
 
 const store = useMediaStore();
-const { medias, isLoadingMedia, keyword, source, displayMode, total, page, count, selectedMediaId, useAiSearch } = storeToRefs(store);
+const {
+    medias,
+    isLoadingMedia,
+    keyword,
+    source,
+    displayMode,
+    total,
+    page,
+    count,
+    selectedMediaId,
+    useAiSearch,
+    sortBy,
+    sortOrder,
+    mediaType,
+} = storeToRefs(store);
 const { refetchMedia, selectMedia } = store;
-const { toggleSidebar, isCreateMediaOpen } = useAppLayout();
+const { toggleSidebar, isSidebarCollapsed, isCreateMediaOpen } = useAppLayout();
 const libraryStore = useLibraryStore();
 const { isMultiSelectClick } = useMultiSelectModifier();
 const visualViewportBottomOffsetStyle = useVisualViewportBottomOffset();
@@ -52,8 +66,49 @@ const areAllMovableVisibleMediaSelected = computed(
 
 const showCreateDialog = isCreateMediaOpen;
 
+const sortValue = computed({
+    get: () => {
+        if (sortBy.value === "published_time") {
+            return sortOrder.value === "asc" ? "published_asc" : "published_desc";
+        }
+        return sortOrder.value === "asc" ? "created_asc" : "created_desc";
+    },
+    set: (val: string) => {
+        if (val === "published_desc") {
+            sortBy.value = "published_time";
+            sortOrder.value = "desc";
+        } else if (val === "published_asc") {
+            sortBy.value = "published_time";
+            sortOrder.value = "asc";
+        } else if (val === "created_asc") {
+            sortBy.value = "create_time";
+            sortOrder.value = "asc";
+        } else {
+            sortBy.value = "create_time";
+            sortOrder.value = "desc";
+        }
+    },
+});
+
+const hasActiveFilters = computed(() => {
+    return Boolean(
+        source.value ||
+        mediaType.value ||
+        (sortBy.value && sortBy.value !== "create_time") ||
+        (sortOrder.value && sortOrder.value !== "desc"),
+    );
+});
+
+const resetFilters = () => {
+    keyword.value = "";
+    source.value = undefined;
+    mediaType.value = undefined;
+    sortBy.value = "create_time";
+    sortOrder.value = "desc";
+};
+
 watch(
-    () => [keyword.value, source.value, displayMode.value, libraryStore.activeLibraryId],
+    () => [keyword.value, source.value, displayMode.value, libraryStore.activeLibraryId, sortBy.value, sortOrder.value, mediaType.value],
     () => {
         exitSelectionMode();
     },
@@ -211,21 +266,23 @@ onMounted(() => {
 <template>
     <div :style="visualViewportBottomOffsetStyle" class="flex-1 min-h-0 flex flex-col bg-white md:overflow-hidden relative">
         <!-- Header -->
-        <div
-            class="sticky top-0 z-30 h-15 sm:h-14 border-b border-gray-100/80 flex items-center gap-2 px-3 sm:px-6 shrink-0 bg-white/98 backdrop-blur-md supports-backdrop-filter:bg-white/98 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
-        >
+        <div class="z-30 h-14 border-b border-zinc-200/80 flex items-center gap-2 px-4 md:px-6 shrink-0 bg-white">
             <!-- Left side: Sidebar Toggle & Page Title -->
             <div class="flex items-center gap-3 shrink-0">
                 <button
                     @click="toggleSidebar"
-                    class="h-9 w-9 rounded-full -ml-1 flex items-center justify-center text-slate-500 hover:bg-slate-50 hover:text-slate-900 active:scale-[0.95] transition-all cursor-pointer"
-                    title="Toggle Sidebar"
+                    class="h-8 w-8 rounded-lg -ml-1 items-center justify-center text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 transition-colors cursor-pointer"
+                    :class="isSidebarCollapsed ? 'flex' : 'flex md:hidden'"
+                    :title="$t('common.toggle_sidebar', 'Toggle sidebar')"
+                    :aria-label="$t('common.toggle_sidebar', 'Toggle sidebar')"
                 >
                     <Sidebar class="w-5 h-5" />
                 </button>
-                <h1 class="font-semibold text-base text-gray-900 hidden md:flex items-center gap-2 select-none whitespace-nowrap shrink-0">
+                <h1
+                    class="text-sm font-bold tracking-tight text-zinc-900 hidden md:flex items-center gap-2 select-none whitespace-nowrap shrink-0"
+                >
                     <span>{{ $t("common.media_assets", "Media Assets") }}</span>
-                    <span v-if="total" class="text-[11px] font-normal text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full font-mono">{{
+                    <span v-if="total" class="text-xs font-medium text-zinc-500 bg-zinc-100 px-2 py-0.5 rounded-full tabular-nums">{{
                         total
                     }}</span>
                 </h1>
@@ -234,63 +291,58 @@ onMounted(() => {
             <!-- Right side: Filters & Actions Group -->
             <div class="flex min-w-0 items-center gap-2 sm:gap-3 flex-1 justify-end">
                 <!-- Search Input (Unified height and border radius, remove shadow-sm) -->
-                <div class="relative min-w-0 flex-1 sm:max-w-55 group transition-all duration-300">
+                <div class="relative min-w-0 flex-1 sm:max-w-64 group transition-all duration-300">
                     <Search
-                        class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 group-focus-within:text-blue-600 transition-colors"
+                        class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-blue-600 transition-colors"
                     />
                     <input
                         v-model="keyword"
                         type="text"
+                        :aria-label="$t('common.search_media', 'Search media')"
                         :placeholder="$t('common.search', 'Search...')"
-                        class="w-full h-9 rounded-full bg-slate-50/90 border border-slate-200/80 text-slate-900 text-sm font-medium focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 block pl-9 pr-8 hover:bg-white focus:bg-white transition-all placeholder:text-slate-400"
+                        class="w-full h-9 rounded-full bg-zinc-50/90 border border-zinc-200/80 text-zinc-900 text-sm font-medium focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/10 block pl-9 pr-16 hover:bg-white focus:bg-white transition-all placeholder:text-zinc-400"
                     />
-                    <button
-                        v-if="keyword"
-                        @click="clearSearch"
-                        class="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 hover:bg-slate-200 rounded-full transition-colors text-slate-400"
-                    >
-                        <X class="w-3 h-3" />
-                    </button>
+                    <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
+                        <button
+                            v-if="keyword"
+                            @click="clearSearch"
+                            :aria-label="$t('common.clear_search', 'Clear search')"
+                            class="flex h-6 w-6 items-center justify-center rounded-full text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 transition-colors cursor-pointer"
+                        >
+                            <X class="w-3 h-3" />
+                        </button>
+                        <button
+                            @click="useAiSearch = !useAiSearch"
+                            :aria-pressed="useAiSearch"
+                            :aria-label="$t('common.ai_search', 'AI Search')"
+                            :title="$t('common.ai_search', 'AI Search')"
+                            :class="useAiSearch ? 'bg-blue-600 text-white' : 'text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700'"
+                            class="flex h-6 w-6 items-center justify-center rounded-full transition-colors cursor-pointer"
+                        >
+                            <Sparkles class="w-3.5 h-3.5" :class="useAiSearch ? 'fill-white/20' : ''" />
+                        </button>
+                    </div>
                 </div>
-
-                <!-- AI Search Toggle Button (Unified height and border radius, remove shadow-sm) -->
-                <button
-                    @click="useAiSearch = !useAiSearch"
-                    :class="[
-                        useAiSearch
-                            ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300'
-                            : 'bg-white border-slate-200/80 text-slate-600 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900',
-                    ]"
-                    class="flex h-9 w-9 rounded-full sm:h-9 sm:w-auto sm:rounded-full items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 active:scale-[0.95]"
-                    title="Toggle AI Search"
-                >
-                    <Sparkles
-                        class="w-3.5 h-3.5 transition-colors"
-                        :class="useAiSearch ? 'text-blue-600 fill-blue-600/10' : 'text-gray-400'"
-                    />
-                    <span class="hidden lg:inline">{{ $t("common.ai_search", "AI Search") }}</span>
-                </button>
 
                 <!-- Toggle Filters Button (Unified height and border radius, remove shadow-sm) -->
                 <button
                     @click="showFilters = !showFilters"
                     :class="[
-                        showFilters || source
+                        showFilters || hasActiveFilters
                             ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300'
-                            : 'bg-white border-slate-200/80 text-slate-600 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900',
+                            : 'bg-white border-zinc-200/80 text-zinc-600 hover:bg-zinc-50 hover:border-zinc-300 hover:text-zinc-900',
                     ]"
-                    class="flex h-9 w-9 rounded-full sm:h-9 sm:w-auto sm:rounded-full items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3.5 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 active:scale-[0.95]"
-                    title="Filters"
+                    class="flex h-9 w-9 rounded-full sm:h-9 sm:w-auto sm:rounded-full items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3.5 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950"
+                    :title="$t('common.filters', 'Filters')"
+                    :aria-label="$t('common.filters', 'Filters')"
                 >
                     <Filter class="w-3.5 h-3.5" />
                     <span class="hidden lg:inline">{{ $t("common.filters", "Filters") }}</span>
-                    <span v-if="source" class="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
+                    <span v-if="hasActiveFilters" class="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
                 </button>
 
-                <!-- Create Media Button moved to Left Sidebar -->
-
                 <!-- Action Toolbar Divider -->
-                <div class="h-5 w-px bg-gray-200 hidden sm:block mx-0.5"></div>
+                <div class="h-5 w-px bg-zinc-200 hidden sm:block mx-0.5"></div>
 
                 <!-- Batch Select Button (Unified height, remove shadow-sm) -->
                 <button
@@ -298,278 +350,357 @@ onMounted(() => {
                     :class="[
                         isSelectionMode
                             ? 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300'
-                            : 'bg-white border-slate-200/80 text-slate-600 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900',
+                            : 'bg-white border-zinc-200/80 text-zinc-600 hover:bg-zinc-50 hover:border-zinc-300 hover:text-zinc-900',
                     ]"
-                    class="flex h-9 w-9 rounded-full sm:h-9 sm:w-auto sm:rounded-full items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 active:scale-[0.95]"
-                    title="Batch Select"
+                    class="flex h-9 w-9 rounded-full sm:h-9 sm:w-auto sm:rounded-full items-center justify-center gap-1.5 px-0 sm:px-2.5 lg:px-3 border text-xs font-semibold transition-all cursor-pointer select-none whitespace-nowrap shrink-0 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950"
+                    :title="$t('common.batch_select', 'Batch select')"
+                    :aria-label="$t('common.batch_select', 'Batch select')"
                 >
                     <CheckSquare class="w-3.5 h-3.5" />
                     <span class="hidden lg:inline">{{ $t("common.batch_select", "Batch Select") }}</span>
                 </button>
 
                 <!-- Layout Switchers (Unified height and border radius, remove shadow-sm) -->
-                <div class="hidden sm:flex items-center gap-0.5 bg-gray-100/70 p-0.5 rounded-full border border-gray-200/50 shrink-0 h-9">
+                <div class="hidden sm:flex items-center gap-0.5 bg-zinc-100/70 p-0.5 rounded-full border border-zinc-200/50 shrink-0 h-9">
                     <button
                         @click="displayMode = 'flat'"
                         :class="[
                             displayMode === 'flat'
-                                ? 'text-gray-950 bg-white border border-gray-200/30 font-semibold shadow-none'
-                                : 'text-gray-500 hover:text-gray-900 hover:bg-white/50',
+                                ? 'text-zinc-950 bg-white border border-zinc-200/30 font-semibold shadow-none'
+                                : 'text-zinc-500 hover:text-zinc-900 hover:bg-white/50',
                         ]"
-                        class="h-7 px-2.5 rounded-full transition-all flex items-center justify-center gap-1.5 text-xs cursor-pointer select-none"
-                        title="Flat Layout"
+                        class="h-7 px-2.5 rounded-full transition-all flex items-center justify-center gap-1.5 text-xs cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950"
+                        :title="$t('grid.flat_layout', 'Flat layout')"
+                        :aria-label="$t('grid.flat_layout', 'Flat layout')"
                     >
                         <LayoutGrid class="w-3.5 h-3.5" />
-                        <span class="hidden lg:inline">Flat</span>
+                        <span class="hidden lg:inline">{{ $t("grid.flat_layout", "Flat") }}</span>
                     </button>
                     <button
                         @click="displayMode = 'stacked'"
                         :class="[
                             displayMode === 'stacked'
-                                ? 'text-gray-950 bg-white border border-gray-200/30 font-semibold shadow-none'
-                                : 'text-gray-500 hover:text-gray-900 hover:bg-white/50',
+                                ? 'text-zinc-950 bg-white border border-zinc-200/30 font-semibold shadow-none'
+                                : 'text-zinc-500 hover:text-zinc-900 hover:bg-white/50',
                         ]"
-                        class="h-7 px-2.5 rounded-full transition-all flex items-center justify-center gap-1.5 text-xs cursor-pointer select-none"
-                        title="Stacked Layout"
+                        class="h-7 px-2.5 rounded-full transition-all flex items-center justify-center gap-1.5 text-xs cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950"
+                        :title="$t('grid.stacked_layout', 'Stacked layout')"
+                        :aria-label="$t('grid.stacked_layout', 'Stacked layout')"
                     >
                         <Layers class="w-3.5 h-3.5" />
-                        <span class="hidden lg:inline">Stacked</span>
+                        <span class="hidden lg:inline">{{ $t("grid.stacked_layout", "Stacked") }}</span>
                     </button>
                 </div>
             </div>
         </div>
 
-        <div
-            class="sticky top-15 sm:top-14 z-20 transition-all duration-300 ease-in-out border-b border-[#c2c6d6]/30 bg-[#f9f9ff] flex flex-col shrink-0 overflow-hidden"
-            :class="[showFilters ? 'max-h-90 p-5 opacity-100' : 'max-h-0 py-0! opacity-0 border-b-0']"
-        >
-            <div class="space-y-4">
-                <!-- Platform pill tags (Horizontal Scrollable list matching Stitch, remove shadow-sm) -->
-                <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
-                    <span class="text-[#424754] font-semibold text-xs whitespace-nowrap select-none mr-2"
-                        >{{ $t("common.platform", "Platform") }}:</span
-                    >
-                    <button
-                        v-for="p in platforms"
-                        :key="String(p.value)"
-                        @click="source = p.value"
-                        class="px-4 py-1.5 rounded-full border text-xs font-semibold transition-all cursor-pointer whitespace-nowrap"
-                        :class="
-                            source === p.value
-                                ? 'bg-[#151c27] border-transparent text-[#f9f9ff]'
-                                : 'bg-white border-[#c2c6d6]/60 text-[#424754] hover:bg-[#f9f9ff] hover:text-[#151c27] hover:border-[#c2c6d6]/80'
-                        "
-                    >
-                        {{ p.label }}
-                    </button>
-                </div>
-
-                <!-- Sorting & Dropdowns row -->
-                <div class="flex flex-wrap items-center gap-4 sm:gap-6 text-xs border-t border-[#c2c6d6]/30 pt-3.5">
-                    <!-- Sort by Dropdown -->
-                    <div class="flex items-center gap-2">
-                        <span class="text-[#424754] font-semibold select-none">{{ $t("common.sort_by", "Sort by") }}:</span>
-                        <div class="relative">
-                            <select
-                                class="appearance-none bg-white border border-[#c2c6d6]/60 hover:border-[#c2c6d6]/80 text-[#151c27] rounded-lg py-1.5 pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#0058be]/10 cursor-pointer transition-all"
-                            >
-                                <option>Latest</option>
-                                <option>Oldest</option>
-                            </select>
-                            <ChevronDown
-                                class="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                            />
-                        </div>
-                    </div>
-
-                    <!-- Media Type Dropdown -->
-                    <div class="flex items-center gap-2">
-                        <span class="text-[#424754] font-semibold select-none">Media Type:</span>
-                        <div class="relative">
-                            <select
-                                class="appearance-none bg-white border border-[#c2c6d6]/60 hover:border-[#c2c6d6]/80 text-[#151c27] rounded-lg py-1.5 pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#0058be]/10 cursor-pointer transition-all"
-                            >
-                                <option>All Types</option>
-                                <option>Video Only</option>
-                                <option>Image Only</option>
-                            </select>
-                            <ChevronDown
-                                class="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                            />
-                        </div>
-                    </div>
-
-                    <!-- Items per Page Dropdown -->
-                    <div class="flex items-center gap-2">
-                        <span class="text-[#424754] font-semibold select-none">{{ $t("grid.items_per_page_label", "每页显示") }}:</span>
-                        <div class="relative">
-                            <select
-                                v-model="pageSize"
-                                class="appearance-none bg-white border border-[#c2c6d6]/60 hover:border-[#c2c6d6]/80 text-[#151c27] rounded-lg py-1.5 pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-[#0058be]/10 cursor-pointer transition-all"
-                            >
-                                <option :value="20">20</option>
-                                <option :value="50">50</option>
-                                <option :value="100">100</option>
-                            </select>
-                            <ChevronDown
-                                class="w-3.5 h-3.5 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
-                            />
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Content -->
-        <div ref="scrollContainer" class="flex-1 overflow-y-auto p-6 pb-0 sm:pb-6 bg-gray-50/50">
+        <!-- Main Workplace (Seamless Split-Pane) -->
+        <div class="flex-1 flex flex-col min-h-0 min-w-0 bg-white relative overflow-hidden">
+            <!-- Filters Drawer Strip -->
             <div
-                v-if="Array.isArray(medias)"
-                ref="gridContainer"
-                class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4 pb-[calc(3.75rem+env(safe-area-inset-bottom)+var(--visual-viewport-bottom-offset,0))] sm:pb-0"
+                class="transition-all duration-300 ease-in-out border-b border-zinc-200/70 bg-zinc-50/70 flex flex-col shrink-0 overflow-hidden"
+                :class="[showFilters ? 'max-h-90 p-4 sm:p-5 opacity-100' : 'max-h-0 py-0! opacity-0 border-b-0']"
             >
-                <MediaCard
-                    v-for="(media, index) in medias"
-                    :key="media.id"
-                    :media="media"
-                    :data-index="index"
-                    :is-selected="selectedMediaId === media.id"
-                    :is-checked="isMediaChecked(media.id)"
-                    :can-move="isMediaMovable(media)"
-                    :show-checkbox="isSelectionMode || isMediaChecked(media.id)"
-                    @toggle-checked="setMediaChecked(media, $event)"
-                    @click="handleMediaClick(media, $event)"
-                />
-            </div>
-        </div>
+                <div class="space-y-4">
+                    <!-- Platform pill tags -->
+                    <div class="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+                        <span class="text-zinc-600 font-semibold text-xs whitespace-nowrap select-none mr-2"
+                            >{{ $t("common.platform", "Platform") }}:</span
+                        >
+                        <button
+                            v-for="p in platforms"
+                            :key="String(p.value)"
+                            @click="source = p.value"
+                            class="px-4 py-1.5 rounded-full border text-xs font-semibold transition-all cursor-pointer whitespace-nowrap active:scale-[0.96]"
+                            :class="
+                                source === p.value
+                                    ? 'bg-zinc-900 border-transparent text-white'
+                                    : 'bg-white border-zinc-200/80 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900'
+                            "
+                        >
+                            {{ p.label }}
+                        </button>
+                    </div>
 
-        <!-- Footer / Pagination -->
-        <div
-            class="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom)+var(--visual-viewport-bottom-offset,0))] right-4 z-30 h-10 px-1 bg-white/90 backdrop-blur-md border border-slate-200 rounded-full flex items-center justify-center w-max sm:relative sm:bottom-auto sm:left-auto sm:right-auto sm:translate-x-0 sm:z-auto sm:h-14 sm:px-6 sm:border-0 sm:border-t sm:border-slate-100 sm:rounded-none sm:bg-white/95 sm:w-full sm:justify-between"
-        >
-            <!-- Left side: Total items count (hidden on mobile, shown on desktop) -->
-            <div class="hidden sm:block text-slate-500 text-sm select-none font-medium">
-                {{ $t("grid.showing_items", { count: total || 0 }) }}
-            </div>
-
-            <!-- Right side: Pagination (centered on mobile, right-aligned on desktop) -->
-            <div class="flex items-center sm:gap-4">
-                <PaginationRoot
-                    :total="total || 0"
-                    :sibling-count="1"
-                    :items-per-page="count || 20"
-                    :page="page"
-                    @update:page="changePage"
-                    class="flex items-center"
-                >
-                    <PaginationList v-slot="{ items }" class="flex items-center gap-1.5">
-                        <!-- Mobile Layout: A single unified pill selector -->
-                        <div class="flex sm:hidden items-center p-0.5">
-                            <PaginationPrev as-child>
-                                <Button
-                                    variant="ghost"
-                                    class="w-8 h-8 rounded-full p-0 text-slate-600 hover:text-slate-900"
-                                    :disabled="isPrevDisabled"
-                                >
-                                    <ChevronLeft class="w-4 h-4" />
-                                </Button>
-                            </PaginationPrev>
-                            <NumberField v-if="isEditingPage" v-model="mobileJumpPage" :min="1" :max="totalPages" class="w-12 h-6">
-                                <NumberFieldInput
-                                    ref="mobileInputRef"
-                                    class="w-12 h-6 text-center p-0 bg-slate-50 border-slate-200 text-xs font-semibold tabular-nums"
-                                    @blur="finishEditingPage"
-                                    @keyup.enter="finishEditingPage"
-                                />
-                            </NumberField>
-                            <span
-                                v-else
-                                @click="startEditingPage"
-                                class="text-xs font-semibold text-slate-700 px-3 min-w-14 text-center cursor-pointer hover:bg-slate-100/80 active:bg-slate-200/50 py-1 rounded-md transition-colors select-none tabular-nums"
+                    <!-- Sorting & Dropdowns row -->
+                    <div class="flex flex-wrap items-center gap-4 sm:gap-6 text-xs border-t border-zinc-200/50 pt-3.5">
+                        <!-- Sort by Dropdown -->
+                        <div class="flex items-center gap-2">
+                            <label for="media-sort-select" class="text-zinc-600 font-semibold select-none cursor-pointer"
+                                >{{ $t("common.sort_by", "Sort by") }}:</label
                             >
-                                {{ page }} / {{ totalPages }}
-                            </span>
-                            <PaginationNext as-child>
-                                <Button
-                                    variant="ghost"
-                                    class="w-8 h-8 rounded-full p-0 text-slate-600 hover:text-slate-900"
-                                    :disabled="isNextDisabled"
+                            <div class="relative">
+                                <select
+                                    id="media-sort-select"
+                                    v-model="sortValue"
+                                    :aria-label="$t('common.sort_by', 'Sort by')"
+                                    class="appearance-none bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-800 rounded-lg py-1.5 pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/10 cursor-pointer transition-all"
                                 >
-                                    <ChevronRight class="w-4 h-4" />
-                                </Button>
-                            </PaginationNext>
-                        </div>
-
-                        <!-- Desktop Layout: Standard items -->
-                        <div class="hidden sm:flex items-center gap-1.5">
-                            <PaginationPrev as-child>
-                                <Button
-                                    variant="outline"
-                                    class="w-9 h-9 rounded-lg border-slate-200/80 hover:bg-slate-50 text-slate-700 p-0"
-                                    :disabled="isPrevDisabled"
-                                >
-                                    <ChevronLeft class="w-4 h-4" />
-                                </Button>
-                            </PaginationPrev>
-
-                            <template v-for="(p, index) in items" :key="index">
-                                <PaginationListItem v-if="p.type === 'page'" :value="p.value" as-child>
-                                    <Button
-                                        :variant="p.value === page ? 'default' : 'outline'"
-                                        class="w-9 h-9 rounded-lg border-slate-200/80 text-slate-700 p-0 tabular-nums transition-all"
-                                        :class="
-                                            p.value === page
-                                                ? 'bg-slate-900 hover:bg-slate-800 text-white border-transparent'
-                                                : 'hover:bg-slate-50'
-                                        "
-                                    >
-                                        {{ p.value }}
-                                    </Button>
-                                </PaginationListItem>
-                                <PaginationEllipsis
-                                    v-else-if="p.type === 'ellipsis'"
-                                    class="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center"
-                                >
-                                    <MoreHorizontal class="w-4 h-4 text-gray-400" />
-                                </PaginationEllipsis>
-                            </template>
-
-                            <PaginationNext as-child>
-                                <Button
-                                    variant="outline"
-                                    class="w-9 h-9 rounded-lg border-slate-200/80 hover:bg-slate-50 text-slate-700 p-0"
-                                    :disabled="isNextDisabled"
-                                >
-                                    <ChevronRight class="w-4 h-4" />
-                                </Button>
-                            </PaginationNext>
-                        </div>
-                    </PaginationList>
-                </PaginationRoot>
-
-                <div class="hidden sm:flex items-center gap-3 border-l border-gray-200 pl-4 tabular-nums">
-                    <i18n-t
-                        tag="div"
-                        keypath="grid.page_info"
-                        scope="global"
-                        class="hidden sm:flex items-center gap-1.5 text-gray-500 text-sm"
-                    >
-                        <template #current>
-                            <NumberField v-model="jumpPage" :min="1" :max="totalPages" class="w-10 h-7">
-                                <NumberFieldInput
-                                    class="w-10 h-7 text-center p-0 bg-slate-50/50 border-slate-200 text-sm tabular-nums"
-                                    @keyup.enter="handleJump"
-                                    @blur="handleJump"
+                                    <option value="created_desc">{{ $t("common.sort_import_time_desc", "Newly Added") }}</option>
+                                    <option value="created_asc">{{ $t("common.sort_import_time_asc", "Oldest Added") }}</option>
+                                    <option value="published_desc">{{ $t("common.sort_published_time_desc", "Latest Published") }}</option>
+                                    <option value="published_asc">{{ $t("common.sort_published_time_asc", "Oldest Published") }}</option>
+                                </select>
+                                <ChevronDown
+                                    class="w-3.5 h-3.5 text-zinc-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
                                 />
-                            </NumberField>
-                        </template>
-                        <template #total>
-                            <span class="font-medium text-gray-700">{{ totalPages }}</span>
-                        </template>
-                    </i18n-t>
+                            </div>
+                        </div>
+
+                        <!-- Media Type Dropdown -->
+                        <div class="flex items-center gap-2">
+                            <label for="media-type-select" class="text-zinc-600 font-semibold select-none cursor-pointer"
+                                >{{ $t("common.media_type", "Media Type") }}:</label
+                            >
+                            <div class="relative">
+                                <select
+                                    id="media-type-select"
+                                    v-model="mediaType"
+                                    :aria-label="$t('common.media_type', 'Media Type')"
+                                    class="appearance-none bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-800 rounded-lg py-1.5 pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/10 cursor-pointer transition-all"
+                                >
+                                    <option :value="undefined">{{ $t("common.all_media_types", "All Types") }}</option>
+                                    <option value="VIDEO">{{ $t("common.media_type_video", "Video Only") }}</option>
+                                    <option value="IMAGE">{{ $t("common.media_type_image", "Image Only") }}</option>
+                                </select>
+                                <ChevronDown
+                                    class="w-3.5 h-3.5 text-zinc-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                                />
+                            </div>
+                        </div>
+
+                        <!-- Items per Page Dropdown -->
+                        <div class="flex items-center gap-2">
+                            <label for="media-page-size-select" class="text-zinc-600 font-semibold select-none cursor-pointer"
+                                >{{ $t("grid.items_per_page_label", "Page size") }}:</label
+                            >
+                            <div class="relative">
+                                <select
+                                    id="media-page-size-select"
+                                    v-model="pageSize"
+                                    :aria-label="$t('grid.items_per_page_label', 'Page size')"
+                                    class="appearance-none bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-800 rounded-lg py-1.5 pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/10 cursor-pointer transition-all"
+                                >
+                                    <option :value="20">20</option>
+                                    <option :value="50">50</option>
+                                    <option :value="100">100</option>
+                                </select>
+                                <ChevronDown
+                                    class="w-3.5 h-3.5 text-zinc-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                                />
+                            </div>
+                        </div>
+
+                        <!-- Clear Filters Button -->
+                        <button
+                            v-if="hasActiveFilters"
+                            type="button"
+                            @click="resetFilters"
+                            class="text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer ml-auto"
+                        >
+                            {{ $t("common.clear_all", "Clear filters") }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Content Area -->
+            <div ref="scrollContainer" class="flex-1 overflow-y-auto p-4 sm:p-6 bg-zinc-50/30">
+                <!-- Skeletons when loading -->
+                <div v-if="isLoadingMedia" class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
+                    <div
+                        v-for="i in 12"
+                        :key="i"
+                        class="aspect-square rounded-2xl bg-zinc-100 animate-pulse border border-zinc-200/50 flex flex-col justify-end p-3.5"
+                    >
+                        <div class="h-3 w-2/3 bg-zinc-200/80 rounded-md"></div>
+                    </div>
+                </div>
+
+                <!-- Empty State -->
+                <div
+                    v-else-if="!medias || medias.length === 0"
+                    class="h-full min-h-72 flex flex-col items-center justify-center p-8 text-center"
+                >
+                    <div
+                        class="w-12 h-12 rounded-2xl bg-zinc-100 border border-zinc-200/60 flex items-center justify-center text-zinc-400 mb-3 shadow-xs"
+                    >
+                        <LayoutGrid class="w-6 h-6" />
+                    </div>
+                    <h2 class="text-sm font-semibold text-zinc-800 mb-1">
+                        {{
+                            keyword || hasActiveFilters
+                                ? $t("common.no_results", "No results found")
+                                : $t("common.no_media_title", "No media assets")
+                        }}
+                    </h2>
+                    <p class="text-xs text-zinc-500 max-w-sm mb-4">
+                        {{
+                            keyword || hasActiveFilters
+                                ? $t("common.no_results_desc", "Try adjusting your search query or filters.")
+                                : $t("common.no_media_desc", "Upload files or import posts to populate your library.")
+                        }}
+                    </p>
+                    <Button
+                        v-if="keyword || hasActiveFilters"
+                        variant="outline"
+                        size="sm"
+                        class="h-8 text-xs cursor-pointer"
+                        @click="resetFilters"
+                    >
+                        {{ $t("common.clear_all", "Clear filters") }}
+                    </Button>
+                </div>
+
+                <!-- Media Grid Cards -->
+                <div
+                    v-else
+                    ref="gridContainer"
+                    class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4 pb-[calc(3.75rem+env(safe-area-inset-bottom)+var(--visual-viewport-bottom-offset,0))] sm:pb-0"
+                >
+                    <MediaCard
+                        v-for="(media, index) in medias"
+                        :key="media.id"
+                        :media="media"
+                        :data-index="index"
+                        :is-selected="selectedMediaId === media.id"
+                        :is-checked="isMediaChecked(media.id)"
+                        :can-move="isMediaMovable(media)"
+                        :show-checkbox="isSelectionMode || isMediaChecked(media.id)"
+                        @toggle-checked="setMediaChecked(media, $event)"
+                        @click="handleMediaClick(media, $event)"
+                    />
+                </div>
+            </div>
+
+            <!-- Footer / Pagination -->
+            <div
+                class="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom)+var(--visual-viewport-bottom-offset,0))] right-4 z-30 h-10 px-1 bg-white/90 backdrop-blur-md border border-zinc-200 rounded-full flex items-center justify-center w-max sm:relative sm:bottom-auto sm:left-auto sm:right-auto sm:translate-x-0 sm:z-auto sm:h-14 sm:px-6 sm:border-0 sm:border-t sm:border-zinc-200/60 sm:rounded-none sm:bg-white/95 sm:w-full sm:justify-between"
+            >
+                <!-- Left side: Total items count (hidden on mobile, shown on desktop) -->
+                <div class="hidden sm:block text-zinc-500 text-sm select-none font-medium">
+                    {{ $t("grid.showing_items", { count: total || 0 }) }}
+                </div>
+
+                <!-- Right side: Pagination (centered on mobile, right-aligned on desktop) -->
+                <div class="flex items-center sm:gap-4">
+                    <PaginationRoot
+                        :total="total || 0"
+                        :sibling-count="1"
+                        :items-per-page="count || 20"
+                        :page="page"
+                        @update:page="changePage"
+                        class="flex items-center"
+                    >
+                        <PaginationList v-slot="{ items }" class="flex items-center gap-1.5">
+                            <!-- Mobile Layout: A single unified pill selector -->
+                            <div v-if="!isSelectionMode && selectedMediaCount === 0" class="flex sm:hidden items-center p-0.5">
+                                <PaginationPrev as-child>
+                                    <Button
+                                        variant="ghost"
+                                        class="w-8 h-8 rounded-full p-0 text-zinc-600 hover:text-zinc-900"
+                                        :disabled="isPrevDisabled"
+                                    >
+                                        <ChevronLeft class="w-4 h-4" />
+                                    </Button>
+                                </PaginationPrev>
+                                <NumberField v-if="isEditingPage" v-model="mobileJumpPage" :min="1" :max="totalPages" class="w-12 h-6">
+                                    <NumberFieldInput
+                                        ref="mobileInputRef"
+                                        class="w-12 h-6 text-center p-0 bg-zinc-50 border-zinc-200 text-xs font-semibold tabular-nums"
+                                        @blur="finishEditingPage"
+                                        @keyup.enter="finishEditingPage"
+                                    />
+                                </NumberField>
+                                <span
+                                    v-else
+                                    @click="startEditingPage"
+                                    class="text-xs font-semibold text-zinc-700 px-3 min-w-14 text-center cursor-pointer hover:bg-zinc-100/80 active:bg-zinc-200/50 py-1 rounded-md transition-colors select-none tabular-nums"
+                                >
+                                    {{ page }} / {{ totalPages }}
+                                </span>
+                                <PaginationNext as-child>
+                                    <Button
+                                        variant="ghost"
+                                        class="w-8 h-8 rounded-full p-0 text-zinc-600 hover:text-zinc-900"
+                                        :disabled="isNextDisabled"
+                                    >
+                                        <ChevronRight class="w-4 h-4" />
+                                    </Button>
+                                </PaginationNext>
+                            </div>
+
+                            <!-- Desktop Layout: Standard items -->
+                            <div class="hidden sm:flex items-center gap-1.5">
+                                <PaginationPrev as-child>
+                                    <Button
+                                        variant="outline"
+                                        class="w-9 h-9 rounded-lg border-zinc-200/80 hover:bg-zinc-50 text-zinc-700 p-0"
+                                        :disabled="isPrevDisabled"
+                                    >
+                                        <ChevronLeft class="w-4 h-4" />
+                                    </Button>
+                                </PaginationPrev>
+
+                                <template v-for="(p, index) in items" :key="index">
+                                    <PaginationListItem v-if="p.type === 'page'" :value="p.value" as-child>
+                                        <Button
+                                            :variant="p.value === page ? 'default' : 'outline'"
+                                            class="w-9 h-9 rounded-lg border-zinc-200/80 text-zinc-700 p-0 tabular-nums transition-all"
+                                            :class="
+                                                p.value === page
+                                                    ? 'bg-zinc-900 hover:bg-zinc-800 text-white border-transparent'
+                                                    : 'hover:bg-zinc-50'
+                                            "
+                                        >
+                                            {{ p.value }}
+                                        </Button>
+                                    </PaginationListItem>
+                                    <PaginationEllipsis
+                                        v-else-if="p.type === 'ellipsis'"
+                                        class="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center"
+                                    >
+                                        <MoreHorizontal class="w-4 h-4 text-zinc-400" />
+                                    </PaginationEllipsis>
+                                </template>
+
+                                <PaginationNext as-child>
+                                    <Button
+                                        variant="outline"
+                                        class="w-9 h-9 rounded-lg border-zinc-200/80 hover:bg-zinc-50 text-zinc-700 p-0"
+                                        :disabled="isNextDisabled"
+                                    >
+                                        <ChevronRight class="w-4 h-4" />
+                                    </Button>
+                                </PaginationNext>
+                            </div>
+                        </PaginationList>
+                    </PaginationRoot>
+
+                    <div class="hidden sm:flex items-center gap-3 border-l border-zinc-200 pl-4 tabular-nums">
+                        <i18n-t
+                            tag="div"
+                            keypath="grid.page_info"
+                            scope="global"
+                            class="hidden sm:flex items-center gap-1.5 text-zinc-500 text-sm"
+                        >
+                            <template #current>
+                                <NumberField v-model="jumpPage" :min="1" :max="totalPages" class="w-10 h-7">
+                                    <NumberFieldInput
+                                        class="w-10 h-7 text-center p-0 bg-zinc-50/50 border-zinc-200 text-sm tabular-nums"
+                                        @keyup.enter="handleJump"
+                                        @blur="handleJump"
+                                    />
+                                </NumberField>
+                            </template>
+                            <template #total>
+                                <span class="font-medium text-zinc-700">{{ totalPages }}</span>
+                            </template>
+                        </i18n-t>
+                    </div>
                 </div>
             </div>
         </div>
-
         <MoveItemsBar
             v-if="isSelectionMode || selectedMediaCount > 0"
             :post-ids="[]"

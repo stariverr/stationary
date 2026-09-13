@@ -179,7 +179,7 @@ watch(
             <p
                 v-else-if="!isEditing"
                 class="whitespace-pre-line text-xs md:text-sm leading-relaxed"
-                :class="isDark ? 'text-zinc-300/90' : 'text-zinc-650 dark:text-zinc-300'"
+                :class="isDark ? 'text-zinc-300/90' : 'text-zinc-600 dark:text-zinc-300'"
             >
                 {{ post.description || $t("common.no_description") }}
             </p>
@@ -208,7 +208,7 @@ watch(
                     :class="[
                         isDark
                             ? 'border-zinc-800 text-zinc-300 hover:bg-zinc-900'
-                            : 'border-zinc-200 dark:border-zinc-800 text-zinc-650 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800',
+                            : 'border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800',
                     ]"
                     :disabled="isSaving"
                     @click="cancelEditing"
@@ -232,9 +232,9 @@ watch(
             </div>
         </section>
 
-        <section class="border-t pt-5" :class="isDark ? 'border-zinc-850' : 'border-zinc-200 dark:border-zinc-800'">
+        <section class="border-t pt-5" :class="isDark ? 'border-zinc-800' : 'border-zinc-200 dark:border-zinc-800'">
             <h2
-                class="mb-3 text-[10px] font-bold uppercase tracking-[0.08em]"
+                class="mb-3 text-xs font-bold uppercase tracking-[0.08em]"
                 :class="isDark ? 'text-zinc-300' : 'text-zinc-700 dark:text-zinc-300'"
             >
                 {{ $t("post_detail.properties") }}
@@ -242,7 +242,7 @@ watch(
             <dl
                 class="divide-y border-y"
                 :class="
-                    isDark ? 'divide-zinc-850 border-zinc-850' : 'divide-zinc-100 dark:divide-zinc-800 border-zinc-150 dark:border-zinc-800'
+                    isDark ? 'divide-zinc-800 border-zinc-800' : 'divide-zinc-100 dark:divide-zinc-800 border-zinc-200 dark:border-zinc-800'
                 "
             >
                 <div class="grid grid-cols-[6.5rem_minmax(0,1fr)] items-center gap-3 py-2.5 text-xs">
@@ -278,7 +278,7 @@ watch(
                     <dt :class="isDark ? 'text-zinc-400 font-medium' : 'text-zinc-600 dark:text-zinc-400 font-medium'">
                         {{ $t("common.platform") }}
                     </dt>
-                    <dd class="font-semibold" :class="isDark ? 'text-zinc-150' : 'text-zinc-900 dark:text-zinc-100'">
+                    <dd class="font-semibold" :class="isDark ? 'text-zinc-100' : 'text-zinc-900 dark:text-zinc-100'">
                         {{ $t(`platforms.${post.platform}`) }}
                     </dd>
                 </div>
@@ -295,7 +295,7 @@ watch(
                             :class="[
                                 isDark
                                     ? 'border-zinc-800 bg-zinc-900 text-white focus:border-zinc-700 focus:ring-zinc-500/10'
-                                    : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-850 dark:text-zinc-100 focus:border-zinc-500 dark:focus:border-zinc-700 focus:ring-zinc-900/10',
+                                    : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-100 focus:border-zinc-500 dark:focus:border-zinc-700 focus:ring-zinc-900/10',
                             ]"
                         />
                         <span v-else class="font-medium">{{ post.date }}</span>
@@ -337,7 +337,7 @@ watch(
                             :class="[
                                 isDark
                                     ? 'border-zinc-800 bg-zinc-900 text-white focus:border-zinc-700 focus:ring-zinc-500/10'
-                                    : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-850 dark:text-zinc-100 focus:border-zinc-500 dark:focus:border-zinc-700 focus:ring-zinc-900/10',
+                                    : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-100 focus:border-zinc-500 dark:focus:border-zinc-700 focus:ring-zinc-900/10',
                             ]"
                         />
                         <a
@@ -353,7 +353,7 @@ watch(
                             "
                         >
                             <span class="truncate">{{ $t("post_detail.source_link") }}</span>
-                            <LinkIcon class="h-3.5 w-3.5 shrink-0" :class="isDark ? 'text-zinc-450' : 'text-zinc-500 dark:text-zinc-400'" />
+                            <LinkIcon class="h-3.5 w-3.5 shrink-0" :class="isDark ? 'text-zinc-400' : 'text-zinc-500 dark:text-zinc-400'" />
                         </a>
                         <span v-else :class="isDark ? 'text-zinc-600' : 'text-zinc-400 dark:text-zinc-500'">{{
                             $t("post_detail.none")
@@ -363,9 +363,9 @@ watch(
             </dl>
         </section>
 
-        <section class="border-t pt-5" :class="isDark ? 'border-zinc-850' : 'border-zinc-200 dark:border-zinc-800'">
+        <section class="border-t pt-5" :class="isDark ? 'border-zinc-800' : 'border-zinc-200 dark:border-zinc-800'">
             <h2
-                class="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.08em]"
+                class="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.08em]"
                 :class="isDark ? 'text-zinc-400' : 'text-zinc-500 dark:text-zinc-400'"
             >
                 <TagIcon class="h-3.5 w-3.5" :class="isDark ? 'text-zinc-400' : 'text-zinc-500 dark:text-zinc-400'" />

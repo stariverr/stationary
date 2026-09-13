@@ -362,17 +362,31 @@ const handleMove = async () => {
             class="pointer-events-auto flex w-full max-w-4xl flex-col gap-3 rounded-lg border bg-white p-3 shadow-lg sm:flex-row sm:items-center sm:justify-between"
         >
             <div class="flex min-w-0 items-center gap-3">
-                <div class="whitespace-nowrap tabular-nums text-sm font-semibold text-gray-900">{{ itemCount }} selected</div>
-                <div v-if="itemCount > 0" class="hidden truncate text-sm text-muted-foreground sm:block">
-                    Move {{ itemSummary || "selected items" }} to
+                <div class="whitespace-nowrap tabular-nums text-sm font-semibold text-gray-900">
+                    {{ $t("common.items_selected", { count: itemCount }, `${itemCount} selected`) }}
                 </div>
-                <div v-else class="hidden truncate text-sm text-muted-foreground sm:block">Choose items to move</div>
+                <div v-if="itemCount > 0" class="hidden truncate text-sm text-muted-foreground sm:block">
+                    {{
+                        $t(
+                            "common.move_items_to",
+                            { summary: itemSummary || "selected items" },
+                            `Move ${itemSummary || "selected items"} to`,
+                        )
+                    }}
+                </div>
+                <div v-else class="hidden truncate text-sm text-muted-foreground sm:block">
+                    {{ $t("common.choose_items_to_move", "Choose items to move") }}
+                </div>
             </div>
 
             <div class="flex flex-wrap items-center gap-2 sm:flex-nowrap">
                 <Button type="button" variant="outline" size="sm" :disabled="!canSelectVisible || isMoving" @click="emit('toggleVisible')">
                     <CheckSquare />
-                    {{ allVisibleSelected ? "Deselect visible" : "Select visible" }}
+                    {{
+                        allVisibleSelected
+                            ? $t("common.deselect_visible", "Deselect visible")
+                            : $t("common.select_visible", "Select visible")
+                    }}
                 </Button>
                 <Button
                     v-if="mediaIds.length > 0 && postIds.length === 0"
@@ -384,7 +398,7 @@ const handleMove = async () => {
                 >
                     <Loader2 v-if="isLinking" class="animate-spin text-slate-400" />
                     <Link v-else class="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                    Link to Post
+                    {{ $t("common.link_to_post", "Link to Post") }}
                 </Button>
                 <Button
                     v-if="hasSelectedVideos"
@@ -423,7 +437,13 @@ const handleMove = async () => {
                 </Button>
                 <Select :model-value="targetLibraryId" @update:model-value="handleTargetChange">
                     <SelectTrigger class="h-9 w-[220px]">
-                        <SelectValue :placeholder="hasTargetLibrary ? 'Choose library' : 'No target library'" />
+                        <SelectValue
+                            :placeholder="
+                                hasTargetLibrary
+                                    ? $t('common.choose_library', 'Choose library')
+                                    : $t('common.no_target_library', 'No target library')
+                            "
+                        />
                     </SelectTrigger>
                     <SelectContent>
                         <SelectGroup>
@@ -436,7 +456,7 @@ const handleMove = async () => {
                 <Button type="button" size="sm" :disabled="!hasTargetLibrary || itemCount === 0 || isMoving" @click="handleMove">
                     <Loader2 v-if="isMoving" class="animate-spin" />
                     <MoveRight v-else />
-                    Move
+                    {{ $t("common.move", "Move") }}
                 </Button>
                 <Button
                     type="button"

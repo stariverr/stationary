@@ -72,7 +72,7 @@ const handleAttachOrphans = async () => {
 
             <div class="flex-1 overflow-y-auto py-4 min-h-0 divide-y divide-zinc-50 scrollbar-thin">
                 <div v-if="isLoadingOrphans" class="flex items-center justify-center p-8 gap-2 text-zinc-500">
-                    <Loader2 class="w-4 h-4 animate-spin text-emerald-600" />
+                    <Loader2 class="w-4 h-4 animate-spin text-blue-600" />
                     <span class="text-xs">{{ $t("post_detail.manage.loading_playlist") }}</span>
                 </div>
                 <div v-else-if="orphanMediaList.length === 0" class="text-center p-8 text-xs text-zinc-400">
@@ -101,7 +101,7 @@ const handleAttachOrphans = async () => {
                                 {{ orphan.title || $t("post_detail.manage.untitled_media") }}
                             </span>
                         </div>
-                        <span class="font-mono text-[10px] text-zinc-400 bg-zinc-50 px-1.5 py-0.5 rounded">
+                        <span class="font-mono text-xs text-zinc-400 bg-zinc-50 px-1.5 py-0.5 rounded">
                             {{ formatMediaType(orphan.type) }}
                         </span>
                     </div>
@@ -118,7 +118,7 @@ const handleAttachOrphans = async () => {
                 <button
                     @click="handleAttachOrphans"
                     :disabled="selectedOrphanIds.length === 0 || isAttaching"
-                    class="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
+                    class="px-4 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors shadow-sm"
                 >
                     <Loader2 v-if="isAttaching" class="w-3.5 h-3.5 animate-spin" />
                     {{ $t("post_detail.manage.attach_selection") }}

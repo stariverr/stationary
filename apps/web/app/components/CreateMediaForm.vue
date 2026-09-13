@@ -725,7 +725,7 @@ onUnmounted(() => {
                             </div>
                             <div class="min-w-0">
                                 <div class="truncate font-semibold max-w-[150px] text-slate-700 dark:text-zinc-200">{{ file.name }}</div>
-                                <div class="text-[10px] text-slate-400 dark:text-zinc-500 mt-0.5">{{ formatBytes(file.size) }}</div>
+                                <div class="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">{{ formatBytes(file.size) }}</div>
                             </div>
                             <button
                                 class="ml-1 p-0.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
@@ -787,7 +787,7 @@ onUnmounted(() => {
                         <table class="w-full table-fixed border-collapse text-left" style="min-width: 680px">
                             <thead>
                                 <tr
-                                    class="bg-slate-50 dark:bg-zinc-900 text-slate-500 dark:text-zinc-400 font-semibold border-b border-slate-100 dark:border-zinc-800 text-[10px] uppercase tracking-wider"
+                                    class="bg-slate-50 dark:bg-zinc-900 text-slate-500 dark:text-zinc-400 font-semibold border-b border-slate-100 dark:border-zinc-800 text-xs uppercase tracking-wider"
                                 >
                                     <th class="w-[180px] p-3">{{ $t("media.headers.file") }}</th>
                                     <th class="w-[110px] p-3">{{ $t("media.headers.track_type") }}</th>
@@ -1043,7 +1043,7 @@ onUnmounted(() => {
                                     <div class="truncate text-xs font-semibold text-slate-700 dark:text-zinc-200" :title="draft.name">
                                         {{ draft.name }}
                                     </div>
-                                    <div class="text-[10px] text-slate-400 dark:text-zinc-500 mt-0.5 flex gap-2">
+                                    <div class="text-xs text-slate-400 dark:text-zinc-500 mt-0.5 flex gap-2">
                                         <span>{{ formatBytes(draft.size) }}</span>
                                         <span>•</span>
                                         <span>{{ formatDate(draft.create_time) }}</span>

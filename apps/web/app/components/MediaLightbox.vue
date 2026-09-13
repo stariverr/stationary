@@ -315,14 +315,15 @@ const handleKeydown = (e: KeyboardEvent) => {
 const sidebarWidth = ref(380);
 const isResizing = ref(false);
 
-const startResize = (e: MouseEvent) => {
+const startResize = (e: PointerEvent) => {
     isResizing.value = true;
-    window.addEventListener("mousemove", handleResize);
-    window.addEventListener("mouseup", stopResize);
+    window.addEventListener("pointermove", handleResize);
+    window.addEventListener("pointerup", stopResize);
+    window.addEventListener("pointercancel", stopResize);
     e.preventDefault();
 };
 
-const handleResize = (e: MouseEvent) => {
+const handleResize = (e: PointerEvent) => {
     if (!isResizing.value) return;
     const newWidth = window.innerWidth - e.clientX;
     if (newWidth >= 300 && newWidth <= window.innerWidth * 0.6) {
@@ -332,8 +333,9 @@ const handleResize = (e: MouseEvent) => {
 
 const stopResize = () => {
     isResizing.value = false;
-    window.removeEventListener("mousemove", handleResize);
-    window.removeEventListener("mouseup", stopResize);
+    window.removeEventListener("pointermove", handleResize);
+    window.removeEventListener("pointerup", stopResize);
+    window.removeEventListener("pointercancel", stopResize);
 };
 
 onMounted(() => {
@@ -342,8 +344,9 @@ onMounted(() => {
 
 onUnmounted(() => {
     window.removeEventListener("keydown", handleKeydown);
-    window.removeEventListener("mousemove", handleResize);
-    window.removeEventListener("mouseup", stopResize);
+    window.removeEventListener("pointermove", handleResize);
+    window.removeEventListener("pointerup", stopResize);
+    window.removeEventListener("pointercancel", stopResize);
 });
 
 const currentMediaItem = computed(() => {
@@ -654,7 +657,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                             :width="media.width"
                                             :height="media.height"
                                             :autoplay="index === currentIndex"
-                                            class="max-h-full max-w-full h-full w-auto drop-shadow-2xl rounded-sm"
+                                            class="max-h-full max-w-full h-full w-auto rounded-sm"
                                         />
                                         <LivePhotoPlayer
                                             v-else-if="media.type?.toLowerCase() === 'live_photo'"
@@ -664,13 +667,13 @@ const handleAddTag = async (tagToAdd: string) => {
                                             :width="media.width"
                                             :height="media.height"
                                             badge-position="top-left-below-header"
-                                            class="max-h-full max-w-full object-contain drop-shadow-2xl rounded-sm"
+                                            class="max-h-full max-w-full object-contain rounded-sm"
                                         />
                                         <HeicImage
                                             v-else
                                             :src="media.url || media.media_url || ''"
                                             :mime-type="media.mime_type || media.mimeType || undefined"
-                                            class="max-h-full max-w-full object-contain drop-shadow-2xl rounded-sm"
+                                            class="max-h-full max-w-full object-contain rounded-sm"
                                         />
                                     </div>
                                 </swiper-slide>
@@ -681,6 +684,7 @@ const handleAddTag = async (tagToAdd: string) => {
                         <button
                             v-if="displayMode === 'stacked' || currentIndex > 0"
                             class="absolute left-6 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/lightbox:opacity-100 transition-all hover:bg-black/80 hover:scale-110 z-[210] cursor-pointer"
+                            @pointerdown.stop
                             @click.stop="scrollPrev"
                         >
                             <ChevronLeft class="w-8 h-8" />
@@ -688,6 +692,7 @@ const handleAddTag = async (tagToAdd: string) => {
                         <button
                             v-if="displayMode === 'stacked' || currentIndex < postSiblings.length - 1"
                             class="absolute right-6 top-1/2 -translate-y-1/2 p-3 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/lightbox:opacity-100 transition-all hover:bg-black/80 hover:scale-110 z-[210] cursor-pointer"
+                            @pointerdown.stop
                             @click.stop="scrollNext"
                         >
                             <ChevronRight class="w-8 h-8" />
@@ -701,11 +706,12 @@ const handleAddTag = async (tagToAdd: string) => {
                             <div
                                 v-for="(media, index) in postSiblings"
                                 :key="media.id || index"
+                                @pointerdown.stop
                                 @click="swiperInstance?.slideToLoop(index)"
                                 class="w-12 h-12 shrink-0 rounded-md overflow-hidden border-2 cursor-pointer transition-all duration-200 hover:opacity-100"
                                 :class="
                                     index === currentIndex
-                                        ? 'border-emerald-500 opacity-100 scale-105 shadow-xs'
+                                        ? 'border-blue-500 opacity-100 scale-105 shadow-xs'
                                         : 'border-transparent opacity-40 hover:opacity-75'
                                 "
                             >
@@ -720,7 +726,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                 />
                                 <div
                                     v-else
-                                    class="w-full h-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-350 text-[10px] font-bold"
+                                    class="w-full h-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300 text-xs font-bold"
                                 >
                                     VIDEO
                                 </div>
@@ -734,10 +740,10 @@ const handleAddTag = async (tagToAdd: string) => {
                     <!-- Resize Drag Handle -->
                     <div
                         v-if="isSidebarOpen"
-                        @mousedown="startResize"
-                        class="w-1 hover:w-1.5 bg-zinc-850 hover:bg-emerald-550/50 cursor-col-resize h-full shrink-0 relative z-[220] transition-all hidden md:block"
+                        @pointerdown="startResize"
+                        class="w-1 hover:w-1.5 bg-zinc-800 hover:bg-blue-500/50 cursor-col-resize h-full shrink-0 relative z-[220] transition-all hidden md:block"
                         :class="
-                            isResizing ? 'bg-emerald-500/70 w-1.5 border-l border-r border-zinc-900' : 'border-l border-r border-[#08090b]'
+                            isResizing ? 'bg-blue-500/70 w-1.5 border-l border-r border-zinc-900' : 'border-l border-r border-[#08090b]'
                         "
                     ></div>
 
@@ -748,14 +754,14 @@ const handleAddTag = async (tagToAdd: string) => {
                         class="bg-[#0b0c0e] border-l border-zinc-900 h-full shrink-0 flex flex-col shadow-2xl relative z-[210] overflow-hidden hidden md:flex"
                     >
                         <div class="p-5 border-b border-zinc-900 bg-[#0e0f12] flex items-center justify-between shrink-0">
-                            <h3 class="font-semibold text-zinc-150 flex items-center gap-2">
-                                <Info class="w-4 h-4 text-emerald-450" />
+                            <h3 class="font-semibold text-zinc-100 flex items-center gap-2">
+                                <Info class="w-4 h-4 text-blue-400" />
                                 {{ $t("common.details", "Asset Details") }}
                             </h3>
                             <button
                                 v-if="!isEditingMedia && activeTab === 'details'"
                                 @click="startEditingMedia"
-                                class="px-2.5 py-1 text-xs font-semibold text-emerald-400 bg-emerald-950/20 hover:bg-emerald-900/20 border border-emerald-900/50 rounded-md transition-colors cursor-pointer"
+                                class="px-2.5 py-1 text-xs font-semibold text-blue-400 bg-blue-950/20 hover:bg-blue-900/20 border border-blue-900/50 rounded-md transition-colors cursor-pointer"
                             >
                                 {{ $t("common.edit") }}
                             </button>
@@ -768,7 +774,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                 class="font-semibold uppercase tracking-wider transition-colors relative h-full flex items-center cursor-pointer"
                                 :class="
                                     activeTab === 'details'
-                                        ? 'text-zinc-100 border-b-2 border-emerald-500'
+                                        ? 'text-zinc-100 border-b-2 border-blue-500'
                                         : 'text-zinc-500 hover:text-zinc-300'
                                 "
                             >
@@ -779,7 +785,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                 class="font-semibold uppercase tracking-wider transition-colors relative h-full flex items-center cursor-pointer"
                                 :class="
                                     activeTab === 'variants'
-                                        ? 'text-zinc-100 border-b-2 border-emerald-500'
+                                        ? 'text-zinc-100 border-b-2 border-blue-500'
                                         : 'text-zinc-500 hover:text-zinc-300'
                                 "
                             >
@@ -791,12 +797,12 @@ const handleAddTag = async (tagToAdd: string) => {
                             <!-- Basic Info -->
                             <div class="space-y-4">
                                 <div>
-                                    <label class="text-[10px] uppercase text-zinc-500 font-bold tracking-wider mb-1.5 block">Title</label>
+                                    <label class="text-xs uppercase text-zinc-500 font-bold tracking-wider mb-1.5 block">Title</label>
                                     <input
                                         v-if="isEditingMedia"
                                         type="text"
                                         v-model="editMediaTitle"
-                                        class="w-full px-3 py-1.5 text-sm border border-zinc-800 rounded-md focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none bg-zinc-950 text-white"
+                                        class="w-full px-3 py-1.5 text-sm border border-zinc-800 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none bg-zinc-950 text-white"
                                         placeholder="Enter title"
                                     />
                                     <div v-else class="text-sm font-semibold text-zinc-100 break-words leading-relaxed">
@@ -806,9 +812,7 @@ const handleAddTag = async (tagToAdd: string) => {
 
                                 <div class="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label class="text-[10px] uppercase text-zinc-500 font-bold tracking-wider mb-1.5 block"
-                                            >Type</label
-                                        >
+                                        <label class="text-xs uppercase text-zinc-500 font-bold tracking-wider mb-1.5 block">Type</label>
                                         <div
                                             class="flex items-center gap-1.5 text-xs font-medium text-zinc-200 bg-zinc-900 border border-zinc-800 w-fit px-2.5 py-0.5 rounded-md"
                                         >
@@ -817,9 +821,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                         </div>
                                     </div>
                                     <div>
-                                        <label class="text-[10px] uppercase text-zinc-500 font-bold tracking-wider mb-1.5 block"
-                                            >Source</label
-                                        >
+                                        <label class="text-xs uppercase text-zinc-500 font-bold tracking-wider mb-1.5 block">Source</label>
                                         <div class="text-xs font-semibold text-zinc-200">
                                             {{ currentMediaItem?.source || "Local" }}
                                         </div>
@@ -827,14 +829,14 @@ const handleAddTag = async (tagToAdd: string) => {
                                 </div>
 
                                 <div>
-                                    <label class="text-[10px] uppercase text-zinc-500 font-bold tracking-wider mb-1.5 block"
+                                    <label class="text-xs uppercase text-zinc-500 font-bold tracking-wider mb-1.5 block"
                                         >Published Time</label
                                     >
                                     <input
                                         v-if="isEditingMedia"
                                         type="datetime-local"
                                         v-model="editMediaPublishedTime"
-                                        class="w-full px-2.5 py-1.5 text-sm border border-zinc-800 rounded-md focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none bg-zinc-950 text-white"
+                                        class="w-full px-2.5 py-1.5 text-sm border border-zinc-800 rounded-md focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none bg-zinc-950 text-white"
                                     />
                                     <div v-else class="text-xs font-semibold text-zinc-300">
                                         {{ formatDate(currentPublishedTime || "") }}
@@ -845,14 +847,14 @@ const handleAddTag = async (tagToAdd: string) => {
                                 <div v-if="isEditingMedia" class="flex items-center gap-2 justify-end pt-2">
                                     <button
                                         @click="cancelEditingMedia"
-                                        class="px-3 py-1 text-xs font-semibold text-zinc-300 bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 rounded transition-colors cursor-pointer"
+                                        class="px-3 py-1 text-xs font-semibold text-zinc-300 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded transition-colors cursor-pointer"
                                         :disabled="isSavingMedia"
                                     >
                                         {{ $t("common.cancel") }}
                                     </button>
                                     <button
                                         @click="saveEditingMedia"
-                                        class="px-3 py-1 text-xs font-semibold text-zinc-950 bg-emerald-400 hover:bg-emerald-300 rounded shadow-sm transition-colors cursor-pointer flex items-center gap-1"
+                                        class="px-3 py-1 text-xs font-semibold text-zinc-950 bg-blue-400 hover:bg-blue-300 rounded shadow-sm transition-colors cursor-pointer flex items-center gap-1"
                                         :disabled="isSavingMedia"
                                     >
                                         <Loader2 v-if="isSavingMedia" class="w-3 animate-spin" />
@@ -865,11 +867,11 @@ const handleAddTag = async (tagToAdd: string) => {
 
                             <!-- Tags -->
                             <div class="space-y-3">
-                                <label class="text-[10px] font-bold text-zinc-500 uppercase flex items-center gap-1.5">
+                                <label class="text-xs font-bold text-zinc-500 uppercase flex items-center gap-1.5">
                                     <Tag class="w-3.5 h-3.5 text-zinc-400" /> {{ $t("common.tags", "Tags") }}
                                 </label>
                                 <div v-if="isLoadingMediaDetails" class="text-xs text-zinc-400 flex items-center gap-1.5 py-1">
-                                    <Loader2 class="w-3.5 h-3.5 animate-spin text-emerald-500" />
+                                    <Loader2 class="w-3.5 h-3.5 animate-spin text-blue-500" />
                                     <span>Loading tags...</span>
                                 </div>
                                 <TagEditor
@@ -899,7 +901,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                         <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
                                         <span class="text-xs font-semibold text-zinc-100">{{ $t("search.keyword_search") }}</span>
                                     </div>
-                                    <p class="text-[11px] text-zinc-400 pl-3 leading-relaxed">
+                                    <p class="text-xs text-zinc-400 pl-3 leading-relaxed">
                                         {{ $t("search.keyword_search_tooltip") }}
                                     </p>
                                 </div>
@@ -912,14 +914,14 @@ const handleAddTag = async (tagToAdd: string) => {
                                             <span class="text-xs font-semibold text-zinc-100">{{ $t("search.text_embedding") }}</span>
                                         </div>
                                         <span
-                                            class="text-[10px] font-mono bg-purple-950/30 text-purple-400 px-1.5 py-0.5 rounded border border-purple-900/35"
+                                            class="text-xs font-mono bg-purple-950/30 text-purple-400 px-1.5 py-0.5 rounded border border-purple-900/35"
                                         >
                                             d={{ currentMediaItem.matched_details.text_semantic.distance?.toFixed(4) }}
                                         </span>
                                     </div>
                                     <p
                                         v-if="currentMediaItem.matched_details.text_semantic.caption"
-                                        class="text-[11px] text-zinc-300 pl-3 italic border-l-2 border-purple-900/40 my-1 py-0.5 leading-relaxed"
+                                        class="text-xs text-zinc-300 pl-3 italic border-l-2 border-purple-900/40 my-1 py-0.5 leading-relaxed"
                                     >
                                         "{{ currentMediaItem.matched_details.text_semantic.caption }}"
                                     </p>
@@ -933,7 +935,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                             <span class="text-xs font-semibold text-zinc-100">{{ $t("search.image_embedding") }}</span>
                                         </div>
                                         <span
-                                            class="text-[10px] font-mono bg-amber-950/30 text-amber-400 px-1.5 py-0.5 rounded border border-amber-900/35"
+                                            class="text-xs font-mono bg-amber-950/30 text-amber-400 px-1.5 py-0.5 rounded border border-amber-900/35"
                                         >
                                             d={{ currentMediaItem.matched_details.visual_semantic.distance?.toFixed(4) }}
                                         </span>
@@ -943,7 +945,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                             currentMediaItem.matched_details.visual_semantic.scene ||
                                             currentMediaItem.matched_details.visual_semantic.styles?.length
                                         "
-                                        class="text-[11px] text-zinc-300 pl-3 space-y-1 leading-relaxed"
+                                        class="text-xs text-zinc-300 pl-3 space-y-1 leading-relaxed"
                                     >
                                         <div v-if="currentMediaItem.matched_details.visual_semantic.scene">
                                             <span class="text-zinc-400">{{ $t("search.scene") }}:</span>
@@ -955,7 +957,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                                 <span
                                                     v-for="style in currentMediaItem.matched_details.visual_semantic.styles"
                                                     :key="style"
-                                                    class="bg-zinc-800 text-zinc-300 px-1.5 py-0.5 rounded text-[10px]"
+                                                    class="bg-zinc-800 text-zinc-300 px-1.5 py-0.5 rounded text-xs"
                                                 >
                                                     {{ style }}
                                                 </span>
@@ -969,14 +971,14 @@ const handleAddTag = async (tagToAdd: string) => {
 
                             <!-- Actions (Regenerate Cover) -->
                             <div v-if="isCoverable" class="space-y-3">
-                                <label class="text-[10px] uppercase text-zinc-500 font-bold tracking-wider flex items-center gap-1.5">
+                                <label class="text-xs uppercase text-zinc-500 font-bold tracking-wider flex items-center gap-1.5">
                                     <Info class="w-3.5 h-3.5" />
                                     {{ $t("media.actions.regenerate_cover", "Regenerate Cover") }}
                                 </label>
                                 <button
                                     :disabled="!currentMediaItem || regeneratingCoverMediaId === currentMediaItem.id"
                                     @click="currentMediaItem && handleRegenerateCover(currentMediaItem.id)"
-                                    class="w-full flex items-center justify-center gap-2 px-4 py-2 border border-zinc-800 rounded-xl text-sm font-semibold text-zinc-300 bg-zinc-900/50 hover:bg-zinc-850 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed select-none cursor-pointer"
+                                    class="w-full flex items-center justify-center gap-2 px-4 py-2 border border-zinc-800 rounded-xl text-sm font-semibold text-zinc-300 bg-zinc-900/50 hover:bg-zinc-800 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed select-none cursor-pointer"
                                 >
                                     <Loader2
                                         v-if="currentMediaItem && regeneratingCoverMediaId === currentMediaItem.id"
@@ -997,13 +999,13 @@ const handleAddTag = async (tagToAdd: string) => {
 
                             <!-- Provenance / Part of Post (The Wormhole) -->
                             <div v-if="postDetail || isLoadingPost" class="space-y-3">
-                                <label class="text-[10px] uppercase text-zinc-500 font-bold tracking-wider flex items-center gap-1.5">
+                                <label class="text-xs uppercase text-zinc-500 font-bold tracking-wider flex items-center gap-1.5">
                                     <Layers class="w-3.5 h-3.5" /> Part of Post
                                 </label>
 
                                 <div
                                     v-if="isLoadingPost"
-                                    class="border border-zinc-850 rounded-xl p-4 space-y-3 animate-pulse bg-zinc-900/20"
+                                    class="border border-zinc-800 rounded-xl p-4 space-y-3 animate-pulse bg-zinc-900/20"
                                 >
                                     <div class="flex items-center gap-2">
                                         <div class="w-6 h-6 rounded-full bg-zinc-800"></div>
@@ -1016,7 +1018,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                 </div>
                                 <div
                                     v-else-if="postDetail"
-                                    class="bg-[#12141a]/40 hover:bg-[#12141a]/70 border border-zinc-850 rounded-xl p-4 transition-all cursor-pointer shadow-sm group/post-card"
+                                    class="bg-[#12141a]/40 hover:bg-[#12141a]/70 border border-zinc-800 rounded-xl p-4 transition-all cursor-pointer shadow-sm group/post-card"
                                     @click="navigateTo(`/posts/${postDetail.id}`)"
                                 >
                                     <div class="flex items-center gap-2 mb-2">
@@ -1029,7 +1031,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                         />
                                         <div
                                             v-else
-                                            class="w-6 h-6 rounded-full bg-zinc-850 flex items-center justify-center text-xs font-bold text-emerald-400 shrink-0"
+                                            class="w-6 h-6 rounded-full bg-zinc-800 flex items-center justify-center text-xs font-bold text-blue-400 shrink-0"
                                         >
                                             {{ postDetail.author_name?.charAt(0) || "A" }}
                                         </div>
@@ -1041,7 +1043,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                         {{ postDetail.description || postDetail.title || "View the original post context." }}
                                     </p>
                                     <div
-                                        class="mt-3 flex items-center text-emerald-400 text-xs font-semibold gap-1.5 transition-all group-hover/post-card:text-emerald-350"
+                                        class="mt-3 flex items-center text-blue-400 text-xs font-semibold gap-1.5 transition-all group-hover/post-card:text-blue-300"
                                     >
                                         View Full Post
                                         <ChevronRight class="w-3.5 h-3.5 transition-transform group-hover/post-card:translate-x-0.5" />

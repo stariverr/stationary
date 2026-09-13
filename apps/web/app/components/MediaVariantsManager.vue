@@ -497,7 +497,7 @@ const handleVideoMouseLeave = (e: Event) => {
 </script>
 
 <template>
-    <div class="flex flex-col h-full overflow-hidden" :class="isDark ? 'bg-[#0b0c0e] text-zinc-350' : 'bg-white text-zinc-800'">
+    <div class="flex flex-col h-full overflow-hidden" :class="isDark ? 'bg-[#0b0c0e] text-zinc-300' : 'bg-white text-zinc-800'">
         <!-- Scrollable Tracks Section -->
         <div class="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar">
             <div
@@ -505,13 +505,13 @@ const handleVideoMouseLeave = (e: Event) => {
                 class="flex flex-col items-center justify-center py-16 text-xs gap-1.5"
                 :class="isDark ? 'text-zinc-500' : 'text-zinc-400'"
             >
-                <Loader2 class="w-5 h-5 animate-spin mb-2" :class="isDark ? 'text-emerald-500' : 'text-zinc-400'" />
+                <Loader2 class="w-5 h-5 animate-spin mb-2" :class="isDark ? 'text-blue-500' : 'text-zinc-400'" />
                 <span>{{ $t("media.tracks.loading") }}</span>
             </div>
             <div
                 v-else-if="tracksList.length === 0"
                 class="text-center py-16 text-xs italic"
-                :class="isDark ? 'text-zinc-500' : 'text-zinc-550'"
+                :class="isDark ? 'text-zinc-500' : 'text-zinc-500'"
             >
                 {{ $t("media.tracks.no_tracks") }}
             </div>
@@ -530,9 +530,9 @@ const handleVideoMouseLeave = (e: Event) => {
                     <div v-if="group.items.length > 0" class="space-y-2.5">
                         <h3
                             class="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 px-1"
-                            :class="isDark ? 'text-zinc-450' : 'text-zinc-500'"
+                            :class="isDark ? 'text-zinc-400' : 'text-zinc-500'"
                         >
-                            <component :is="group.icon" class="w-3.5 h-3.5" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'" />
+                            <component :is="group.icon" class="w-3.5 h-3.5" :class="isDark ? 'text-zinc-400' : 'text-zinc-500'" />
                             {{ group.name }}
                         </h3>
                         <div class="space-y-2.5">
@@ -543,19 +543,19 @@ const handleVideoMouseLeave = (e: Event) => {
                                 :class="[
                                     isDark
                                         ? editingTrackId === item.id
-                                            ? 'border-zinc-700 bg-zinc-900/60 shadow-2xs'
-                                            : 'border-zinc-850 bg-zinc-900/20 hover:border-zinc-750 hover:bg-zinc-900/40 hover:shadow-2xs'
+                                            ? 'border-zinc-700 bg-zinc-900/60 shadow-xs'
+                                            : 'border-zinc-800 bg-zinc-900/20 hover:border-zinc-700 hover:bg-zinc-900/40 hover:shadow-xs'
                                         : editingTrackId === item.id
-                                          ? 'border-zinc-300 bg-white shadow-2xs'
-                                          : 'border-zinc-150 bg-white hover:border-zinc-200 hover:shadow-2xs',
+                                          ? 'border-zinc-300 bg-white shadow-xs'
+                                          : 'border-zinc-200 bg-white hover:border-zinc-200 hover:shadow-xs',
                                 ]"
                             >
                                 <!-- Top Row: Preview & Primary Metadata -->
                                 <div class="flex items-start gap-3">
                                     <!-- Visual Preview Thumbnail -->
                                     <div
-                                        class="w-14 h-14 shrink-0 rounded-lg overflow-hidden flex items-center justify-center relative group/thumb select-none shadow-3xs self-start mt-0.5 border"
-                                        :class="isDark ? 'bg-zinc-950 border-zinc-800' : 'bg-zinc-50 border-zinc-150'"
+                                        class="w-14 h-14 shrink-0 rounded-lg overflow-hidden flex items-center justify-center relative group/thumb select-none shadow-xs self-start mt-0.5 border"
+                                        :class="isDark ? 'bg-zinc-950 border-zinc-800' : 'bg-zinc-50 border-zinc-200'"
                                     >
                                         <HeicImage
                                             v-if="item.type === 'IMAGE' && item.file?.url"
@@ -582,7 +582,7 @@ const handleVideoMouseLeave = (e: Event) => {
                                         <div
                                             v-else-if="item.type === 'AUDIO'"
                                             class="w-full h-full flex items-center justify-center"
-                                            :class="isDark ? 'bg-indigo-950/25 text-indigo-400' : 'bg-indigo-50/50 text-indigo-550'"
+                                            :class="isDark ? 'bg-indigo-950/25 text-indigo-400' : 'bg-indigo-50/50 text-indigo-600'"
                                         >
                                             <Music class="w-5 h-5" />
                                         </div>
@@ -598,7 +598,7 @@ const handleVideoMouseLeave = (e: Event) => {
                                             class="w-full h-full flex items-center justify-center"
                                             :class="isDark ? 'bg-zinc-950' : 'bg-zinc-50'"
                                         >
-                                            <FileImage class="w-5 h-5" :class="isDark ? 'text-zinc-655' : 'text-zinc-500'" />
+                                            <FileImage class="w-5 h-5" :class="isDark ? 'text-zinc-600' : 'text-zinc-500'" />
                                         </div>
                                     </div>
 
@@ -613,22 +613,22 @@ const handleVideoMouseLeave = (e: Event) => {
                                             </span>
                                             <span
                                                 v-if="item.is_default"
-                                                class="px-1.5 py-0.5 rounded text-[10px] font-bold border"
+                                                class="px-1.5 py-0.5 rounded text-xs font-bold border"
                                                 :class="
                                                     isDark
-                                                        ? 'bg-emerald-950/30 text-emerald-400 border-emerald-900/30'
-                                                        : 'bg-emerald-55 text-emerald-700 border border-emerald-250/30'
+                                                        ? 'bg-blue-950/30 text-blue-400 border-blue-900/30'
+                                                        : 'bg-blue-50 text-blue-700 border border-blue-200/30'
                                                 "
                                             >
                                                 {{ $t("media.tracks.default") }}
                                             </span>
                                             <span
                                                 v-if="item.is_stale"
-                                                class="px-1.5 py-0.5 rounded text-[10px] font-bold border animate-pulse"
+                                                class="px-1.5 py-0.5 rounded text-xs font-bold border animate-pulse"
                                                 :class="
                                                     isDark
                                                         ? 'bg-amber-950/30 text-amber-400 border-amber-900/30'
-                                                        : 'bg-amber-55 text-amber-700 border border-amber-250/30'
+                                                        : 'bg-amber-50 text-amber-700 border border-amber-200/30'
                                                 "
                                             >
                                                 {{ $t("media.tracks.out_of_sync") }}
@@ -666,8 +666,8 @@ const handleVideoMouseLeave = (e: Event) => {
                                                     $t("media.tracks.field_codec")
                                                 }}</span>
                                                 <span
-                                                    class="font-semibold font-mono text-[11px]"
-                                                    :class="isDark ? 'text-zinc-350' : 'text-zinc-800'"
+                                                    class="font-semibold font-mono text-xs"
+                                                    :class="isDark ? 'text-zinc-300' : 'text-zinc-800'"
                                                     >{{ getFriendlyCodec(item.codec) }}</span
                                                 >
                                             </div>
@@ -684,7 +684,7 @@ const handleVideoMouseLeave = (e: Event) => {
                                                     $t("media.tracks.field_format")
                                                 }}</span>
                                                 <span
-                                                    class="font-mono text-[10px] px-1.5 py-0.5 rounded border break-all select-all leading-tight"
+                                                    class="font-mono text-xs px-1.5 py-0.5 rounded border break-all select-all leading-tight"
                                                     :class="
                                                         isDark
                                                             ? 'text-zinc-300 bg-zinc-950 border-zinc-800'
@@ -700,7 +700,7 @@ const handleVideoMouseLeave = (e: Event) => {
                                                 }}</span>
                                                 <span class="font-semibold" :class="isDark ? 'text-zinc-300' : 'text-zinc-800'">
                                                     {{ item.file.width }} × {{ item.file.height }}
-                                                    <span class="text-zinc-400 font-normal text-[11px]"
+                                                    <span class="text-zinc-400 font-normal text-xs"
                                                         >({{ calculateAspectRatio(item.file.width, item.file.height) }})</span
                                                     >
                                                 </span>
@@ -723,10 +723,10 @@ const handleVideoMouseLeave = (e: Event) => {
                                                         item.is_generated
                                                             ? isDark
                                                                 ? 'text-zinc-400'
-                                                                : 'text-zinc-705'
+                                                                : 'text-zinc-700'
                                                             : isDark
-                                                              ? 'text-emerald-450'
-                                                              : 'text-indigo-650',
+                                                              ? 'text-blue-400'
+                                                              : 'text-indigo-600',
                                                     ]"
                                                 >
                                                     {{
@@ -741,11 +741,11 @@ const handleVideoMouseLeave = (e: Event) => {
                                                     $t("media.tracks.field_variant_key")
                                                 }}</span>
                                                 <span
-                                                    class="font-mono text-[10px] px-1.5 py-0.5 rounded border"
+                                                    class="font-mono text-xs px-1.5 py-0.5 rounded border"
                                                     :class="
                                                         isDark
-                                                            ? 'text-zinc-300 bg-zinc-950 border-zinc-850'
-                                                            : 'text-zinc-650 bg-zinc-50 border-zinc-150/40'
+                                                            ? 'text-zinc-300 bg-zinc-950 border-zinc-800'
+                                                            : 'text-zinc-600 bg-zinc-50 border-zinc-200/40'
                                                     "
                                                     >{{ item.variant_key }}</span
                                                 >
@@ -758,56 +758,56 @@ const handleVideoMouseLeave = (e: Event) => {
                                 <div
                                     v-if="editingTrackId === item.id"
                                     class="space-y-3 mt-3 text-xs border-t pt-3"
-                                    :class="isDark ? 'border-zinc-850' : 'border-zinc-100'"
+                                    :class="isDark ? 'border-zinc-800' : 'border-zinc-100'"
                                 >
                                     <div class="grid grid-cols-2 gap-3">
                                         <div class="space-y-1">
                                             <Label
-                                                class="text-[10px] uppercase font-bold tracking-wider"
-                                                :class="isDark ? 'text-zinc-400' : 'text-zinc-550'"
+                                                class="text-xs uppercase font-bold tracking-wider"
+                                                :class="isDark ? 'text-zinc-400' : 'text-zinc-500'"
                                                 >{{ $t("media.tracks.field_display_name") }}</Label
                                             >
                                             <Input
                                                 v-model="editParams.display_name"
-                                                class="h-8 text-xs rounded-lg border outline-none focus:ring-1 focus:ring-emerald-500"
+                                                class="h-8 text-xs rounded-lg border outline-none focus:ring-1 focus:ring-blue-500"
                                                 :class="
                                                     isDark
-                                                        ? 'border-zinc-800 bg-zinc-950 text-white focus:border-emerald-500'
-                                                        : 'border-zinc-200 bg-white text-zinc-850 focus:border-zinc-550'
+                                                        ? 'border-zinc-800 bg-zinc-950 text-white focus:border-blue-500'
+                                                        : 'border-zinc-200 bg-white text-zinc-800 focus:border-zinc-500'
                                                 "
                                                 :placeholder="$t('media.tracks.optional_label')"
                                             />
                                         </div>
                                         <div class="space-y-1">
                                             <Label
-                                                class="text-[10px] uppercase font-bold tracking-wider"
-                                                :class="isDark ? 'text-zinc-400' : 'text-zinc-550'"
+                                                class="text-xs uppercase font-bold tracking-wider"
+                                                :class="isDark ? 'text-zinc-400' : 'text-zinc-500'"
                                                 >{{ $t("media.tracks.field_variant_key") }}</Label
                                             >
                                             <Input
                                                 v-model="editParams.variant_key"
-                                                class="h-8 text-xs rounded-lg border outline-none focus:ring-1 focus:ring-emerald-500"
+                                                class="h-8 text-xs rounded-lg border outline-none focus:ring-1 focus:ring-blue-500"
                                                 :class="
                                                     isDark
-                                                        ? 'border-zinc-800 bg-zinc-950 text-white focus:border-emerald-500'
-                                                        : 'border-zinc-200 bg-white text-zinc-850 focus:border-zinc-550'
+                                                        ? 'border-zinc-800 bg-zinc-950 text-white focus:border-blue-500'
+                                                        : 'border-zinc-200 bg-white text-zinc-800 focus:border-zinc-500'
                                                 "
                                                 :placeholder="$t('media.tracks.placeholder_variant_key_eg')"
                                             />
                                         </div>
                                         <div class="space-y-1">
                                             <Label
-                                                class="text-[10px] uppercase font-bold tracking-wider"
-                                                :class="isDark ? 'text-zinc-400' : 'text-zinc-550'"
+                                                class="text-xs uppercase font-bold tracking-wider"
+                                                :class="isDark ? 'text-zinc-400' : 'text-zinc-500'"
                                                 >{{ $t("media.tracks.field_purpose") }}</Label
                                             >
                                             <Select v-model="editParams.purpose">
                                                 <SelectTrigger
-                                                    class="h-8 rounded-lg text-xs border focus:ring-1 focus:ring-emerald-500 outline-none"
+                                                    class="h-8 rounded-lg text-xs border focus:ring-1 focus:ring-blue-500 outline-none"
                                                     :class="
                                                         isDark
-                                                            ? 'border-zinc-800 bg-zinc-950 text-white focus:border-emerald-500'
-                                                            : 'border-zinc-200 bg-white text-zinc-850 focus:border-zinc-555'
+                                                            ? 'border-zinc-800 bg-zinc-950 text-white focus:border-blue-500'
+                                                            : 'border-zinc-200 bg-white text-zinc-800 focus:border-zinc-500'
                                                     "
                                                 >
                                                     <SelectValue :placeholder="$t('media.tracks.select_purpose')" />
@@ -829,17 +829,17 @@ const handleVideoMouseLeave = (e: Event) => {
                                         </div>
                                         <div class="space-y-1">
                                             <Label
-                                                class="text-[10px] uppercase font-bold tracking-wider"
-                                                :class="isDark ? 'text-zinc-400' : 'text-zinc-550'"
+                                                class="text-xs uppercase font-bold tracking-wider"
+                                                :class="isDark ? 'text-zinc-400' : 'text-zinc-500'"
                                                 >{{ $t("media.tracks.field_quality") }}</Label
                                             >
                                             <Select v-model="editParams.quality">
                                                 <SelectTrigger
-                                                    class="h-8 rounded-lg text-xs border focus:ring-1 focus:ring-emerald-500 outline-none"
+                                                    class="h-8 rounded-lg text-xs border focus:ring-1 focus:ring-blue-500 outline-none"
                                                     :class="
                                                         isDark
-                                                            ? 'border-zinc-800 bg-zinc-950 text-white focus:border-emerald-500'
-                                                            : 'border-zinc-200 bg-white text-zinc-850 focus:border-zinc-555'
+                                                            ? 'border-zinc-800 bg-zinc-950 text-white focus:border-blue-500'
+                                                            : 'border-zinc-200 bg-white text-zinc-800 focus:border-zinc-500'
                                                     "
                                                 >
                                                     <SelectValue :placeholder="$t('media.tracks.select_quality')" />
@@ -860,17 +860,17 @@ const handleVideoMouseLeave = (e: Event) => {
                                         </div>
                                         <div class="space-y-1">
                                             <Label
-                                                class="text-[10px] uppercase font-bold tracking-wider"
-                                                :class="isDark ? 'text-zinc-400' : 'text-zinc-550'"
+                                                class="text-xs uppercase font-bold tracking-wider"
+                                                :class="isDark ? 'text-zinc-400' : 'text-zinc-500'"
                                                 >{{ $t("media.tracks.field_language") }}</Label
                                             >
                                             <Select v-model="editParams.language">
                                                 <SelectTrigger
-                                                    class="h-8 rounded-lg text-xs border focus:ring-1 focus:ring-emerald-500 outline-none"
+                                                    class="h-8 rounded-lg text-xs border focus:ring-1 focus:ring-blue-500 outline-none"
                                                     :class="
                                                         isDark
-                                                            ? 'border-zinc-800 bg-zinc-950 text-white focus:border-emerald-500'
-                                                            : 'border-zinc-200 bg-white text-zinc-850 focus:border-zinc-555'
+                                                            ? 'border-zinc-800 bg-zinc-950 text-white focus:border-blue-500'
+                                                            : 'border-zinc-200 bg-white text-zinc-800 focus:border-zinc-500'
                                                     "
                                                 >
                                                     <SelectValue :placeholder="$t('media.tracks.select_language')" />
@@ -894,36 +894,36 @@ const handleVideoMouseLeave = (e: Event) => {
                                         </div>
                                         <div class="space-y-1">
                                             <Label
-                                                class="text-[10px] uppercase font-bold tracking-wider"
-                                                :class="isDark ? 'text-zinc-400' : 'text-zinc-550'"
+                                                class="text-xs uppercase font-bold tracking-wider"
+                                                :class="isDark ? 'text-zinc-400' : 'text-zinc-500'"
                                                 >{{ $t("media.tracks.field_codec") }}</Label
                                             >
                                             <Input
                                                 v-model="editParams.codec"
-                                                class="h-8 text-xs rounded-lg border outline-none focus:ring-1 focus:ring-emerald-500"
+                                                class="h-8 text-xs rounded-lg border outline-none focus:ring-1 focus:ring-blue-500"
                                                 :class="
                                                     isDark
-                                                        ? 'border-zinc-800 bg-zinc-950 text-white focus:border-emerald-500'
-                                                        : 'border-zinc-200 bg-white text-zinc-850 focus:border-zinc-550'
+                                                        ? 'border-zinc-800 bg-zinc-950 text-white focus:border-blue-500'
+                                                        : 'border-zinc-200 bg-white text-zinc-800 focus:border-zinc-500'
                                                 "
                                                 :placeholder="$t('media.tracks.placeholder_codec_edit_eg')"
                                             />
                                         </div>
                                         <div class="space-y-1 col-span-2">
                                             <Label
-                                                class="text-[10px] uppercase font-bold tracking-wider"
-                                                :class="isDark ? 'text-zinc-400' : 'text-zinc-550'"
+                                                class="text-xs uppercase font-bold tracking-wider"
+                                                :class="isDark ? 'text-zinc-400' : 'text-zinc-500'"
                                                 >{{ $t("media.tracks.field_priority") }}</Label
                                             >
                                             <Input
                                                 type="number"
                                                 v-model.number="editParams.priority"
                                                 min="0"
-                                                class="h-8 text-xs rounded-lg border outline-none focus:ring-1 focus:ring-emerald-500"
+                                                class="h-8 text-xs rounded-lg border outline-none focus:ring-1 focus:ring-blue-500"
                                                 :class="
                                                     isDark
-                                                        ? 'border-zinc-800 bg-zinc-950 text-white focus:border-emerald-500'
-                                                        : 'border-zinc-200 bg-white text-zinc-850 focus:border-zinc-550'
+                                                        ? 'border-zinc-800 bg-zinc-950 text-white focus:border-blue-500'
+                                                        : 'border-zinc-200 bg-white text-zinc-800 focus:border-zinc-500'
                                                 "
                                             />
                                         </div>
@@ -934,8 +934,8 @@ const handleVideoMouseLeave = (e: Event) => {
                                             class="px-3 py-1.5 text-xs font-semibold border rounded-lg transition-colors cursor-pointer"
                                             :class="
                                                 isDark
-                                                    ? 'border-zinc-800 bg-zinc-900 hover:bg-zinc-850 text-zinc-300'
-                                                    : 'border-zinc-200 hover:bg-zinc-55 text-zinc-700'
+                                                    ? 'border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-zinc-300'
+                                                    : 'border-zinc-200 hover:bg-zinc-50 text-zinc-700'
                                             "
                                         >
                                             {{ $t("common.cancel") }}
@@ -945,7 +945,7 @@ const handleVideoMouseLeave = (e: Event) => {
                                             class="px-3 py-1.5 text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
                                             :class="
                                                 isDark
-                                                    ? 'bg-emerald-500 text-zinc-950 hover:bg-emerald-450'
+                                                    ? 'bg-blue-500 text-zinc-950 hover:bg-blue-400'
                                                     : 'bg-primary text-primary-foreground hover:bg-primary/90'
                                             "
                                         >
@@ -958,15 +958,15 @@ const handleVideoMouseLeave = (e: Event) => {
                                 <div
                                     v-if="editingTrackId !== item.id"
                                     class="mt-3 pt-2.5 border-t flex items-center justify-between gap-3 text-xs"
-                                    :class="isDark ? 'border-zinc-850 text-zinc-450' : 'border-zinc-100 text-zinc-500'"
+                                    :class="isDark ? 'border-zinc-800 text-zinc-400' : 'border-zinc-100 text-zinc-500'"
                                 >
                                     <button
                                         v-if="!item.is_default"
                                         @click="handleSetDefault(item.id)"
-                                        class="px-2.5 py-1 rounded-md text-[10px] font-semibold border transition-all cursor-pointer select-none active:scale-[0.98] transform flex items-center gap-1"
+                                        class="px-2.5 py-1 rounded-md text-xs font-semibold border transition-all cursor-pointer select-none active:scale-[0.98] transform flex items-center gap-1"
                                         :class="
                                             isDark
-                                                ? 'bg-zinc-900 hover:bg-zinc-850 border-zinc-800 text-zinc-300'
+                                                ? 'bg-zinc-900 hover:bg-zinc-800 border-zinc-800 text-zinc-300'
                                                 : 'bg-zinc-50 hover:bg-zinc-100 active:bg-zinc-200/80 border-zinc-200 text-zinc-700'
                                         "
                                         :title="$t('media.tracks.set_default')"
@@ -976,22 +976,22 @@ const handleVideoMouseLeave = (e: Event) => {
                                     <div class="flex items-center gap-1.5 ml-auto">
                                         <button
                                             @click="startEditingTrack(item)"
-                                            class="p-1.5 rounded-md border border-transparent transition-all cursor-pointer flex items-center justify-center hover:shadow-3xs active:scale-95 duration-150"
+                                            class="p-1.5 rounded-md border border-transparent transition-all cursor-pointer flex items-center justify-center hover:shadow-xs active:scale-95 duration-150"
                                             :class="
                                                 isDark
                                                     ? 'text-zinc-400 hover:text-white hover:bg-zinc-900 hover:border-zinc-800 bg-transparent'
-                                                    : 'text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 hover:border-zinc-200/50 bg-white'
+                                                    : 'text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 hover:border-zinc-200/50 bg-white'
                                             "
                                             :title="$t('media.tracks.edit_properties')"
                                         >
                                             <Pencil class="w-3.5 h-3.5" />
                                         </button>
                                         <label
-                                            class="p-1.5 rounded-md border border-transparent transition-all cursor-pointer flex items-center justify-center hover:shadow-3xs active:scale-95 duration-150"
+                                            class="p-1.5 rounded-md border border-transparent transition-all cursor-pointer flex items-center justify-center hover:shadow-xs active:scale-95 duration-150"
                                             :class="
                                                 isDark
                                                     ? 'text-zinc-400 hover:text-white hover:bg-zinc-900 hover:border-zinc-800 bg-transparent'
-                                                    : 'text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 hover:border-zinc-200/50 bg-white'
+                                                    : 'text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 hover:border-zinc-200/50 bg-white'
                                             "
                                             :title="$t('media.tracks.replace_file')"
                                         >
@@ -1017,11 +1017,11 @@ const handleVideoMouseLeave = (e: Event) => {
                                             v-if="item.file?.url"
                                             :href="item.file.url"
                                             target="_blank"
-                                            class="p-1.5 rounded-md border border-transparent transition-all flex items-center justify-center hover:shadow-3xs active:scale-95 duration-150"
+                                            class="p-1.5 rounded-md border border-transparent transition-all flex items-center justify-center hover:shadow-xs active:scale-95 duration-150"
                                             :class="
                                                 isDark
                                                     ? 'text-zinc-400 hover:text-white hover:bg-zinc-900 hover:border-zinc-800 bg-transparent'
-                                                    : 'text-zinc-500 hover:text-zinc-850 hover:bg-zinc-100 hover:border-zinc-200/50 bg-white'
+                                                    : 'text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 hover:border-zinc-200/50 bg-white'
                                             "
                                             :title="$t('media.tracks.open_original')"
                                         >
@@ -1029,11 +1029,11 @@ const handleVideoMouseLeave = (e: Event) => {
                                         </a>
                                         <button
                                             @click="handleDeleteTrack(item.id)"
-                                            class="p-1.5 rounded-md border border-transparent transition-all cursor-pointer flex items-center justify-center hover:shadow-3xs active:scale-95 duration-150"
+                                            class="p-1.5 rounded-md border border-transparent transition-all cursor-pointer flex items-center justify-center hover:shadow-xs active:scale-95 duration-150"
                                             :class="
                                                 isDark
-                                                    ? 'text-zinc-450 hover:text-red-400 hover:bg-red-950/20 hover:border-red-900 bg-transparent'
-                                                    : 'text-zinc-500 hover:text-red-750 hover:bg-red-50/50 hover:border-red-150 bg-white'
+                                                    ? 'text-zinc-400 hover:text-red-400 hover:bg-red-950/20 hover:border-red-900 bg-transparent'
+                                                    : 'text-zinc-500 hover:text-red-700 hover:bg-red-50/50 hover:border-red-200 bg-white'
                                             "
                                             :title="$t('media.tracks.delete_track')"
                                         >
@@ -1054,8 +1054,8 @@ const handleVideoMouseLeave = (e: Event) => {
             :class="isDark ? 'border-zinc-900 bg-zinc-950/30' : 'border-zinc-100 bg-zinc-50/30'"
         >
             <h4
-                class="text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5"
-                :class="isDark ? 'text-zinc-400' : 'text-zinc-550'"
+                class="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5"
+                :class="isDark ? 'text-zinc-400' : 'text-zinc-500'"
             >
                 <Plus class="w-3.5 h-3.5" :class="isDark ? 'text-zinc-400' : 'text-zinc-500'" /> {{ $t("media.tracks.add_custom_variant") }}
             </h4>
@@ -1063,7 +1063,7 @@ const handleVideoMouseLeave = (e: Event) => {
             <div class="grid grid-cols-2 gap-3 text-xs">
                 <!-- Purpose Selection (PRIORITIZED) -->
                 <div class="space-y-1">
-                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                    <Label class="text-xs uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-400' : 'text-zinc-500'">{{
                         $t("media.tracks.field_purpose")
                     }}</Label>
                     <Select v-model="newTrackParams.purpose">
@@ -1071,8 +1071,8 @@ const handleVideoMouseLeave = (e: Event) => {
                             class="w-full h-9 rounded-xl outline-none transition-all text-xs border focus:ring-2"
                             :class="
                                 isDark
-                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:ring-emerald-500/20 focus:border-emerald-500'
-                                    : 'border-zinc-200 bg-white text-zinc-850 focus:ring-zinc-500/20 focus:border-zinc-550'
+                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:ring-blue-500/20 focus:border-blue-500'
+                                    : 'border-zinc-200 bg-white text-zinc-800 focus:ring-zinc-500/20 focus:border-zinc-500'
                             "
                         >
                             <SelectValue :placeholder="$t('media.tracks.select_purpose')" />
@@ -1091,7 +1091,7 @@ const handleVideoMouseLeave = (e: Event) => {
 
                 <!-- Type Selection -->
                 <div class="space-y-1">
-                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                    <Label class="text-xs uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-400' : 'text-zinc-500'">{{
                         $t("media.tracks.field_type")
                     }}</Label>
                     <Select v-model="newTrackParams.type" :disabled="!newTrackParams.purpose">
@@ -1099,8 +1099,8 @@ const handleVideoMouseLeave = (e: Event) => {
                             class="w-full h-9 rounded-xl outline-none transition-all text-xs border focus:ring-2"
                             :class="
                                 isDark
-                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:ring-emerald-500/20 focus:border-emerald-500'
-                                    : 'border-zinc-200 bg-white text-zinc-850 focus:ring-zinc-500/20 focus:border-zinc-550'
+                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:ring-blue-500/20 focus:border-blue-500'
+                                    : 'border-zinc-200 bg-white text-zinc-800 focus:ring-zinc-500/20 focus:border-zinc-500'
                             "
                         >
                             <SelectValue :placeholder="$t('media.tracks.select_type')" />
@@ -1127,7 +1127,7 @@ const handleVideoMouseLeave = (e: Event) => {
 
                 <!-- Quality Selection -->
                 <div class="space-y-1">
-                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                    <Label class="text-xs uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-400' : 'text-zinc-500'">{{
                         $t("media.tracks.field_quality")
                     }}</Label>
                     <Select v-model="newTrackParams.quality" :disabled="!newTrackParams.purpose">
@@ -1135,8 +1135,8 @@ const handleVideoMouseLeave = (e: Event) => {
                             class="w-full h-9 rounded-xl outline-none transition-all text-xs border focus:ring-2"
                             :class="
                                 isDark
-                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:ring-emerald-500/20 focus:border-emerald-500'
-                                    : 'border-zinc-200 bg-white text-zinc-850 focus:ring-zinc-500/20 focus:border-zinc-550'
+                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:ring-blue-500/20 focus:border-blue-500'
+                                    : 'border-zinc-200 bg-white text-zinc-800 focus:ring-zinc-500/20 focus:border-zinc-500'
                             "
                         >
                             <SelectValue :placeholder="$t('media.tracks.select_quality')" />
@@ -1159,7 +1159,7 @@ const handleVideoMouseLeave = (e: Event) => {
                         :checked="newTrackParams.is_default"
                         @update:checked="newTrackParams.is_default = $event"
                         :disabled="!newTrackParams.purpose"
-                        class="data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-500 focus-visible:ring-emerald-500"
+                        class="data-[state=checked]:bg-blue-500 data-[state=checked]:border-blue-500 focus-visible:ring-blue-500"
                         :class="isDark ? 'border-zinc-800' : 'border-zinc-300'"
                     />
                     <Label
@@ -1176,7 +1176,7 @@ const handleVideoMouseLeave = (e: Event) => {
 
                 <!-- Dynamic Field: Subtitle format (Subtitle only) -->
                 <div v-if="newTrackParams.type === 'SUBTITLE'" class="space-y-1">
-                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                    <Label class="text-xs uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-400' : 'text-zinc-500'">{{
                         $t("media.tracks.field_format")
                     }}</Label>
                     <Select v-model="newTrackParams.metadata.format" :disabled="!newTrackParams.purpose">
@@ -1184,8 +1184,8 @@ const handleVideoMouseLeave = (e: Event) => {
                             class="w-full h-9 rounded-xl outline-none transition-all text-xs border focus:ring-2"
                             :class="
                                 isDark
-                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:border-emerald-500/20 focus:border-emerald-500'
-                                    : 'border-zinc-200 bg-white text-zinc-850 focus:ring-zinc-500/20 focus:border-zinc-550'
+                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:border-blue-500/20 focus:border-blue-500'
+                                    : 'border-zinc-200 bg-white text-zinc-800 focus:ring-zinc-500/20 focus:border-zinc-500'
                             "
                         >
                             <SelectValue :placeholder="$t('media.tracks.select_format')" />
@@ -1203,7 +1203,7 @@ const handleVideoMouseLeave = (e: Event) => {
 
                 <!-- Dynamic Field: Language Selection (Subtitle/Audio only) -->
                 <div v-if="['SUBTITLE', 'AUDIO'].includes(newTrackParams.type)" class="space-y-1">
-                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                    <Label class="text-xs uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-400' : 'text-zinc-500'">{{
                         $t("media.tracks.field_language")
                     }}</Label>
                     <Select v-model="newTrackParams.language" :disabled="!newTrackParams.purpose">
@@ -1211,8 +1211,8 @@ const handleVideoMouseLeave = (e: Event) => {
                             class="w-full h-9 rounded-xl outline-none transition-all text-xs border focus:ring-2"
                             :class="
                                 isDark
-                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:border-emerald-500/20 focus:border-emerald-500'
-                                    : 'border-zinc-200 bg-white text-zinc-850 focus:ring-zinc-500/20 focus:border-zinc-550'
+                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:border-blue-500/20 focus:border-blue-500'
+                                    : 'border-zinc-200 bg-white text-zinc-800 focus:ring-zinc-500/20 focus:border-zinc-500'
                             "
                         >
                             <SelectValue :placeholder="$t('media.tracks.select_language')" />
@@ -1233,7 +1233,7 @@ const handleVideoMouseLeave = (e: Event) => {
 
                 <!-- Dynamic Field: Codec (Video/Audio only) -->
                 <div v-if="['VIDEO', 'AUDIO'].includes(newTrackParams.type)" class="space-y-1">
-                    <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                    <Label class="text-xs uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-400' : 'text-zinc-500'">{{
                         $t("media.tracks.field_codec")
                     }}</Label>
                     <Input
@@ -1244,7 +1244,7 @@ const handleVideoMouseLeave = (e: Event) => {
                         class="w-full h-9 rounded-xl outline-none transition-all text-xs border focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
                         :class="
                             isDark
-                                ? 'border-zinc-800 bg-zinc-950 text-white focus:border-emerald-500 focus:ring-emerald-500/20'
+                                ? 'border-zinc-800 bg-zinc-950 text-white focus:border-blue-500 focus:ring-blue-500/20'
                                 : 'border-zinc-200 bg-white text-zinc-800 focus:border-zinc-500 focus:ring-zinc-500/20'
                         "
                     />
@@ -1257,7 +1257,7 @@ const handleVideoMouseLeave = (e: Event) => {
                     type="button"
                     @click="newTrackParams.purpose && (showAdvancedSettings = !showAdvancedSettings)"
                     :disabled="!newTrackParams.purpose"
-                    class="text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 transition-colors cursor-pointer select-none"
+                    class="text-xs font-bold uppercase tracking-wider flex items-center gap-1 transition-colors cursor-pointer select-none"
                     :class="[
                         !newTrackParams.purpose ? 'opacity-50 cursor-not-allowed' : '',
                         isDark ? 'text-zinc-400 hover:text-zinc-200' : 'text-zinc-500 hover:text-zinc-700',
@@ -1267,7 +1267,7 @@ const handleVideoMouseLeave = (e: Event) => {
                 </button>
                 <div v-if="showAdvancedSettings && newTrackParams.purpose" class="grid grid-cols-2 gap-3 mt-3">
                     <div class="space-y-1">
-                        <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                        <Label class="text-xs uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-400' : 'text-zinc-500'">{{
                             $t("media.tracks.field_priority")
                         }}</Label>
                         <Input
@@ -1278,13 +1278,13 @@ const handleVideoMouseLeave = (e: Event) => {
                             class="w-full h-9 rounded-xl outline-none transition-all text-xs border focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             :class="
                                 isDark
-                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:border-emerald-500 focus:ring-emerald-500/20'
-                                    : 'border-zinc-200 bg-white text-zinc-805 focus:border-zinc-550/20 focus:border-zinc-500'
+                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:border-blue-500 focus:ring-blue-500/20'
+                                    : 'border-zinc-200 bg-white text-zinc-800 focus:border-zinc-500/20 focus:border-zinc-500'
                             "
                         />
                     </div>
                     <div class="space-y-1">
-                        <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                        <Label class="text-xs uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-400' : 'text-zinc-500'">{{
                             $t("media.tracks.field_variant_key")
                         }}</Label>
                         <Input
@@ -1295,13 +1295,13 @@ const handleVideoMouseLeave = (e: Event) => {
                             class="w-full h-9 rounded-xl outline-none transition-all text-xs border focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             :class="
                                 isDark
-                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:border-emerald-500 focus:ring-emerald-500/20'
-                                    : 'border-zinc-200 bg-white text-zinc-805 focus:border-zinc-550/20 focus:border-zinc-500'
+                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:border-blue-500 focus:ring-blue-500/20'
+                                    : 'border-zinc-200 bg-white text-zinc-800 focus:border-zinc-500/20 focus:border-zinc-500'
                             "
                         />
                     </div>
                     <div class="space-y-1 col-span-2">
-                        <Label class="text-[10px] uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-450' : 'text-zinc-500'">{{
+                        <Label class="text-xs uppercase font-bold tracking-wider" :class="isDark ? 'text-zinc-400' : 'text-zinc-500'">{{
                             $t("media.tracks.field_display_name")
                         }}</Label>
                         <Input
@@ -1312,8 +1312,8 @@ const handleVideoMouseLeave = (e: Event) => {
                             class="w-full h-9 rounded-xl outline-none transition-all text-xs border focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             :class="
                                 isDark
-                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:border-emerald-500 focus:ring-emerald-500/20'
-                                    : 'border-zinc-200 bg-white text-zinc-805 focus:border-zinc-550/20 focus:border-zinc-500'
+                                    ? 'border-zinc-800 bg-zinc-950 text-white focus:border-blue-500 focus:ring-blue-500/20'
+                                    : 'border-zinc-200 bg-white text-zinc-800 focus:border-zinc-500/20 focus:border-zinc-500'
                             "
                         />
                     </div>
@@ -1326,10 +1326,10 @@ const handleVideoMouseLeave = (e: Event) => {
                 :class="
                     isUploadDisabled
                         ? isDark
-                            ? 'bg-zinc-900/60 text-zinc-650 border border-zinc-850 pointer-events-none cursor-not-allowed'
+                            ? 'bg-zinc-900/60 text-zinc-600 border border-zinc-800 pointer-events-none cursor-not-allowed'
                             : 'bg-zinc-100 text-zinc-400 border border-zinc-200 pointer-events-none cursor-not-allowed'
                         : isDark
-                          ? 'bg-emerald-500 text-zinc-950 hover:bg-emerald-450 active:scale-[0.99] shadow-xs'
+                          ? 'bg-blue-500 text-zinc-950 hover:bg-blue-400 active:scale-[0.99] shadow-xs'
                           : 'bg-primary text-primary-foreground hover:bg-primary/90 active:scale-[0.99] shadow-xs'
                 "
             >

@@ -196,8 +196,6 @@ const innerContainerClass = computed(() => {
         :style="attrs.style"
         @mouseenter="startPlayback"
         @mouseleave="stopPlayback"
-        @touchstart="startPlayback"
-        @touchend="stopPlayback"
     >
         <!-- Inner container that matches the image size exactly to align video, image, and badge -->
         <div class="relative flex items-center justify-center" :class="innerContainerClass" :style="aspectRatioStyle">
@@ -211,10 +209,11 @@ const innerContainerClass = computed(() => {
                         ? 'opacity-95 scale-105 bg-black/40 live-badge-playing'
                         : 'opacity-80 hover:opacity-100 hover:scale-105 hover:bg-black/40',
                 ]"
+                @pointerdown.stop
                 @click.stop="togglePlay"
             >
                 <CircleDotDashed class="w-3.5 h-3.5 text-white select-none live-photo-icon" :class="{ 'is-playing': videoPlaying }" />
-                <span class="text-[9px] font-bold uppercase tracking-[0.18em] select-none text-white/95 leading-none">{{
+                <span class="text-xs font-bold uppercase tracking-[0.18em] select-none text-white/95 leading-none">{{
                     $t("media.live")
                 }}</span>
             </div>

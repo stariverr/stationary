@@ -57,7 +57,7 @@ const getMediaThumb = (med: any) => {
         <DialogContent class="sm:max-w-[800px] max-h-[85vh] overflow-y-auto flex flex-col p-6 bg-white rounded-lg">
             <DialogHeader class="border-b border-zinc-100 pb-3 shrink-0">
                 <DialogTitle class="text-lg font-bold text-zinc-900 flex items-center gap-2">
-                    <Layers class="w-5 h-5 text-emerald-600" />
+                    <Layers class="w-5 h-5 text-blue-600" />
                     {{ $t("post_detail.manage.manage_tracks") }}
                 </DialogTitle>
                 <DialogDescription class="text-xs text-zinc-500 mt-1">
@@ -69,7 +69,7 @@ const getMediaThumb = (med: any) => {
             <div v-if="mediaList && mediaList.length > 1" class="flex flex-col gap-2 border-b border-zinc-100 pb-4 mt-3 shrink-0">
                 <div class="flex items-center justify-between text-xs text-zinc-500 font-medium">
                     <span>{{ $t("post_detail.manage.select_media_asset") }}</span>
-                    <span class="font-mono text-[10px] bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded-full">
+                    <span class="font-mono text-xs bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded-full">
                         {{ mediaList.findIndex((m) => m.id === trackEditMediaId) + 1 }} / {{ mediaList.length }}
                     </span>
                 </div>
@@ -82,7 +82,7 @@ const getMediaThumb = (med: any) => {
                         class="group relative flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border-2 bg-zinc-50 transition-all duration-300 ease-out hover:scale-105 active:scale-95 cursor-pointer shadow-xs"
                         :class="
                             trackEditMediaId === med.id
-                                ? 'border-emerald-600 ring-4 ring-emerald-50/80 shadow-xs'
+                                ? 'border-blue-600 ring-4 ring-blue-50/80 shadow-xs'
                                 : 'border-zinc-200 hover:border-zinc-300'
                         "
                     >
@@ -93,19 +93,19 @@ const getMediaThumb = (med: any) => {
                         />
                         <div
                             v-else
-                            class="w-full h-full flex items-center justify-center bg-zinc-100 text-[10px] text-zinc-400 font-semibold font-mono"
+                            class="w-full h-full flex items-center justify-center bg-zinc-100 text-xs text-zinc-400 font-semibold font-mono"
                         >
                             #{{ idx + 1 }}
                         </div>
                         <div class="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
                         <div
-                            class="absolute bottom-1 right-1 bg-black/60 backdrop-blur-xs text-[8px] font-bold text-white px-1 py-0.2 rounded-md font-mono scale-90 origin-bottom-right"
+                            class="absolute bottom-1 right-1 bg-black/60 backdrop-blur-xs text-xs font-bold text-white px-1 py-0.2 rounded-md font-mono scale-90 origin-bottom-right"
                         >
                             {{ formatMediaType(med.type) }}
                         </div>
                         <div
                             v-if="trackEditMediaId === med.id"
-                            class="absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-600 ring-2 ring-white"
+                            class="absolute top-1 right-1 w-2 h-2 rounded-full bg-blue-600 ring-2 ring-white"
                         ></div>
                     </button>
                 </div>

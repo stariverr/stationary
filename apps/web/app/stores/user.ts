@@ -1,7 +1,6 @@
 import { defineStore } from "pinia";
-import { ref, watch } from "vue";
+import { ref } from "vue";
 import { useApi } from "@/composables/useApi";
-import { useSession } from "@/lib/auth-client";
 
 export interface BusinessUser {
     id: string;
@@ -14,25 +13,8 @@ export interface BusinessUser {
 }
 
 export const useUserStore = defineStore("user", () => {
-    const expandDetailByDefault = ref(false);
     const userProfile = ref<BusinessUser | null>(null);
     const isLoading = ref(false);
-
-    if (typeof window !== "undefined") {
-        const stored = localStorage.getItem("expandDetailByDefault");
-        console.log("[useUserStore] Initialized expandDetailByDefault from localStorage:", stored);
-        if (stored !== null) {
-            expandDetailByDefault.value = stored === "true";
-        }
-        watch(expandDetailByDefault, (newVal) => {
-            console.log("[useUserStore] expandDetailByDefault watch fired. New value:", newVal);
-            localStorage.setItem("expandDetailByDefault", String(newVal));
-        });
-    }
-
-    const toggleExpandDefault = () => {
-        expandDetailByDefault.value = !expandDetailByDefault.value;
-    };
 
     const fetchUserProfile = async () => {
         isLoading.value = true;
@@ -51,8 +33,6 @@ export const useUserStore = defineStore("user", () => {
     };
 
     return {
-        expandDetailByDefault,
-        toggleExpandDefault,
         userProfile,
         isLoading,
         fetchUserProfile,

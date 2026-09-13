@@ -9,6 +9,8 @@ import { toast } from "vue-sonner";
 import { useApi } from "@/composables/useApi";
 import { useMediaStore } from "@/stores/media";
 
+const { t } = useI18n();
+
 const { media, isSelected, isChecked, canMove, showCheckbox } = defineProps<{
     media: MappedMediaItem;
     isSelected?: boolean;
@@ -67,12 +69,12 @@ const handleRegenerateCover = async () => {
             method: "POST",
         });
         if (response && response.success) {
-            toast.success("Cover regeneration queued.");
+            toast.success(t("toasts.cover_regeneration_queued", "Cover regeneration queued."));
         } else {
             throw new Error();
         }
     } catch {
-        toast.error("Failed to queue cover regeneration.");
+        toast.error(t("toasts.cover_regeneration_failed", "Unable to queue cover regeneration. Try again."));
     } finally {
         isRegenerating.value = false;
     }
@@ -82,13 +84,13 @@ const handleDelete = async () => {
     try {
         const response = await useApi<ApiResponse>(`/media/trash/${media.id}`, { method: "POST" });
         if (response && response.success) {
-            toast.success("Media moved to trash.");
+            toast.success(t("toasts.media_trashed", "Media moved to trash."));
             mediaStore.refetchMedia();
         } else {
             throw new Error();
         }
     } catch {
-        toast.error("Failed to move media to trash.");
+        toast.error(t("toasts.media_trash_failed", "Unable to move media to trash. Try again."));
     }
 };
 
@@ -100,12 +102,12 @@ const handleRetrySync = async () => {
     try {
         const res = await mediaStore.retrySync([media.id]);
         if (res && res.success) {
-            toast.success("Sync retry queued.");
+            toast.success(t("toasts.sync_retry_queued", "Sync retry queued."));
         } else {
             throw new Error();
         }
     } catch {
-        toast.error("Failed to queue sync retry.");
+        toast.error(t("toasts.sync_retry_failed", "Unable to queue sync retry. Try again."));
     } finally {
         isRetryingSync.value = false;
     }
@@ -116,12 +118,12 @@ const handleQueueAi = async () => {
     try {
         const res = await mediaStore.queueAi([media.id]);
         if (res && res.success) {
-            toast.success("AI enrichment queued.");
+            toast.success(t("toasts.ai_queued", "AI enrichment queued."));
         } else {
             throw new Error();
         }
     } catch {
-        toast.error("Failed to queue AI enrichment.");
+        toast.error(t("toasts.ai_queue_failed", "Unable to queue AI enrichment. Try again."));
     } finally {
         isQueueingAi.value = false;
     }
@@ -151,7 +153,7 @@ const handleQueueAi = async () => {
                     <!-- Stack Indicator (1/N) -->
                     <div
                         v-if="media.media_count > 1"
-                        class="absolute top-2 right-2 z-10 bg-black/60 text-white text-[10px] font-medium px-1.5 py-0.5 rounded flex items-center gap-1 backdrop-blur-sm"
+                        class="absolute top-2 right-2 z-10 bg-black/60 text-white text-xs font-medium px-1.5 py-0.5 rounded flex items-center gap-1 backdrop-blur-sm"
                     >
                         <Layers class="w-3 h-3" />
                         {{ media.media_count }}
@@ -160,7 +162,9 @@ const handleQueueAi = async () => {
                     <!-- Image Card -->
                     <img
                         v-if="media.type?.toLowerCase() === 'image' || media.type?.toLowerCase() === 'live_photo' || !media.type"
-                        :src="media.url || ''"
+                        :src="media.thumbnail || media.url || ''"
+                        :srcset="media.srcset ?? undefined"
+                        sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                         :alt="media.title || 'Image'"
                         class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                         loading="lazy"
@@ -182,7 +186,9 @@ const handleQueueAi = async () => {
 
                         <img
                             v-if="media.poster && !isHovered"
-                            :src="media.poster"
+                            :src="media.poster || ''"
+                            :srcset="media.srcset ?? undefined"
+                            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                             :alt="media.title || 'Video Cover'"
                             class="absolute inset-0 w-full h-full object-cover transition-all duration-300 group-hover:scale-105 pointer-events-none"
                             loading="lazy"
@@ -194,7 +200,7 @@ const handleQueueAi = async () => {
                             class="absolute inset-0 flex flex-col items-center justify-center bg-gray-800 text-gray-500 pointer-events-none"
                         >
                             <Play class="w-8 h-8 opacity-40 mb-1" />
-                            <span class="text-[10px] opacity-40">Hover to play</span>
+                            <span class="text-xs opacity-40">Hover to play</span>
                         </div>
 
                         <div
@@ -208,9 +214,9 @@ const handleQueueAi = async () => {
                 </div>
 
                 <div class="flex flex-col px-1">
-                    <h3 class="text-sm font-medium text-gray-900 line-clamp-1 group-hover:text-blue-600 transition-colors">
+                    <h2 class="text-sm font-medium text-gray-900 line-clamp-1 group-hover:text-blue-600 transition-colors">
                         {{ media.title || "Untitled" }}
-                    </h3>
+                    </h2>
                     <div class="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
                         <span>{{ media.date }}</span>
                     </div>
@@ -219,21 +225,21 @@ const handleQueueAi = async () => {
                         <template v-if="media.sync_status && media.sync_status !== 'COMPLETED'">
                             <span
                                 v-if="media.sync_status === 'PENDING'"
-                                class="inline-flex items-center gap-1 text-[10px] font-medium text-gray-400"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-zinc-500"
                             >
                                 <Clock class="size-3 shrink-0" />
                                 <span>Pending Sync</span>
                             </span>
                             <span
                                 v-else-if="media.sync_status === 'IN_PROGRESS'"
-                                class="inline-flex items-center gap-1 text-[10px] font-medium text-blue-500 animate-pulse"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-blue-500 animate-pulse"
                             >
                                 <Loader2 class="size-3 animate-spin shrink-0" />
                                 <span>Syncing...</span>
                             </span>
                             <span
                                 v-else-if="media.sync_status === 'FAILED'"
-                                class="inline-flex items-center gap-1 text-[10px] font-medium text-red-500 cursor-help"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-red-500 cursor-help"
                                 :title="media.last_error || 'Sync failed'"
                             >
                                 <AlertCircle class="size-3 shrink-0" />
@@ -245,28 +251,28 @@ const handleQueueAi = async () => {
                         <template v-if="media.ai_status">
                             <span
                                 v-if="media.ai_status === 'COMPLETED'"
-                                class="inline-flex items-center gap-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 select-none"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 dark:text-zinc-400 select-none"
                             >
-                                <Sparkles class="size-3 text-gray-400 dark:text-gray-500 shrink-0" />
+                                <Sparkles class="size-3 text-zinc-500 dark:text-zinc-400 shrink-0" />
                                 <span>AI Ready</span>
                             </span>
                             <span
                                 v-else-if="media.ai_status === 'PENDING'"
-                                class="inline-flex items-center gap-1 text-[10px] font-medium text-gray-400"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-zinc-500"
                             >
                                 <Clock class="size-3 shrink-0" />
                                 <span>AI Pending</span>
                             </span>
                             <span
                                 v-else-if="media.ai_status === 'IN_PROGRESS'"
-                                class="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-400 animate-pulse"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-indigo-400 animate-pulse"
                             >
                                 <Loader2 class="size-3 animate-spin shrink-0" />
                                 <span>Enriching...</span>
                             </span>
                             <span
                                 v-else-if="media.ai_status === 'FAILED'"
-                                class="inline-flex items-center gap-1 text-[10px] font-medium text-red-400 cursor-help"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-red-400 cursor-help"
                                 :title="media.ai_error || 'AI Enrichment failed'"
                             >
                                 <AlertCircle class="size-3 shrink-0" />
@@ -277,21 +283,21 @@ const handleQueueAi = async () => {
                     <div v-if="media.matched_details" class="flex flex-wrap gap-1 mt-1.5 animate-fade-in">
                         <span
                             v-if="media.matched_details.keyword"
-                            class="text-[9px] px-1.5 py-0.5 rounded font-medium bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400 border border-blue-100/50 dark:border-blue-900/30"
+                            class="text-xs px-1.5 py-0.5 rounded font-medium bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400 border border-blue-100/50 dark:border-blue-900/30"
                             :title="$t('search.keyword_search', 'Keyword Search')"
                         >
                             Keyword
                         </span>
                         <span
                             v-if="media.matched_details.text_semantic"
-                            class="text-[9px] px-1.5 py-0.5 rounded font-medium bg-purple-50 text-purple-600 dark:bg-purple-950/40 dark:text-purple-400 border border-purple-100/50 dark:border-purple-900/30"
+                            class="text-xs px-1.5 py-0.5 rounded font-medium bg-purple-50 text-purple-600 dark:bg-purple-950/40 dark:text-purple-400 border border-purple-100/50 dark:border-purple-900/30"
                             :title="`${$t('search.text_embedding')}: ${media.matched_details.text_semantic.distance?.toFixed(4)}`"
                         >
                             Text AI
                         </span>
                         <span
                             v-if="media.matched_details.visual_semantic"
-                            class="text-[9px] px-1.5 py-0.5 rounded font-medium bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-100/50 dark:border-amber-900/30"
+                            class="text-xs px-1.5 py-0.5 rounded font-medium bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-100/50 dark:border-amber-900/30"
                             :title="`${$t('search.image_embedding')}: ${media.matched_details.visual_semantic.distance?.toFixed(4)}`"
                         >
                             Visual AI

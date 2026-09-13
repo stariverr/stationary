@@ -60,8 +60,8 @@ const getPasswordStrength = (pwd: string) => {
         textColor = "text-amber-500";
     } else if (finalScore === 3) {
         textKey = "good";
-        color = "bg-emerald-500";
-        textColor = "text-emerald-500";
+        color = "bg-blue-500";
+        textColor = "text-blue-500";
     } else if (finalScore === 4) {
         textKey = "strong";
         color = "bg-teal-500";
@@ -175,7 +175,7 @@ const handleResetPassword = async () => {
                 <!-- Branding -->
                 <div class="relative group mb-6">
                     <div
-                        class="absolute -inset-0.5 bg-linear-to-r from-emerald-500 to-teal-500 rounded-full blur opacity-30 group-hover:opacity-50 transition duration-1000"
+                        class="absolute -inset-0.5 bg-linear-to-r from-blue-500 to-teal-500 rounded-full blur opacity-30 group-hover:opacity-50 transition duration-1000"
                     ></div>
                     <img
                         src="/logo.svg"
@@ -201,7 +201,7 @@ const handleResetPassword = async () => {
                                     type="email"
                                     :placeholder="$t('auth.email_placeholder')"
                                     required
-                                    class="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all duration-200"
+                                    class="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200"
                                 />
                             </div>
                         </div>
@@ -212,7 +212,7 @@ const handleResetPassword = async () => {
                         <button
                             type="submit"
                             :disabled="loading"
-                            class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-medium shadow-lg shadow-emerald-600/20 transition-all duration-200 active:scale-[0.99] disabled:opacity-50"
+                            class="w-full py-3 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl font-medium shadow-lg shadow-zinc-900/20 transition-all duration-200 active:scale-[0.99] disabled:opacity-50"
                         >
                             <span v-if="loading">{{ $t("auth.sending_btn") }}</span>
                             <span v-else>{{ $t("auth.send_reset_code_btn") }}</span>
@@ -244,7 +244,7 @@ const handleResetPassword = async () => {
                                 maxLength="6"
                                 placeholder="123456"
                                 required
-                                class="w-full text-center tracking-[0.5em] text-xl font-mono py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all duration-200"
+                                class="w-full text-center tracking-[0.5em] text-xl font-mono py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200"
                             />
                         </div>
 
@@ -261,7 +261,7 @@ const handleResetPassword = async () => {
                                     :type="showPassword ? 'text' : 'password'"
                                     :placeholder="$t('auth.password_placeholder')"
                                     required
-                                    class="w-full pl-10 pr-10 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all duration-200"
+                                    class="w-full pl-10 pr-10 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200"
                                 />
                                 <button
                                     type="button"
@@ -289,10 +289,10 @@ const handleResetPassword = async () => {
                                     :class="i <= resetPasswordStrength.score ? resetPasswordStrength.color : 'bg-gray-200'"
                                 ></div>
                             </div>
-                            <p v-if="!/^[\x20-\x7E]*$/.test(newPassword)" class="text-[11px] text-red-500">
+                            <p v-if="!/^[\x20-\x7E]*$/.test(newPassword)" class="text-xs text-red-500">
                                 {{ $t("auth.strength_ascii_only") }}
                             </p>
-                            <p v-else-if="newPassword.length < 8 || newPassword.length > 20" class="text-[11px] text-red-500">
+                            <p v-else-if="newPassword.length < 8 || newPassword.length > 20" class="text-xs text-red-500">
                                 {{ $t("auth.strength_length_error") }}
                             </p>
                         </div>
@@ -303,7 +303,7 @@ const handleResetPassword = async () => {
                         <button
                             type="submit"
                             :disabled="loading"
-                            class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-medium shadow-lg shadow-emerald-600/20 transition-all duration-200 active:scale-[0.99] disabled:opacity-50"
+                            class="w-full py-3 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl font-medium shadow-lg shadow-zinc-900/20 transition-all duration-200 active:scale-[0.99] disabled:opacity-50"
                         >
                             <span v-if="loading">{{ $t("auth.resetting_btn") }}</span>
                             <span v-else>{{ $t("auth.update_password_btn") }}</span>

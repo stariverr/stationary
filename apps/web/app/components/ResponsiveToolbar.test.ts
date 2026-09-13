@@ -10,10 +10,9 @@ describe("responsive toolbar controls", () => {
             const component = await readComponent(componentPath);
 
             expect(component).toContain(
-                'class="sticky top-0 z-30 h-15 sm:h-14 border-b border-gray-100/80 flex items-center gap-2 px-3 sm:px-6',
+                'class="z-30 h-14 border-b border-zinc-200/80 flex items-center gap-2 px-4 md:px-6 shrink-0 bg-white"',
             );
-            expect(component).toContain("bg-white/98 backdrop-blur-md supports-backdrop-filter:bg-white/98");
-            expect(component).toContain("h-9 w-9 rounded-full");
+            expect(component).toContain("h-8 w-8 rounded-lg");
             expect(component).toContain("h-9 rounded-full");
         }
     });

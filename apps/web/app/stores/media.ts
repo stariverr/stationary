@@ -19,6 +19,24 @@ export const MediaListResponseBodySchema = v.object({
     url: v.nullable(v.string()),
     mime_type: v.optional(v.nullable(v.string())),
     cover_url: v.optional(v.nullable(v.string())),
+    covers: v.optional(
+        v.array(
+            v.object({
+                url: v.nullable(v.string()),
+                quality: v.string(),
+                codec: v.optional(v.nullable(v.string())),
+            }),
+        ),
+    ),
+    videos: v.optional(
+        v.array(
+            v.object({
+                url: v.nullable(v.string()),
+                quality: v.string(),
+                codec: v.optional(v.nullable(v.string())),
+            }),
+        ),
+    ),
     sync_status: v.optional(v.nullable(v.string())),
     last_error: v.optional(v.nullable(v.string())),
     ai_status: v.optional(v.nullable(v.string())),
@@ -58,7 +76,11 @@ export interface MappedMediaItem {
     mime_type: string | null;
     cover_url?: string | null;
     cover?: string | null;
+    thumbnail?: string | null;
     poster: string | null;
+    srcset?: string | null;
+    covers?: Array<{ url: string | null; quality: string; codec?: string | null }>;
+    videos?: Array<{ url: string | null; quality: string; codec?: string | null }>;
     sync_status: string;
     last_error: string | null;
     ai_status: string;
@@ -81,6 +103,9 @@ export const useMediaStore = defineStore("media", () => {
     const keyword = ref((route.query.keyword as string) || "");
     const searchKeyword = ref(keyword.value);
     const source = ref<string | undefined>((route.query.source as string) || undefined);
+    const sortBy = ref<"create_time" | "published_time">((route.query.sort_by as "create_time" | "published_time") || "create_time");
+    const sortOrder = ref<"asc" | "desc">((route.query.sort_order as "asc" | "desc") || "desc");
+    const mediaType = ref<string | undefined>((route.query.type as string) || undefined);
     const displayMode = ref<"flat" | "stacked">((route.query.display_mode as "flat" | "stacked") || "flat");
     const page = ref(parseInt(route.query.page as string) || 1);
     const count = ref(parseInt(route.query.count as string) || 20);
@@ -104,7 +129,7 @@ export const useMediaStore = defineStore("media", () => {
     });
 
     // Reset page to 1 when search filters change
-    watch([source, displayMode, useAiSearch], () => {
+    watch([source, displayMode, useAiSearch, sortBy, sortOrder, mediaType], () => {
         page.value = 1;
     });
 
@@ -121,11 +146,23 @@ export const useMediaStore = defineStore("media", () => {
         () => ({
             keyword: keyword.value,
             source: source.value,
+            sortBy: sortBy.value,
+            sortOrder: sortOrder.value,
+            mediaType: mediaType.value,
             page: page.value,
             display_mode: displayMode.value,
             count: count.value,
         }),
-        ({ keyword: newKeyword, source: newSource, page: newPage, display_mode: newDisplayMode, count: newCount }) => {
+        ({
+            keyword: newKeyword,
+            source: newSource,
+            sortBy: newSortBy,
+            sortOrder: newSortOrder,
+            mediaType: newMediaType,
+            page: newPage,
+            display_mode: newDisplayMode,
+            count: newCount,
+        }) => {
             const query = { ...route.query };
             let changed = false;
 
@@ -150,6 +187,9 @@ export const useMediaStore = defineStore("media", () => {
 
             updateParam("keyword", newKeyword || undefined);
             updateParam("source", newSource);
+            updateParam("sort_by", newSortBy !== "create_time" ? newSortBy : undefined);
+            updateParam("sort_order", newSortOrder !== "desc" ? newSortOrder : undefined);
+            updateParam("type", newMediaType);
             updateParam("page", newPage && newPage > 1 ? newPage.toString() : undefined);
             updateParam("display_mode", newDisplayMode && newDisplayMode !== "flat" ? newDisplayMode : undefined);
             updateParam("count", newCount && newCount !== 20 ? newCount.toString() : undefined);
@@ -177,6 +217,18 @@ export const useMediaStore = defineStore("media", () => {
             if (querySource !== source.value) {
                 source.value = querySource;
             }
+            const querySortBy = (newQuery.sort_by as "create_time" | "published_time") || "create_time";
+            if (querySortBy !== sortBy.value) {
+                sortBy.value = querySortBy;
+            }
+            const querySortOrder = (newQuery.sort_order as "asc" | "desc") || "desc";
+            if (querySortOrder !== sortOrder.value) {
+                sortOrder.value = querySortOrder;
+            }
+            const queryType = (newQuery.type as string) || undefined;
+            if (queryType !== mediaType.value) {
+                mediaType.value = queryType;
+            }
             const queryDisplayMode = (newQuery.display_mode as "flat" | "stacked") || "flat";
             if (queryDisplayMode !== displayMode.value) {
                 displayMode.value = queryDisplayMode;
@@ -195,11 +247,46 @@ export const useMediaStore = defineStore("media", () => {
 
     const mapApiMediaToUiMedia = (apiMedia: MediaListItem): MappedMediaItem => {
         const displayTime = apiMedia.published_time ?? apiMedia.create_time;
+        const coversList = apiMedia.covers || [];
+        const videosList = apiMedia.videos || [];
+
+        const lowCover = coversList.find((c) => c.quality === "LOW")?.url || null;
+        const mediumCover = coversList.find((c) => c.quality === "MEDIUM")?.url || null;
+        const highCover = coversList.find((c) => c.quality === "HIGH")?.url || null;
+
+        const fallbackVideo = videosList[0]?.url || null;
+
+        const srcsetParts: string[] = [];
+        for (const c of coversList) {
+            if (c.url) {
+                if (c.quality === "LOW") srcsetParts.push(`${c.url} 360w`);
+                else if (c.quality === "MEDIUM") srcsetParts.push(`${c.url} 720w`);
+                else if (c.quality === "HIGH") srcsetParts.push(`${c.url} 1440w`);
+            }
+        }
+        const srcset = srcsetParts.length > 0 ? srcsetParts.join(", ") : null;
+
+        let url: string | null = null;
+        if (apiMedia.type?.toUpperCase() === "VIDEO") {
+            url = fallbackVideo || apiMedia.url || null;
+        } else {
+            url = highCover || mediumCover || lowCover || apiMedia.url || null;
+        }
+
+        const thumbnail = lowCover || mediumCover || highCover || apiMedia.cover_url || url;
+        const poster = mediumCover || highCover || lowCover || apiMedia.cover_url || null;
+
         return {
             ...apiMedia,
-            url: apiMedia.url,
+            url: url,
             mime_type: apiMedia.mime_type || null,
-            poster: apiMedia.cover_url || null,
+            cover_url: apiMedia.cover_url || mediumCover || lowCover || highCover || null,
+            cover: apiMedia.cover_url || mediumCover || lowCover || highCover || null,
+            thumbnail: thumbnail,
+            poster: poster,
+            srcset: srcset,
+            covers: coversList,
+            videos: videosList,
             sync_status: apiMedia.sync_status || "PENDING",
             last_error: apiMedia.last_error || null,
             ai_status: apiMedia.ai_status || "PENDING",
@@ -251,6 +338,9 @@ export const useMediaStore = defineStore("media", () => {
                 count: count.value,
                 keyword: searchKeyword.value,
                 source: source.value,
+                sortBy: sortBy.value,
+                sortOrder: sortOrder.value,
+                mediaType: mediaType.value,
                 display_mode: displayMode.value,
                 library_id: libraryStore.activeLibraryId,
                 ai: useAiSearch.value,
@@ -280,6 +370,8 @@ export const useMediaStore = defineStore("media", () => {
                 if (response && response.success && response.data) {
                     const mappedList: MappedMediaItem[] = response.data.list.map((item) => {
                         const displayTime = item.published_time ?? item.create_time;
+                        const coverUrl = item.cover_url || item.cover || null;
+                        const mediaUrl = item.media_url || item.url || coverUrl || null;
                         return {
                             id: item.id,
                             eid: "",
@@ -291,11 +383,13 @@ export const useMediaStore = defineStore("media", () => {
                             published_time: item.published_time || null,
                             post_media_count: 1,
                             media_count: 1,
-                            url: item.media_url || item.url || null,
+                            url: mediaUrl,
                             mime_type: null,
-                            cover: item.cover_url || item.cover || null,
-                            cover_url: item.cover_url || item.cover || null,
-                            poster: item.cover_url || item.cover || null,
+                            cover: coverUrl,
+                            cover_url: coverUrl,
+                            thumbnail: coverUrl || mediaUrl,
+                            poster: coverUrl,
+                            srcset: null,
                             sync_status: item.sync_status || "PENDING",
                             last_error: item.last_error || null,
                             ai_status: item.ai_status || "PENDING",
@@ -334,6 +428,9 @@ export const useMediaStore = defineStore("media", () => {
                         count: count.value,
                         keyword: searchKeyword.value,
                         source: source.value,
+                        sort_by: sortBy.value,
+                        sort_order: sortOrder.value,
+                        type: mediaType.value,
                         display_mode: displayMode.value,
                         library_id: libraryStore.activeLibraryId,
                     },
@@ -422,6 +519,9 @@ export const useMediaStore = defineStore("media", () => {
     return {
         keyword,
         source,
+        sortBy,
+        sortOrder,
+        mediaType,
         displayMode,
         page,
         count,

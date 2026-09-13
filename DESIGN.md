@@ -4,29 +4,34 @@ This document establishes the UI/UX design system for the **Stationary** web app
 
 ---
 
-## 1. Spatial Layout System: Card-on-Canvas
+## 1. Spatial Layout System: Seamless Split-Pane Layout
 
-Rather than flat, full-bleed screen splits with border lines touching the viewport edges, we utilize a **Card-on-Canvas** hierarchy to introduce depth, focus, and a desktop-application feel.
+Rather than floating "cards on a gray canvas" separated by gaps and nested card radiuses, the application utilizes a **Seamless Split-Pane Layout** inspired by modern desktop-grade creative suites (such as Lightroom, Linear, and macOS native utilities). Workspaces seamlessly dock against the sidebar and topbar, maximizing screen real estate and providing a clean, edge-to-edge layout.
 
 ```
-+-------------------------------------------------------------+
-| Canvas (Cool neutral slate-gray backdrop: bg-[#f9fafb] / p-6)|
-|                                                             |
-|  +---------------------------+  +------------------------+  |
-|  | Left Card: Tag List       |  | Right Card: Inspector  |  |
-|  |                           |  |                        |  |
-|  | - bg-white                |  | - bg-white             |  |
-|  | - rounded-2xl             |  | - rounded-2xl          |  |
-|  | - shadow-[0_1px_2px_rgba(0,0,0,0.02)]                 |  |
-|  | - border border-zinc-100  |  | - border border-zinc-100| |
-|  |                           |  |                        |  |
-|  +---------------------------+  +------------------------+  |
-+-------------------------------------------------------------+
++------------------+----------------------------------------------------------+
+| LeftSidebar      | Workspace View (Full-Bleed, Edge-to-Edge)                |
+| (w-64 / border-r)| +------------------------------------------------------+ |
+|                  | | Docked Header (h-14 px-4 md:px-6 border-b bg-white)  | |
+|                  | +------------------------------------------------------+ |
+|                  | | Filter & View Bar (h-12 border-b bg-white)          | |
+|                  | +------------------------------------+-----------------+ |
+|                  | | Main Content Grid / Table / Stream | Docked Inspector| |
+|                  | | (flex-1 bg-white overflow-y-auto)  | (border-l)      | |
+|                  | |                                    |                 | |
+|                  | +------------------------------------+-----------------+ |
+|                  | | Docked Footer / Status (h-12 border-t bg-white)      | |
+|                  | +------------------------------------------------------+ |
++------------------+----------------------------------------------------------+
 ```
 
-* **The Canvas (`bg-[#f9fafb]`)**: The baseline background. Provides a cool, crisp backdrop that makes active workspaces float.
-* **Floating Cards (`bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.02)] border border-zinc-100/80`)**: Individual interactive compartments that group related actions. They feature generous border radii (`1rem` / `rounded-2xl`) and soft shadow definitions.
-* **Layout Padding**: The canvas uses a consistent `p-6` layout padding, separating the workspace from sidebar elements with breathing room.
+* **Full-Bleed Workspace Container (`flex-1 flex flex-col min-h-0 min-w-0 bg-white relative overflow-hidden`)**: Eliminates the outer canvas padding (`p-4` / `p-6` and `#f9fafb`) and double card borders. The workspace cleanly connects with adjacent panes.
+* **Unified Docked Headers (`h-14 px-4 md:px-6 border-b border-zinc-200/80 bg-white`)**: Standardized 56px height across Media, Posts, Tags, Drafts, Trash, and Jobs, aligning title, search inputs, and primary action buttons.
+* **Seamless Split-Pane Panes (`border-l border-zinc-200/80 bg-white`)**: Secondary panels (such as Tag Inspector or Media Details) dock directly to the right border of the view rather than floating as separated cards.
+* **Micro-Interactions & A11y**:
+  - Interactive elements feature tactile feedback with `active:scale-[0.96]` and standard focus rings `focus-visible:ring-2 focus-visible:ring-zinc-950`.
+  - Telemetry badges and counters utilize `tabular-nums` to eliminate jitter during value changes.
+  - Dropdowns, toggles, and buttons provide explicit semantic `<label>` associations and `aria-label` tags.
 
 ---
 
@@ -77,3 +82,22 @@ Instead of generic grid cards or dry spreadsheet tables, the tag table is styled
   - Selected State: A glowing background transition (`bg-indigo-50/20`) with a left border highlight to represent active focus.
   - Borders: Thin, soft grey borders (`border-b border-zinc-100`).
 * **Icons**: Standardized sizes (`w-4 h-4`) using low-contrast opacity (`text-zinc-300` or `text-zinc-400`) that light up on hover.
+
+---
+
+## 6. Left Sidebar Architecture & Navigation
+
+* **Unified `h-14` Docked Header**:
+  - The sidebar header matches the exact `h-14` (56px) height of the main workspace headers with a bottom dividing border (`border-b border-zinc-200/80`). This produces a seamless, continuous horizontal baseline across the entire viewport.
+  - Houses the `LibrarySwitcher` (with clean `hover:bg-zinc-100`) and the desktop collapse trigger (`⌘B`).
+* **Spacious Creation Action Bar**:
+  - Full-width stacked buttons with comfortable breathing room (`px-3.5 pt-4 pb-2 flex flex-col gap-2`).
+  - Primary button (New Post) in high-contrast solid zinc (`h-9 bg-zinc-900 hover:bg-zinc-800 text-white font-medium text-sm shadow-xs rounded-lg`) alongside secondary button (Upload Media) in crisp bordered white (`h-9 border border-zinc-200/90 bg-white hover:bg-zinc-50 text-zinc-700 hover:text-zinc-900 font-medium text-sm shadow-xs rounded-lg`).
+* **Elevated White Card Active Navigation & Clean Hover**:
+  - Replaces muddy grey backgrounds with a pristine elevated active tile (`bg-white text-zinc-950 font-semibold shadow-xs border border-zinc-200/80`).
+  - Inactive items feature gentle, whisper-light hover states (`hover:bg-zinc-100 hover:text-zinc-900 text-zinc-600`) and optical icon states (`text-zinc-400 group-hover:text-zinc-700` inactive, `text-zinc-950` active).
+  - Comfortable navigation typography at `text-sm font-medium` (14px) with generous hit areas (`px-3 py-2 rounded-lg`) and balanced icons (`w-4.5 h-4.5`).
+  - Notification and draft badges use rounded pill tags with `tabular-nums` and balanced contrast (`bg-zinc-200/70 text-zinc-600` inactive, `bg-zinc-900 text-white` active).
+* **Sidebar Toggle Ergonomics**:
+  - Global `⌘B` / `Ctrl+B` toggle shortcut (safely bypassing input fields and textareas).
+  - Main workspace headers hide the toggle trigger when the sidebar is already expanded on desktop, preventing redundant buttons.

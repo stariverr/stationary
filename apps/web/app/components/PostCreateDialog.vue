@@ -468,7 +468,7 @@ async function handleSubmit() {
                                 v-model="title"
                                 :placeholder="$t('post.title_placeholder', 'Enter post title')"
                                 :disabled="isSubmitting"
-                                class="text-sm placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-slate-800 dark:text-zinc-100 focus:bg-white dark:focus:bg-zinc-950 focus:border-slate-350"
+                                class="text-sm placeholder:text-slate-400 dark:placeholder:text-zinc-500 text-slate-800 dark:text-zinc-100 focus:bg-white dark:focus:bg-zinc-950 focus:border-slate-400"
                             />
                         </div>
 
@@ -575,7 +575,7 @@ async function handleSubmit() {
                             class="flex flex-col items-center justify-center h-full text-slate-500 dark:text-zinc-400 py-12"
                         >
                             <div class="p-3 bg-slate-50 dark:bg-zinc-900 rounded-full mb-3">
-                                <FileText class="w-7 h-7 text-slate-400 dark:text-zinc-650" />
+                                <FileText class="w-7 h-7 text-slate-400 dark:text-zinc-500" />
                             </div>
                             <span class="text-sm font-semibold text-slate-700 dark:text-zinc-300">{{
                                 $t("post.no_media", "No media assets attached yet.")
@@ -590,7 +590,7 @@ async function handleSubmit() {
                                     class="h-8 text-xs gap-1.5 text-slate-700 dark:text-zinc-300"
                                     @click="openLibraryView"
                                 >
-                                    <Search class="w-3.5 h-3.5 text-slate-500 dark:text-zinc-450" />
+                                    <Search class="w-3.5 h-3.5 text-slate-500 dark:text-zinc-400" />
                                     {{ $t("post.choose_library", "Choose from Library") }}
                                 </Button>
                                 <Button
@@ -599,7 +599,7 @@ async function handleSubmit() {
                                     class="h-8 text-xs gap-1.5 text-slate-700 dark:text-zinc-300"
                                     @click="openUploadView"
                                 >
-                                    <Plus class="w-3.5 h-3.5 text-slate-500 dark:text-zinc-450" />
+                                    <Plus class="w-3.5 h-3.5 text-slate-500 dark:text-zinc-400" />
                                     {{ $t("post.upload_media", "Upload New Media") }}
                                 </Button>
                             </div>
@@ -694,7 +694,7 @@ async function handleSubmit() {
                                                     </DropdownMenuItem>
                                                     <DropdownMenuSeparator />
                                                     <DropdownMenuItem
-                                                        class="cursor-pointer gap-2 py-2 text-red-600 focus:text-red-655 focus:bg-red-50 dark:focus:bg-red-950/20"
+                                                        class="cursor-pointer gap-2 py-2 text-red-600 focus:text-red-600 focus:bg-red-50 dark:focus:bg-red-950/20"
                                                         @click="removeStagedItem(idx)"
                                                     >
                                                         <Trash2 class="w-4 h-4" />
@@ -717,7 +717,7 @@ async function handleSubmit() {
                                         >
                                             <span class="w-1.5 h-1.5 rounded-full bg-slate-300 dark:bg-zinc-700 shrink-0"></span>
                                             <span class="truncate max-w-[240px] font-medium" :title="file.name">{{ file.name }}</span>
-                                            <span class="text-[10px] text-slate-400 dark:text-zinc-500 truncate ml-1"
+                                            <span class="text-xs text-slate-400 dark:text-zinc-500 truncate ml-1"
                                                 >({{ file.mime_type }})</span
                                             >
                                         </div>
@@ -739,7 +739,7 @@ async function handleSubmit() {
                                         class="h-8 text-xs gap-1.5 text-slate-700 dark:text-zinc-300 px-3 hover:bg-slate-100 dark:hover:bg-zinc-900 cursor-pointer"
                                         @click="openLibraryView"
                                     >
-                                        <Search class="w-3.5 h-3.5 text-slate-550 dark:text-zinc-400" />
+                                        <Search class="w-3.5 h-3.5 text-slate-500 dark:text-zinc-400" />
                                         {{ $t("post.choose_library", "Choose from Library") }}
                                     </Button>
                                     <Button
@@ -748,7 +748,7 @@ async function handleSubmit() {
                                         class="h-8 text-xs gap-1.5 text-slate-700 dark:text-zinc-300 px-3 hover:bg-slate-100 dark:hover:bg-zinc-900 cursor-pointer"
                                         @click="openUploadView"
                                     >
-                                        <Plus class="w-3.5 h-3.5 text-slate-550 dark:text-zinc-400" />
+                                        <Plus class="w-3.5 h-3.5 text-slate-500 dark:text-zinc-400" />
                                         {{ $t("post.upload_media", "Upload New Media") }}
                                     </Button>
                                 </div>
@@ -802,7 +802,7 @@ async function handleSubmit() {
                                     <div class="font-semibold text-slate-700 dark:text-zinc-200 truncate">
                                         {{ media.title || $t("media.untitled") }}
                                     </div>
-                                    <div class="text-[10px] text-slate-400 mt-0.5">
+                                    <div class="text-xs text-slate-400 mt-0.5">
                                         {{ formatMediaType(media.type) }} •
                                         {{ $t("media.tracks_count", { count: media.tracks?.length || 0 }) }}
                                     </div>

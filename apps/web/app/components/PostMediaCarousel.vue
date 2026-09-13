@@ -177,6 +177,7 @@ const scrollNext = () => swiperInstance.value?.slideNext();
         <button
             v-if="mappedMedia.length > 1"
             class="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 z-[100] pointer-events-auto cursor-pointer"
+            @pointerdown.stop
             @click.stop="scrollPrev"
         >
             <ChevronLeft class="w-6 h-6" />
@@ -184,6 +185,7 @@ const scrollNext = () => swiperInstance.value?.slideNext();
         <button
             v-if="mappedMedia.length > 1"
             class="absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 z-[100] pointer-events-auto cursor-pointer"
+            @pointerdown.stop
             @click.stop="scrollNext"
         >
             <ChevronRight class="w-6 h-6" />
@@ -198,7 +200,7 @@ const scrollNext = () => swiperInstance.value?.slideNext();
         <!-- Media Counter (Embedded) -->
         <div
             v-if="mappedMedia.length > 1"
-            class="absolute top-4 right-4 px-2 py-0.5 rounded-full bg-black/50 text-white text-[10px] font-medium z-[100] font-mono"
+            class="absolute top-4 right-4 px-2 py-0.5 rounded-full bg-black/50 text-white text-xs font-medium z-[100] font-mono"
         >
             {{ currentIndex + 1 }} / {{ mappedMedia.length }}
         </div>
@@ -254,6 +256,7 @@ const scrollNext = () => swiperInstance.value?.slideNext();
         <button
             v-if="mappedMedia.length > 1"
             class="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 z-[100] pointer-events-auto cursor-pointer"
+            @pointerdown.stop
             @click.stop="scrollPrev"
         >
             <ChevronLeft class="w-5 h-5" />
@@ -261,6 +264,7 @@ const scrollNext = () => swiperInstance.value?.slideNext();
         <button
             v-if="mappedMedia.length > 1"
             class="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/40 text-white backdrop-blur-sm md:opacity-0 md:group-hover/carousel:opacity-100 transition-opacity hover:bg-black/60 z-[100] pointer-events-auto cursor-pointer"
+            @pointerdown.stop
             @click.stop="scrollNext"
         >
             <ChevronRight class="w-5 h-5" />

@@ -1,5 +1,24 @@
 <script setup lang="ts">
-import { Airplay, ArrowLeft, ChevronLeft, ChevronRight, Gauge, Loader2, Maximize, Minimize, MoreHorizontal, Pause, PictureInPicture2, Play, Settings, SlidersHorizontal, Subtitles, Volume2, VolumeX, X } from "@lucide/vue";
+import {
+    Airplay,
+    ArrowLeft,
+    ChevronLeft,
+    ChevronRight,
+    Gauge,
+    Loader2,
+    Maximize,
+    Minimize,
+    MoreHorizontal,
+    Pause,
+    PictureInPicture2,
+    Play,
+    Settings,
+    SlidersHorizontal,
+    Subtitles,
+    Volume2,
+    VolumeX,
+    X,
+} from "@lucide/vue";
 import type { MediaPlayerElement } from "vidstack/elements";
 
 import "vidstack/player";
@@ -37,6 +56,7 @@ interface Props {
     autoplay?: boolean;
     title?: string;
     showBack?: boolean;
+    hideTopControls?: boolean;
 }
 
 interface PlayerProvider {
@@ -76,9 +96,46 @@ const props = withDefaults(defineProps<Props>(), {
     autoplay: true,
     title: "",
     showBack: false,
+    hideTopControls: false,
 });
 
-const emit = defineEmits(["back"]);
+const emit = defineEmits<{
+    (e: "back"): void;
+    (e: "click-player"): void;
+    (e: "controls-change", visible: boolean): void;
+    (e: "user-activity"): void;
+    (e: "play"): void;
+    (e: "pause"): void;
+}>();
+
+let lastPointerDownTime = 0;
+let lastPointerDownX = 0;
+let lastPointerDownY = 0;
+
+const handlePlayerPointerDown = (event: PointerEvent) => {
+    lastPointerDownTime = performance.now();
+    lastPointerDownX = event.clientX;
+    lastPointerDownY = event.clientY;
+    emit("user-activity");
+};
+
+const handlePlayerPointerUp = (event: PointerEvent) => {
+    emit("user-activity");
+    const elapsed = performance.now() - lastPointerDownTime;
+    const dist = Math.hypot(event.clientX - lastPointerDownX, event.clientY - lastPointerDownY);
+    const target = event.target as HTMLElement | null;
+    const isInteractive = target?.closest(
+        "button, input, [role='button'], media-time-slider, .vds-time-slider, .settings-panel, .video-settings-drawer",
+    );
+    if (!isInteractive && elapsed < 350 && dist < 12) {
+        emit("click-player");
+    }
+};
+
+const handleControlsChange = (event: Event) => {
+    const isVisible = Boolean((event as CustomEvent<boolean>).detail);
+    emit("controls-change", isVisible);
+};
 
 const { t } = useI18n();
 const playerRef = ref<MediaPlayerElement | null>(null);
@@ -450,10 +507,12 @@ onBeforeUnmount(() => {
                 @play="
                     isPlaying = true;
                     isAutoplayAttempting = false;
+                    emit('play');
                 "
                 @pause="
                     isPlaying = false;
                     isAutoplayAttempting = false;
+                    emit('pause');
                 "
                 @waiting="isBuffering = true"
                 @playing="
@@ -471,6 +530,9 @@ onBeforeUnmount(() => {
                 @volume-change="handleVolumeChange"
                 @fullscreen-change="isFullscreen = Boolean(($event as CustomEvent<boolean>).detail)"
                 @picture-in-picture-change="isPictureInPicture = Boolean(($event as CustomEvent<boolean>).detail)"
+                @pointerdown="handlePlayerPointerDown"
+                @pointerup="handlePlayerPointerUp"
+                @controls-change="handleControlsChange"
             >
                 <media-provider>
                     <track
@@ -508,14 +570,6 @@ onBeforeUnmount(() => {
                     action="seek:10"
                 />
 
-                <media-play-button
-                    v-if="!isPlaying && !isBuffering"
-                    class="center-play-button absolute top-1/2 left-1/2 z-25 grid h-15 w-15 -translate-x-1/2 -translate-y-1/2 cursor-pointer place-items-center rounded-full border border-white/20 bg-[rgba(15,15,18,0.72)] text-white shadow-2xl backdrop-blur-md transition-all duration-200 hover:scale-108 hover:border-white/35 hover:bg-[rgba(15,15,18,0.86)] hover:shadow-[0_0_28px_rgba(56,189,248,0.25)]"
-                    :aria-label="$t('post_detail.viewer.player.play')"
-                >
-                    <Play class="h-7 w-7 translate-x-0.5 fill-current" />
-                </media-play-button>
-
                 <div
                     v-if="isBuffering || (isAutoplayAttempting && !isPlaying)"
                     class="buffering-indicator pointer-events-none absolute top-1/2 left-1/2 z-25 grid h-15 w-15 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-white/20 bg-[rgba(15,15,18,0.72)] text-white shadow-2xl backdrop-blur-md"
@@ -525,16 +579,32 @@ onBeforeUnmount(() => {
                 </div>
 
                 <media-controls
-                    class="player-controls absolute inset-0 z-30 flex flex-col justify-between box-border pointer-events-none opacity-0 transition-opacity duration-220 bg-gradient-to-t from-black/80 via-transparent to-black/60 px-3 sm:px-4 pb-[max(10px,env(safe-area-inset-bottom,10px))] pt-3 sm:pt-3.5 data-[visible]:opacity-100 data-[active]:opacity-100"
+                    class="player-controls absolute inset-0 z-30 flex flex-col justify-between box-border pointer-events-none opacity-0 transition-opacity duration-220 pb-[max(12px,env(safe-area-inset-bottom,12px))] bg-gradient-to-t from-black/80 via-transparent to-black/60 data-[visible]:opacity-100 data-[active]:opacity-100"
+                    :class="[
+                        'pt-[max(14px,env(safe-area-inset-top,14px))] px-3.5 sm:px-4 md:px-6',
+                        isSettingsOpen ? '!opacity-100 !pointer-events-auto' : '',
+                    ]"
                     hide-delay="2500"
                 >
+                    <!-- Center Play Button (Rendered inside media-controls so it fades out with the controls) -->
+                    <media-play-button
+                        v-if="!isPlaying && !isBuffering"
+                        class="center-play-button pointer-events-auto absolute top-1/2 left-1/2 z-25 grid h-13 w-13 sm:h-14 sm:w-14 -translate-x-1/2 -translate-y-1/2 cursor-pointer place-items-center rounded-full border border-white/25 bg-black/50 text-white shadow-xl backdrop-blur-md transition-all duration-200 hover:scale-108 hover:border-white/40 hover:bg-black/75 hover:shadow-[0_0_24px_rgba(255,255,255,0.2)]"
+                        :aria-label="$t('post_detail.viewer.player.play')"
+                    >
+                        <Play class="h-6 w-6 sm:h-7 sm:w-7 translate-x-0.5 fill-current" />
+                    </media-play-button>
+
                     <!-- TOP BAR: Clean & Minimal (Back button + Video Title + Cast/Airplay) -->
-                    <media-controls-group class="top-row pointer-events-auto flex w-full items-center justify-between gap-3 px-1">
+                    <media-controls-group
+                        v-if="!props.hideTopControls"
+                        class="top-row pointer-events-auto flex w-full items-center justify-between gap-3 px-0.5 shrink-0"
+                    >
                         <div class="top-left-cluster flex items-center gap-2 min-w-0">
                             <button
                                 v-if="props.showBack"
                                 type="button"
-                                class="control-button grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 hover:bg-white/15 hover:text-white transition-all duration-140"
+                                class="control-button grid h-8.5 w-8.5 shrink-0 cursor-pointer place-items-center rounded-full bg-zinc-950/80 hover:bg-white/20 border border-white/15 text-white/85 hover:text-white backdrop-blur-xl transition-all duration-140 active:scale-95"
                                 @click="emit('back')"
                             >
                                 <ArrowLeft class="h-4.5 w-4.5" />
@@ -544,10 +614,10 @@ onBeforeUnmount(() => {
                             </span>
                         </div>
 
-                        <div class="top-right-cluster flex items-center gap-1 shrink-0">
+                        <div class="top-right-cluster flex items-center gap-1.5 sm:gap-2 shrink-0">
                             <!-- Picture in Picture (PIP) Button -->
                             <media-pip-button
-                                class="control-button relative grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 hover:bg-white/15 hover:text-white transition-all duration-140"
+                                class="control-button relative grid h-8.5 w-8.5 sm:h-9 sm:w-9 md:h-10 md:w-10 shrink-0 cursor-pointer place-items-center rounded-full bg-zinc-950/80 hover:bg-white/20 border border-white/15 text-white/85 hover:text-white backdrop-blur-xl shadow-2xl transition-all duration-150 active:scale-95"
                                 :aria-label="$t('post_detail.viewer.player.pip')"
                             >
                                 <PictureInPicture2 class="h-4 w-4" />
@@ -556,7 +626,7 @@ onBeforeUnmount(() => {
                             <!-- Cast / Airplay Icon -->
                             <button
                                 type="button"
-                                class="control-button grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 hover:bg-white/15 hover:text-white transition-all duration-140"
+                                class="control-button grid h-8.5 w-8.5 sm:h-9 sm:w-9 md:h-10 md:w-10 shrink-0 cursor-pointer place-items-center rounded-full bg-zinc-950/80 hover:bg-white/20 border border-white/15 text-white/85 hover:text-white backdrop-blur-xl shadow-2xl transition-all duration-150 active:scale-95"
                                 :aria-label="$t('post_detail.viewer.player.cast')"
                             >
                                 <Airplay class="h-4 w-4" />
@@ -565,8 +635,12 @@ onBeforeUnmount(() => {
                             <!-- More Button (...) in Top Right -->
                             <button
                                 type="button"
-                                class="control-button grid h-8 w-8 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 hover:bg-white/15 hover:text-white transition-all duration-140"
-                                :class="{ 'bg-white/20 text-white': isSettingsOpen && activeSettingsTab === 'all' }"
+                                class="control-button grid h-8.5 w-8.5 sm:h-9 sm:w-9 md:h-10 md:w-10 shrink-0 cursor-pointer place-items-center rounded-full border backdrop-blur-xl shadow-2xl transition-all duration-150 active:scale-95"
+                                :class="
+                                    isSettingsOpen && activeSettingsTab === 'all'
+                                        ? 'border-white/40 bg-white/25 text-white'
+                                        : 'bg-zinc-950/80 hover:bg-white/20 border-white/15 text-white/85 hover:text-white'
+                                "
                                 :aria-label="$t('common.more')"
                                 @click.stop="toggleSettings('all')"
                             >
@@ -578,7 +652,7 @@ onBeforeUnmount(() => {
                     <!-- Transparent Backdrop for Click-Outside to Close Drawer -->
                     <div
                         v-if="isSettingsOpen"
-                        class="settings-backdrop pointer-events-auto fixed inset-0 sm:absolute sm:inset-0 z-40 bg-black/10 max-sm:bg-black/35 backdrop-blur-[1px] sm:backdrop-blur-none cursor-default transition-opacity duration-150"
+                        class="settings-backdrop pointer-events-auto fixed inset-0 z-45 bg-black/20 max-sm:bg-black/40 backdrop-blur-[1px] sm:backdrop-blur-none cursor-default transition-opacity duration-150"
                         @click.stop="closeSettings"
                     />
 
@@ -596,7 +670,7 @@ onBeforeUnmount(() => {
                             class="video-settings-drawer settings-panel pointer-events-auto absolute z-50 overflow-hidden shadow-2xl backdrop-blur-2xl bg-white/95 text-neutral-900 border border-neutral-200/90 text-xs"
                             :class="[
                                 'max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:rounded-t-2xl max-sm:max-h-[75vh]',
-                                'sm:absolute sm:top-12 sm:right-4 sm:w-68 sm:rounded-xl sm:max-h-[360px]'
+                                'sm:absolute sm:top-[max(56px,calc(env(safe-area-inset-top,0px)+52px))] sm:right-3.5 md:sm:right-6 sm:w-68 sm:rounded-xl sm:max-h-[380px]',
                             ]"
                             @click.stop
                         >
@@ -614,12 +688,17 @@ onBeforeUnmount(() => {
                                     </button>
                                     <span>
                                         {{
-                                            activeSettingsTab === 'volume' ? ($t('post_detail.viewer.player.volume') || '音量') :
-                                            activeSettingsTab === 'quality' ? $t('post_detail.viewer.player.quality') :
-                                            activeSettingsTab === 'speed' ? $t('post_detail.viewer.player.speed') :
-                                            activeSettingsTab === 'subtitles' ? $t('post_detail.viewer.player.subtitles') :
-                                            activeSettingsTab === 'audio' ? $t('media.tracks.group_audios') :
-                                            ($t('common.more') || '更多')
+                                            activeSettingsTab === "volume"
+                                                ? $t("post_detail.viewer.player.volume") || "音量"
+                                                : activeSettingsTab === "quality"
+                                                  ? $t("post_detail.viewer.player.quality")
+                                                  : activeSettingsTab === "speed"
+                                                    ? $t("post_detail.viewer.player.speed")
+                                                    : activeSettingsTab === "subtitles"
+                                                      ? $t("post_detail.viewer.player.subtitles")
+                                                      : activeSettingsTab === "audio"
+                                                        ? $t("media.tracks.group_audios")
+                                                        : $t("common.more") || "更多"
                                         }}
                                     </span>
                                 </div>
@@ -647,7 +726,7 @@ onBeforeUnmount(() => {
                                             <span>{{ $t("post_detail.viewer.player.volume") || "音量" }}</span>
                                         </span>
                                         <span class="flex items-center gap-1 text-neutral-500 font-semibold text-xs">
-                                            <span>{{ isMuted ? '0%' : `${volumeLevel}%` }}</span>
+                                            <span>{{ isMuted ? "0%" : `${volumeLevel}%` }}</span>
                                             <ChevronRight class="h-4 w-4" />
                                         </span>
                                     </button>
@@ -680,7 +759,7 @@ onBeforeUnmount(() => {
                                             <span>{{ $t("post_detail.viewer.player.speed") }}</span>
                                         </span>
                                         <span class="flex items-center gap-1 text-neutral-500 font-semibold text-xs">
-                                            <span>{{ currentSpeed === 1 ? '1.0x' : `${currentSpeed}x` }}</span>
+                                            <span>{{ currentSpeed === 1 ? "1.0x" : `${currentSpeed}x` }}</span>
                                             <ChevronRight class="h-4 w-4" />
                                         </span>
                                     </button>
@@ -729,7 +808,7 @@ onBeforeUnmount(() => {
                                                     <span>{{ $t("post_detail.viewer.player.volume") || "音量" }}</span>
                                                 </span>
                                                 <span class="font-mono text-xs font-bold text-neutral-600 tabular-nums">
-                                                    {{ isMuted ? '0%' : `${volumeLevel}%` }}
+                                                    {{ isMuted ? "0%" : `${volumeLevel}%` }}
                                                 </span>
                                             </div>
 
@@ -737,7 +816,11 @@ onBeforeUnmount(() => {
                                                 <button
                                                     type="button"
                                                     class="control-button grid h-7 w-7 shrink-0 cursor-pointer place-items-center rounded-lg text-neutral-700 hover:bg-neutral-200/90 transition-colors"
-                                                    :aria-label="isMuted ? ($t('post_detail.viewer.player.unmute') || '取消静音') : ($t('post_detail.viewer.player.mute') || '静音')"
+                                                    :aria-label="
+                                                        isMuted
+                                                            ? $t('post_detail.viewer.player.unmute') || '取消静音'
+                                                            : $t('post_detail.viewer.player.mute') || '静音'
+                                                    "
                                                     @click.stop="toggleMute"
                                                 >
                                                     <VolumeX v-if="isMuted || volumeLevel === 0" class="h-4 w-4 text-neutral-400" />
@@ -758,8 +841,11 @@ onBeforeUnmount(() => {
                                         <div class="settings-chip-group flex flex-wrap gap-1">
                                             <button
                                                 type="button"
-                                                class="settings-chip flex-1 min-w-[48px] cursor-pointer rounded-lg border border-neutral-200 bg-neutral-100/80 px-2 py-1.5 text-center text-[11px] font-medium text-neutral-700 transition-all hover:border-neutral-300 hover:bg-neutral-200/80 hover:text-neutral-900"
-                                                :class="{ 'border-neutral-800 bg-neutral-900 text-white font-semibold shadow-xs': isMuted || volumeLevel === 0 }"
+                                                class="settings-chip flex-1 min-w-[48px] cursor-pointer rounded-lg border border-neutral-200 bg-neutral-100/80 px-2 py-1.5 text-center text-xs font-medium text-neutral-700 transition-all hover:border-neutral-300 hover:bg-neutral-200/80 hover:text-neutral-900"
+                                                :class="{
+                                                    'border-neutral-800 bg-neutral-900 text-white font-semibold shadow-xs':
+                                                        isMuted || volumeLevel === 0,
+                                                }"
                                                 @click.stop="setPlayerVolume(0)"
                                             >
                                                 {{ $t("post_detail.viewer.player.mute") || "静音" }}
@@ -768,8 +854,11 @@ onBeforeUnmount(() => {
                                                 v-for="v in [25, 50, 75, 100]"
                                                 :key="v"
                                                 type="button"
-                                                class="settings-chip flex-1 min-w-[48px] cursor-pointer rounded-lg border border-neutral-200 bg-neutral-100/80 px-2 py-1.5 text-center text-[11px] font-medium text-neutral-700 transition-all hover:border-neutral-300 hover:bg-neutral-200/80 hover:text-neutral-900"
-                                                :class="{ 'border-neutral-800 bg-neutral-900 text-white font-semibold shadow-xs': !isMuted && volumeLevel === v }"
+                                                class="settings-chip flex-1 min-w-[48px] cursor-pointer rounded-lg border border-neutral-200 bg-neutral-100/80 px-2 py-1.5 text-center text-xs font-medium text-neutral-700 transition-all hover:border-neutral-300 hover:bg-neutral-200/80 hover:text-neutral-900"
+                                                :class="{
+                                                    'border-neutral-800 bg-neutral-900 text-white font-semibold shadow-xs':
+                                                        !isMuted && volumeLevel === v,
+                                                }"
                                                 @click.stop="setPlayerVolume(v)"
                                             >
                                                 {{ v }}%
@@ -808,7 +897,9 @@ onBeforeUnmount(() => {
                                             </media-captions-radio-group>
 
                                             <div class="settings-subgroup mt-3 pt-2 border-t border-neutral-200/80">
-                                                <div class="settings-subheading px-1 py-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+                                                <div
+                                                    class="settings-subheading px-1 py-1 text-xs font-semibold uppercase tracking-wider text-neutral-400"
+                                                >
                                                     {{ $t("post_detail.viewer.player.subtitle_size") }}
                                                 </div>
                                                 <div class="settings-chip-group flex flex-wrap gap-1">
@@ -816,8 +907,11 @@ onBeforeUnmount(() => {
                                                         v-for="opt in subtitleSizeOptions"
                                                         :key="opt.value"
                                                         type="button"
-                                                        class="settings-chip flex-1 min-w-[52px] cursor-pointer rounded-lg border border-neutral-200 bg-neutral-100/80 px-2 py-1.5 text-center text-[11px] font-medium text-neutral-700 transition-all duration-120 hover:border-neutral-300 hover:bg-neutral-200/80 hover:text-neutral-900"
-                                                        :class="{ 'border-neutral-800 bg-neutral-900 text-white font-semibold shadow-xs': subtitleFontSize === opt.value }"
+                                                        class="settings-chip flex-1 min-w-[52px] cursor-pointer rounded-lg border border-neutral-200 bg-neutral-100/80 px-2 py-1.5 text-center text-xs font-medium text-neutral-700 transition-all duration-120 hover:border-neutral-300 hover:bg-neutral-200/80 hover:text-neutral-900"
+                                                        :class="{
+                                                            'border-neutral-800 bg-neutral-900 text-white font-semibold shadow-xs':
+                                                                subtitleFontSize === opt.value,
+                                                        }"
                                                         @click.stop="subtitleFontSize = opt.value"
                                                     >
                                                         {{ opt.label }}
@@ -826,7 +920,9 @@ onBeforeUnmount(() => {
                                             </div>
 
                                             <div class="settings-subgroup mt-2.5">
-                                                <div class="settings-subheading px-1 py-1 text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+                                                <div
+                                                    class="settings-subheading px-1 py-1 text-xs font-semibold uppercase tracking-wider text-neutral-400"
+                                                >
                                                     {{ $t("post_detail.viewer.player.subtitle_bg") }}
                                                 </div>
                                                 <div class="settings-chip-group flex flex-wrap gap-1">
@@ -834,8 +930,11 @@ onBeforeUnmount(() => {
                                                         v-for="opt in subtitleBgOptions"
                                                         :key="opt.value"
                                                         type="button"
-                                                        class="settings-chip flex-1 min-w-[52px] cursor-pointer rounded-lg border border-neutral-200 bg-neutral-100/80 px-2 py-1.5 text-center text-[11px] font-medium text-neutral-700 transition-all duration-120 hover:border-neutral-300 hover:bg-neutral-200/80 hover:text-neutral-900"
-                                                        :class="{ 'border-neutral-800 bg-neutral-900 text-white font-semibold shadow-xs': subtitleBgStyle === opt.value }"
+                                                        class="settings-chip flex-1 min-w-[52px] cursor-pointer rounded-lg border border-neutral-200 bg-neutral-100/80 px-2 py-1.5 text-center text-xs font-medium text-neutral-700 transition-all duration-120 hover:border-neutral-300 hover:bg-neutral-200/80 hover:text-neutral-900"
+                                                        :class="{
+                                                            'border-neutral-800 bg-neutral-900 text-white font-semibold shadow-xs':
+                                                                subtitleBgStyle === opt.value,
+                                                        }"
                                                         @click.stop="subtitleBgStyle = opt.value"
                                                     >
                                                         {{ opt.label }}
@@ -844,7 +943,9 @@ onBeforeUnmount(() => {
                                             </div>
                                         </template>
                                         <template v-else>
-                                            <div class="settings-empty-notice rounded-lg bg-neutral-100 p-3 text-center text-xs text-neutral-400">
+                                            <div
+                                                class="settings-empty-notice rounded-lg bg-neutral-100 p-3 text-center text-xs text-neutral-400"
+                                            >
                                                 {{ $t("post_detail.viewer.player.no_subtitles") }}
                                             </div>
                                         </template>
@@ -869,9 +970,11 @@ onBeforeUnmount(() => {
                     </Transition>
 
                     <!-- Bottom Controls Container (Scrubber + Buttons Row) -->
-                    <div class="bottom-controls-cluster pointer-events-auto flex w-full flex-col gap-1">
+                    <div class="bottom-controls-cluster mt-auto pointer-events-auto flex w-full flex-col gap-1 shrink-0">
                         <!-- Video Progress Bar Scrubber -->
-                        <media-time-slider class="vds-time-slider group relative flex h-5 w-full cursor-pointer items-center touch-none select-none box-border px-0.5">
+                        <media-time-slider
+                            class="vds-time-slider group relative flex h-5 w-full cursor-pointer items-center touch-none select-none box-border px-0.5"
+                        >
                             <div class="vds-slider-track" />
                             <div class="vds-slider-track-fill vds-slider-track" />
                             <div class="vds-slider-thumb" />
@@ -888,7 +991,9 @@ onBeforeUnmount(() => {
                                     <Play v-else class="h-4.5 w-4.5 translate-x-px fill-current" />
                                 </media-play-button>
 
-                                <div class="time-display flex min-w-0 items-center gap-1 ml-1.5 sm:ml-2.5 text-xs sm:text-sm font-semibold text-white/95 tabular-nums drop-shadow-xs">
+                                <div
+                                    class="time-display flex min-w-0 items-center gap-1 ml-1.5 sm:ml-2.5 text-xs sm:text-sm font-semibold text-white/95 tabular-nums drop-shadow-xs"
+                                >
                                     <media-time type="current" />
                                     <span aria-hidden="true" class="opacity-70">/</span>
                                     <media-time type="duration" />
@@ -928,7 +1033,7 @@ onBeforeUnmount(() => {
                                     :aria-label="$t('post_detail.viewer.player.speed')"
                                     @click.stop="toggleSettings('speed')"
                                 >
-                                    <span>{{ currentSpeed === 1 ? '1.0x' : `${currentSpeed}x` }}</span>
+                                    <span>{{ currentSpeed === 1 ? "1.0x" : `${currentSpeed}x` }}</span>
                                 </button>
 
                                 <media-fullscreen-button

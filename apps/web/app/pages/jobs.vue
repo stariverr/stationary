@@ -26,6 +26,7 @@ import {
     ListFilter,
     Layers,
     Sparkles,
+    Sidebar,
 } from "@lucide/vue";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -525,24 +526,31 @@ onUnmounted(() => {
 <template>
     <div class="h-screen bg-[#f9fafb] text-zinc-900 flex flex-col overflow-hidden font-sans antialiased select-none">
         <!-- Top Telemetry & Control Toolbar -->
-        <header
-            class="shrink-0 bg-white border-b border-zinc-200/80 px-6 py-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 z-10 shadow-2xs"
-        >
+        <header class="h-14 shrink-0 bg-white border-b border-zinc-200/80 px-4 md:px-6 flex items-center justify-between gap-3 z-10">
             <div class="flex items-center gap-3">
+                <button
+                    @click="toggleSidebar"
+                    class="h-8 w-8 rounded-lg -ml-1 items-center justify-center text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 transition-all cursor-pointer"
+                    :class="isSidebarCollapsed ? 'flex' : 'flex md:hidden'"
+                    :title="$t('common.toggle_sidebar', 'Toggle sidebar')"
+                    :aria-label="$t('common.toggle_sidebar', 'Toggle sidebar')"
+                >
+                    <Sidebar class="w-4.5 h-4.5" />
+                </button>
                 <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-zinc-900 text-white shadow-xs">
                     <Activity class="w-4.5 h-4.5 text-white" />
                 </div>
                 <div>
                     <div class="flex items-center gap-2.5">
-                        <h1 class="text-base font-semibold tracking-tight text-zinc-900">{{ $t("jobs.title") }}</h1>
+                        <h1 class="text-sm font-bold tracking-tight text-zinc-900 leading-none">{{ $t("jobs.title") }}</h1>
                         <span
-                            class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200/80 text-[11px] font-medium text-[#1e7e34]"
+                            class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200/80 text-xs font-medium text-[#1e7e34]"
                         >
                             <span class="relative flex h-1.5 w-1.5">
                                 <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                                 <span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#27a644]"></span>
                             </span>
-                            实时连接 (5s)
+                            {{ $t("jobs.actions.auto_refresh_on", "实时连接 (5s)") }}
                         </span>
                     </div>
                 </div>
@@ -553,10 +561,10 @@ onUnmounted(() => {
                     @click="refreshAll"
                     variant="outline"
                     size="sm"
-                    class="h-8 px-3 text-xs bg-white hover:bg-zinc-50 border-zinc-200 text-zinc-700 shadow-2xs font-medium cursor-pointer rounded-lg transition-all"
+                    class="h-8.5 px-3 text-xs bg-white hover:bg-zinc-50 border-zinc-200 text-zinc-700 font-medium cursor-pointer rounded-lg transition-all active:scale-[0.96] focus-visible:ring-2 focus-visible:ring-zinc-950"
                 >
                     <RefreshCw class="w-3.5 h-3.5 mr-1.5 text-zinc-500" :class="{ 'animate-spin': tasksLoading || statsLoading }" />
-                    <span>刷新数据</span>
+                    <span>{{ $t("jobs.actions.refresh", "刷新数据") }}</span>
                 </Button>
 
                 <Button
@@ -564,26 +572,28 @@ onUnmounted(() => {
                     :disabled="isSweeping"
                     variant="outline"
                     size="sm"
-                    class="h-8 px-3 text-xs bg-white hover:bg-zinc-50 border-zinc-200 text-zinc-700 shadow-2xs font-medium cursor-pointer rounded-lg transition-all"
+                    class="h-8.5 px-3 text-xs bg-white hover:bg-zinc-50 border-zinc-200 text-zinc-700 font-medium cursor-pointer rounded-lg transition-all active:scale-[0.96] focus-visible:ring-2 focus-visible:ring-zinc-950"
                 >
                     <RotateCcw class="w-3.5 h-3.5 mr-1.5 text-zinc-500" :class="{ 'animate-spin': isSweeping }" />
-                    <span>修复卡住任务</span>
+                    <span>{{ $t("jobs.actions.sweep", "修复卡住任务") }}</span>
                 </Button>
             </div>
         </header>
 
-        <!-- Main Workspace Viewport (Card-on-Canvas Layout) -->
+        <!-- Main Workspace Viewport -->
         <main class="flex-1 flex flex-col p-4 sm:p-6 space-y-4 max-w-7xl mx-auto w-full min-h-0 overflow-hidden">
             <!-- Hero Telemetry Metric Tiles (Master/Parent Tasks Only) -->
             <div class="shrink-0 grid grid-cols-2 sm:grid-cols-4 gap-3.5">
                 <!-- Tile 1: Active Master Tasks -->
                 <div class="bg-white border border-zinc-200/80 rounded-xl p-3.5 shadow-2xs transition-all hover:border-zinc-300">
                     <div class="flex items-center justify-between">
-                        <span class="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">处理中主任务</span>
+                        <span class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">{{
+                            $t("jobs.metrics.active_tasks", "处理中主任务")
+                        }}</span>
                         <div class="w-2 h-2 rounded-full bg-blue-600 animate-pulse"></div>
                     </div>
                     <div class="flex items-baseline gap-2 mt-2">
-                        <span class="text-2xl font-bold tracking-tight text-zinc-900">{{ stats.tasks.running }}</span>
+                        <span class="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">{{ stats.tasks.running }}</span>
                         <span class="text-xs text-zinc-500 font-normal truncate">正在执行</span>
                     </div>
                 </div>
@@ -591,12 +601,14 @@ onUnmounted(() => {
                 <!-- Tile 2: Failed Master Tasks -->
                 <div class="bg-white border rounded-xl p-3.5 shadow-2xs transition-all border-zinc-200/80 hover:border-zinc-300">
                     <div class="flex items-center justify-between">
-                        <span class="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">失败主任务</span>
+                        <span class="text-xs font-semibold uppercase tracking-wider text-zinc-400">{{
+                            $t("jobs.metrics.failed_tasks", "失败主任务")
+                        }}</span>
                         <AlertTriangle v-if="stats.tasks.failed > 0" class="w-4 h-4 text-rose-500" />
                     </div>
                     <div class="flex items-baseline gap-2 mt-2">
                         <span
-                            class="text-2xl font-bold tracking-tight"
+                            class="text-2xl font-bold tracking-tight tabular-nums"
                             :class="stats.tasks.failed > 0 ? 'text-rose-600' : 'text-zinc-900'"
                             >{{ stats.tasks.failed }}</span
                         >
@@ -611,11 +623,13 @@ onUnmounted(() => {
                 <!-- Tile 3: Completed Master Tasks -->
                 <div class="bg-white border border-zinc-200/80 rounded-xl p-3.5 shadow-2xs transition-all hover:border-zinc-300">
                     <div class="flex items-center justify-between">
-                        <span class="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">已完成主任务</span>
+                        <span class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">{{
+                            $t("jobs.metrics.completed_tasks", "已完成主任务")
+                        }}</span>
                         <CheckCircle2 class="w-4 h-4 text-emerald-500" />
                     </div>
                     <div class="flex items-baseline gap-2 mt-2">
-                        <span class="text-2xl font-bold tracking-tight text-zinc-900">{{ stats.tasks.completed }}</span>
+                        <span class="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">{{ stats.tasks.completed }}</span>
                         <span class="text-xs text-zinc-500 font-normal truncate">成功结束</span>
                     </div>
                 </div>
@@ -623,11 +637,13 @@ onUnmounted(() => {
                 <!-- Tile 4: Total Master Tasks -->
                 <div class="bg-white border border-zinc-200/80 rounded-xl p-3.5 shadow-2xs transition-all hover:border-zinc-300">
                     <div class="flex items-center justify-between">
-                        <span class="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">主任务总量</span>
+                        <span class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">{{
+                            $t("jobs.metrics.total_tasks", "主任务总量")
+                        }}</span>
                         <Layers class="w-4 h-4 text-zinc-400" />
                     </div>
                     <div class="flex items-baseline gap-2 mt-2">
-                        <span class="text-2xl font-bold tracking-tight text-zinc-900">{{ stats.tasks.total }}</span>
+                        <span class="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">{{ stats.tasks.total }}</span>
                         <span class="text-xs text-zinc-500 font-normal truncate">全量任务记录</span>
                     </div>
                 </div>
@@ -643,7 +659,7 @@ onUnmounted(() => {
                         v-for="st in ['ALL', 'RUNNING', 'PAUSED', 'FAILED', 'COMPLETED', 'CANCELLED']"
                         :key="st"
                         @click="statusFilter = st"
-                        class="px-3 py-1.5 rounded-md transition-all cursor-pointer shrink-0 flex items-center gap-1.5 text-xs font-medium"
+                        class="h-7 px-3 rounded-md transition-colors duration-150 cursor-pointer shrink-0 flex items-center gap-1.5 text-xs font-medium"
                         :class="
                             statusFilter === st
                                 ? 'bg-zinc-900 text-white shadow-xs font-semibold'
@@ -653,7 +669,7 @@ onUnmounted(() => {
                         <span>{{ st === "ALL" ? $t("jobs.tabs.all") : formatStatus(st) }}</span>
                         <span
                             v-if="st === 'FAILED' && stats.tasks.failed > 0"
-                            class="px-1.5 py-0.2 text-[11px] rounded-full font-semibold"
+                            class="px-1.5 py-0.2 text-xs rounded-full font-semibold"
                             :class="statusFilter === 'FAILED' ? 'bg-rose-500 text-white' : 'bg-rose-100 text-rose-700'"
                         >
                             {{ stats.tasks.failed }}
@@ -699,7 +715,7 @@ onUnmounted(() => {
                 <div class="flex-1 overflow-y-auto w-full min-h-0">
                     <table class="w-full text-left text-xs table-fixed">
                         <thead
-                            class="bg-zinc-50/90 backdrop-blur-xs border-b border-zinc-200/80 text-zinc-500 font-semibold uppercase tracking-wider text-[11px] sticky top-0 z-10"
+                            class="bg-zinc-50/90 backdrop-blur-xs border-b border-zinc-200/80 text-zinc-500 font-semibold uppercase tracking-wider text-xs sticky top-0 z-10"
                         >
                             <tr>
                                 <th class="py-3 px-3.5 w-10 text-center">
@@ -766,7 +782,7 @@ onUnmounted(() => {
                                             <Copy v-else class="w-3.5 h-3.5" />
                                         </button>
                                     </div>
-                                    <div class="text-[11px] text-zinc-400 mt-0.5">
+                                    <div class="text-xs text-zinc-400 mt-0.5">
                                         {{ new Date(task.update_time).toLocaleString() }}
                                     </div>
                                 </td>
@@ -839,7 +855,7 @@ onUnmounted(() => {
                                                 :style="{ width: `${task.progress.percentage}%` }"
                                             ></div>
                                         </div>
-                                        <div class="flex items-center gap-2.5 text-[11px] font-medium">
+                                        <div class="flex items-center gap-2.5 text-xs font-medium">
                                             <span class="text-[#1e7e34]" title="成功">✓ {{ task.succeeded_units }} 成功</span>
                                             <span class="text-rose-500 font-medium" v-if="task.failed_units > 0" title="失败"
                                                 >✗ {{ task.failed_units }} 失败</span

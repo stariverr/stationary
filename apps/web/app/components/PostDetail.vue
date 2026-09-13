@@ -10,7 +10,6 @@ import {
     Link as LinkIcon,
     ListFilter,
     Maximize2,
-    Minimize2,
     Music,
     User,
     X,
@@ -22,10 +21,8 @@ import {
     CircleDotDashed,
 } from "@lucide/vue";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { storeToRefs } from "pinia";
 import { useQueryClient } from "@tanstack/vue-query";
 import { toast } from "vue-sonner";
-import { useUserStore } from "@/stores/user";
 import { usePostMediaQuery } from "@/composables/usePostMediaQuery";
 import { useApi } from "@/composables/useApi";
 import type { ApiResponse } from "@/types/api";
@@ -43,8 +40,6 @@ import OrphanMediaPickerDialog from "./OrphanMediaPickerDialog.vue";
 import ManageTracksDialog from "./ManageTracksDialog.vue";
 
 const { selectedPost, selectedPostId } = usePosts();
-const userStore = useUserStore();
-const { expandDetailByDefault } = storeToRefs(userStore);
 const { t } = useI18n();
 const route = useRoute();
 const queryClient = useQueryClient();
@@ -69,13 +64,94 @@ const refreshPostData = async (postId: string) => {
 const activeMediaId = ref<string | null>(null);
 const currentIndex = ref(0);
 const activeTab = ref<"details" | "management">("details");
-const isImmersiveView = ref(false);
 const isMediaOnly = ref(false);
-const isUiHidden = ref(false);
+const isControlsVisible = ref(true);
 const isMobile = ref(false);
 const isMounted = ref(false);
 
-const isOverlay = computed(() => isImmersiveView.value || isMediaOnly.value);
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+const resetIdleTimer = () => {
+    isControlsVisible.value = true;
+    if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+    }
+    if (isMediaOnly.value) {
+        idleTimer = setTimeout(() => {
+            isControlsVisible.value = false;
+        }, 3500);
+    }
+};
+
+const handlePointerActivity = () => {
+    if (isMediaOnly.value && isControlsVisible.value) {
+        resetIdleTimer();
+    }
+};
+
+const isVideoPlaying = ref(false);
+
+const handlePlayerControlsChange = (visible: boolean) => {
+    if (!isMediaOnly.value) return;
+    isControlsVisible.value = visible;
+    if (visible) {
+        resetIdleTimer();
+    } else if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+    }
+};
+
+const handlePlayerPlay = () => {
+    isVideoPlaying.value = true;
+    if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+    }
+    // Auto-immerse cleanly shortly after video starts playing
+    idleTimer = setTimeout(() => {
+        isControlsVisible.value = false;
+    }, 1500);
+};
+
+const handlePlayerPause = () => {
+    isVideoPlaying.value = false;
+    isControlsVisible.value = true;
+    resetIdleTimer();
+};
+
+// Mobile Touch Swipe Gesture for switching media
+let touchStartX = 0;
+let touchStartY = 0;
+let touchStartTime = 0;
+
+const handleStageTouchStart = (e: TouchEvent) => {
+    const touch = e.touches[0];
+    if (touch) {
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+        touchStartTime = performance.now();
+    }
+};
+
+const handleStageTouchEnd = (e: TouchEvent) => {
+    const touch = e.changedTouches[0];
+    if (touch) {
+        const deltaX = touch.clientX - touchStartX;
+        const deltaY = touch.clientY - touchStartY;
+        const elapsed = performance.now() - touchStartTime;
+
+        if (zoomLevel.value <= 1 && Math.abs(deltaX) > 50 && Math.abs(deltaX) > Math.abs(deltaY) * 1.4 && elapsed < 450) {
+            if (deltaX < 0 && canNext.value) {
+                nextMedia();
+            } else if (deltaX > 0 && canPrevious.value) {
+                previousMedia();
+            }
+        }
+    }
+};
+
 const currentMedia = computed<PostMediaSummary | null>(() => {
     const activeMedia = postMediaList.value.find((media) => media.id === activeMediaId.value);
     return activeMedia ?? postMediaList.value[0] ?? null;
@@ -83,6 +159,17 @@ const currentMedia = computed<PostMediaSummary | null>(() => {
 const currentPosition = computed(() => currentMedia.value?.position ?? 0);
 const mediaCounter = computed(() => (mediaTotal.value > 0 ? `${currentPosition.value + 1} / ${mediaTotal.value}` : "0 / 0"));
 const currentMediaTitle = computed(() => currentMedia.value?.title || t("post_detail.media_item", { number: currentPosition.value + 1 }));
+const displayMediaTitle = computed(() => {
+    const title = currentMedia.value?.title?.trim();
+    if (!title) {
+        return t("post_detail.media_item", { number: currentPosition.value + 1 });
+    }
+    // If title looks like an internal snowflake ID or long hex string
+    if (/^\d{10,}$/.test(title) || /^[a-f0-9]{24,}$/i.test(title)) {
+        return t("post_detail.media_item", { number: currentPosition.value + 1 });
+    }
+    return title;
+});
 const canPrevious = computed(() => postMediaList.value.length > 1 || currentIndex.value > 0 || mediaPage.value > 1);
 const canNext = computed(
     () => postMediaList.value.length > 1 || currentIndex.value < postMediaList.value.length - 1 || mediaPage.value < mediaTotalPages.value,
@@ -155,6 +242,7 @@ const resetZoomRotate = () => {
 watch(
     () => activeMediaId.value,
     () => {
+        isVideoPlaying.value = false;
         resetZoomRotate();
     },
 );
@@ -177,8 +265,11 @@ const resetViewState = () => {
     activeMediaId.value = null;
     activeTab.value = "details";
     isMediaOnly.value = false;
-    isUiHidden.value = false;
-    isImmersiveView.value = !isMobile.value && expandDetailByDefault.value;
+    isControlsVisible.value = true;
+    if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+    }
 };
 
 watch(
@@ -189,15 +280,15 @@ watch(
     { immediate: true },
 );
 
-watch(expandDetailByDefault, (newValue) => {
-    if (!isMobile.value && selectedPost.value && !isMediaOnly.value) {
-        isImmersiveView.value = newValue;
-    }
-});
-
-watch(isOverlay, (newValue) => {
-    if (!newValue) {
-        resetZoomRotate();
+watch(isMediaOnly, (val) => {
+    if (val) {
+        resetIdleTimer();
+    } else {
+        if (idleTimer) {
+            clearTimeout(idleTimer);
+            idleTimer = null;
+        }
+        isControlsVisible.value = true;
     }
 });
 
@@ -272,38 +363,35 @@ const nextMedia = async () => {
     }
 };
 
-const enterImmersiveView = () => {
-    if (!isMobile.value) isImmersiveView.value = true;
-};
-
-const leaveImmersiveView = () => {
-    if (typeof document !== "undefined" && document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
-    }
-    isMediaOnly.value = false;
-    isImmersiveView.value = false;
-    isUiHidden.value = false;
-};
-
 const enterMediaOnly = () => {
     if (currentMedia.value) isMediaOnly.value = true;
 };
 
 const handleMediaClick = () => {
-    if (isOverlay.value) {
-        if (isImmersiveView.value) {
-            isMediaOnly.value = !isMediaOnly.value;
-        } else {
-            isUiHidden.value = !isUiHidden.value;
-        }
-    } else {
+    if (!isMediaOnly.value) {
         isMediaOnly.value = true;
-        isUiHidden.value = false;
+    } else {
+        if (currentMedia.value?.type === "VIDEO") {
+            resetIdleTimer();
+        } else {
+            isControlsVisible.value = !isControlsVisible.value;
+            if (isControlsVisible.value) {
+                resetIdleTimer();
+            } else if (idleTimer) {
+                clearTimeout(idleTimer);
+                idleTimer = null;
+            }
+        }
     }
 };
 
 const leaveMediaOnly = () => {
     isMediaOnly.value = false;
+    isControlsVisible.value = true;
+    if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+    }
 };
 
 const closeDetail = () => {
@@ -312,18 +400,21 @@ const closeDetail = () => {
     }
     selectedPostId.value = null;
     isMediaOnly.value = false;
-    isImmersiveView.value = false;
-    isUiHidden.value = false;
+    isControlsVisible.value = true;
+    if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+    }
+    resetZoomRotate();
     if (route.params.id) navigateTo("/");
 };
 
 const handleResize = () => {
-    const nextIsMobile = window.innerWidth < 768;
-    isMobile.value = nextIsMobile;
-    if (nextIsMobile) isImmersiveView.value = false;
+    isMobile.value = window.innerWidth < 768;
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
+    resetIdleTimer();
     if (event.defaultPrevented || isEditingTracks.value || isOrphanPickerOpen.value || isCreateMediaOpen.value) return;
     const target = event.target;
     if (
@@ -336,7 +427,7 @@ const handleKeydown = (event: KeyboardEvent) => {
     }
 
     if (event.key === "Escape") {
-        if (isOverlay.value) leaveImmersiveView();
+        if (isMediaOnly.value) leaveMediaOnly();
         else closeDetail();
     } else if (event.key === "ArrowLeft") {
         previousMedia();
@@ -350,11 +441,17 @@ onMounted(() => {
     handleResize();
     window.addEventListener("resize", handleResize);
     window.addEventListener("keydown", handleKeydown);
+    window.addEventListener("mousemove", handlePointerActivity);
 });
 
 onUnmounted(() => {
     window.removeEventListener("resize", handleResize);
     window.removeEventListener("keydown", handleKeydown);
+    window.removeEventListener("mousemove", handlePointerActivity);
+    if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+    }
 });
 
 const copyLink = async () => {
@@ -521,79 +618,180 @@ const confirmTrashMedia = async () => {
 <template>
     <div
         v-if="selectedPost"
-        :class="[
-            isOverlay
-                ? 'fixed inset-0 z-[150] flex bg-zinc-950 text-zinc-100 pointer-events-auto'
-                : 'fixed inset-y-0 right-0 z-60 w-full md:relative md:z-auto md:w-[520px] shrink-0 h-full bg-white dark:bg-zinc-950 border-l border-zinc-200 dark:border-zinc-800 flex flex-col shadow-2xl overflow-hidden pointer-events-auto',
-        ]"
+        class="fixed inset-0 z-[150] flex flex-col md:flex-row bg-zinc-950 text-zinc-100 pointer-events-auto"
         role="dialog"
         aria-modal="true"
         :aria-label="$t('post_detail.title')"
     >
-        <!-- Full-screen media stage -->
-        <section v-if="isOverlay" class="relative flex min-w-0 flex-1 flex-col bg-zinc-950 group/fullscreen">
-            <!-- Floating Nav Arrows for Fullscreen -->
-            <button
-                v-if="postMediaList.length > 1 && canPrevious && !isUiHidden"
-                type="button"
-                @click.stop="previousMedia"
-                class="absolute left-3 md:left-6 top-1/2 -translate-y-1/2 flex h-10 w-10 md:h-12 md:w-12 items-center justify-center rounded-full bg-black/40 text-white border border-white/10 backdrop-blur-md hover:bg-white/20 hover:text-white hover:scale-105 active:scale-95 transition-all duration-300 opacity-80 md:opacity-0 md:-translate-x-3 md:group-hover/fullscreen:opacity-100 md:group-hover/fullscreen:translate-x-0 z-30 cursor-pointer"
-                :title="$t('post_detail.previous_media')"
-            >
-                <ChevronLeft class="h-5 w-5 md:h-6 md:w-6" />
-            </button>
-            <button
-                v-if="postMediaList.length > 1 && canNext && !isUiHidden"
-                type="button"
-                @click.stop="nextMedia"
-                class="absolute right-3 md:right-6 top-1/2 -translate-y-1/2 flex h-10 w-10 md:h-12 md:w-12 items-center justify-center rounded-full bg-black/40 text-white border border-white/10 backdrop-blur-md hover:bg-white/20 hover:text-white hover:scale-105 active:scale-95 transition-all duration-300 opacity-80 md:opacity-0 md:translate-x-3 md:group-hover/fullscreen:opacity-100 md:group-hover/fullscreen:translate-x-0 z-30 cursor-pointer"
-                :title="$t('post_detail.next_media')"
-            >
-                <ChevronRight class="h-5 w-5 md:h-6 md:w-6" />
-            </button>
+        <!-- Mobile Top Bar (< 768px): Sits at the top on narrow screens -->
+        <header
+            v-if="!isMediaOnly"
+            class="flex md:hidden shrink-0 items-center justify-between border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-4 pt-[env(safe-area-inset-top)] h-[calc(3.5rem+env(safe-area-inset-top))] text-zinc-900 dark:text-zinc-100"
+        >
+            <div class="flex min-w-0 items-center gap-3">
+                <button
+                    type="button"
+                    class="-ml-1.5 flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition cursor-pointer"
+                    :title="$t('post_detail.close')"
+                    :aria-label="$t('post_detail.close')"
+                    @click="closeDetail"
+                >
+                    <ChevronLeft class="h-5 w-5" />
+                </button>
+                <div
+                    class="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400"
+                >
+                    <img
+                        v-if="selectedPost.author_avatar_url"
+                        :src="selectedPost.author_avatar_url"
+                        :alt="selectedPost.author"
+                        class="h-full w-full object-cover"
+                    />
+                    <User v-else class="h-4 w-4" />
+                </div>
+                <div class="min-w-0">
+                    <h2 class="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                        {{ $t("common.post_info") }}
+                    </h2>
+                    <p class="truncate text-xs text-zinc-500 dark:text-zinc-400">
+                        {{ selectedPost.author }} <span class="text-zinc-300 dark:text-zinc-700">·</span> {{ platformLabel }}
+                    </p>
+                </div>
+            </div>
+            <div class="flex items-center gap-1">
+                <button
+                    type="button"
+                    class="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition cursor-pointer"
+                    :title="$t('common.copy_link')"
+                    :aria-label="$t('common.copy_link')"
+                    @click="copyLink"
+                >
+                    <LinkIcon class="h-4 w-4" />
+                </button>
+                <button
+                    type="button"
+                    class="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition cursor-pointer"
+                    :title="$t('post_detail.media_fullscreen')"
+                    :aria-label="$t('post_detail.media_fullscreen')"
+                    @click="enterMediaOnly"
+                >
+                    <Maximize2 class="h-4 w-4" />
+                </button>
+            </div>
+        </header>
 
+        <!-- Full-screen / Split-view media stage -->
+        <section
+            class="relative flex min-w-0 flex-1 flex-col bg-zinc-950 group/fullscreen overflow-hidden select-none"
+            :class="[!isMediaOnly ? 'h-[42vh] shrink-0 md:h-full md:flex-1' : 'h-full flex-1']"
+        >
+            <!-- Media Viewport: Truly full-screen, p-0, zero black bars reserved -->
             <div
-                v-if="!isUiHidden"
-                class="absolute inset-x-0 top-0 z-40 flex h-18 items-center justify-between px-4 md:px-6 pointer-events-none select-none"
+                class="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-0"
+                @touchstart="handleStageTouchStart"
+                @touchend="handleStageTouchEnd"
             >
-                <!-- Left: Media Title & Counter Pill -->
-                <div class="flex items-center pointer-events-auto">
-                    <div
-                        v-if="currentMedia"
-                        class="flex h-10 items-center gap-2.5 rounded-full border border-white/15 bg-zinc-950/80 px-4 backdrop-blur-xl shadow-2xl"
-                    >
-                        <component
-                            :is="
-                                currentMedia.type === 'LIVE_PHOTO'
-                                    ? CircleDotDashed
-                                    : currentMedia.type === 'VIDEO'
-                                      ? Film
-                                      : currentMedia.type === 'AUDIO'
-                                        ? Music
-                                        : FileImage
-                            "
-                            class="h-4 w-4 text-emerald-400 shrink-0"
-                        />
-                        <span
-                            v-if="currentMedia.type === 'LIVE_PHOTO'"
-                            class="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-[10px] font-bold text-emerald-300 uppercase tracking-wider select-none leading-none shrink-0"
-                        >
-                            {{ $t("media.live") }}
-                        </span>
-                        <span class="max-w-[140px] sm:max-w-[200px] md:max-w-[280px] truncate text-xs font-semibold text-white/95">
-                            {{ currentMediaTitle }}
-                        </span>
-                        <span class="h-3.5 w-px bg-white/20"></span>
-                        <span class="font-mono text-xs font-bold tabular-nums text-white/80 bg-white/10 px-2 py-0.5 rounded-full">
-                            {{ mediaCounter }}
-                        </span>
-                    </div>
+                <!-- Floating Nav Arrows (Visible on both mobile & desktop when multiple media exist) -->
+                <button
+                    v-if="postMediaList.length > 1 && canPrevious && !isVideoPlaying"
+                    type="button"
+                    @pointerdown.stop="resetIdleTimer"
+                    @click.stop="previousMedia"
+                    class="absolute left-2 md:left-5 top-1/2 -translate-y-1/2 flex h-8 w-8 md:h-11 md:w-11 items-center justify-center rounded-full bg-black/50 text-white/90 hover:text-white border border-white/15 backdrop-blur-md hover:bg-black/75 hover:scale-105 active:scale-95 transition-all duration-200 z-30 cursor-pointer shadow-lg"
+                    :class="[!isControlsVisible ? 'opacity-0 pointer-events-none' : 'opacity-80 md:opacity-70 hover:opacity-100']"
+                    :title="$t('post_detail.previous_media')"
+                >
+                    <ChevronLeft class="h-4 w-4 md:h-5 md:w-5" />
+                </button>
+                <button
+                    v-if="postMediaList.length > 1 && canNext && !isVideoPlaying"
+                    type="button"
+                    @pointerdown.stop="resetIdleTimer"
+                    @click.stop="nextMedia"
+                    class="absolute right-2 md:right-5 top-1/2 -translate-y-1/2 flex h-8 w-8 md:h-11 md:w-11 items-center justify-center rounded-full bg-black/50 text-white/90 hover:text-white border border-white/15 backdrop-blur-md hover:bg-black/75 hover:scale-105 active:scale-95 transition-all duration-200 z-30 cursor-pointer shadow-lg"
+                    :class="[!isControlsVisible ? 'opacity-0 pointer-events-none' : 'opacity-80 md:opacity-70 hover:opacity-100']"
+                    :title="$t('post_detail.next_media')"
+                >
+                    <ChevronRight class="h-4 w-4 md:h-5 md:w-5" />
+                </button>
+
+                <!-- Floating Media Counter Pill (When not in fullscreen media-only, centered) -->
+                <div
+                    v-if="!isMediaOnly && mediaTotal > 1"
+                    class="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-xs font-mono font-medium text-white/90 backdrop-blur-md border border-white/10 pointer-events-none select-none shadow-md"
+                >
+                    <span>{{ currentPosition + 1 }}</span>
+                    <span class="opacity-40">/</span>
+                    <span>{{ mediaTotal }}</span>
                 </div>
 
-                <!-- Center: Floating Glassmorphism Inspection Toolbar -->
+                <UniversalMediaViewer
+                    :media="currentMedia"
+                    :is-loading="isLoadingMediaList"
+                    :interactive="isZoomableMedia"
+                    :hide-badge="false"
+                    :zoom="zoomLevel"
+                    :rotation="rotationAngle"
+                    @zoom-change="handleZoomChange"
+                    @click-media="handleMediaClick"
+                    @controls-change="handlePlayerControlsChange"
+                    @user-activity="resetIdleTimer"
+                    @play="handlePlayerPlay"
+                    @pause="handlePlayerPause"
+                    class="h-full w-full"
+                />
+            </div>
+
+            <!-- Fullscreen Top Header (Left-aligned </X, Centered Counter, Clean Canvas) -->
+            <header
+                v-if="isMediaOnly"
+                class="absolute top-0 inset-x-0 z-40 flex items-center justify-between pointer-events-none select-none transition-all duration-300 ease-out pt-[max(16px,env(safe-area-inset-top))] px-4 md:px-6"
+                :class="isControlsVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'"
+                @mouseenter="resetIdleTimer"
+                @pointerdown.stop="resetIdleTimer"
+            >
+                <!-- Left: Exit Fullscreen / Back button (</X) -->
+                <div class="flex items-center pointer-events-auto">
+                    <button
+                        type="button"
+                        class="flex h-9 w-9 md:h-10 md:w-10 items-center justify-center rounded-full bg-zinc-950/80 hover:bg-white/20 border border-white/15 text-white/80 hover:text-white backdrop-blur-xl shadow-2xl transition-all duration-150 cursor-pointer active:scale-95"
+                        :title="$t('post_detail.exit_fullscreen')"
+                        :aria-label="$t('post_detail.exit_fullscreen')"
+                        @click="leaveMediaOnly"
+                    >
+                        <ChevronLeft class="h-5 w-5 -translate-x-px" />
+                    </button>
+                </div>
+
+                <!-- Center: Counter Pill (Title removed for pure content immersion) -->
                 <div
-                    v-if="isZoomableMedia"
-                    class="hidden sm:flex h-10 items-center gap-1 rounded-full border border-white/15 bg-zinc-950/80 px-3 backdrop-blur-xl shadow-2xl pointer-events-auto"
+                    v-if="mediaTotal > 1"
+                    class="pointer-events-auto flex h-8 md:h-9 items-center justify-center rounded-full border border-white/15 bg-zinc-950/80 px-3 md:px-3.5 backdrop-blur-xl shadow-2xl font-mono text-xs font-bold tabular-nums text-white/90 select-none"
+                >
+                    {{ mediaCounter }}
+                </div>
+                <div v-else class="w-9 md:w-10 pointer-events-none"></div>
+
+                <!-- Right: Balanced spacer so center counter stays optically centered -->
+                <div class="w-9 md:w-10 pointer-events-none"></div>
+            </header>
+
+            <!-- Bottom Action Toolbar (Desktop only; mobile uses native pinch & double-tap gestures) -->
+            <footer
+                v-if="isZoomableMedia"
+                class="absolute bottom-0 inset-x-0 z-40 pb-[max(20px,env(safe-area-inset-bottom))] hidden md:flex items-center justify-center pointer-events-none select-none transition-all duration-300 ease-out"
+                :class="
+                    isMediaOnly
+                        ? isControlsVisible
+                            ? 'opacity-100 translate-y-0'
+                            : 'opacity-0 translate-y-4'
+                        : 'opacity-0 group-hover/fullscreen:opacity-100 translate-y-0'
+                "
+                @mouseenter="resetIdleTimer"
+                @pointerdown.stop="resetIdleTimer"
+            >
+                <div
+                    class="flex h-10 items-center gap-1 rounded-full border border-white/15 bg-zinc-950/80 px-3 backdrop-blur-xl shadow-2xl pointer-events-auto"
                 >
                     <!-- Rotate Left -->
                     <button
@@ -637,7 +835,7 @@ const confirmTrashMedia = async () => {
                         :max="MAX_ZOOM"
                         step="0.05"
                         v-model.number="zoomLevel"
-                        class="w-20 md:w-24 h-1 rounded-full appearance-none cursor-pointer focus:outline-none mx-1.5 bg-white/20 hover:bg-white/30 transition-colors [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:shadow-md"
+                        class="w-20 md:w-28 h-1 rounded-full appearance-none cursor-pointer focus:outline-none mx-1.5 bg-white/20 hover:bg-white/30 transition-colors [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:shadow-md"
                     />
 
                     <!-- Zoom In -->
@@ -658,7 +856,7 @@ const confirmTrashMedia = async () => {
                     <button
                         type="button"
                         @click="zoomTo(1)"
-                        class="h-8 px-2.5 flex items-center justify-center rounded-full text-[11px] font-mono font-bold text-white/75 hover:bg-white/15 hover:text-white transition-all cursor-pointer active:scale-95"
+                        class="h-8 px-2.5 flex items-center justify-center rounded-full text-xs font-mono font-bold text-white/75 hover:bg-white/15 hover:text-white transition-all cursor-pointer active:scale-95"
                         :title="$t('post_detail.viewer.zoom_reset_original')"
                     >
                         1:1
@@ -674,59 +872,18 @@ const confirmTrashMedia = async () => {
                         <Maximize class="h-4 w-4" />
                     </button>
                 </div>
-
-                <!-- Right: Close Button -->
-                <div class="flex items-center pointer-events-auto">
-                    <button
-                        type="button"
-                        class="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-950/80 hover:bg-white/20 border border-white/15 text-white/80 hover:text-white backdrop-blur-xl shadow-2xl transition-all duration-150 cursor-pointer active:scale-95"
-                        :title="$t('post_detail.close')"
-                        :aria-label="$t('post_detail.close')"
-                        @click="closeDetail"
-                    >
-                        <X class="h-4 w-4" />
-                    </button>
-                </div>
-            </div>
-
-            <div class="flex min-h-0 flex-1 items-center justify-center p-0 overflow-hidden">
-                <UniversalMediaViewer
-                    :media="currentMedia"
-                    :is-loading="isLoadingMediaList"
-                    :interactive="isZoomableMedia"
-                    :hide-badge="isOverlay"
-                    :zoom="zoomLevel"
-                    :rotation="rotationAngle"
-                    @zoom-change="handleZoomChange"
-                    @click-media="handleMediaClick"
-                    class="h-full w-full"
-                />
-            </div>
+            </footer>
         </section>
 
-        <!-- Details inspector. It becomes the right rail in full-screen mode. -->
+        <!-- Details inspector. It is the right rail in full-screen mode, or bottom panel on mobile. -->
         <section
             v-if="!isMediaOnly"
-            :class="
-                isOverlay
-                    ? 'flex h-full w-full shrink-0 flex-col border-l border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 md:w-[480px] xl:w-[520px]'
-                    : 'flex h-full w-full flex-col bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100'
-            "
+            class="flex h-full w-full shrink-0 flex-col border-t md:border-t-0 md:border-l border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 flex-1 min-h-0 md:flex-none md:w-[480px] xl:w-[520px]"
         >
             <header
-                class="flex h-16 shrink-0 items-center justify-between border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-4 md:px-5"
+                class="hidden md:flex h-16 shrink-0 items-center justify-between border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-4 md:px-5"
             >
                 <div class="flex min-w-0 items-center gap-3">
-                    <button
-                        v-if="isMobile && !isOverlay"
-                        type="button"
-                        class="-ml-2 flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition cursor-pointer"
-                        :title="$t('post_detail.close')"
-                        :aria-label="$t('post_detail.close')"
-                        @click="closeDetail"
-                    >
-                        <ChevronLeft class="h-5 w-5" />
-                    </button>
                     <div
                         class="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400"
                     >
@@ -758,27 +915,15 @@ const confirmTrashMedia = async () => {
                         <LinkIcon class="h-4 w-4" />
                     </button>
                     <button
-                        v-if="!isOverlay && !isMobile"
                         type="button"
                         class="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition cursor-pointer"
-                        :title="$t('common.immersive_view')"
-                        :aria-label="$t('common.immersive_view')"
-                        @click="enterImmersiveView"
+                        :title="$t('post_detail.media_fullscreen')"
+                        :aria-label="$t('post_detail.media_fullscreen')"
+                        @click="enterMediaOnly"
                     >
                         <Maximize2 class="h-4 w-4" />
                     </button>
                     <button
-                        v-if="isOverlay"
-                        type="button"
-                        class="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition cursor-pointer"
-                        :title="$t('common.standard_view')"
-                        :aria-label="$t('common.standard_view')"
-                        @click="leaveImmersiveView"
-                    >
-                        <Minimize2 class="h-4 w-4" />
-                    </button>
-                    <button
-                        v-if="!isMobile || isOverlay"
                         type="button"
                         class="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition cursor-pointer"
                         :title="$t('post_detail.close')"
@@ -789,66 +934,6 @@ const confirmTrashMedia = async () => {
                     </button>
                 </div>
             </header>
-
-            <!-- Compact media stage in the standard side panel (With Hover Nav Arrows) -->
-            <div v-if="!isOverlay" class="relative aspect-video shrink-0 overflow-hidden bg-zinc-950 group/player">
-                <UniversalMediaViewer
-                    :media="currentMedia"
-                    :is-loading="isLoadingMediaList"
-                    :interactive="isZoomableMedia"
-                    @click-media="handleMediaClick"
-                    class="h-full w-full"
-                />
-
-                <!-- Nav Arrows for Standard Player -->
-
-                <!-- Nav Arrows for Standard Player -->
-                <button
-                    v-if="postMediaList.length > 1 && canPrevious"
-                    type="button"
-                    @click.stop="previousMedia"
-                    class="absolute left-3 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-xs hover:bg-black/80 transition-opacity opacity-80 md:opacity-0 md:group-hover/player:opacity-100 z-10 cursor-pointer"
-                    :title="$t('post_detail.previous_media')"
-                >
-                    <ChevronLeft class="h-4.5 w-4.5" />
-                </button>
-                <button
-                    v-if="postMediaList.length > 1 && canNext"
-                    type="button"
-                    @click.stop="nextMedia"
-                    class="absolute right-3 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-xs hover:bg-black/80 transition-opacity opacity-80 md:opacity-0 md:group-hover/player:opacity-100 z-10 cursor-pointer"
-                    :title="$t('post_detail.next_media')"
-                >
-                    <ChevronRight class="h-4.5 w-4.5" />
-                </button>
-
-                <button
-                    v-if="currentMedia && currentMedia.type !== 'IMAGE' && currentMedia.type !== 'VIDEO'"
-                    type="button"
-                    class="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/40 text-white/90 backdrop-blur-xs transition hover:bg-black/60 hover:text-white cursor-pointer z-10 border border-white/10"
-                    :title="$t('post_detail.media_fullscreen')"
-                    :aria-label="$t('post_detail.media_fullscreen')"
-                    @click="enterMediaOnly"
-                >
-                    <Maximize2 class="h-4 w-4" />
-                </button>
-            </div>
-
-            <!-- Active Media Header Row (Linear style precision bar) -->
-            <div
-                v-if="!isOverlay && currentMedia"
-                class="h-9 px-5 border-b border-zinc-200/60 dark:border-zinc-800/60 bg-zinc-50/60 dark:bg-zinc-900/40 flex items-center justify-between shrink-0 select-none"
-            >
-                <div class="min-w-0 flex-1 mr-3 flex items-center gap-2">
-                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
-                    <h4 class="text-xs font-semibold text-zinc-800 dark:text-zinc-200 truncate" :title="currentMediaTitle">
-                        {{ currentMediaTitle || $t("post_detail.media_item", { number: currentPosition + 1 }) }}
-                    </h4>
-                </div>
-                <span class="font-mono text-[11px] tabular-nums font-semibold text-zinc-600 dark:text-zinc-300 shrink-0">
-                    {{ currentPosition + 1 }}<span class="mx-0.5 text-zinc-400 dark:text-zinc-600">/</span>{{ mediaTotal }}
-                </span>
-            </div>
 
             <!-- Segmented Tabs Switcher (Vercel / Linear style) -->
             <div class="px-5 py-2.5 shrink-0 select-none border-b border-zinc-200/60 dark:border-zinc-800/60 bg-white dark:bg-zinc-950">
@@ -898,13 +983,13 @@ const confirmTrashMedia = async () => {
                             >
                                 {{ $t("common.media_assets") }}
                             </h3>
-                            <span class="font-mono text-[11px] tabular-nums font-semibold text-zinc-600 dark:text-zinc-300">
+                            <span class="font-mono text-xs tabular-nums font-semibold text-zinc-600 dark:text-zinc-300">
                                 {{ currentPosition + 1 }}<span class="mx-0.5 text-zinc-400 dark:text-zinc-600">/</span>{{ mediaTotal }}
                             </span>
                         </div>
                         <button
                             type="button"
-                            class="inline-flex shrink-0 items-center gap-1 text-xs font-semibold transition cursor-pointer text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300"
+                            class="inline-flex shrink-0 items-center gap-1 text-xs font-semibold transition cursor-pointer text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
                             @click="activeTab = 'management'"
                         >
                             <ListFilter class="h-3.5 w-3.5" />
@@ -921,14 +1006,14 @@ const confirmTrashMedia = async () => {
                             class="w-34 shrink-0 text-left rounded-lg border p-1.5 flex flex-col gap-1.5 transition-all duration-150 cursor-pointer relative group/media-card"
                             :class="[
                                 activeMediaId === item.id
-                                    ? 'border-emerald-500/80 dark:border-emerald-500/80 bg-emerald-50/20 dark:bg-emerald-950/20 ring-1 ring-emerald-500/20'
+                                    ? 'border-blue-500/80 dark:border-blue-500/80 bg-blue-50/20 dark:bg-blue-950/20 ring-1 ring-blue-500/20'
                                     : 'border-zinc-200/70 dark:border-zinc-800/70 bg-white dark:bg-zinc-900/40 hover:bg-zinc-50 dark:hover:bg-zinc-900 hover:border-zinc-300 dark:hover:border-zinc-700',
                             ]"
                             @click="selectMedia(item.id)"
                         >
                             <!-- Card Thumbnail -->
                             <div
-                                class="w-full aspect-video bg-zinc-950 rounded overflow-hidden relative border border-zinc-150 dark:border-zinc-800/80"
+                                class="w-full aspect-video bg-zinc-950 rounded overflow-hidden relative border border-zinc-200 dark:border-zinc-800/80"
                             >
                                 <img
                                     v-if="item.previewUrl"
@@ -952,18 +1037,16 @@ const confirmTrashMedia = async () => {
                                 <h5
                                     class="text-xs font-semibold truncate leading-tight tracking-tight"
                                     :class="[
-                                        activeMediaId === item.id
-                                            ? 'text-emerald-700 dark:text-emerald-400'
-                                            : 'text-zinc-900 dark:text-zinc-100',
+                                        activeMediaId === item.id ? 'text-blue-700 dark:text-blue-400' : 'text-zinc-900 dark:text-zinc-100',
                                     ]"
                                 >
                                     {{ item.title || $t("post_detail.media_item", { number: item.position + 1 }) }}
                                 </h5>
                                 <div
-                                    class="flex items-center justify-between text-[10px] font-mono text-zinc-500 dark:text-zinc-400 font-medium"
+                                    class="flex items-center justify-between text-xs font-mono text-zinc-500 dark:text-zinc-400 font-medium"
                                 >
                                     <span>#{{ item.position + 1 }}</span>
-                                    <span class="text-[9px] font-bold text-zinc-600 dark:text-zinc-400">
+                                    <span class="text-xs font-bold text-zinc-600 dark:text-zinc-400">
                                         {{ formatMediaType(item.type) }}
                                     </span>
                                 </div>

@@ -13,7 +13,7 @@ definePageMeta({
             <div class="p-8 border-b border-gray-100 flex items-center justify-between">
                 <NuxtLink
                     to="/login"
-                    class="flex items-center gap-2 text-sm text-gray-500 hover:text-emerald-600 transition-colors duration-200"
+                    class="flex items-center gap-2 text-sm text-gray-500 hover:text-blue-600 transition-colors duration-200"
                 >
                     <ChevronLeft class="w-4 h-4" />
                     Back to Login
@@ -22,7 +22,7 @@ definePageMeta({
             </div>
 
             <!-- Content -->
-            <div class="p-8 sm:p-10 prose prose-emerald max-w-none">
+            <div class="p-8 sm:p-10 prose prose-blue max-w-none">
                 <div class="flex items-center gap-3 mb-6">
                     <img src="/logo.svg" alt="Stationary Logo" class="w-10 h-10" />
                     <h1 class="text-3xl font-extrabold text-gray-900 m-0">Terms of Service</h1>

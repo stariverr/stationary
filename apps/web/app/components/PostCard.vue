@@ -26,6 +26,7 @@ const isHovered = ref(false);
 const isRegenerating = ref(false);
 const postStore = usePostStore();
 const { postItemAspectRatio, postLayoutMode } = useAppLayout();
+const { t } = useI18n();
 
 const cardAspectRatioStyle = computed(() => {
     const ratio = postItemAspectRatio.value || "3:4";
@@ -72,12 +73,12 @@ const handleRegenerateCover = async () => {
             method: "POST",
         });
         if (response && response.success) {
-            toast.success("Cover regeneration queued.");
+            toast.success(t("toasts.cover_regeneration_queued", "Cover regeneration queued."));
         } else {
             throw new Error();
         }
     } catch {
-        toast.error("Failed to queue cover regeneration.");
+        toast.error(t("toasts.cover_regeneration_failed", "Unable to queue cover regeneration. Try again."));
     } finally {
         isRegenerating.value = false;
     }
@@ -86,20 +87,20 @@ const handleRegenerateCover = async () => {
 const handleCopyLink = () => {
     const url = window.location.origin + "/posts/" + post.id;
     navigator.clipboard.writeText(url);
-    toast.success("Post link copied to clipboard.");
+    toast.success(t("toasts.link_copied", "Post link copied to clipboard."));
 };
 
 const handleDelete = async () => {
     try {
         const response = await useApi<ApiResponse>(`/post/trash/${post.id}`, { method: "POST" });
         if (response && response.success) {
-            toast.success("Post moved to trash.");
+            toast.success(t("toasts.post_trashed", "Post moved to trash."));
             postStore.refetchPosts();
         } else {
             throw new Error();
         }
     } catch {
-        toast.error("Failed to move post to trash.");
+        toast.error(t("toasts.post_trash_failed", "Unable to move post to trash. Try again."));
     }
 };
 
@@ -115,12 +116,12 @@ const handleRetrySync = async () => {
     try {
         const res = await postStore.retrySync([post.id]);
         if (res && res.success) {
-            toast.success("Sync retry queued.");
+            toast.success(t("toasts.sync_retry_queued", "Sync retry queued."));
         } else {
             throw new Error();
         }
     } catch {
-        toast.error("Failed to queue sync retry.");
+        toast.error(t("toasts.sync_retry_failed", "Unable to queue sync retry. Try again."));
     } finally {
         isRetryingSync.value = false;
     }
@@ -131,12 +132,12 @@ const handleQueueAi = async () => {
     try {
         const res = await postStore.queueAi([post.id]);
         if (res && res.success) {
-            toast.success("AI enrichment queued.");
+            toast.success(t("toasts.ai_queued", "AI enrichment queued."));
         } else {
             throw new Error();
         }
     } catch {
-        toast.error("Failed to queue AI enrichment.");
+        toast.error(t("toasts.ai_queue_failed", "Unable to queue AI enrichment. Try again."));
     } finally {
         isQueueingAi.value = false;
     }
@@ -255,7 +256,7 @@ const getPlatformBadgeClass = (platform: string) => {
                             class="absolute inset-0 flex flex-col items-center justify-center bg-gray-800 text-gray-500 pointer-events-none"
                         >
                             <Play class="w-8 h-8 opacity-40 mb-1" />
-                            <span class="text-[10px] opacity-40">Hover to play</span>
+                            <span class="text-xs opacity-40">Hover to play</span>
                         </div>
 
                         <div
@@ -281,7 +282,7 @@ const getPlatformBadgeClass = (platform: string) => {
                             />
                             <div
                                 v-else
-                                class="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center text-[10px] font-medium text-gray-500 shrink-0"
+                                class="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center text-xs font-medium text-gray-500 shrink-0"
                             >
                                 {{ (post.author || "U").charAt(0).toUpperCase() }}
                             </div>
@@ -291,16 +292,16 @@ const getPlatformBadgeClass = (platform: string) => {
                         </div>
                         <span
                             v-if="post.platform"
-                            class="text-[9px] px-1.5 py-0.5 rounded font-semibold border shrink-0"
+                            class="text-xs px-1.5 py-0.5 rounded font-semibold border shrink-0"
                             :class="getPlatformBadgeClass(post.platform)"
                         >
                             {{ $t("platforms." + post.platform) }}
                         </span>
                     </div>
 
-                    <h3 class="text-sm font-medium text-gray-900 line-clamp-1 group-hover:text-blue-600 transition-colors mt-0.5">
+                    <h2 class="text-sm font-medium text-gray-900 line-clamp-1 group-hover:text-blue-600 transition-colors mt-0.5">
                         {{ post.title }}
-                    </h3>
+                    </h2>
                     <div class="text-xs text-gray-500 flex items-center gap-2 mt-0.5">
                         <span
                             v-if="
@@ -315,21 +316,21 @@ const getPlatformBadgeClass = (platform: string) => {
                         <template v-if="post.sync_status && post.sync_status !== 'COMPLETED'">
                             <span
                                 v-if="post.sync_status === 'PENDING'"
-                                class="inline-flex items-center gap-1 text-[10px] font-medium text-gray-400"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-zinc-500"
                             >
                                 <Clock class="size-3 shrink-0" />
                                 <span>Pending Sync</span>
                             </span>
                             <span
                                 v-else-if="post.sync_status === 'IN_PROGRESS'"
-                                class="inline-flex items-center gap-1 text-[10px] font-medium text-blue-500 animate-pulse"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-blue-500 animate-pulse"
                             >
                                 <Loader2 class="size-3 animate-spin shrink-0" />
                                 <span>Syncing...</span>
                             </span>
                             <span
                                 v-else-if="post.sync_status === 'FAILED'"
-                                class="inline-flex items-center gap-1 text-[10px] font-medium text-red-500 cursor-help"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-red-500 cursor-help"
                                 :title="post.last_error || 'Sync failed'"
                             >
                                 <AlertCircle class="size-3 shrink-0" />
@@ -341,28 +342,28 @@ const getPlatformBadgeClass = (platform: string) => {
                         <template v-if="post.media?.[0]?.ai_status">
                             <span
                                 v-if="post.media[0].ai_status === 'COMPLETED'"
-                                class="inline-flex items-center gap-1 text-[10px] font-medium text-gray-400 dark:text-gray-500 select-none"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 dark:text-zinc-400 select-none"
                             >
-                                <Sparkles class="size-3 text-gray-400 dark:text-gray-500 shrink-0" />
+                                <Sparkles class="size-3 text-zinc-500 dark:text-zinc-400 shrink-0" />
                                 <span>AI Ready</span>
                             </span>
                             <span
                                 v-else-if="post.media[0].ai_status === 'PENDING'"
-                                class="inline-flex items-center gap-1 text-[10px] font-medium text-gray-400"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-zinc-500"
                             >
                                 <Clock class="size-3 shrink-0" />
                                 <span>AI Pending</span>
                             </span>
                             <span
                                 v-else-if="post.media[0].ai_status === 'IN_PROGRESS'"
-                                class="inline-flex items-center gap-1 text-[10px] font-medium text-indigo-400 animate-pulse"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-indigo-400 animate-pulse"
                             >
                                 <Loader2 class="size-3 animate-spin shrink-0" />
                                 <span>Enriching...</span>
                             </span>
                             <span
                                 v-else-if="post.media[0].ai_status === 'FAILED'"
-                                class="inline-flex items-center gap-1 text-[10px] font-medium text-red-400 cursor-help"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-red-400 cursor-help"
                                 :title="post.media[0].ai_error || 'AI Enrichment failed'"
                             >
                                 <AlertCircle class="size-3 shrink-0" />
@@ -370,9 +371,13 @@ const getPlatformBadgeClass = (platform: string) => {
                             </span>
                         </template>
                     </div>
-                    <div class="flex flex-wrap gap-1 mt-2">
-                        <span v-for="tag in post.tags" :key="tag" class="px-1.5 py-0.5 bg-gray-100 text-xs text-gray-600 rounded-md">
-                            #{{ tag }}
+                    <div v-if="post.tags && post.tags.length > 0" class="flex flex-wrap gap-1.5 mt-2">
+                        <span
+                            v-for="tag in post.tags"
+                            :key="tag"
+                            class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-50 border border-zinc-200/80 text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+                        >
+                            {{ tag }}
                         </span>
                     </div>
                 </div>

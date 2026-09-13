@@ -23,6 +23,7 @@ import {
     ShieldAlert,
     ChevronRight,
     Info,
+    Sidebar,
 } from "@lucide/vue";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -32,9 +33,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "vue-sonner";
+import { useAppLayout } from "@/composables/useAppLayout";
 
 const tagStore = useTagStore();
 const libraryStore = useLibraryStore();
+const { toggleSidebar, isSidebarCollapsed } = useAppLayout();
 
 const activeLibrary = computed(() => libraryStore.activeLibrary);
 const searchQuery = ref("");
@@ -307,35 +310,66 @@ const handleSaveInspectorChanges = async () => {
     }
 };
 
-const handleDeleteTag = async (tagId: string) => {
-    if (!confirm(confirmDeleteText.value)) return;
-    try {
-        await tagStore.deleteTag(tagId);
-        toast.success(t("tags.toast_delete_success"));
-        selectedTag.value = null;
-        checkedTagIds.value = checkedTagIds.value.filter((id) => id !== tagId);
-    } catch (e: any) {
-        toast.error(t("tags.toast_delete_failed"), {
-            description: e.message || String(e),
-        });
-    }
+const confirmModal = ref<{
+    open: boolean;
+    title: string;
+    description: string;
+    confirmText: string;
+    variant: "default" | "destructive";
+    action: () => Promise<void> | void;
+}>({
+    open: false,
+    title: "",
+    description: "",
+    confirmText: "",
+    variant: "destructive",
+    action: () => {},
+});
+
+const openConfirm = (opts: {
+    title: string;
+    description: string;
+    confirmText?: string;
+    variant?: "default" | "destructive";
+    action: () => Promise<void> | void;
+}) => {
+    confirmModal.value = {
+        open: true,
+        title: opts.title,
+        description: opts.description,
+        confirmText: opts.confirmText || t("tags.delete"),
+        variant: opts.variant || "destructive",
+        action: opts.action,
+    };
 };
 
-const handleMergeTags = async (retainAsAlias: boolean) => {
-    const targetId = retainAsAlias ? aliasTargetId.value : mergeTargetId.value;
-    if (!activeInspectorTag.value || !targetId) return;
+const handleExecuteConfirm = async () => {
+    confirmModal.value.open = false;
+    await confirmModal.value.action();
+};
 
-    const targetTag = tagStore.tags.find((t) => t.id === targetId);
-    if (!targetTag) return;
+const handleDeleteTag = (tagId: string) => {
+    openConfirm({
+        title: t("tags.delete"),
+        description: confirmDeleteText.value,
+        variant: "destructive",
+        action: async () => {
+            try {
+                await tagStore.deleteTag(tagId);
+                toast.success(t("tags.toast_delete_success"));
+                selectedTag.value = null;
+                checkedTagIds.value = checkedTagIds.value.filter((id) => id !== tagId);
+            } catch (e: any) {
+                toast.error(t("tags.toast_delete_failed"), {
+                    description: e.message || String(e),
+                });
+            }
+        },
+    });
+};
 
-    if (!retainAsAlias) {
-        const confirmMsg = t("tags.confirm_merge_delete_prompt", {
-            source: activeInspectorTag.value.name,
-            target: targetTag.name,
-        });
-        if (!confirm(confirmMsg)) return;
-    }
-
+const executeMerge = async (targetId: string, retainAsAlias: boolean) => {
+    if (!activeInspectorTag.value) return;
     try {
         await tagStore.mergeTags({
             sourceTagId: activeInspectorTag.value.id,
@@ -362,6 +396,31 @@ const handleMergeTags = async (retainAsAlias: boolean) => {
     }
 };
 
+const handleMergeTags = async (retainAsAlias: boolean) => {
+    const targetId = retainAsAlias ? aliasTargetId.value : mergeTargetId.value;
+    if (!activeInspectorTag.value || !targetId) return;
+
+    const targetTag = tagStore.tags.find((t) => t.id === targetId);
+    if (!targetTag) return;
+
+    if (!retainAsAlias) {
+        const confirmMsg = t("tags.confirm_merge_delete_prompt", {
+            source: activeInspectorTag.value.name,
+            target: targetTag.name,
+        });
+        openConfirm({
+            title: t("tags.merge"),
+            description: confirmMsg,
+            confirmText: t("tags.merge"),
+            variant: "destructive",
+            action: () => executeMerge(targetId, retainAsAlias),
+        });
+        return;
+    }
+
+    await executeMerge(targetId, retainAsAlias);
+};
+
 // QUICK ACTIONS FOR CANDIDATES & IGNORED
 const handlePromoteTag = async (tag: TagItem) => {
     try {
@@ -381,23 +440,30 @@ const handlePromoteTag = async (tag: TagItem) => {
     }
 };
 
-const handleIgnoreTag = async (tag: TagItem) => {
-    if (!confirm(confirmIgnoreText.value)) return;
-    try {
-        await tagStore.updateTag({
-            id: tag.id,
-            status: "IGNORED",
-        });
-        toast.success(t("tags.toast_ignore_success", { name: tag.name }));
-        if (activeInspectorTag.value?.id === tag.id) {
-            selectedTag.value = null;
-            checkedTagIds.value = checkedTagIds.value.filter((id) => id !== tag.id);
-        }
-    } catch (e: any) {
-        toast.error(t("tags.toast_ignore_failed", { name: tag.name }), {
-            description: e.message || String(e),
-        });
-    }
+const handleIgnoreTag = (tag: TagItem) => {
+    openConfirm({
+        title: t("tags.ignore"),
+        description: confirmIgnoreText.value,
+        confirmText: t("tags.ignore"),
+        variant: "destructive",
+        action: async () => {
+            try {
+                await tagStore.updateTag({
+                    id: tag.id,
+                    status: "IGNORED",
+                });
+                toast.success(t("tags.toast_ignore_success", { name: tag.name }));
+                if (activeInspectorTag.value?.id === tag.id) {
+                    selectedTag.value = null;
+                    checkedTagIds.value = checkedTagIds.value.filter((id) => id !== tag.id);
+                }
+            } catch (e: any) {
+                toast.error(t("tags.toast_ignore_failed", { name: tag.name }), {
+                    description: e.message || String(e),
+                });
+            }
+        },
+    });
 };
 
 const handleRestoreTag = async (tag: TagItem) => {
@@ -519,30 +585,37 @@ const handleBatchPromote = async () => {
     }
 };
 
-const handleBatchIgnore = async () => {
+const handleBatchIgnore = () => {
     const ids = [...checkedTagIds.value];
     if (ids.length === 0) return;
-    if (!confirm(t("tags.confirm_ignore_batch", { count: ids.length }))) return;
-    isBatchLoading.value = true;
-    try {
-        await Promise.all(
-            ids.map((id) =>
-                tagStore.updateTag({
-                    id,
-                    status: "IGNORED",
-                }),
-            ),
-        );
-        toast.success(t("tags.toast_batch_ignore_success", { count: ids.length }));
-        checkedTagIds.value = [];
-        selectedTag.value = null;
-    } catch (e: any) {
-        toast.error(t("tags.toast_batch_ignore_failed"), {
-            description: e.message || String(e),
-        });
-    } finally {
-        isBatchLoading.value = false;
-    }
+    openConfirm({
+        title: t("tags.ignore_selected"),
+        description: t("tags.confirm_ignore_batch", { count: ids.length }),
+        confirmText: t("tags.ignore"),
+        variant: "destructive",
+        action: async () => {
+            isBatchLoading.value = true;
+            try {
+                await Promise.all(
+                    ids.map((id) =>
+                        tagStore.updateTag({
+                            id,
+                            status: "IGNORED",
+                        }),
+                    ),
+                );
+                toast.success(t("tags.toast_batch_ignore_success", { count: ids.length }));
+                checkedTagIds.value = [];
+                selectedTag.value = null;
+            } catch (e: any) {
+                toast.error(t("tags.toast_batch_ignore_failed"), {
+                    description: e.message || String(e),
+                });
+            } finally {
+                isBatchLoading.value = false;
+            }
+        },
+    });
 };
 
 const handleBatchRestore = async () => {
@@ -570,23 +643,30 @@ const handleBatchRestore = async () => {
     }
 };
 
-const handleBatchDelete = async () => {
+const handleBatchDelete = () => {
     const ids = [...checkedTagIds.value];
     if (ids.length === 0) return;
-    if (!confirm(t("tags.confirm_delete_batch", { count: ids.length }))) return;
-    isBatchLoading.value = true;
-    try {
-        await Promise.all(ids.map((id) => tagStore.deleteTag(id)));
-        toast.success(t("tags.toast_batch_delete_success", { count: ids.length }));
-        checkedTagIds.value = [];
-        selectedTag.value = null;
-    } catch (e: any) {
-        toast.error(t("tags.toast_batch_delete_failed"), {
-            description: e.message || String(e),
-        });
-    } finally {
-        isBatchLoading.value = false;
-    }
+    openConfirm({
+        title: t("tags.delete_selected"),
+        description: t("tags.confirm_delete_batch", { count: ids.length }),
+        confirmText: t("tags.delete"),
+        variant: "destructive",
+        action: async () => {
+            isBatchLoading.value = true;
+            try {
+                await Promise.all(ids.map((id) => tagStore.deleteTag(id)));
+                toast.success(t("tags.toast_batch_delete_success", { count: ids.length }));
+                checkedTagIds.value = [];
+                selectedTag.value = null;
+            } catch (e: any) {
+                toast.error(t("tags.toast_batch_delete_failed"), {
+                    description: e.message || String(e),
+                });
+            } finally {
+                isBatchLoading.value = false;
+            }
+        },
+    });
 };
 
 const handleBatchSaveColor = async () => {
@@ -717,11 +797,18 @@ const groupedTags = computed(() => {
 <template>
     <div class="h-full flex flex-col bg-white overflow-hidden font-sans select-none">
         <!-- Top Navigation Header -->
-        <header
-            class="border-b border-zinc-200 px-4 md:px-8 py-3 md:py-4 shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3 md:gap-4 bg-white"
-        >
+        <header class="h-14 border-b border-zinc-200/80 px-4 md:px-6 shrink-0 flex items-center justify-between gap-3 md:gap-4 bg-white">
             <div class="flex items-center gap-3">
-                <div class="p-1.5 bg-zinc-50 border border-zinc-150 rounded-lg">
+                <button
+                    @click="toggleSidebar"
+                    class="h-8 w-8 rounded-lg -ml-1 items-center justify-center text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950 transition-all cursor-pointer"
+                    :class="isSidebarCollapsed ? 'flex' : 'flex md:hidden'"
+                    :title="$t('common.toggle_sidebar', 'Toggle sidebar')"
+                    :aria-label="$t('common.toggle_sidebar', 'Toggle sidebar')"
+                >
+                    <Sidebar class="w-4.5 h-4.5" />
+                </button>
+                <div class="p-1.5 bg-zinc-50 border border-zinc-200 rounded-lg">
                     <TagIcon class="w-4 h-4 text-zinc-700" />
                 </div>
                 <div>
@@ -740,13 +827,14 @@ const groupedTags = computed(() => {
                     <Input
                         v-model="searchQuery"
                         type="text"
+                        :aria-label="searchPlaceholder"
                         :placeholder="searchPlaceholder"
                         class="pl-8 pr-7 h-9 w-full bg-zinc-50 hover:bg-zinc-100/50 focus:bg-white text-xs rounded-lg border border-zinc-200 focus:ring-1 focus:ring-zinc-950 transition-all duration-200 placeholder-zinc-500 text-zinc-800"
                     />
                     <button
                         v-if="searchQuery"
                         @click="searchQuery = ''"
-                        class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-650 transition-colors"
+                        class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 transition-colors"
                     >
                         <X class="w-3.5 h-3.5" />
                     </button>
@@ -754,7 +842,7 @@ const groupedTags = computed(() => {
 
                 <Button
                     @click="isCreateOpen = true"
-                    class="h-9 gap-1 px-3 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg font-bold text-xs cursor-pointer shadow-sm transition-colors duration-200 shrink-0"
+                    class="h-9 gap-1 px-3 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg font-bold text-xs cursor-pointer shadow-sm transition-colors duration-200 shrink-0 active:scale-[0.96]"
                 >
                     <Plus class="w-3.5 h-3.5" />
                     <span>{{ createBtnText }}</span>
@@ -762,12 +850,10 @@ const groupedTags = computed(() => {
             </div>
         </header>
 
-        <!-- Main Workplace (Collapsible side-panel layout on cool canvas) -->
-        <div class="flex-1 flex p-4 md:p-6 min-h-0 bg-[#f9fafb] relative gap-4 md:gap-6 overflow-hidden">
-            <!-- Column 1: Main Tag Grid Card -->
-            <div
-                class="flex-1 bg-white rounded-2xl border border-zinc-200/60 shadow-[0_1px_2px_rgba(0,0,0,0.02)] overflow-hidden flex flex-col min-w-0 relative"
-            >
+        <!-- Main Workplace (Seamless split-panel layout) -->
+        <div class="flex-1 flex min-h-0 bg-white relative overflow-hidden">
+            <!-- Column 1: Main Tag Area -->
+            <div class="flex-1 bg-white overflow-hidden flex flex-col min-w-0 min-h-0 relative">
                 <!-- Unified Card Header (Tabs & Toolbar) -->
                 <div
                     class="px-4 md:px-6 py-2.5 sm:py-0 border-b border-zinc-200 bg-[#fbfbfb] flex flex-col sm:flex-row sm:items-center justify-between gap-3.5 sm:h-12 shrink-0 select-none"
@@ -785,14 +871,14 @@ const groupedTags = computed(() => {
                                 v-for="tab in ['active', 'candidate', 'ignored']"
                                 :key="tab"
                                 :value="tab"
-                                class="relative h-full px-1 text-xs sm:text-sm font-bold tracking-tight transition-all duration-200 cursor-pointer flex items-center gap-1 sm:gap-1.5 focus-visible:ring-0 focus-visible:outline-none rounded-none text-zinc-400 hover:text-zinc-700 bg-transparent shadow-none border-none data-[state=active]:bg-transparent dark:data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-zinc-900 pb-0 pt-0"
+                                class="relative h-full px-1 text-xs sm:text-sm font-bold tracking-tight transition-colors duration-150 cursor-pointer flex items-center gap-1 sm:gap-1.5 focus-visible:ring-0 focus-visible:outline-none rounded-none text-zinc-400 hover:text-zinc-700 bg-transparent shadow-none border-none data-[state=active]:bg-transparent dark:data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-zinc-900 pb-0 pt-0"
                             >
                                 <span>{{
                                     tab === "active" ? activeTabLabel : tab === "candidate" ? candidateTabLabel : ignoredTabLabel
                                 }}</span>
                                 <span
-                                    class="text-[10px] sm:text-xs font-bold px-1.5 py-0.5 rounded-full font-mono transition-colors"
-                                    :class="activeTab === tab ? 'bg-zinc-150 text-zinc-800' : 'bg-zinc-50 text-zinc-500'"
+                                    class="text-xs sm:text-xs font-bold px-1.5 py-0.5 rounded-full tabular-nums transition-colors"
+                                    :class="activeTab === tab ? 'bg-zinc-200 text-zinc-800' : 'bg-zinc-100 text-zinc-500'"
                                 >
                                     {{
                                         tab === "active"
@@ -821,7 +907,7 @@ const groupedTags = computed(() => {
                             }}</span>
                         </div>
 
-                        <div v-if="checkedTagIds.length > 0" class="h-3.5 w-[1px] bg-zinc-250"></div>
+                        <div v-if="checkedTagIds.length > 0" class="h-3.5 w-[1px] bg-zinc-200"></div>
 
                         <!-- Batch Action Button -->
                         <Button
@@ -834,7 +920,7 @@ const groupedTags = computed(() => {
                             <span>{{ t("tags.batch_inspector_title") }} ({{ checkedTagIds.length }})</span>
                         </Button>
 
-                        <div class="h-3.5 w-[1px] bg-zinc-250"></div>
+                        <div class="h-3.5 w-[1px] bg-zinc-200"></div>
 
                         <!-- Sort By dropdown -->
                         <div class="flex items-center gap-2">
@@ -888,9 +974,9 @@ const groupedTags = computed(() => {
                         <!-- Grouped alphabetically by name initial -->
                         <div v-if="sortBy === 'name'" class="space-y-6">
                             <div v-for="group in groupedTags" :key="group.initial" class="space-y-2">
-                                <h3 class="text-xs font-bold text-zinc-400 uppercase select-none sticky top-0 bg-white py-1 z-10">
+                                <h2 class="text-xs font-bold text-zinc-400 uppercase select-none sticky top-0 bg-white py-1 z-10">
                                     {{ group.initial }}
-                                </h3>
+                                </h2>
                                 <div class="flex flex-wrap gap-2.5">
                                     <div
                                         v-for="tag in group.tags"
@@ -918,7 +1004,7 @@ const groupedTags = computed(() => {
                                         <span class="opacity-40 font-normal">#</span>
                                         <span>{{ tag.name }}</span>
                                         <span
-                                            class="text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold"
+                                            class="text-xs px-1.5 py-0.5 rounded-full font-mono font-bold"
                                             :class="[
                                                 activeInspectorTag?.id === tag.id ? 'bg-zinc-800 text-white' : 'bg-zinc-100 text-zinc-500',
                                             ]"
@@ -958,7 +1044,7 @@ const groupedTags = computed(() => {
                                 <span class="opacity-40 font-normal">#</span>
                                 <span>{{ tag.name }}</span>
                                 <span
-                                    class="text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold"
+                                    class="text-xs px-1.5 py-0.5 rounded-full font-mono font-bold"
                                     :class="[activeInspectorTag?.id === tag.id ? 'bg-zinc-800 text-white' : 'bg-zinc-100 text-zinc-500']"
                                 >
                                     {{ sortBy === "post_count" ? tag.post_count : tag.media_count }}
@@ -984,18 +1070,18 @@ const groupedTags = computed(() => {
             <transition name="side-panel">
                 <div
                     v-if="showSidebar"
-                    class="fixed inset-y-4 right-4 md:relative md:inset-y-0 md:right-0 z-45 w-[calc(100%-2rem)] sm:w-96 bg-white border border-zinc-200/60 shadow-2xl md:shadow-[0_1px_2px_rgba(0,0,0,0.02)] rounded-2xl flex flex-col select-none overflow-hidden shrink-0 h-[calc(100dvh-2rem)] md:h-full"
+                    class="fixed inset-y-0 right-0 md:relative z-45 w-full sm:w-96 bg-white border-l border-zinc-200/80 shadow-2xl md:shadow-none flex flex-col select-none overflow-hidden shrink-0 h-full"
                 >
                     <!-- BATCH INSPECTOR TEMPLATE -->
                     <template v-if="isBatchInspector">
                         <!-- Inspector Header -->
-                        <div class="px-6 py-4 border-b border-zinc-150 bg-[#fbfbfb] flex items-center justify-between shrink-0 h-11">
+                        <div class="px-6 py-4 border-b border-zinc-200/80 bg-white flex items-center justify-between shrink-0 h-11">
                             <div class="flex items-center gap-2">
                                 <span class="text-xs font-bold text-zinc-500 uppercase tracking-wider">{{
                                     t("tags.batch_inspector_title")
                                 }}</span>
                                 <span
-                                    class="text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-md px-2 py-0.5 font-mono"
+                                    class="text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-md px-2 py-0.5 tabular-nums"
                                 >
                                     {{ checkedTagIds.length }}
                                 </span>
@@ -1005,7 +1091,7 @@ const groupedTags = computed(() => {
                                     checkedTagIds = [];
                                     showSidebar = false;
                                 "
-                                class="p-1 hover:bg-zinc-100 rounded-lg text-zinc-400 hover:text-zinc-650 transition-colors cursor-pointer"
+                                class="p-1 hover:bg-zinc-100 rounded-lg text-zinc-400 hover:text-zinc-700 transition-colors cursor-pointer"
                             >
                                 <X class="w-4 h-4" />
                             </button>
@@ -1019,7 +1105,7 @@ const groupedTags = computed(() => {
                                     t("tags.selected_count", { count: checkedTagIds.length })
                                 }}</span>
                                 <div
-                                    class="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 bg-zinc-50/50 border border-zinc-150 rounded-xl"
+                                    class="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 bg-zinc-50/50 border border-zinc-200 rounded-xl"
                                 >
                                     <div
                                         v-for="id in checkedTagIds"
@@ -1069,7 +1155,7 @@ const groupedTags = computed(() => {
                                             v-model="batchColor"
                                             type="text"
                                             :placeholder="t('tags.hex_placeholder')"
-                                            class="h-9.5 pl-3 pr-2 text-xs font-mono bg-zinc-50 border-zinc-200 rounded-lg placeholder-zinc-450 text-zinc-800"
+                                            class="h-9.5 pl-3 pr-2 text-xs font-mono bg-zinc-50 border-zinc-200 rounded-lg placeholder-zinc-400 text-zinc-800"
                                             :disabled="isBatchLoading"
                                             @input="handleBatchColorInput"
                                         />
@@ -1142,7 +1228,7 @@ const groupedTags = computed(() => {
                                         @click="handleBatchDelete"
                                         variant="outline"
                                         :disabled="isBatchLoading"
-                                        class="w-full text-xs font-bold border-red-200 text-red-650 hover:bg-red-50/50 hover:text-red-750 h-9 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                                        class="w-full text-xs font-bold border-red-200 text-red-600 hover:bg-red-50/50 hover:text-red-700 h-9 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
                                     >
                                         <Trash2 class="w-4 h-4" />
                                         {{ t("tags.delete_selected") }}
@@ -1155,13 +1241,13 @@ const groupedTags = computed(() => {
                     <!-- SINGLE INSPECTOR TEMPLATE -->
                     <template v-else-if="activeInspectorTag">
                         <!-- Inspector Header -->
-                        <div class="px-6 py-4 border-b border-zinc-150 bg-[#fbfbfb] flex items-center justify-between shrink-0 h-11">
+                        <div class="px-6 py-4 border-b border-zinc-200/80 bg-white flex items-center justify-between shrink-0 h-11">
                             <div class="flex items-center gap-2">
                                 <span class="text-xs font-bold text-zinc-500 uppercase tracking-wider">{{
                                     t("tags.inspector_title")
                                 }}</span>
                                 <span
-                                    class="text-[10px] font-bold bg-zinc-100 text-zinc-700 border border-zinc-200 rounded-md px-2 py-0.5 tracking-wider uppercase font-mono"
+                                    class="text-xs font-bold bg-zinc-100 text-zinc-700 border border-zinc-200 rounded-md px-2 py-0.5 tracking-wider uppercase tabular-nums"
                                 >
                                     {{ activeInspectorTag.status }}
                                 </span>
@@ -1172,7 +1258,7 @@ const groupedTags = computed(() => {
                                     checkedTagIds = [];
                                     showSidebar = false;
                                 "
-                                class="p-1 hover:bg-zinc-100 rounded-lg text-zinc-400 hover:text-zinc-650 transition-colors cursor-pointer"
+                                class="p-1 hover:bg-zinc-100 rounded-lg text-zinc-400 hover:text-zinc-700 transition-colors cursor-pointer"
                             >
                                 <X class="w-4 h-4" />
                             </button>
@@ -1219,7 +1305,7 @@ const groupedTags = computed(() => {
                                     id="inspector-rename"
                                     v-model="editName"
                                     :placeholder="t('tags.rename_placeholder')"
-                                    class="bg-zinc-50/50 border-zinc-200 h-9.5 text-sm rounded-lg placeholder-zinc-450 focus:ring-1 focus:ring-zinc-950 transition-all duration-200 text-zinc-800"
+                                    class="bg-zinc-50/50 border-zinc-200 h-9.5 text-sm rounded-lg placeholder-zinc-400 focus:ring-1 focus:ring-zinc-950 transition-all duration-200 text-zinc-800"
                                     :disabled="tagStore.isUpdating"
                                 />
                             </div>
@@ -1253,7 +1339,7 @@ const groupedTags = computed(() => {
                                             v-model="editColor"
                                             type="text"
                                             :placeholder="t('tags.hex_placeholder')"
-                                            class="h-9.5 pl-3 pr-2 text-xs font-mono bg-zinc-50 border-zinc-200 rounded-lg placeholder-zinc-450 text-zinc-800"
+                                            class="h-9.5 pl-3 pr-2 text-xs font-mono bg-zinc-50 border-zinc-200 rounded-lg placeholder-zinc-400 text-zinc-800"
                                             :disabled="tagStore.isUpdating"
                                             @input="handleColorInput"
                                         />
@@ -1267,14 +1353,14 @@ const groupedTags = computed(() => {
                             </div>
 
                             <!-- Action Sections: Separated Set as Alias and Merge Tags -->
-                            <div v-if="activeInspectorTag.status === 'ACTIVE'" class="border-t border-zinc-150 pt-5 space-y-4">
+                            <div v-if="activeInspectorTag.status === 'ACTIVE'" class="border-t border-zinc-200 pt-5 space-y-4">
                                 <!-- Block 1: Set as Alias -->
                                 <div class="p-4 bg-indigo-50/20 rounded-2xl border border-indigo-500/10 flex items-start gap-3">
                                     <GitMerge class="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
                                     <div class="flex-1 space-y-2.5">
                                         <div>
                                             <p class="text-xs font-bold text-indigo-950 mb-0.5">{{ t("tags.alias_card_title") }}</p>
-                                            <p class="text-[11px] text-indigo-750/90 leading-relaxed">
+                                            <p class="text-xs text-indigo-700/90 leading-relaxed">
                                                 {{ t("tags.alias_card_description", { name: activeInspectorTag.name }) }}
                                             </p>
                                         </div>
@@ -1304,7 +1390,7 @@ const groupedTags = computed(() => {
                                             <Button
                                                 @click="handleMergeTags(true)"
                                                 :disabled="!aliasTargetId || tagStore.isMerging"
-                                                class="w-full text-xs font-bold bg-indigo-650 hover:bg-indigo-700 text-white rounded-lg h-8 transition-colors cursor-pointer"
+                                                class="w-full text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg h-8 transition-colors cursor-pointer"
                                             >
                                                 <Loader2 v-if="tagStore.isMerging" class="w-3.5 h-3.5 mr-1.5 animate-spin" />
                                                 {{ t("tags.alias_card_btn") }}
@@ -1314,7 +1400,7 @@ const groupedTags = computed(() => {
                                         <!-- Case 2: Tag has child aliases, disable alias function to maintain flatness -->
                                         <div v-else class="p-2.5 bg-zinc-50 border border-zinc-200 rounded-lg flex items-start gap-2">
                                             <Info class="w-3.5 h-3.5 text-zinc-500 shrink-0 mt-0.5" />
-                                            <p class="text-[10px] text-zinc-650 leading-normal font-medium">
+                                            <p class="text-xs text-zinc-600 leading-normal font-medium">
                                                 {{ t("tags.alias_card_disabled_tip") }}
                                             </p>
                                         </div>
@@ -1327,10 +1413,11 @@ const groupedTags = computed(() => {
                                     <div class="flex-1 space-y-2.5">
                                         <div>
                                             <p class="text-xs font-bold text-red-950 mb-0.5">{{ t("tags.merge_card_title") }}</p>
-                                            <p class="text-[11px] text-red-750/90 leading-relaxed">
+                                            <p class="text-xs text-red-700/90 leading-relaxed">
                                                 {{ t("tags.merge_card_description", { name: activeInspectorTag.name }) }}
                                             </p>
                                         </div>
+
                                         <div class="space-y-2">
                                             <Select v-model="mergeTargetId">
                                                 <SelectTrigger
@@ -1353,7 +1440,7 @@ const groupedTags = computed(() => {
                                                 @click="handleMergeTags(false)"
                                                 :disabled="!mergeTargetId || tagStore.isMerging"
                                                 variant="outline"
-                                                class="w-full text-xs font-bold border-red-200 text-red-650 hover:bg-red-50 hover:text-red-750 rounded-lg h-8 transition-colors cursor-pointer"
+                                                class="w-full text-xs font-bold border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 rounded-lg h-8 transition-colors cursor-pointer"
                                             >
                                                 <Loader2 v-if="tagStore.isMerging" class="w-3.5 h-3.5 mr-1.5 animate-spin" />
                                                 {{ t("tags.merge_card_btn") }}
@@ -1365,10 +1452,10 @@ const groupedTags = computed(() => {
                         </div>
 
                         <!-- Inspector Footer: Sticky actions footer -->
-                        <div class="p-4 bg-zinc-50 border-t border-zinc-150 flex gap-2 shrink-0">
+                        <div class="p-4 bg-zinc-50 border-t border-zinc-200/80 flex gap-2 shrink-0">
                             <Button
                                 @click="handleSaveInspectorChanges"
-                                class="flex-1 bg-zinc-900 hover:bg-zinc-800 text-white h-9.5 rounded-lg font-bold text-xs cursor-pointer shadow-sm transition-colors duration-205"
+                                class="flex-1 bg-zinc-900 hover:bg-zinc-800 text-white h-9.5 rounded-lg font-bold text-xs cursor-pointer shadow-sm transition-colors duration-200"
                                 :disabled="!editName.trim() || tagStore.isUpdating"
                             >
                                 <Loader2 v-if="tagStore.isUpdating" class="w-4 h-4 mr-1.5 animate-spin" />
@@ -1401,7 +1488,7 @@ const groupedTags = computed(() => {
                             <Button
                                 type="button"
                                 variant="outline"
-                                class="border-red-205 text-red-600 hover:bg-red-50 hover:text-red-750 cursor-pointer h-9.5 text-xs font-semibold px-3 shrink-0"
+                                class="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 cursor-pointer h-9.5 text-xs font-semibold px-3 shrink-0"
                                 @click="handleDeleteTag(activeInspectorTag.id)"
                                 :title="t('tags.delete')"
                             >
@@ -1431,7 +1518,7 @@ const groupedTags = computed(() => {
                             v-model="newTagName"
                             :placeholder="t('tags.name_placeholder')"
                             :disabled="tagStore.isCreating"
-                            class="bg-zinc-50 border-zinc-200 rounded-lg focus:ring-1 focus:ring-zinc-950 w-full text-sm h-9.5 placeholder-zinc-450 text-zinc-800"
+                            class="bg-zinc-50 border-zinc-200 rounded-lg focus:ring-1 focus:ring-zinc-950 w-full text-sm h-9.5 placeholder-zinc-400 text-zinc-800"
                             autofocus
                         />
                     </div>
@@ -1464,7 +1551,7 @@ const groupedTags = computed(() => {
                                     v-model="newTagColor"
                                     type="text"
                                     :placeholder="t('tags.color_placeholder')"
-                                    class="h-9.5 pl-3 pr-2 text-xs font-mono bg-zinc-50 border-zinc-200 rounded-lg placeholder-zinc-450 text-zinc-800"
+                                    class="h-9.5 pl-3 pr-2 text-xs font-mono bg-zinc-50 border-zinc-200 rounded-lg placeholder-zinc-400 text-zinc-800"
                                     :disabled="tagStore.isCreating"
                                     @input="handleNewColorInput"
                                 />
@@ -1497,6 +1584,26 @@ const groupedTags = computed(() => {
                         </Button>
                     </DialogFooter>
                 </form>
+            </DialogContent>
+        </Dialog>
+
+        <!-- Reusable Confirmation Dialog replacing native confirm() -->
+        <Dialog v-model:open="confirmModal.open">
+            <DialogContent class="sm:max-w-md">
+                <DialogHeader>
+                    <DialogTitle>{{ confirmModal.title }}</DialogTitle>
+                    <DialogDescription class="pt-1.5 text-xs sm:text-sm text-zinc-600">
+                        {{ confirmModal.description }}
+                    </DialogDescription>
+                </DialogHeader>
+                <DialogFooter class="flex sm:justify-end gap-2 pt-2">
+                    <Button variant="outline" size="sm" @click="confirmModal.open = false">
+                        {{ t("tags.cancel") }}
+                    </Button>
+                    <Button :variant="confirmModal.variant" size="sm" @click="handleExecuteConfirm">
+                        {{ confirmModal.confirmText }}
+                    </Button>
+                </DialogFooter>
             </DialogContent>
         </Dialog>
     </div>

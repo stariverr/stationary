@@ -233,8 +233,8 @@ const scrollIntoView = () => {
                 class="px-3 py-1.5 border border-dashed rounded-md text-xs transition-colors cursor-pointer"
                 :class="[
                     isDark
-                        ? 'border-zinc-800 text-zinc-500 hover:border-zinc-750 hover:text-zinc-300 hover:bg-zinc-900/30'
-                        : 'border-zinc-305 hover:border-zinc-400 text-zinc-450 hover:text-zinc-650 hover:bg-zinc-50',
+                        ? 'border-zinc-800 text-zinc-500 hover:border-zinc-700 hover:text-zinc-300 hover:bg-zinc-900/30'
+                        : 'border-zinc-300 hover:border-zinc-400 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-50',
                 ]"
             >
                 + {{ $t("common.add_tag", "Add Tag") }}
@@ -249,7 +249,7 @@ const scrollIntoView = () => {
                 :class="[isDark ? 'bg-[#0f1115] border border-zinc-800 text-white' : 'bg-white border border-zinc-200/80 text-zinc-900']"
             >
                 <!-- Popover Search Input -->
-                <div class="relative flex items-center mb-1.5 pb-1.5 px-1 border-b" :class="isDark ? 'border-zinc-850' : 'border-zinc-100'">
+                <div class="relative flex items-center mb-1.5 pb-1.5 px-1 border-b" :class="isDark ? 'border-zinc-800' : 'border-zinc-100'">
                     <Search class="absolute left-2.5 w-3.5 h-3.5 text-zinc-400 dark:text-zinc-500" />
                     <input
                         ref="searchInputRef"
@@ -259,7 +259,7 @@ const scrollIntoView = () => {
                         class="w-full pl-8 pr-7 py-1.5 text-xs rounded-lg outline-none transition-all focus:ring-1"
                         :class="[
                             isDark
-                                ? 'text-white bg-zinc-950 border border-zinc-850 focus:border-emerald-500 focus:ring-emerald-500/20'
+                                ? 'text-white bg-zinc-950 border border-zinc-800 focus:border-indigo-500 focus:ring-indigo-500/20'
                                 : 'text-zinc-800 bg-zinc-50 border border-zinc-200 focus:border-indigo-500 focus:ring-indigo-500',
                         ]"
                         @keydown="onKeyDown"
@@ -269,7 +269,7 @@ const scrollIntoView = () => {
                         type="button"
                         @click="searchQuery = ''"
                         class="absolute right-2 cursor-pointer transition-colors"
-                        :class="isDark ? 'text-zinc-500 hover:text-zinc-300' : 'text-zinc-400 hover:text-zinc-650'"
+                        :class="isDark ? 'text-zinc-500 hover:text-zinc-300' : 'text-zinc-400 hover:text-zinc-700'"
                     >
                         <X class="w-3.5 h-3.5" />
                     </button>
@@ -283,7 +283,7 @@ const scrollIntoView = () => {
                         class="flex items-center justify-center py-6 text-xs gap-1.5"
                         :class="isDark ? 'text-zinc-500' : 'text-zinc-400'"
                     >
-                        <Loader2 class="w-3.5 h-3.5 animate-spin" :class="isDark ? 'text-emerald-500' : 'text-indigo-500'" />
+                        <Loader2 class="w-3.5 h-3.5 animate-spin" :class="isDark ? 'text-indigo-500' : 'text-indigo-500'" />
                         <span>Loading tags...</span>
                     </div>
 
@@ -297,10 +297,10 @@ const scrollIntoView = () => {
                             :class="[
                                 index === focusedIndex
                                     ? isDark
-                                        ? 'tag-editor-popover-item-active bg-emerald-950/40 text-emerald-300 font-semibold'
+                                        ? 'tag-editor-popover-item-active bg-indigo-950/40 text-indigo-300 font-semibold'
                                         : 'tag-editor-popover-item-active bg-indigo-50 text-indigo-950 font-medium'
                                     : isDark
-                                      ? 'text-zinc-350 hover:bg-zinc-900/60 hover:text-zinc-100'
+                                      ? 'text-zinc-300 hover:bg-zinc-900/60 hover:text-zinc-100'
                                       : 'text-zinc-700 hover:bg-zinc-50 hover:text-zinc-950',
                             ]"
                             @click="handleSelectOption(option)"
@@ -311,7 +311,7 @@ const scrollIntoView = () => {
                                 <Plus
                                     v-if="option.type === 'create'"
                                     class="w-3.5 h-3.5 shrink-0"
-                                    :class="isDark ? 'text-emerald-400' : 'text-indigo-500'"
+                                    :class="isDark ? 'text-indigo-400' : 'text-indigo-500'"
                                 />
                                 <Tag
                                     v-else
@@ -323,7 +323,7 @@ const scrollIntoView = () => {
                                     <span
                                         v-if="option.type === 'create'"
                                         class="font-semibold"
-                                        :class="isDark ? 'text-emerald-400' : 'text-indigo-650'"
+                                        :class="isDark ? 'text-indigo-400' : 'text-indigo-600'"
                                         >Create tag:
                                     </span>
                                     #{{ option.name }}
@@ -333,7 +333,7 @@ const scrollIntoView = () => {
                             <Check
                                 v-if="option.isSelected"
                                 class="w-3.5 h-3.5 shrink-0"
-                                :class="isDark ? 'text-emerald-450' : 'text-indigo-600'"
+                                :class="isDark ? 'text-indigo-400' : 'text-indigo-600'"
                             />
                         </button>
                     </template>

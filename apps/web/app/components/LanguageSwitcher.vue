@@ -84,10 +84,10 @@ const currentLocaleName = computed(() => {
                     :key="item.code"
                     @click="selectLocale(item.code)"
                     class="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 flex items-center justify-between transition-colors duration-150 cursor-pointer"
-                    :class="locale === item.code ? 'text-emerald-700 font-semibold' : 'text-gray-700'"
+                    :class="locale === item.code ? 'text-blue-700 font-semibold' : 'text-gray-700'"
                 >
                     <span>{{ item.name }}</span>
-                    <Check v-if="locale === item.code" class="w-3.5 h-3.5 text-emerald-600" />
+                    <Check v-if="locale === item.code" class="w-3.5 h-3.5 text-blue-600" />
                 </button>
             </div>
         </transition>
