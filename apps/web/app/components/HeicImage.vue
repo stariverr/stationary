@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, onUnmounted, useAttrs } from "vue";
+import { ref, computed, watch, useAttrs } from "vue";
+import { isHeic, supportsHeicNatively, decodeHeicToBlobUrl } from "@/utils/heic-decoder";
 
 const props = defineProps<{
     src: string;
@@ -7,6 +8,12 @@ const props = defineProps<{
     srcset?: string;
     sizes?: string;
     mimeType?: string;
+    noSpinner?: boolean;
+}>();
+
+const emit = defineEmits<{
+    (e: "load", event: Event): void;
+    (e: "error", error: unknown): void;
 }>();
 
 const attrs = useAttrs();
@@ -14,136 +21,28 @@ const attrs = useAttrs();
 const decodedUrl = ref<string | null>(null);
 const isLoading = ref(false);
 const error = ref<string | null>(null);
+const nativeFailed = ref(false);
 
-// Determine if the URL or mime type points to a HEIC/HEIF file
-const isHeic = (url: string | null | undefined, mime: string | null | undefined): boolean => {
-    if (mime && (mime.includes("heic") || mime.includes("heif") || mime.includes("image/heic") || mime.includes("image/heif"))) {
-        return true;
+const displaySrc = computed(() => {
+    if (decodedUrl.value) return decodedUrl.value;
+    if (isHeic(props.src, props.mimeType) && !supportsHeicNatively()) {
+        // While decoding in non-Safari, show transparent placeholder to prevent broken-image icon
+        return "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
     }
-    if (!url) return false;
-    const path = url.split("?")[0] || "";
-    return /\.(heic|heif)$/i.test(path);
-};
+    return props.src;
+});
 
-// Check if browser natively supports HEIC (Safari)
-const supportsHeicNatively = (): boolean => {
-    if (typeof window === "undefined") return false;
-    return /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-};
-
-interface HeifImage {
-    is_primary: () => boolean;
-    get_width: () => number;
-    get_height: () => number;
-    display: (imageData: ImageData, callback: (displayData: ImageData | null) => void) => void;
-    free: () => void;
-}
-
-interface HeifDecoder {
-    decode: (buffer: ArrayBuffer) => HeifImage[];
-    free: () => void;
-}
-
-interface LibheifModule {
-    HeifDecoder: {
-        new (): HeifDecoder;
-    };
-}
-
-let libheifModuleInstance: LibheifModule | null = null;
-
-const getLibheifModule = async (): Promise<LibheifModule> => {
-    if (libheifModuleInstance) return libheifModuleInstance;
-    const libheif = await import("libheif-js/wasm-bundle");
-    const mod = (libheif.default || libheif) as any;
-
-    // Workaround for a bug in libheif-js NPM package:
-    // Its HeifImage.prototype.is_primary() calls the global function 'heif_image_handle_is_primary_image'
-    // without prefixing it with the module instance 'a.', resulting in a ReferenceError.
-    if (typeof window !== "undefined") {
-        (window as any).heif_image_handle_is_primary_image =
-            mod.heif_image_handle_is_primary_image || mod._heif_image_handle_is_primary_image;
-    }
-
-    libheifModuleInstance = mod as unknown as LibheifModule;
-    return libheifModuleInstance;
-};
-
-// Decode function
-const decodeHeic = async (url: string) => {
-    if (decodedUrl.value) {
-        URL.revokeObjectURL(decodedUrl.value);
-        decodedUrl.value = null;
-    }
-
+const performDecode = async (url: string) => {
     isLoading.value = true;
     error.value = null;
 
     try {
-        // 1. Fetch the image file as ArrayBuffer
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`Failed to fetch image: ${res.statusText}`);
-        const buffer = await res.arrayBuffer();
-
-        // 2. Initialize WASM module
-        const libheifModule = await getLibheifModule();
-
-        // 3. Decode buffer
-        const decoder = new libheifModule.HeifDecoder();
-        let images: HeifImage[];
-        try {
-            images = decoder.decode(buffer);
-        } finally {
-            if (typeof (decoder as any).free === "function") {
-                (decoder as any).free();
-            }
-        }
-
-        if (!images || images.length === 0) {
-            throw new Error("No images found in HEIC file");
-        }
-
-        const primaryImage = images.find((x) => x.is_primary()) || images[0];
-        if (!primaryImage) {
-            throw new Error("No primary image in HEIC file");
-        }
-        const width = primaryImage.get_width();
-        const height = primaryImage.get_height();
-
-        // 4. Create canvas to draw the image data
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) throw new Error("Failed to get 2D context");
-
-        const imageData = ctx.createImageData(width, height);
-
-        // Convert the decoded image into raw pixel data
-        await new Promise<void>((resolve, reject) => {
-            primaryImage.display(imageData, (displayData) => {
-                if (!displayData) {
-                    reject(new Error("Failed to extract image display data"));
-                    return;
-                }
-                ctx.putImageData(displayData, 0, 0);
-                resolve();
-            });
-        });
-
-        // Free primary image memory on the WASM heap
-        primaryImage.free();
-
-        // 5. Convert canvas contents to a Blob URL
-        const blob = await new Promise<Blob | null>((resolve) => {
-            canvas.toBlob((b) => resolve(b), "image/jpeg", 0.92);
-        });
-
-        if (!blob) throw new Error("Failed to create blob from canvas");
-        decodedUrl.value = URL.createObjectURL(blob);
+        const blobUrl = await decodeHeicToBlobUrl(url);
+        decodedUrl.value = blobUrl;
     } catch (err: unknown) {
-        console.error("HEIC decode error:", err);
+        console.error("HEIC WASM decode error:", err);
         error.value = err instanceof Error ? err.message : "Decode failed";
+        emit("error", err);
     } finally {
         isLoading.value = false;
     }
@@ -152,29 +51,49 @@ const decodeHeic = async (url: string) => {
 watch(
     [() => props.src, () => props.mimeType],
     ([newSrc, newMime]) => {
-        if (!import.meta.client) return; // Prevent any SSR decode attempt/fetch
-        if (isHeic(newSrc, newMime) && !supportsHeicNatively()) {
-            decodeHeic(newSrc);
-        } else {
-            // Standard image or native support, no decoding needed
-            if (decodedUrl.value) {
-                URL.revokeObjectURL(decodedUrl.value);
+        if (!import.meta.client) return; // Prevent SSR decode attempts
+        nativeFailed.value = false;
+        error.value = null;
+
+        if (isHeic(newSrc, newMime)) {
+            if (supportsHeicNatively()) {
+                // Safari prefers native hardware-accelerated HEIC decoding
                 decodedUrl.value = null;
+                isLoading.value = false;
+            } else {
+                // Non-Safari browsers (Chrome, Edge, Firefox) decode via libheif-js WASM
+                performDecode(newSrc);
             }
+        } else {
+            // Standard image format
+            decodedUrl.value = null;
+            isLoading.value = false;
         }
     },
     { immediate: true },
 );
 
-onUnmounted(() => {
-    if (decodedUrl.value) {
-        URL.revokeObjectURL(decodedUrl.value);
+const handleImgLoad = (event: Event) => {
+    if (displaySrc.value.startsWith("data:image/gif;base64")) return;
+    emit("load", event);
+};
+
+const handleImgError = (event: Event) => {
+    // If native Safari HEIC rendering fails (e.g. S3 missing image/heic content-type),
+    // silently fallback to WASM libheif-js decoding
+    if (isHeic(props.src, props.mimeType) && supportsHeicNatively() && !nativeFailed.value && !decodedUrl.value) {
+        console.warn("Safari native HEIC rendering failed; silently falling back to libheif-js WASM:", props.src);
+        nativeFailed.value = true;
+        performDecode(props.src);
+        return;
     }
-});
+
+    emit("error", event);
+};
 </script>
 
 <template>
-    <div v-if="isLoading" class="flex items-center justify-center w-full h-full min-h-[100px]">
+    <div v-if="isLoading && !props.noSpinner" class="flex items-center justify-center w-full h-full min-h-[100px]">
         <slot name="loading">
             <div class="flex flex-col items-center gap-2 text-gray-400">
                 <svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
@@ -190,7 +109,7 @@ onUnmounted(() => {
         </slot>
     </div>
     <div
-        v-else-if="error"
+        v-else-if="error && !props.noSpinner"
         class="flex flex-col items-center justify-center w-full h-full min-h-[100px] bg-red-50 text-red-500 p-4 border border-red-100 rounded-lg"
     >
         <slot name="error" :message="error">
@@ -200,9 +119,11 @@ onUnmounted(() => {
     <img
         v-else
         v-bind="attrs"
-        :src="decodedUrl || props.src"
+        :src="displaySrc"
         :alt="props.alt"
         :srcset="decodedUrl ? undefined : props.srcset"
         :sizes="decodedUrl ? undefined : props.sizes"
+        @load="handleImgLoad"
+        @error="handleImgError"
     />
 </template>
