@@ -146,6 +146,26 @@ const TagMergeBodySchema = v.object({
     retain_as_alias: v.optional(v.boolean(), true),
 });
 
+const TrashListQuerySchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    type: v.optional(v.picklist(["all", "post", "media"])),
+    page: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+    count: v.optional(v.pipe(v.number(), v.integer(), v.minValue(10), v.maxValue(100))),
+    keyword: v.optional(v.string()),
+    sort_by: v.optional(v.picklist(["recycle_time"])),
+    sort_order: v.optional(v.picklist(["asc", "desc"])),
+});
+
+const TrashBatchActionSchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+    post_ids: v.optional(v.array(v.pipe(v.string(), v.uuid()))),
+    media_ids: v.optional(v.array(v.pipe(v.string(), v.uuid()))),
+});
+
+const TrashEmptySchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+});
+
 const PostListRequestBodySchema = v.object({
     library_id: v.pipe(v.string(), v.uuid()),
     page: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
@@ -1341,6 +1361,69 @@ const routes: RouteItem[] = [
                 session: { type: "object", nullable: true },
             },
         },
+    },
+    // Trash / Recycle Bin
+    {
+        path: "/api/trash/list",
+        method: "get",
+        summary: "List all items in the recycle bin for a given library",
+        tags: ["Trash"],
+        querySchema: TrashListQuerySchema,
+        requiresAuth: true,
+        responseSchema: makeUnifiedSuccessResponse({
+            type: "object",
+            properties: {
+                list: { type: "array", items: { type: "object" } },
+                total: { type: "integer" },
+                page: { type: "integer" },
+                count: { type: "integer" },
+            },
+        }),
+    },
+    {
+        path: "/api/trash/restore",
+        method: "post",
+        summary: "Batch restore posts and media from the recycle bin",
+        tags: ["Trash"],
+        bodySchema: TrashBatchActionSchema,
+        requiresAuth: true,
+        responseSchema: makeUnifiedSuccessResponse({
+            type: "object",
+            properties: {
+                restored_posts: { type: "integer" },
+                restored_media: { type: "integer" },
+            },
+        }),
+    },
+    {
+        path: "/api/trash/delete",
+        method: "post",
+        summary: "Batch permanently delete posts and media from the recycle bin",
+        tags: ["Trash"],
+        bodySchema: TrashBatchActionSchema,
+        requiresAuth: true,
+        responseSchema: makeUnifiedSuccessResponse({
+            type: "object",
+            properties: {
+                deleted_posts: { type: "integer" },
+                deleted_media: { type: "integer" },
+            },
+        }),
+    },
+    {
+        path: "/api/trash/empty",
+        method: "post",
+        summary: "Empty the entire recycle bin for a library",
+        tags: ["Trash"],
+        bodySchema: TrashEmptySchema,
+        requiresAuth: true,
+        responseSchema: makeUnifiedSuccessResponse({
+            type: "object",
+            properties: {
+                deleted_posts: { type: "integer" },
+                deleted_media: { type: "integer" },
+            },
+        }),
     },
 ];
 
