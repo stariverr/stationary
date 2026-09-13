@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: stationary-ingress
+  namespace: stationary
+  annotations:
+    # Traefik (k3s default) ingress annotations
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: stationary
+                port:
+                  number: 4000

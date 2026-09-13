@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stationary
+  namespace: stationary
+  labels:
+    app: stationary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stationary
+  template:
+    metadata:
+      labels:
+        app: stationary
+    spec:
+      containers:
+        - name: stationary
+          image: ghcr.io/stariverr/stationary:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 4000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: stationary-config
+            - secretRef:
+                name: stationary-secrets
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 4000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 4000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: stationary
+  namespace: stationary
+  labels:
+    app: stationary
+spec:
+  type: NodePort
+  selector:
+    app: stationary
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000
+      nodePort: 30000

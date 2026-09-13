@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stationary-config
+  namespace: stationary
+data:
+  SERVER_ENV: "production"
+  NODE_ENV: "production"
+  HOST: "0.0.0.0"
+  PORT: "4000"
+  SERVER_PORT: "9400"
+  WEB_PORT: "4000"
+  BETTER_AUTH_URL: "http://stationary-server:9400"
+  TRUSTED_ORIGINS: "http://localhost:4000,http://localhost:9400"
+  NUXT_API_BASE_URL: "http://stationary-server:9400"
+  NUXT_PUBLIC_API_BASE_URL: "/api"
+  NUXT_PUBLIC_APP_URL: "/"
+  NUXT_PUBLIC_CDN_BASE_URL: "/api"
+  S3_REGION: "auto"
+  STORAGE_IS_PUBLIC: "false"
