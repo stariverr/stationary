@@ -41,6 +41,10 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "vue-sonner";
+import { useAppLayout } from "@/composables/useAppLayout";
+import { useApi } from "@/composables/useApi";
+
+const { toggleSidebar, isSidebarCollapsed } = useAppLayout();
 
 interface QueueStats {
     tasks: {
@@ -227,7 +231,7 @@ function toggleSelectTask(id: string, e?: Event) {
 async function fetchStats(isSilent = false) {
     if (!isSilent) statsLoading.value = true;
     try {
-        const res: any = await $fetch("/api/jobs/stats");
+        const res: any = await useApi("/jobs/stats");
         if (isApiSuccess(res) && res.data) {
             stats.value = res.data;
         }
@@ -250,7 +254,7 @@ async function fetchTasks(isSilent = false) {
             queryParams.type = selectedTaskType.value;
         }
 
-        const res: any = await $fetch("/api/jobs/list", { query: queryParams });
+        const res: any = await useApi("/jobs/list", { query: queryParams });
         if (isApiSuccess(res) && res.data) {
             tasks.value = res.data.items || [];
             totalPages.value = res.data.pagination?.total_pages || 1;
@@ -266,7 +270,7 @@ async function fetchTasks(isSilent = false) {
 async function fetchTaskUnits(taskId: string) {
     taskUnitsLoading.value = true;
     try {
-        const res: any = await $fetch(`/api/jobs/${taskId}/items`, { query: { limit: 100 } });
+        const res: any = await useApi(`/jobs/${taskId}/items`, { query: { limit: 100 } });
         if (isApiSuccess(res) && res.data) {
             taskUnits.value = res.data.items || [];
         }
@@ -284,7 +288,7 @@ async function refreshAll() {
 async function pauseTask(taskId: string) {
     actionLoadingId.value = taskId;
     try {
-        const res: any = await $fetch(`/api/jobs/${taskId}/pause`, { method: "POST" });
+        const res: any = await useApi(`/jobs/${taskId}/pause`, { method: "POST" });
         if (isApiSuccess(res)) {
             toast.success("已暂停任务");
             await refreshAll();
@@ -301,7 +305,7 @@ async function pauseTask(taskId: string) {
 async function resumeTask(taskId: string) {
     actionLoadingId.value = taskId;
     try {
-        const res: any = await $fetch(`/api/jobs/${taskId}/resume`, { method: "POST" });
+        const res: any = await useApi(`/jobs/${taskId}/resume`, { method: "POST" });
         if (isApiSuccess(res)) {
             toast.success("已恢复任务");
             await refreshAll();
@@ -318,7 +322,7 @@ async function resumeTask(taskId: string) {
 async function cancelTask(taskId: string) {
     actionLoadingId.value = taskId;
     try {
-        const res: any = await $fetch(`/api/jobs/${taskId}/cancel`, { method: "POST" });
+        const res: any = await useApi(`/jobs/${taskId}/cancel`, { method: "POST" });
         if (isApiSuccess(res)) {
             toast.success("已标记为忽略 / 取消任务");
             await refreshAll();
@@ -335,7 +339,7 @@ async function cancelTask(taskId: string) {
 async function retryTaskFailedUnits(taskId: string) {
     actionLoadingId.value = taskId;
     try {
-        const res: any = await $fetch(`/api/jobs/${taskId}/retry-failed`, { method: "POST" });
+        const res: any = await useApi(`/jobs/${taskId}/retry-failed`, { method: "POST" });
         if (isApiSuccess(res)) {
             const count = res.data?.retried_count || 0;
             toast.success(`已重新入队 ${count} 个失败项`);
@@ -356,7 +360,7 @@ async function retryTaskFailedUnits(taskId: string) {
 async function retryUnit(unitId: string) {
     actionLoadingId.value = unitId;
     try {
-        const res: any = await $fetch(`/api/jobs/units/${unitId}/retry`, { method: "POST" });
+        const res: any = await useApi(`/jobs/units/${unitId}/retry`, { method: "POST" });
         if (isApiSuccess(res)) {
             toast.success("已重试该子单元");
             if (activeTask.value) {
@@ -378,7 +382,7 @@ async function handleBulkRetry() {
     if (selectedTaskIds.value.length === 0) return;
     isBulkLoading.value = true;
     try {
-        const res: any = await $fetch("/api/jobs/units/batch-retry", {
+        const res: any = await useApi("/jobs/units/batch-retry", {
             method: "POST",
             body: { task_ids: selectedTaskIds.value },
         });
@@ -400,7 +404,7 @@ async function handleBulkPause() {
     if (selectedTaskIds.value.length === 0) return;
     isBulkLoading.value = true;
     try {
-        const res: any = await $fetch("/api/jobs/batch-pause", {
+        const res: any = await useApi("/jobs/batch-pause", {
             method: "POST",
             body: { task_ids: selectedTaskIds.value },
         });
@@ -420,7 +424,7 @@ async function handleBulkResume() {
     if (selectedTaskIds.value.length === 0) return;
     isBulkLoading.value = true;
     try {
-        const res: any = await $fetch("/api/jobs/batch-resume", {
+        const res: any = await useApi("/jobs/batch-resume", {
             method: "POST",
             body: { task_ids: selectedTaskIds.value },
         });
@@ -440,7 +444,7 @@ async function handleBulkCancel() {
     if (selectedTaskIds.value.length === 0) return;
     isBulkLoading.value = true;
     try {
-        const res: any = await $fetch("/api/jobs/batch-cancel", {
+        const res: any = await useApi("/jobs/batch-cancel", {
             method: "POST",
             body: { task_ids: selectedTaskIds.value },
         });
@@ -459,7 +463,7 @@ async function handleBulkCancel() {
 async function sweepStuckTasks() {
     isSweeping.value = true;
     try {
-        const res: any = await $fetch("/api/task/sweep-stuck-tasks", { method: "POST" });
+        const res: any = await useApi("/task/sweep-stuck-tasks", { method: "POST" });
         if (isApiSuccess(res)) {
             toast.success("卡住的任务已修复完成");
             await refreshAll();

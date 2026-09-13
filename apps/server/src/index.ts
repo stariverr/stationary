@@ -42,6 +42,9 @@ const shutdown = async (signal: string) => {
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("unhandledRejection", (reason) => {
+    console.error("[Server] Unhandled rejection:", reason);
+});
 
 const app = new Hono();
 
@@ -53,8 +56,7 @@ app.use(
     "*",
     cors({
         origin: env.TRUSTED_ORIGINS,
-        allowHeaders: ["Content-Type", "Authorization"],
-        allowMethods: ["POST", "GET", "PUT", "OPTIONS"],
+        allowMethods: ["GET", "HEAD", "PUT", "POST", "DELETE", "PATCH", "OPTIONS"],
         exposeHeaders: ["Content-Length"],
         maxAge: 600,
         credentials: true,

@@ -38,8 +38,15 @@ const envSchema = v.object({
     BETTER_AUTH_SECRET: v.optional(v.string()),
 
     TRUSTED_ORIGINS: v.pipe(
-        v.optional(v.string(), ""),
-        v.transform((v) => (v ? v.split(",") : [])),
+        v.optional(v.string(), "http://localhost:4000,http://localhost:9400"),
+        v.transform((v) =>
+            v
+                ? v
+                      .split(",")
+                      .map((s) => s.trim().replace(/\/+$/, ""))
+                      .filter(Boolean)
+                : ["http://localhost:4000", "http://localhost:9400"],
+        ),
     ),
 
     /** TikHub API Base URL */

@@ -44,6 +44,9 @@ export default defineNuxtConfig({
     },
     vite: {
         plugins: [tailwindcss()],
+        define: {
+            "process.env.NUXT_PUBLIC_API_BASE_URL": JSON.stringify(process.env.NUXT_PUBLIC_API_BASE_URL || "http://localhost:9400"),
+        },
         optimizeDeps: {
             include: ["@vueuse/core", "@tanstack/vue-query", "@lucide/vue", "swiper/vue", "@js-temporal/polyfill", "vidstack"],
         },

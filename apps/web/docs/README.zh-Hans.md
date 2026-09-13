@@ -41,23 +41,20 @@ apps/web/app/
 
 ---
 
-## 🔗 Nitro 代理网关与 OAuth 状态穿透
+## 🔗 API 直连架构与跨域认证传递
 
-由于前端在 `localhost:4000`，后端在 `localhost:9400`，为规避跨域问题并保证认证 Session 的传递，项目在 Nuxt 底层引入了 **Nitro Server Proxy**。
+前端请求直接发往后端服务（默认 `localhost:9400`），不经过 Nuxt Nitro 前端代理，保持干净轻量的架构。
 
-### 1. 代理逻辑 (`server/api/[...].ts`)
-所有发往 `/api/**` 的请求都会被 Nitro 服务拦截，自动转发至 `.env` 中 `NUXT_PUBLIC_API_BASE_URL` 配置的后端地址。
+### 1. 统一请求客户端 (`composables/useApi.ts`)
+所有业务 API 请求均通过 `useApi` composable 发起：
+- 自动根据 `runtimeConfig.public.apiBaseUrl` 拼接后端直连地址。
+- 开启 `credentials: 'include'`，确保浏览器跨源请求时携带认证 Cookie。
+- 在 Nuxt SSR 渲染阶段，自动通过 `useRequestHeaders(['cookie'])` 将用户请求头中的 Cookie 透传至后端服务。
 
-### 2. 302 重定向穿透魔法 (重要)
-在 `server/api/[...].ts` 代理请求中，配置了 `redirect: 'manual'` 参数：
-```typescript
-return proxyRequest(event, targetUrl, {
-    fetchOptions: {
-        redirect: 'manual', // 禁止服务端自动跟随重定向
-    }
-})
-```
-- **原理解析**：如果在服务端执行了自动跟随重定向，Better Auth（OAuth 如 GitHub 登录）成功后的 `Set-Cookie` 和 `302 Found` 会在 Nitro 代理服务器内部消化，用户的浏览器将无法接收到身份 Cookie。通过设定为 `manual`，可保证 302 状态码与 `Set-Cookie` 报头原封不动透传至浏览器，完成正常的登录会话持久化。
+### 2. 身份认证与跨源 Session (`lib/auth-client.ts`)
+Better Auth 客户端直接配置 `baseURL` 指向后端 `apiBaseUrl`：
+- 注册、登录（含 Turnstile 人机验证头透传）、邮箱 OTP 验证与 OAuth 社交登录均直连后端处理。
+- 后端 Hono 服务配置 CORS 信任源（`TRUSTED_ORIGINS`）并开启 `credentials: true`，预检请求动态放行客户端自定义报头。
 
 ---
 

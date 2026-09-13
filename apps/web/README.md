@@ -40,23 +40,21 @@ apps/web/app/
 
 ---
 
-## 🔗 Nitro Proxy & OAuth Session Persistence
+## 🔗 Direct API Architecture & Cross-Origin Auth Persistence
 
-Since the frontend runs at `localhost:4000` and the backend at `localhost:9400`, we use **Nitro Server Proxy** to forward endpoints and handle session cookies.
+Frontend requests communicate directly with the backend API (default: `localhost:9400`) without a frontend reverse proxy, keeping the application architecture clean and performant.
 
-### 1. Catch-All Proxy Router (`server/api/[...].ts`)
-All outgoing calls prefixed with `/api/**` are intercepted by the local Nitro server and forwarded to `NUXT_PUBLIC_API_BASE_URL` defined in the `.env` file.
+### 1. Unified API Composable (`composables/useApi.ts`)
+All data requests are dispatched through the `useApi` composable:
+- Automatically prefixes the backend URL from `runtimeConfig.public.apiBaseUrl`.
+- Sets `credentials: 'include'` to ensure cross-origin authentication cookies are preserved in browser sessions.
+- In Nuxt SSR mode, forwards incoming client cookies to the backend via `useRequestHeaders(['cookie'])`.
 
-### 2. 302 Redirection & Cookie Passthrough (Crucial)
-In the proxy call within `server/api/[...].ts`, the fetch option is configured with `redirect: 'manual'`:
-```typescript
-return proxyRequest(event, targetUrl, {
-    fetchOptions: {
-        redirect: 'manual', // Prevent proxy server from automatically following 302 redirects
-    }
-})
-```
-- **Why this is necessary**: During third-party OAuth flows (e.g. GitHub/Google sign-in via Better Auth), the authentication server returns a `302 Found` redirect and a `Set-Cookie` header. If the Nitro proxy follows the redirect internally, the session cookie will be saved inside Nitro instead of reaching the user's browser. Setting `redirect` to `'manual'` forces Nitro to pass the 302 response and cookie headers directly to the browser, preserving active user sessions.
+### 2. Authentication & Session Persistence (`lib/auth-client.ts`)
+Better Auth client points directly to the backend `apiBaseUrl`:
+- Sign up, sign in, email OTP verification, and OAuth social flows talk directly to backend auth endpoints.
+- Backend Hono server configures CORS trusted origins (`TRUSTED_ORIGINS`) with `credentials: true` and dynamically allows required preflight headers (such as `x-captcha-response`).
+
 
 ---
 
