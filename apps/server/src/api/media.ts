@@ -5,7 +5,6 @@ import { success, error, respondWithResult } from "@/lib/response";
 import { Code } from "@/lib/code";
 import {
     Media,
-    Track,
     Post,
     PostSource,
     DeleteStatus,
@@ -13,7 +12,6 @@ import {
     TrackPurpose,
     AssetAiMetadata,
     EntityType,
-    SyncStatus,
     Library,
     Tag,
     MediaTag,
@@ -70,6 +68,9 @@ export const MediaListRequestBodySchema = v.object({
     ),
     keyword: v.optional(v.string()),
     source: v.optional(v.enum(PostSource)),
+    sort_by: v.optional(v.picklist(["create_time", "published_time"])),
+    sort_order: v.optional(v.picklist(["asc", "desc"])),
+    type: v.optional(v.enum(MediaType)),
     display_mode: v.optional(v.picklist(["flat", "stacked"]), "flat"),
     library_id: v.optional(v.pipe(v.string(), v.uuid())),
     has_no_post: v.optional(v.string()),
@@ -84,7 +85,7 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
         pageSize = 100;
     }
     const offset = (page - 1) * pageSize;
-    const { keyword, source, display_mode, library_id, has_no_post } = query;
+    const { keyword, source, sort_by, sort_order, type, display_mode, library_id, has_no_post } = query;
 
     const where: SQL[] = [];
 
@@ -96,6 +97,9 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
     }
     if (source) {
         where.push(eq(Media.source, source));
+    }
+    if (type) {
+        where.push(eq(Media.type, type));
     }
     if (library_id) {
         where.push(eq(Media.library_id, library_id));
@@ -112,6 +116,10 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
     }
 
     const visibleMediaFilter = and(...where);
+
+    const isAsc = sort_order === "asc";
+    const sortField = sort_by === "published_time" ? Media.published_time : Media.create_time;
+    const orderClause = isAsc ? asc(sortField) : desc(sortField);
 
     const rawMedia = await db
         .select({
@@ -132,12 +140,15 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
         .from(Media)
         .leftJoin(Post, eq(Media.post_id, Post.id))
         .where(visibleMediaFilter)
-        .orderBy(desc(Media.create_time))
+        .orderBy(orderClause)
         .limit(pageSize)
         .offset(offset);
 
     const mediaIds = rawMedia.map((m) => m.id);
-    const coversByMediaId = await MediaService.getCoversMap(mediaIds);
+    const [coversByMediaId, videosByMediaId] = await Promise.all([
+        MediaService.getCoversMap(mediaIds),
+        MediaService.getVideosMap(mediaIds),
+    ]);
 
     const aiMetadataMap = new Map<string, { ai_status: string; ai_error: string | null }>();
 
@@ -168,7 +179,16 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
 
     const medias = rawMedia.map((m) => {
         const covers = coversByMediaId.get(m.id) || [];
+        const videos = videosByMediaId.get(m.id) || [];
         const aiMeta = aiMetadataMap.get(m.id);
+
+        const lowCover = covers.find((c) => c.quality === Quality.LOW)?.url || null;
+        const mediumCover = covers.find((c) => c.quality === Quality.MEDIUM)?.url || null;
+        const highCover = covers.find((c) => c.quality === Quality.HIGH)?.url || null;
+        const coverUrl = mediumCover || lowCover || highCover || covers[0]?.url || null;
+
+        const fallbackVideo = videos[0]?.url || null;
+        const mainUrl = m.type === MediaType.VIDEO ? fallbackVideo : highCover || mediumCover || lowCover || covers[0]?.url || null;
 
         return {
             id: m.id,
@@ -185,12 +205,14 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
             last_error: m.last_error,
             ai_status: aiMeta?.ai_status ?? "PENDING",
             ai_error: aiMeta?.ai_error ?? null,
-            url: null,
+            url: mainUrl,
+            cover_url: coverUrl,
             width: null,
             height: null,
             tracks: [],
             media_count: m.post_media_count || 1,
             covers: covers,
+            videos: videos,
         };
     });
 

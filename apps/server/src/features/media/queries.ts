@@ -1,15 +1,6 @@
 import { and, eq, inArray, or, isNull } from "drizzle-orm";
 import { db } from "@/global/db";
-import {
-    Media,
-    Track,
-    File as DbFile,
-    DeleteStatus,
-    SyncStatus,
-    TrackPurpose,
-    TrackType,
-    type TrackMetadata,
-} from "@/db/schema";
+import { Media, Track, File as DbFile, DeleteStatus, SyncStatus, TrackPurpose, TrackType, type TrackMetadata } from "@/db/schema";
 
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { toIsoTimestamp } from "@/lib/utils/time";
@@ -599,7 +590,10 @@ export const MediaService = {
                     inArray(Track.media_id, mediaIds),
                     eq(Track.delete_status, DeleteStatus.ACTIVE),
                     eq(Track.sync_status, SyncStatus.COMPLETED),
-                    eq(Track.purpose, TrackPurpose.COVER),
+                    or(
+                        eq(Track.purpose, TrackPurpose.COVER),
+                        and(eq(Track.purpose, TrackPurpose.CONTENT), eq(Track.type, TrackType.IMAGE)),
+                    ),
                 ),
             );
 
@@ -609,16 +603,28 @@ export const MediaService = {
             [Quality.HIGH]: 3,
         };
 
-        for (const { track, file } of rows) {
-            if (!track.media_id) continue;
-            const list = map.get(track.media_id) || [];
-            list.push({
+        const tracksByMedia = new Map<string, Array<{ track: typeof Track.$inferSelect; file: typeof DbFile.$inferSelect | null }>>();
+        for (const row of rows) {
+            if (!row.track.media_id) continue;
+            const list = tracksByMedia.get(row.track.media_id) || [];
+            list.push(row);
+            tracksByMedia.set(row.track.media_id, list);
+        }
+
+        for (const [mediaId, mediaRows] of tracksByMedia.entries()) {
+            const coverRows = mediaRows.filter((r) => r.track.purpose === TrackPurpose.COVER);
+            const targetRows =
+                coverRows.length > 0
+                    ? coverRows
+                    : mediaRows.filter((r) => r.track.purpose === TrackPurpose.CONTENT && r.track.type === TrackType.IMAGE);
+
+            const list: PreviewItem[] = targetRows.map(({ track, file }) => ({
                 url: buildUrl(file?.bucket, file?.path),
                 quality: track.quality,
                 codec: track.codec,
-            });
+            }));
             list.sort((a, b) => (qualityOrder[a.quality] || 99) - (qualityOrder[b.quality] || 99));
-            map.set(track.media_id, list);
+            map.set(mediaId, list);
         }
         return map;
     },
