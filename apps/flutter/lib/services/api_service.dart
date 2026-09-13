@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -11,9 +12,16 @@ class ApiService {
 
   static const String _tokenKey = 'stationary_session_token';
   static const String _activeLibraryKey = 'stationary_active_library_id';
-  String? _token;
+  static const String _serverUrlKey = 'stationary_server_url';
 
-  String get baseUrl {
+  String? _token;
+  String? _customBaseUrl;
+
+  late final ValueNotifier<String> baseUrlNotifier = ValueNotifier<String>(
+    baseUrl,
+  );
+
+  String get defaultBaseUrl {
     if (kIsWeb) {
       return Uri.base.origin.contains('localhost')
           ? 'http://localhost:9400'
@@ -25,6 +33,25 @@ class ApiService {
     return 'http://localhost:9400'; // iOS Simulator / macOS desktop / etc.
   }
 
+  String get baseUrl => (_customBaseUrl != null && _customBaseUrl!.isNotEmpty)
+      ? _customBaseUrl!
+      : defaultBaseUrl;
+
+  bool get isCustomBaseUrl =>
+      _customBaseUrl != null && _customBaseUrl!.isNotEmpty;
+
+  static String normalizeUrl(String input) {
+    var trimmed = input.trim();
+    if (trimmed.isEmpty) return '';
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+      trimmed = 'http://$trimmed';
+    }
+    while (trimmed.endsWith('/')) {
+      trimmed = trimmed.substring(0, trimmed.length - 1);
+    }
+    return trimmed;
+  }
+
   final http.Client _client = http.Client();
 
   http.Client get client => _client;
@@ -32,6 +59,53 @@ class ApiService {
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
     _token = prefs.getString(_tokenKey);
+    _customBaseUrl = prefs.getString(_serverUrlKey);
+    baseUrlNotifier.value = baseUrl;
+  }
+
+  Future<void> setBaseUrl(String? url) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (url == null || url.trim().isEmpty) {
+      _customBaseUrl = null;
+      await prefs.remove(_serverUrlKey);
+    } else {
+      final normalized = normalizeUrl(url);
+      _customBaseUrl = normalized;
+      await prefs.setString(_serverUrlKey, normalized);
+    }
+    baseUrlNotifier.value = baseUrl;
+  }
+
+  Future<void> resetBaseUrl() async {
+    await setBaseUrl(null);
+  }
+
+  Future<Duration> testConnection([String? targetUrl]) async {
+    final urlToTest = (targetUrl != null && targetUrl.trim().isNotEmpty)
+        ? normalizeUrl(targetUrl)
+        : baseUrl;
+
+    final uri = Uri.parse(urlToTest);
+    final stopwatch = Stopwatch()..start();
+    try {
+      final response = await _client
+          .get(uri)
+          .timeout(const Duration(seconds: 5));
+      stopwatch.stop();
+      if (response.statusCode < 500) {
+        return stopwatch.elapsed;
+      } else {
+        throw Exception('Server returned error status: ${response.statusCode}');
+      }
+    } catch (e) {
+      stopwatch.stop();
+      if (e is TimeoutException) {
+        throw Exception('Connection timed out after 5 seconds');
+      }
+      throw Exception(
+        'Cannot connect to server: ${e.toString().replaceAll('Exception: ', '')}',
+      );
+    }
   }
 
   bool get isAuthenticated => _token != null;

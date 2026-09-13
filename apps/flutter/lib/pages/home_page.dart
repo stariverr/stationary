@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../services/api_service.dart';
 import '../models.dart';
+import '../widgets/server_settings_dialog.dart';
 import 'post_detail_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -828,12 +829,15 @@ class _HomePageState extends State<HomePage> {
           children: [
             Icon(icon, color: isActive ? activeText : inactiveText, size: 16),
             const SizedBox(width: 12),
-            Text(
-              label,
-              style: TextStyle(
-                color: isActive ? activeText : inactiveText,
-                fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
-                fontSize: 14,
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: isActive ? activeText : inactiveText,
+                  fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                  fontSize: 14,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
@@ -1903,6 +1907,136 @@ class _HomePageState extends State<HomePage> {
                             ),
                           ),
                         ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Server Configuration Card
+          Container(
+            decoration: BoxDecoration(
+              color: cardBg,
+              border: Border.all(color: cardBorder),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? const Color(0xFF27272A)
+                            : const Color(0xFFF3F4F6),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        LucideIcons.server,
+                        size: 20,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  'Server Instance',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark
+                                        ? const Color(0xFFFAFAFA)
+                                        : const Color(0xFF111827),
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _apiService.isCustomBaseUrl
+                                      ? const Color(
+                                          0xFF3B82F6,
+                                        ).withValues(alpha: 0.1)
+                                      : (isDark
+                                            ? const Color(0xFF27272A)
+                                            : const Color(0xFFF3F4F6)),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  _apiService.isCustomBaseUrl
+                                      ? 'Custom'
+                                      : 'Default',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: _apiService.isCustomBaseUrl
+                                        ? const Color(0xFF3B82F6)
+                                        : (isDark
+                                              ? const Color(0xFFA1A1AA)
+                                              : const Color(0xFF6B7280)),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _apiService.baseUrl,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: isDark
+                                  ? const Color(0xFFA1A1AA)
+                                  : const Color(0xFF6B7280),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      onPressed: () {
+                        ServerSettingsDialog.show(
+                          context,
+                          isLoggedIn: true,
+                          onServerChanged: (newUrl) {
+                            if (mounted) {
+                              widget.onLogout();
+                            }
+                          },
+                        );
+                      },
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        side: BorderSide(color: cardBorder),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                      ),
+                      child: const Text(
+                        'Change',
+                        style: TextStyle(fontSize: 12),
                       ),
                     ),
                   ],

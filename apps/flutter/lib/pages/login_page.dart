@@ -1,8 +1,8 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:cloudflare_turnstile/cloudflare_turnstile.dart';
 import '../services/api_service.dart';
+import '../widgets/server_settings_dialog.dart';
 
 class LoginPage extends StatefulWidget {
   final VoidCallback onLoginSuccess;
@@ -18,11 +18,21 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLogin = true;
   bool _isLoading = false;
   String? _errorMessage;
-  String? _turnstileToken;
 
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _nameController = TextEditingController();
+
+  String _formatServerLabel(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri != null && uri.host.isNotEmpty) {
+      if (uri.hasPort && uri.port != 80 && uri.port != 443) {
+        return '${uri.host}:${uri.port}';
+      }
+      return uri.host;
+    }
+    return url;
+  }
 
   @override
   void dispose() {
@@ -51,18 +61,9 @@ class _LoginPageState extends State<LoginPage> {
 
     try {
       if (_isLogin) {
-        await _apiService.login(
-          email,
-          password,
-          captchaToken: _turnstileToken,
-        );
+        await _apiService.login(email, password);
       } else {
-        await _apiService.signUp(
-          email,
-          password,
-          name,
-          captchaToken: _turnstileToken,
-        );
+        await _apiService.signUp(email, password, name);
       }
       widget.onLoginSuccess();
     } catch (e) {
@@ -143,321 +144,377 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ],
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+              child: Stack(
                 children: [
-                  // Inner content (Web aligned p-8)
-                  Padding(
-                    padding: const EdgeInsets.all(32.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        // Web 64x64 Logo Replica
-                        Container(
-                          width: 64,
-                          height: 64,
-                          decoration: BoxDecoration(
-                            color: Colors.black,
-                            borderRadius: BorderRadius.circular(16),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.15),
-                                blurRadius: 12,
-                                offset: const Offset(0, 4),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Inner content (Web aligned p-8)
+                      Padding(
+                        padding: const EdgeInsets.all(32.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            // Web 64x64 Logo Replica
+                            Container(
+                              width: 64,
+                              height: 64,
+                              decoration: BoxDecoration(
+                                color: Colors.black,
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.15),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                          child: Center(
-                            child: Container(
-                              width: 28,
-                              height: 28,
-                              decoration: const BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        Text(
-                          _isLogin ? 'Welcome Back' : 'Create Account',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: isDark
-                                ? const Color(0xFFFAFAFA)
-                                : const Color(0xFF111827),
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          _isLogin
-                              ? 'Sign in to your account to continue'
-                              : 'Register to start managing your tags and libraries',
-                          style: TextStyle(color: textGray, fontSize: 14),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 32),
-
-                        // Error Alert
-                        if (_errorMessage != null) ...[
-                          Container(
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.error.withValues(
-                                alpha: 0.08,
-                              ),
-                              border: Border.all(
-                                color: theme.colorScheme.error.withValues(
-                                  alpha: 0.3,
+                              child: Center(
+                                child: Container(
+                                  width: 28,
+                                  height: 28,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
+                                  ),
                                 ),
                               ),
-                              borderRadius: BorderRadius.circular(8),
                             ),
-                            padding: const EdgeInsets.all(12.0),
-                            child: Row(
+                            const SizedBox(height: 24),
+                            Text(
+                              _isLogin ? 'Welcome Back' : 'Create Account',
+                              style: TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: isDark
+                                    ? const Color(0xFFFAFAFA)
+                                    : const Color(0xFF111827),
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _isLogin
+                                  ? 'Sign in to your account to continue'
+                                  : 'Register to start managing your tags and libraries',
+                              style: TextStyle(color: textGray, fontSize: 14),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 32),
+
+                            // Error Alert
+                            if (_errorMessage != null) ...[
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.error.withValues(
+                                    alpha: 0.08,
+                                  ),
+                                  border: Border.all(
+                                    color: theme.colorScheme.error.withValues(
+                                      alpha: 0.3,
+                                    ),
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                padding: const EdgeInsets.all(12.0),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      LucideIcons.alertTriangle,
+                                      color: theme.colorScheme.error,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        _errorMessage!,
+                                        style: TextStyle(
+                                          color: theme.colorScheme.error,
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                            ],
+
+                            // Inputs (Local Dev Fields)
+                            if (!_isLogin) ...[
+                              TextField(
+                                controller: _nameController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Full Name',
+                                  hintText: 'John Doe',
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                            ],
+                            TextField(
+                              controller: _emailController,
+                              decoration: const InputDecoration(
+                                labelText: 'Email Address',
+                                hintText: 'name@example.com',
+                              ),
+                              keyboardType: TextInputType.emailAddress,
+                            ),
+                            const SizedBox(height: 16),
+                            TextField(
+                              controller: _passwordController,
+                              decoration: const InputDecoration(
+                                labelText: 'Password',
+                                hintText: '••••••••',
+                              ),
+                              obscureText: true,
+                            ),
+                            const SizedBox(height: 20),
+
+                            // Login Action Button (Flat layout)
+                            ElevatedButton(
+                              onPressed: _isLoading ? null : _submit,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: isDark
+                                    ? const Color(0xFFFAFAFA)
+                                    : const Color(0xFF151C27),
+                                foregroundColor: isDark
+                                    ? const Color(0xFF09090B)
+                                    : const Color(0xFFFFFFFF),
+                                minimumSize: const Size.fromHeight(48),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              child: _isLoading
+                                  ? SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation(
+                                          isDark
+                                              ? const Color(0xFF09090B)
+                                              : Colors.white,
+                                        ),
+                                      ),
+                                    )
+                                  : Text(_isLogin ? 'Sign In' : 'Sign Up'),
+                            ),
+
+                            // Divider OR
+                            const SizedBox(height: 20),
+                            Row(
                               children: [
-                                Icon(
-                                  LucideIcons.alertTriangle,
-                                  color: theme.colorScheme.error,
+                                Expanded(child: Divider(color: cardBorder)),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10.0,
+                                  ),
+                                  child: Text(
+                                    'OR',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: textGray,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(child: Divider(color: cardBorder)),
+                              ],
+                            ),
+                            const SizedBox(height: 20),
+
+                            // Social GitHub Button
+                            SizedBox(
+                              height: 48,
+                              child: ElevatedButton.icon(
+                                onPressed: _isLoading
+                                    ? null
+                                    : () => _loginSocial('github'),
+                                icon: const Icon(
+                                  LucideIcons.code,
+                                  color: Colors.white,
                                   size: 18,
                                 ),
-                                const SizedBox(width: 10),
-                                Expanded(
+                                label: const Text(
+                                  'Continue with GitHub',
+                                  style: TextStyle(fontWeight: FontWeight.w500),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.black,
+                                  foregroundColor: Colors.white,
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Social Google Button
+                            SizedBox(
+                              height: 48,
+                              child: OutlinedButton.icon(
+                                onPressed: _isLoading
+                                    ? null
+                                    : () => _loginSocial('google'),
+                                icon: const Icon(
+                                  LucideIcons.mail,
+                                  color: Color(0xFFEF4444),
+                                  size: 18,
+                                ),
+                                label: Text(
+                                  'Continue with Google',
+                                  style: TextStyle(
+                                    color: isDark
+                                        ? const Color(0xFFFAFAFA)
+                                        : const Color(0xFF374151),
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  backgroundColor: cardBg,
+                                  side: BorderSide(color: cardBorder),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Footer Section (Web aligned bg-gray-50)
+                      Container(
+                        decoration: BoxDecoration(
+                          color: footerBg,
+                          border: Border(top: BorderSide(color: cardBorder)),
+                          borderRadius: const BorderRadius.only(
+                            bottomLeft: Radius.circular(16),
+                            bottomRight: Radius.circular(16),
+                          ),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24.0,
+                          vertical: 20.0,
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              'By continuing, you agree to our Terms and Privacy Policy.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: textGray,
+                                height: 1.4,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 12),
+                            Wrap(
+                              alignment: WrapAlignment.center,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Text(
+                                  _isLogin
+                                      ? "Don't have an account? "
+                                      : 'Already have an account? ',
+                                  style: TextStyle(
+                                    color: textGray,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      _isLogin = !_isLogin;
+                                      _errorMessage = null;
+                                    });
+                                  },
                                   child: Text(
-                                    _errorMessage!,
+                                    _isLogin ? 'Sign Up' : 'Sign In',
                                     style: TextStyle(
-                                      color: theme.colorScheme.error,
+                                      color: isDark
+                                          ? const Color(0xFFFAFAFA)
+                                          : const Color(0xFF111827),
                                       fontSize: 13,
-                                      fontWeight: FontWeight.w500,
+                                      fontWeight: FontWeight.bold,
+                                      decoration: TextDecoration.underline,
                                     ),
                                   ),
                                 ),
                               ],
                             ),
-                          ),
-                          const SizedBox(height: 20),
-                        ],
-
-                        // Inputs (Local Dev Fields)
-                        if (!_isLogin) ...[
-                          TextField(
-                            controller: _nameController,
-                            decoration: const InputDecoration(
-                              labelText: 'Full Name',
-                              hintText: 'John Doe',
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                        ],
-                        TextField(
-                          controller: _emailController,
-                          decoration: const InputDecoration(
-                            labelText: 'Email Address',
-                            hintText: 'name@example.com',
-                          ),
-                          keyboardType: TextInputType.emailAddress,
+                          ],
                         ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          controller: _passwordController,
-                          decoration: const InputDecoration(
-                            labelText: 'Password',
-                            hintText: '••••••••',
-                          ),
-                          obscureText: true,
+                      ),
+                    ],
+                  ),
+                  Positioned(
+                    top: 14,
+                    right: 14,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () {
+                        ServerSettingsDialog.show(
+                          context,
+                          onServerChanged: (_) => setState(() {}),
+                        );
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 5,
                         ),
-                        const SizedBox(height: 16),
-
-                        // Cloudflare Turnstile Widget
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4.0),
-                          child: CloudflareTurnstile(
-                            siteKey: '1x00000000000000000000AA',
-                            baseUrl: _apiService.baseUrl,
-                            onTokenReceived: (token) {
-                              setState(() {
-                                _turnstileToken = token;
-                              });
-                            },
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? const Color(0xFF27272A)
+                              : const Color(0xFFF3F4F6),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isDark
+                                ? const Color(0xFF3F3F46)
+                                : const Color(0xFFE5E7EB),
+                            width: 0.8,
                           ),
                         ),
-                        const SizedBox(height: 20),
-
-                        // Login Action Button (Flat layout)
-                        ElevatedButton(
-                          onPressed: _isLoading ? null : _submit,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: isDark
-                                ? const Color(0xFFFAFAFA)
-                                : const Color(0xFF151C27),
-                            foregroundColor: isDark
-                                ? const Color(0xFF09090B)
-                                : const Color(0xFFFFFFFF),
-                            minimumSize: const Size.fromHeight(48),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: _isLoading
-                              ? SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation(
-                                      isDark
-                                          ? const Color(0xFF09090B)
-                                          : Colors.white,
-                                    ),
-                                  ),
-                                )
-                              : Text(_isLogin ? 'Sign In' : 'Sign Up'),
-                        ),
-
-                        // Divider OR
-                        const SizedBox(height: 20),
-                        Row(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Expanded(child: Divider(color: cardBorder)),
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10.0,
-                              ),
+                            Icon(
+                              LucideIcons.server,
+                              size: 12,
+                              color: _apiService.isCustomBaseUrl
+                                  ? (isDark
+                                        ? const Color(0xFF60A5FA)
+                                        : const Color(0xFF2563EB))
+                                  : textGray,
+                            ),
+                            const SizedBox(width: 5),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 120),
                               child: Text(
-                                'OR',
+                                _formatServerLabel(_apiService.baseUrl),
                                 style: TextStyle(
                                   fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: textGray,
+                                  fontWeight: FontWeight.w500,
+                                  color: _apiService.isCustomBaseUrl
+                                      ? (isDark
+                                            ? const Color(0xFF60A5FA)
+                                            : const Color(0xFF2563EB))
+                                      : textGray,
                                 ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
                               ),
                             ),
-                            Expanded(child: Divider(color: cardBorder)),
                           ],
                         ),
-                        const SizedBox(height: 20),
-
-                        // Social GitHub Button
-                        SizedBox(
-                          height: 48,
-                          child: ElevatedButton.icon(
-                            onPressed: _isLoading
-                                ? null
-                                : () => _loginSocial('github'),
-                            icon: const Icon(
-                              LucideIcons.code,
-                              color: Colors.white,
-                              size: 18,
-                            ),
-                            label: const Text(
-                              'Continue with GitHub',
-                              style: TextStyle(fontWeight: FontWeight.w500),
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.black,
-                              foregroundColor: Colors.white,
-                              elevation: 0,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        // Social Google Button
-                        SizedBox(
-                          height: 48,
-                          child: OutlinedButton.icon(
-                            onPressed: _isLoading
-                                ? null
-                                : () => _loginSocial('google'),
-                            icon: const Icon(
-                              LucideIcons.mail,
-                              color: Color(0xFFEF4444),
-                              size: 18,
-                            ),
-                            label: Text(
-                              'Continue with Google',
-                              style: TextStyle(
-                                color: isDark
-                                    ? const Color(0xFFFAFAFA)
-                                    : const Color(0xFF374151),
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              backgroundColor: cardBg,
-                              side: BorderSide(color: cardBorder),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Footer Section (Web aligned bg-gray-50)
-                  Container(
-                    decoration: BoxDecoration(
-                      color: footerBg,
-                      border: Border(top: BorderSide(color: cardBorder)),
-                      borderRadius: const BorderRadius.only(
-                        bottomLeft: Radius.circular(16),
-                        bottomRight: Radius.circular(16),
                       ),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 24.0,
-                      vertical: 20.0,
-                    ),
-                    child: Column(
-                      children: [
-                        Text(
-                          'By continuing, you agree to our Terms and Privacy Policy.',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: textGray,
-                            height: 1.4,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              _isLogin
-                                  ? "Don't have an account? "
-                                  : 'Already have an account? ',
-                              style: TextStyle(color: textGray, fontSize: 13),
-                            ),
-                            GestureDetector(
-                              onTap: () {
-                                setState(() {
-                                  _isLogin = !_isLogin;
-                                  _errorMessage = null;
-                                });
-                              },
-                              child: Text(
-                                _isLogin ? 'Sign Up' : 'Sign In',
-                                style: TextStyle(
-                                  color: isDark
-                                      ? const Color(0xFFFAFAFA)
-                                      : const Color(0xFF111827),
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  decoration: TextDecoration.underline,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
                     ),
                   ),
                 ],
