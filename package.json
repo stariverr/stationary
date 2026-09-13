@@ -23,7 +23,7 @@
     ],
     "devDependencies": {
         "oxfmt": "^0.59.0",
-        "oxlint": "^1.68.0",
+        "oxlint": "^1.82.0",
         "typescript": "^6.0.3"
     },
     "workspaces": [

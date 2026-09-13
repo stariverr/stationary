@@ -136,6 +136,11 @@
         "appearance": {
             "title": "Appearance",
             "desc": "Customize the look and feel of the application.",
+            "theme": "Theme Preference",
+            "theme_desc": "Select how Stationary looks to you.",
+            "theme_light": "Light",
+            "theme_dark": "Dark",
+            "theme_system": "System",
             "coming_soon": "Coming soon."
         },
         "account": {

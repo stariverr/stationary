@@ -16,7 +16,33 @@ import { toast } from "vue-sonner";
 import { useLibraryStore } from "@/stores/library";
 import { useUserStore } from "@/stores/user";
 import { storeToRefs } from "pinia";
-import { Key, Copy, Plus, Check, Loader2, Trash2, AlertTriangle, Calendar, Layers, Sparkles, RefreshCw, Save, Info } from "@lucide/vue";
+import { useColorMode } from "@vueuse/core";
+import {
+    Key,
+    Copy,
+    Plus,
+    Check,
+    Loader2,
+    Trash2,
+    AlertTriangle,
+    Calendar,
+    Layers,
+    Sparkles,
+    RefreshCw,
+    Save,
+    Info,
+    Sun,
+    Moon,
+    Monitor,
+} from "@lucide/vue";
+
+const colorMode = useColorMode({
+    attribute: "class",
+    modes: {
+        light: "",
+        dark: "dark",
+    },
+});
 
 const props = defineProps({
     open: { type: Boolean, default: false },
@@ -633,8 +659,67 @@ watch(
                                     {{ $t("settings.appearance.desc") }}
                                 </CardDescription>
                             </CardHeader>
-                            <CardContent class="py-20 text-center text-gray-400">
-                                {{ $t("settings.appearance.coming_soon") }}
+                            <CardContent class="space-y-6">
+                                <div class="space-y-2">
+                                    <Label class="text-sm font-semibold text-zinc-900">{{ $t("settings.appearance.theme") }}</Label>
+                                    <p class="text-xs text-zinc-500">{{ $t("settings.appearance.theme_desc") }}</p>
+
+                                    <div class="grid grid-cols-3 gap-3 pt-2 max-w-md">
+                                        <button
+                                            type="button"
+                                            @click="colorMode = 'light'"
+                                            class="flex flex-col items-center gap-2.5 p-3.5 rounded-xl border-2 transition-all cursor-pointer text-center select-none"
+                                            :class="
+                                                colorMode === 'light'
+                                                    ? 'border-zinc-900 bg-zinc-50 font-semibold text-zinc-950 shadow-xs'
+                                                    : 'border-zinc-200 hover:border-zinc-300 text-zinc-600 hover:bg-zinc-50/50'
+                                            "
+                                        >
+                                            <div
+                                                class="w-10 h-10 rounded-full bg-amber-50 border border-amber-200/60 flex items-center justify-center text-amber-600"
+                                            >
+                                                <Sun class="w-5 h-5" />
+                                            </div>
+                                            <span class="text-xs">{{ $t("settings.appearance.theme_light") }}</span>
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            @click="colorMode = 'dark'"
+                                            class="flex flex-col items-center gap-2.5 p-3.5 rounded-xl border-2 transition-all cursor-pointer text-center select-none"
+                                            :class="
+                                                colorMode === 'dark'
+                                                    ? 'border-zinc-900 bg-zinc-50 font-semibold text-zinc-950 shadow-xs'
+                                                    : 'border-zinc-200 hover:border-zinc-300 text-zinc-600 hover:bg-zinc-50/50'
+                                            "
+                                        >
+                                            <div
+                                                class="w-10 h-10 rounded-full bg-indigo-50 border border-indigo-200/60 flex items-center justify-center text-indigo-600"
+                                            >
+                                                <Moon class="w-5 h-5" />
+                                            </div>
+                                            <span class="text-xs">{{ $t("settings.appearance.theme_dark") }}</span>
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            @click="colorMode = 'auto'"
+                                            class="flex flex-col items-center gap-2.5 p-3.5 rounded-xl border-2 transition-all cursor-pointer text-center select-none"
+                                            :class="
+                                                colorMode === 'auto'
+                                                    ? 'border-zinc-900 bg-zinc-50 font-semibold text-zinc-950 shadow-xs'
+                                                    : 'border-zinc-200 hover:border-zinc-300 text-zinc-600 hover:bg-zinc-50/50'
+                                            "
+                                        >
+                                            <div
+                                                class="w-10 h-10 rounded-full bg-zinc-100 border border-zinc-200 flex items-center justify-center text-zinc-600"
+                                            >
+                                                <Monitor class="w-5 h-5" />
+                                            </div>
+                                            <span class="text-xs">{{ $t("settings.appearance.theme_system") }}</span>
+                                        </button>
+                                    </div>
+                                </div>
                             </CardContent>
                         </Card>
                     </TabsContent>

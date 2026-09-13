@@ -18,29 +18,29 @@
         "verify:media-track-migration": "bun run src/scripts/verify_media_track_migration.ts"
     },
     "dependencies": {
-        "@ai-sdk/google": "^4.0.17",
-        "@ai-sdk/openai": "^4.0.15",
-        "@aws-sdk/client-s3": "^3.1088.0",
-        "@aws-sdk/lib-storage": "^3.1088.0",
-        "@aws-sdk/s3-request-presigner": "^3.1088.0",
-        "ai": "^7.0.29",
-        "better-auth": "^1.6.23",
-        "better-result": "^3",
-        "drizzle-orm": "^1.0.0-rc.4",
-        "hono": "^4.12.30",
-        "ky": "^2.0.2",
-        "pg": "^8.22.0",
-        "redis": "^6.1.0",
-        "resend": "^6.17.2",
-        "uuid": "^14.0.1",
-        "valibot": "^1.4.2"
+        "@ai-sdk/google": "^4.0.69",
+        "@ai-sdk/openai": "^4.0.66",
+        "@aws-sdk/client-s3": "^3.1131.0",
+        "@aws-sdk/lib-storage": "^3.1131.0",
+        "@aws-sdk/s3-request-presigner": "^3.1131.0",
+        "ai": "^7.0.99",
+        "better-auth": "^1.7.4",
+        "better-result": "^3.0.1",
+        "drizzle-orm": "^1.0.0-rc.5-ab785fc",
+        "hono": "^4.13.7",
+        "ky": "^2.1.0",
+        "pg": "^8.23.0",
+        "redis": "^6.2.1",
+        "resend": "^6.28.0",
+        "uuid": "^14.0.2",
+        "valibot": "^1.5.0"
     },
     "devDependencies": {
-        "@cloudflare/workers-types": "^5.20260716.1",
+        "@cloudflare/workers-types": "^5.20260911.1",
         "@types/bun": "latest",
         "@types/pg": "latest",
         "@types/uuid": "^11.0.0",
-        "@valibot/to-json-schema": "^1.7.1",
-        "drizzle-kit": "^1.0.0-rc.3"
+        "@valibot/to-json-schema": "^1.8.0",
+        "drizzle-kit": "^1.0.0-rc.5-ab785fc"
     }
 }

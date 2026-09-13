@@ -134,8 +134,13 @@
             "cover_qualities_min_err": "至少必须选择 1 档封面清晰度"
         },
         "appearance": {
-            "title": "外观",
-            "desc": "自定义应用程序的外观和感觉。",
+            "title": "外观设置",
+            "desc": "自定义应用程序的外观与主题偏好。",
+            "theme": "主题偏好",
+            "theme_desc": "选择您偏好的色彩主题外观。",
+            "theme_light": "浅色",
+            "theme_dark": "深色",
+            "theme_system": "跟随系统",
             "coming_soon": "即将推出。"
         },
         "account": {

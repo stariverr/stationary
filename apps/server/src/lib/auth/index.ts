@@ -1,7 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { bearer, emailOTP, captcha } from "better-auth/plugins";
-import { createAuthMiddleware, APIError, getIp } from "better-auth/api";
+import { createAuthMiddleware, APIError, getIP } from "better-auth/api";
 import { createHmac } from "crypto";
 import { db } from "@/global/db";
 import * as schema from "@/db/schema";
@@ -29,7 +29,7 @@ const emailRateLimitPlugin = () => ({
                     const emailHash = createHmac("sha256", env.BETTER_AUTH_SECRET || "")
                         .update(normalizedEmail)
                         .digest("hex");
-                    const ip = (ctx.request ? getIp(ctx.request, ctx.context.options) : null) || "unknown-ip";
+                    const ip = (ctx.request ? getIP(ctx.request, ctx.context.options) : null) || "unknown-ip";
 
                     // 1. Email 60s cooldown (1 / 60s)
                     const emailCooldownKey = `rate-limit:email:cooldown:${emailHash}`;

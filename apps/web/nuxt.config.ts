@@ -8,7 +8,10 @@ export default defineNuxtConfig({
             link: [{ rel: "icon", type: "image/svg+xml", href: "/logo.svg" }],
         },
     },
-    compatibilityDate: "2026-05-18",
+    future: {
+        compatibilityVersion: 5,
+    },
+    compatibilityDate: "2026-09-13",
     ssr: true,
     vue: {
         compilerOptions: {
@@ -18,9 +21,6 @@ export default defineNuxtConfig({
     devtools: { enabled: false },
     devServer: {
         port: 4000,
-    },
-    experimental: {
-        ssrStreaming: true,
     },
     modules: ["@pinia/nuxt", "shadcn-nuxt", "@nuxtjs/i18n"],
     i18n: {
@@ -66,10 +66,10 @@ export default defineNuxtConfig({
     },
     nitro: {
         preset: process.env.NITRO_PRESET || "cloudflare-module",
-        // TODO: temporarily add this to fix the build error: Nitro's global replace plugin naively replaces 'typeof window' inside unhead's iife.mjs string literals, which corrupts the output syntax and crashes Rollup.
-        replace: {
-            "typeof window": "typeof window",
-        },
+        // // TODO: temporarily add this to fix the build error: Nitro's global replace plugin naively replaces 'typeof window' inside unhead's iife.mjs string literals, which corrupts the output syntax and crashes Rollup.
+        // replace: {
+        //     "typeof window": "typeof window",
+        // },
     },
     shadcn: {
         prefix: "",
