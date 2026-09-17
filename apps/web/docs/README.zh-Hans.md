@@ -41,20 +41,21 @@ apps/web/app/
 
 ---
 
-## 🔗 API 直连架构与跨域认证传递
+## 🔗 API 架构与会话处理
 
-前端请求直接发往后端服务（默认 `localhost:9400`），不经过 Nuxt Nitro 前端代理，保持干净轻量的架构。
+浏览器始终只访问同源 `/api`：开发环境由 Nuxt 开发代理转发，生产环境由 Caddy / Ingress 网关转发。服务端渲染阶段则通过 `runtimeConfig.apiBaseUrl` 直连后端。
 
-### 1. 统一请求客户端 (`composables/useApi.ts`)
-所有业务 API 请求均通过 `useApi` composable 发起：
-- 自动根据 `runtimeConfig.public.apiBaseUrl` 拼接后端直连地址。
-- 开启 `credentials: 'include'`，确保浏览器跨源请求时携带认证 Cookie。
+### 1. 统一请求客户端 (`plugins/api.ts` + `composables/useApi.ts`)
+插件中创建的 `$api` 实例承载全部请求策略，`useApi` 是对外暴露的类型化入口，供各 store 与组件使用：
+- 浏览器端使用 `runtimeConfig.public.apiBaseUrl`，SSR 端使用 `runtimeConfig.apiBaseUrl`。
+- 开启 `credentials: 'include'`，确保始终携带认证 Cookie。
 - 在 Nuxt SSR 渲染阶段，自动通过 `useRequestHeaders(['cookie'])` 将用户请求头中的 Cookie 透传至后端服务。
+- 任何请求返回 `401` 时，自动退出登录并跳转 `/login`。
 
-### 2. 身份认证与跨源 Session (`lib/auth-client.ts`)
-Better Auth 客户端直接配置 `baseURL` 指向后端 `apiBaseUrl`：
-- 注册、登录（含 Turnstile 人机验证头透传）、邮箱 OTP 验证与 OAuth 社交登录均直连后端处理。
-- 后端 Hono 服务配置 CORS 信任源（`TRUSTED_ORIGINS`）并开启 `credentials: true`，预检请求动态放行客户端自定义报头。
+### 2. 身份认证 (`plugins/auth.ts`)
+Better Auth 客户端在插件中按应用实例创建，`baseURL` 来自 runtime config：
+- 注册、登录（含 Turnstile 人机验证头透传）、邮箱 OTP 验证与 OAuth 社交登录均走与业务 API 相同的 `/api/auth/*` 网关。
+- 调整 API 地址只需修改 `NUXT_PUBLIC_API_BASE_URL` / `NUXT_API_BASE_URL`。
 
 ---
 

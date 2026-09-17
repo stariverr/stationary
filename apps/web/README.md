@@ -40,20 +40,21 @@ apps/web/app/
 
 ---
 
-## 🔗 Direct API Architecture & Cross-Origin Auth Persistence
+## 🔗 API Architecture & Session Handling
 
-Frontend requests communicate directly with the backend API (default: `localhost:9400`) without a frontend reverse proxy, keeping the application architecture clean and performant.
+The browser always talks to a single origin: `/api` is served by the backend through the same-origin gateway (the Nuxt dev proxy locally, Caddy/ingress in production). Server-side rendering calls the backend directly through `runtimeConfig.apiBaseUrl`.
 
-### 1. Unified API Composable (`composables/useApi.ts`)
-All data requests are dispatched through the `useApi` composable:
-- Automatically prefixes the backend URL from `runtimeConfig.public.apiBaseUrl`.
-- Sets `credentials: 'include'` to ensure cross-origin authentication cookies are preserved in browser sessions.
+### 1. API Client (`plugins/api.ts` + `composables/useApi.ts`)
+The `$api` client created in the plugin carries all HTTP policy, and `useApi` is the typed accessor used by stores and components:
+- Base URL from `runtimeConfig.public.apiBaseUrl` (browser) or `runtimeConfig.apiBaseUrl` (SSR).
+- Sets `credentials: 'include'` so session cookies are always sent.
 - In Nuxt SSR mode, forwards incoming client cookies to the backend via `useRequestHeaders(['cookie'])`.
+- On any `401`, signs the session out and redirects to `/login`.
 
-### 2. Authentication & Session Persistence (`lib/auth-client.ts`)
-Better Auth client points directly to the backend `apiBaseUrl`:
-- Sign up, sign in, email OTP verification, and OAuth social flows talk directly to backend auth endpoints.
-- Backend Hono server configures CORS trusted origins (`TRUSTED_ORIGINS`) with `credentials: true` and dynamically allows required preflight headers (such as `x-captcha-response`).
+### 2. Authentication (`plugins/auth.ts`)
+The Better Auth client is created per app instance with the API base URL from runtime config:
+- Sign up, sign in, email OTP verification, and OAuth social flows use the same `/api/auth/*` gateway as the rest of the API.
+- Changes to the API base only need to be made in `NUXT_PUBLIC_API_BASE_URL` / `NUXT_API_BASE_URL`.
 
 
 ---
