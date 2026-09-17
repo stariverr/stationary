@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
-import { authClient } from "@/lib/auth-client";
 import { ShieldCheck, ArrowLeft, RotateCcw } from "@lucide/vue";
 import { toast } from "vue-sonner";
 
@@ -10,6 +9,7 @@ definePageMeta({
 
 const route = useRoute();
 const { t } = useI18n();
+const { $auth } = useNuxtApp();
 const verificationEmail = ref((route.query.email as string) || "");
 
 // Inputs
@@ -47,7 +47,7 @@ const handleVerifyEmail = async () => {
     }
     loading.value = true;
     try {
-        const { data, error } = await authClient.emailOtp.verifyEmail({
+        const { data, error } = await $auth.emailOtp.verifyEmail({
             email: verificationEmail.value,
             otp: otpCode.value,
         });
@@ -72,7 +72,7 @@ const handleResendOTP = async () => {
     if (resendCooldown.value > 0) return;
     loading.value = true;
     try {
-        const { data, error } = await authClient.emailOtp.sendVerificationOtp({
+        const { data, error } = await $auth.emailOtp.sendVerificationOtp({
             email: verificationEmail.value,
             type: "email-verification",
         });

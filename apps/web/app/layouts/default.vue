@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { useUserStore } from "@/stores/user";
-import { useSession } from "@/lib/auth-client";
 import { watch, onMounted, onBeforeUnmount } from "vue";
 import { useWindowSize } from "@vueuse/core";
 import { FocusScope } from "reka-ui";
@@ -32,7 +31,8 @@ function handleKeydown(event: KeyboardEvent) {
 }
 
 const userStore = useUserStore();
-const session = useSession();
+const { $auth } = useNuxtApp();
+const session = $auth.useSession();
 watch(
     () => session.value.data?.user,
     (user) => {

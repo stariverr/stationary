@@ -4,12 +4,7 @@
     "compilerOptions": {
         "module": "esnext",
         "jsx": "preserve",
-        "jsxImportSource": "vue",
-        "paths": {
-            "@/*": [
-                "./app/*"
-            ]
-        }
+        "jsxImportSource": "vue"
     },
     "extends": "./.nuxt/tsconfig.json"
 }

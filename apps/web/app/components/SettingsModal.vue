@@ -8,7 +8,6 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { authClient, useSession } from "@/lib/auth-client";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { computed, ref, watch, onUnmounted } from "vue";
 import { Input } from "@/components/ui/input";
@@ -65,7 +64,8 @@ interface NuxtI18nComposer {
 }
 
 const { locale, setLocale, locales, t } = useI18n() as unknown as NuxtI18nComposer;
-const session = useSession();
+const { $auth } = useNuxtApp();
+const session = $auth.useSession();
 
 const userStore = useUserStore();
 const { userProfile } = storeToRefs(userStore);
@@ -770,7 +770,7 @@ watch(
                                         class="w-full text-red-600 hover:text-red-700 hover:bg-red-50"
                                         @click="
                                             async () => {
-                                                await authClient.signOut();
+                                                await $auth.signOut();
                                                 navigateTo('/login');
                                             }
                                         "

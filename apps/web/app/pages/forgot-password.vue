@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, nextTick } from "vue";
-import { authClient } from "@/lib/auth-client";
 import { Mail, Lock, Eye, EyeOff, ArrowLeft } from "@lucide/vue";
 import { toast } from "vue-sonner";
 
@@ -10,6 +9,7 @@ definePageMeta({
 
 const config = useRuntimeConfig();
 const { t } = useI18n();
+const { $auth } = useNuxtApp();
 const turnstileSiteKey = config.public.turnstileSiteKey;
 
 type Step = "request" | "reset";
@@ -90,7 +90,7 @@ const handleRequestReset = async () => {
     }
     loading.value = true;
     try {
-        const { data, error } = await authClient.emailOtp.requestPasswordReset({
+        const { data, error } = await $auth.emailOtp.requestPasswordReset({
             email: email.value,
             fetchOptions: {
                 headers: {
@@ -135,7 +135,7 @@ const handleResetPassword = async () => {
     }
     loading.value = true;
     try {
-        const { data, error } = await authClient.emailOtp.resetPassword({
+        const { data, error } = await $auth.emailOtp.resetPassword({
             email: email.value,
             otp: otp.value,
             password: newPassword.value,

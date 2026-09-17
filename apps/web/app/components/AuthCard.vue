@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
-import { authClient } from "@/lib/auth-client";
 import { Mail, Lock, User, Eye, EyeOff } from "@lucide/vue";
 import { toast } from "vue-sonner";
 
@@ -11,6 +10,7 @@ const props = defineProps<{
 const config = useRuntimeConfig();
 const router = useRouter();
 const { t } = useI18n();
+const { $auth } = useNuxtApp();
 
 // Mode state
 const currentMode = ref(props.mode);
@@ -49,14 +49,14 @@ const setMode = (newMode: "login" | "register") => {
 
 // Social Sign-Ins
 const loginWithGithub = async () => {
-    await authClient.signIn.social({
+    await $auth.signIn.social({
         provider: "github",
         callbackURL: config.public.appUrl as string | undefined,
     });
 };
 
 const loginWithGoogle = async () => {
-    await authClient.signIn.social({
+    await $auth.signIn.social({
         provider: "google",
         callbackURL: config.public.appUrl as string | undefined,
     });
@@ -122,7 +122,7 @@ const handleSignIn = async () => {
     }
     loading.value = true;
     try {
-        const { data, error } = await authClient.signIn.email({
+        const { data, error } = await $auth.signIn.email({
             email: email.value,
             password: password.value,
             fetchOptions: {
@@ -134,7 +134,7 @@ const handleSignIn = async () => {
         if (error) {
             if (error.code === "EMAIL_NOT_VERIFIED") {
                 toast.info(t("auth.toast_email_not_verified"));
-                const { error: resendError } = await authClient.emailOtp.sendVerificationOtp({
+                const { error: resendError } = await $auth.emailOtp.sendVerificationOtp({
                     email: email.value,
                     type: "email-verification",
                 });
@@ -184,7 +184,7 @@ const handleSignUp = async () => {
     }
     loading.value = true;
     try {
-        const { data, error } = await authClient.signUp.email({
+        const { data, error } = await $auth.signUp.email({
             email: email.value,
             password: password.value,
             name: email.value.split("@")[0] || "User",

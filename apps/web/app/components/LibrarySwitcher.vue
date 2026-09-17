@@ -10,13 +10,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ChevronsUpDown, LogOut, Settings, Plus, Check } from "@lucide/vue";
-import { authClient, useSession } from "@/lib/auth-client";
 import { useLibraryStore } from "@/stores/library";
 import { useUserStore } from "@/stores/user";
 import { storeToRefs } from "pinia";
 import CreateLibraryDialog from "@/components/CreateLibraryDialog.vue";
 
-const session = useSession();
+const { $auth } = useNuxtApp();
+const session = $auth.useSession();
 const emit = defineEmits(["open-settings"]);
 
 const libraryStore = useLibraryStore();
@@ -111,7 +111,7 @@ const showCreateDialog = ref(false);
                 class="cursor-pointer text-red-600 focus:text-red-600 focus:bg-red-50"
                 @click="
                     async () => {
-                        await authClient.signOut();
+                        await $auth.signOut();
                         navigateTo('/login');
                     }
                 "

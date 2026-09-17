@@ -1,5 +1,7 @@
 import tailwindcss from "@tailwindcss/vite";
 
+const backendApiBaseUrl = process.env.NUXT_API_BASE_URL || "http://127.0.0.1:9400/api";
+
 export default defineNuxtConfig({
     srcDir: "app",
     app: {
@@ -44,9 +46,6 @@ export default defineNuxtConfig({
     },
     vite: {
         plugins: [tailwindcss()],
-        define: {
-            "process.env.NUXT_PUBLIC_API_BASE_URL": JSON.stringify(process.env.NUXT_PUBLIC_API_BASE_URL || "http://localhost:9400"),
-        },
         optimizeDeps: {
             include: ["@vueuse/core", "@tanstack/vue-query", "@lucide/vue", "swiper/vue", "@js-temporal/polyfill", "vidstack"],
         },
@@ -55,10 +54,19 @@ export default defineNuxtConfig({
     pinia: {
         storesDirs: ["./app/stores"],
     },
+    // Dev only: the browser talks to a single origin, like the production gateway (Caddy / ingress).
+    routeRules:
+        process.env.NODE_ENV === "development"
+            ? {
+                  "/api/**": { proxy: `${backendApiBaseUrl}/**` },
+              }
+            : {},
     runtimeConfig: {
-        apiBaseUrl: process.env.NUXT_API_BASE_URL || process.env.NUXT_PUBLIC_API_BASE_URL || "http://localhost:9400",
+        // Server-side only: direct backend base URL, no browser involved.
+        apiBaseUrl: backendApiBaseUrl,
         public: {
-            apiBaseUrl: process.env.NUXT_PUBLIC_API_BASE_URL || "http://localhost:9400",
+            // Browser-facing API base URL (same-origin gateway).
+            apiBaseUrl: process.env.NUXT_PUBLIC_API_BASE_URL || "/api",
             cdnBaseUrl: process.env.NUXT_PUBLIC_CDN_BASE_URL || "http://localhost:9400",
             appUrl: process.env.NUXT_PUBLIC_APP_URL || "http://localhost:4000",
             turnstileSiteKey: process.env.NUXT_PUBLIC_TURNSTILE_SITE_KEY || "1x00000000000000000000AA",
