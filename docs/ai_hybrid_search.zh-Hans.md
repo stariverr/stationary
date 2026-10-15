@@ -34,22 +34,14 @@ MVP 使用三个互补的检索信号：
 
 不同 embedding 模型、模型版本、task type、维度、预处理规则或归一化策略生成的向量，属于不同语义空间。即使物理维度相同，也不能跨空间计算 cosine 或其他距离。
 
-因此，每条 embedding 记录必须携带 `embedding_space_id`，用于表示完整 pipeline 配置，例如：
+因此，每条 embedding 记录都携带 `embedding_space_id`，由模型定义计算为 `{modelName}:{dimension}:{taskPrefixType|plain}`，例如：
 
 ```text
-gemini:text-embedding-004:768:cosine:v1
-gemini:multimodal-embedding-004:1408:cosine:v1
+gemini-embedding-2:768:gemini-asymmetric
+qwen3-vl-embedding:1024:plain
 ```
 
-版本后缀是 **pipeline version**，不只是模型版本。以下任一变化都必须 bump 版本：
-
-- embedding 模型或模型版本变化。
-- 输出维度变化。
-- query/document task type 变化。
-- prompt 结构或元数据拼接方式变化。
-- 文本归一化、chunking、语言处理或 tag 格式变化。
-- 图片预处理、resize、视频帧选择或裁剪策略变化。
-- 向量归一化策略或距离度量变化。
+空间 ID 有意不包含供应商连接：同一模型换一个供应商提供服务，向量仍可比较，因此迁移供应商无需重新向量化。凡是会改变向量的因素（模型、输出维度、输入模板）都会改变空间 ID。
 
 ### 2.2 Canonical Lifecycle Integration
 
@@ -122,20 +114,21 @@ AI 表可以保存冗余生命周期字段，用于索引和清理，但不能�
 
 MVP 会在 `apps/server/src/db/schema/index.ts` 中引入以下逻辑表。
 
-### 4.1 `embedding_space`
+### 4.1 `library_embedding_space`
 
-用于登记活跃、废弃和实验性语义空间。
+记录每个媒体库按向量角色（`textEmbedding` / `imageEmbedding`）写入的空间。
 
-关键字段：
+- `status = ACTIVE`：检索使用的空间，每个角色一个。
+- `status = BUILDING`：更换模型后正在填充的新空间。回填任务结束、队列清空，并且满足下面两个条件，才会替换 ACTIVE：
+  - 失败的向量不超过已完成的 5%；
+  - READY 向量数不少于 ACTIVE 空间的 95%。
 
-- `id`：完整 pipeline 标识，例如 `gemini:multimodal-embedding-004:1408:cosine:v1`。
-- `provider`：embedding provider，例如 `gemini`。
-- `model` 与 `model_version`。
-- `dimension`。
-- `space_kind`：`TEXT` 或 `MULTIMODAL`。
-- `metric`：`COSINE`、`INNER_PRODUCT` 或 `L2`。
-- `status`：`ACTIVE`、`DEPRECATED` 或 `EXPERIMENTAL`。
-- `config`：JSON 配置，包含支持的输入模态、query/document task type、归一化、预处理和 pipeline 说明。
+  不满足时空间停在 BUILDING，`/api/ai/status` 返回 `blocked`（`too_many_failures` / `low_coverage`）。设置页的"重试失败项"会把失败的向量重新排队，覆盖不足时还会重新发起回填。
+- `status = RETIRED`：被替换下来的旧 ACTIVE 空间，向量保留 7 天，既不检索也不写入。期间重新选择它的模型，会直接把它恢复为 BUILDING，只补齐这段时间的变化，不需要重新计算全部向量。过期后由 embedding worker 删除。每个角色最多一个 RETIRED。
+- `model_id`：提供该空间向量的模型；同一空间换供应商只更新这里，不重建。
+- `backfill_task_id`：把整个媒体库重新处理一遍的 AI 任务（按页发现媒体）。
+
+切换期间 enrichment 同时写 ACTIVE 与 BUILDING，检索只读 ACTIVE，因此搜索不中断。
 
 ### 4.2 `asset_search_document`
 
@@ -150,6 +143,8 @@ MVP 会在 `apps/server/src/db/schema/index.ts` 中引入以下逻辑表。
 - AI tags
 - author name
 - AI metadata 中的 OCR 和 caption
+
+`content` 只存各字段的值，每行一个，不带字段名。如果带上 `Title:` 这类标签，搜索 "title" 就会命中所有文档。不论媒体库是否配置了 AI，每个被索引的媒体都会写入搜索文档；图像描述失败也不会阻止写入。文档使用当前最合适的已有描述，新描述生成后会重写文档。
 
 推荐唯一约束：
 
@@ -188,32 +183,36 @@ gemini:gemini-2.5-flash:image-metadata:v1
 (entity_type, entity_id, metadata_pipeline_id)
 ```
 
+搜索文档和结果说明优先使用当前描述管线的结果；当前管线还没有结果时，使用较早管线中最新的结果。这样在更换模型或语言、重新描述整个库期间，描述依然可以被搜索到。当前管线为某个媒体写入结果后，该媒体在旧管线中的行会被删除。
+
 ### 4.4 `asset_embedding`
 
-保存帖子和媒体生成的向量。
+既是向量结果表，也是向量请求队列：一行先以 `PENDING` 入队，由 embedding worker 填入向量后变为 `READY`。
 
 关键字段：
 
-- `entity_type`, `entity_id`。
-- `library_id`，用于检索前预过滤。
-- `document_id`，在关联 `asset_search_document` 时使用。
-- `embedding_space_id`。
-- `embedding_role`，例如 `CONTENT_TEXT`、`AI_CAPTION`、`IMAGE_PRIMARY`、`VIDEO_KEYFRAME`、`OCR_TEXT`。
-- `input_modality`，例如 `TEXT`、`IMAGE`、`VIDEO_FRAME`、`AUDIO`。
-- `dimension`。
-- `embedding`，使用无固定维度的 pgvector `vector` 类型。
-- `content_hash`，用于幂等处理。
-- `source_file_id`，用于文件型媒体 embedding。
-- `embedding_status`，例如 `READY`、`STALE`、`FAILED`、`DISABLED`。
-- 生命周期字段。
+- `entity_type`, `entity_id`, `library_id`（检索前预过滤）, `document_id`。
+- `embedding_space_id`, `embedding_role`（`AI_CAPTION`、`IMAGE_PRIMARY` 等）, `input_modality`, `dimension`。
+- `embedding`：无固定维度的 `halfvec`，排队期间为 null。
+- `content_hash`：本行自身输入的哈希（图像为源文件哈希，文本为实际向量化的文本）。
+- `source_file_id`：图像输入；`input_text` / `input_title`：文本输入，向量写入后清空。
+- `embedding_status`：`PENDING`、`READY`、`STALE`（同空间同角色被新输入取代）、`FAILED`（多次失败后放弃，可手动重试）。
+- 队列字段：`available_at`（可领取时间，领取时前推作为租约）、`attempt_count`、`last_error`。
 
-推荐唯一约束：
+唯一约束：
 
 ```text
 (entity_type, entity_id, embedding_space_id, embedding_role, content_hash)
 ```
 
-`content_hash` 应为非空；或者 unique index 必须使用 `NULLS NOT DISTINCT`。否则 PostgreSQL 会允许多条 `NULL` hash 的重复记录。
+### 4.5 向量队列
+
+- enrichment 只负责图像描述和搜索文档，并为每个写入中的空间登记待计算行；新行完成前，旧的 `READY` 向量继续服务检索。
+- embedding worker（每个实例 2 个循环）按「媒体库 + 空间 + 模态」领取一批，批量大小取决于供应商（文本最多 64 条，DashScope 20 条；Gemini 图像 6 张，其他图像 1 张）。
+- 失败过的行单独重试，避免一条坏输入拖累整批；被限流的批次延后且不计重试次数。
+- 新任务入队后通过 Redis 发布唤醒所有实例，另有 10 秒轮询兜底。
+- 回收站中媒体的待计算向量会暂停，恢复后继续；它们不阻塞空间切换，也不计入进度。永久删除媒体时，同一事务内删除其向量、搜索文档和图像描述。
+- 文本输入按模型 `maxInputTokens` 的约 90% 截断，采用保守估算（中日韩字符每字 1.5 token，其他每 3 字符 1 token）；文档中标题和标签排在 OCR 之前，超长时先截掉尾部。
 
 ---
 
@@ -221,45 +220,26 @@ gemini:gemini-2.5-flash:image-metadata:v1
 
 ### 5.1 Generic Vector Column
 
-使用单个无固定维度的 pgvector 列：
+使用单个不定维的半精度 pgvector 列：
 
 ```sql
-embedding vector NOT NULL
+embedding halfvec NOT NULL,
+CONSTRAINT asset_emb_dimension_check CHECK (vector_dims(embedding) = dimension)
 ```
 
-实际维度存入 `dimension` 并进行校验：
-
-```sql
-ALTER TABLE asset_embedding
-ADD CONSTRAINT check_vector_dims
-CHECK (vector_dims(embedding) = dimension);
-```
-
-应用层也必须在写库前校验 provider 输出维度。数据库约束是最后一道防线，不应作为主要校验机制。
+Provider adapter 在写库前按模型定义校验返回的维度，数据库约束是最后一道防线。`halfvec` 存储减半，并把 HNSW 的维度上限从 2000 提高到 4000。
 
 ### 5.2 Partial HNSW Indexes
 
-为不同模型空间创建独立 partial HNSW expression index：
+HNSW 需要固定维度，因此 schema 为每个支持的维度声明一个 partial expression index（`features/ai/model-schema.ts` 中的 `EMBEDDING_DIMENSIONS`：256、384、512、768、1024、1536、2048、2560、3072）。模型定义只能使用这些维度，原生维度更高的模型通过 MRL 截断。
 
 ```sql
-CREATE INDEX IF NOT EXISTS asset_embedding_gemini_mm_1408_hnsw
-ON asset_embedding
-USING hnsw ((embedding::vector(1408)) vector_cosine_ops)
-WHERE embedding_space_id = 'gemini:multimodal-embedding-004:1408:cosine:v1'
-  AND dimension = 1408
-  AND embedding_status = 'READY'
-  AND delete_status = 'ACTIVE';
-
-CREATE INDEX IF NOT EXISTS asset_embedding_gemini_text_768_hnsw
-ON asset_embedding
-USING hnsw ((embedding::vector(768)) vector_cosine_ops)
-WHERE embedding_space_id = 'gemini:text-embedding-004:768:cosine:v1'
-  AND dimension = 768
-  AND embedding_status = 'READY'
-  AND delete_status = 'ACTIVE';
+CREATE INDEX asset_emb_hnsw_1024 ON asset_embedding
+USING hnsw ((embedding::halfvec(1024)) halfvec_cosine_ops)
+WHERE dimension = 1024;
 ```
 
-查询条件应尽量与 partial index predicate 保持一致。
+查询使用相同的字面量维度做类型转换，过滤 `dimension = <字面量>`，按距离 `ORDER BY ... LIMIT`，距离阈值在取回 top-k 之后再应用。空间、角色、媒体库等过滤条件依靠 `hnsw.iterative_scan = relaxed_order`（pgvector ≥ 0.8）在扫描中执行。
 
 ### 5.3 Extension 与迁移注意事项
 
@@ -358,8 +338,7 @@ MVP 搜索流程示意：
 
 ```ts
 async function search(params: SearchParams, userId: string) {
-    const accessibleLibraryIds = await resolveAccessibleLibraries(userId, params.library_id);
-    if (accessibleLibraryIds.length === 0) {
+    if (!(await canSearchLibrary(userId, params.library_id))) {
         return { list: [], total: 0 };
     }
 
@@ -367,9 +346,9 @@ async function search(params: SearchParams, userId: string) {
     const visualSpace = "gemini:multimodal-embedding-004:1408:cosine:v1";
 
     const [keywordResults, textSemanticResults, visualSemanticResults] = await Promise.all([
-        keywordSearch(params, accessibleLibraryIds),
-        params.q ? textSemanticSearch(params.q, textSpace, accessibleLibraryIds) : [],
-        params.q ? visualSemanticSearch(params.q, visualSpace, accessibleLibraryIds) : [],
+        keywordSearch(params, params.library_id),
+        params.q ? textSemanticSearch(params.q, textSpace, params.library_id) : [],
+        params.q ? visualSemanticSearch(params.q, visualSpace, params.library_id) : [],
     ]);
 
     return reciprocalRankFusion([keywordResults, textSemanticResults, visualSemanticResults], {
@@ -382,11 +361,17 @@ async function search(params: SearchParams, userId: string) {
 
 关键细节：
 
-- 关键词搜索最适合精确名称、原文、作者名、品牌名和平台标识。
+- 关键词搜索最适合精确名称、原文、作者名、品牌名和平台标识。它对查询做字面匹配（转义 `%` 和 `_`），通过 trigram GIN 索引匹配标题和正文，排序时标题命中优先，其次按 `word_similarity`，因此它在 RRF 中的名次有实际意义。
 - 文本语义搜索用于拼接文档上的同义表达与概念匹配。
 - 视觉/多模态搜索用于风格、氛围、色彩、构图和视觉语言描述。
 - 向量通道应先取多于最终页面大小的候选，再进入 RRF。
 - 混合搜索中的 `total` 不一定是数据库全量精确总数；如果未实现精确分页，应明确它是候选数量，或改用 `hasMore`。
+- 查询向量按「向量空间 + 查询文本」缓存 10 分钟：多个角色共用同一模型时只计算一次，翻页时直接复用。
+- 每路语义检索都会丢弃超过模型 `matchDistance` 的结果（`text` 用于文本对文本，`image` 用于文本对图像，默认 0.5 和 0.6）。阈值可在模型上直接修改，无需重建向量。
+- 媒体库绑定了重排序模型时，融合后的前 50 个候选会按其搜索文档文本交给重排序模型重新排序（Cohere 格式的 `/rerank`），其余保持融合顺序；重排序失败时保留融合顺序。得分会缓存，翻页只重排一次，并通过 `matched_details.rerank` 返回。
+- 某个 AI 通道本该参与却没有参与时（绑定的模型无法解析、调用失败、被限流），搜索照常返回其余通道的结果，并在 `degraded` 中列出 `{ channel, reason }`。`channel` 取 `text_semantic` / `visual_semantic` / `rerank`，AI 配置整体无法加载时为 `ai`；`reason` 是错误分类（如 `CONFIGURATION`、`AUTHENTICATION`、`THROTTLED`）。前端据此在结果上方提示"结果可能不完整"。
+- 结果只返回结构化的 `matched_details`，由客户端按浏览者的语言渲染说明。
+- 图像描述使用媒体库的 `ai_language` 输出（OCR 保留原文）。语言属于描述管线标识的一部分，修改后会对整个库重新生成描述。
 
 ---
 

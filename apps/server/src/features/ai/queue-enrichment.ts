@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import {
     AssetAiMetadata,
     AsyncSubjectType,
@@ -17,6 +17,21 @@ import { AiService } from "./service";
 import { QueueAiError } from "./errors";
 import type { QueueAiInput } from "./schema";
 
+/**
+ * Re-processes every media item of a library (pages through them via unit discovery). Used
+ * when library-wide inputs change: a new embedding space, or the description language.
+ * Unchanged artifacts are reused, so only what actually changed reaches a provider.
+ */
+export async function queueLibraryAiEnrichment(libraryId: string, ownerId: string): Promise<string> {
+    const task = await JobManager.createTask({
+        type: AsyncTaskType.AI_ENRICH,
+        libraryId,
+        ownerId,
+        inputSnapshot: { scope: "library" },
+    });
+    return task.id;
+}
+
 export type QueueAiAuth = {
     ownerId: string;
     scopedLibraryId?: string | null;
@@ -29,7 +44,7 @@ export async function queueAiEnrichment(input: QueueAiInput, auth: QueueAiAuth) 
         const mediaList = await db
             .select({ id: Media.id })
             .from(Media)
-            .where(and(inArray(Media.post_id, input.post_ids), eq(Media.delete_status, DeleteStatus.ACTIVE)));
+            .where(and(inArray(Media.post_id, input.post_ids), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)));
         for (const media of mediaList) {
             targetMediaIds.add(media.id);
         }
@@ -39,7 +54,7 @@ export async function queueAiEnrichment(input: QueueAiInput, auth: QueueAiAuth) 
         const mediaList = await db
             .select({ id: Media.id })
             .from(Media)
-            .where(and(inArray(Media.id, input.media_ids), eq(Media.delete_status, DeleteStatus.ACTIVE)));
+            .where(and(inArray(Media.id, input.media_ids), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)));
         for (const media of mediaList) {
             targetMediaIds.add(media.id);
         }
@@ -50,10 +65,7 @@ export async function queueAiEnrichment(input: QueueAiInput, auth: QueueAiAuth) 
         return { count: 0, message: "No active media items found to enrich" };
     }
 
-    const mediaList = await db
-        .select({ id: Media.id, library_id: Media.library_id })
-        .from(Media)
-        .where(inArray(Media.id, mediaIds));
+    const mediaList = await db.select({ id: Media.id, library_id: Media.library_id }).from(Media).where(inArray(Media.id, mediaIds));
     const libraryIds = Array.from(new Set(mediaList.map((media) => media.library_id)));
 
     if (mediaList.length !== mediaIds.length) {
@@ -73,11 +85,17 @@ export async function queueAiEnrichment(input: QueueAiInput, auth: QueueAiAuth) 
         throw new QueueAiError("FORBIDDEN", "You do not have access to some of the libraries");
     }
 
+    const pipelineByLibrary = new Map<string, { pipelineId: string; model: string } | null>();
+    for (const libraryId of libraryIds) {
+        const aiService = await AiService.forLibrary(libraryId);
+        const pipelineId = aiService?.metadataPipelineId;
+        pipelineByLibrary.set(libraryId, aiService?.chatModelName && pipelineId ? { pipelineId, model: aiService.chatModelName } : null);
+    }
+
     const masterTask = await db.transaction(async (tx) => {
         for (const media of mediaList) {
-            const aiService = await AiService.forLibrary(media.library_id);
-            const metadataPipelineId = aiService?.metadataPipelineId || "default";
-            const model = aiService?.chatModelName || "none";
+            const pipeline = pipelineByLibrary.get(media.library_id);
+            if (!pipeline) continue;
 
             await tx
                 .insert(AssetAiMetadata)
@@ -85,8 +103,8 @@ export async function queueAiEnrichment(input: QueueAiInput, auth: QueueAiAuth) 
                     library_id: media.library_id,
                     entity_type: EntityType.MEDIA,
                     entity_id: media.id,
-                    metadata_pipeline_id: metadataPipelineId,
-                    model,
+                    metadata_pipeline_id: pipeline.pipelineId,
+                    model: pipeline.model,
                     processing_status: ProcessingStatus.PENDING,
                     last_error: null,
                 })

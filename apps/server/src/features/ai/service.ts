@@ -1,142 +1,155 @@
-import { embed } from "ai";
-import {
-    assertImageEmbeddingCapability,
-    assertImageWithinModelLimits,
-    assertTextEmbeddingCapability,
-    assertVisionCapability,
-    formatEmbeddingText,
-    warnIfTextMayExceedModelLimits,
-} from "./capabilities";
 import { IMAGE_METADATA_PIPELINE_VERSION, describeImageWithModel } from "./image-metadata";
-import { resolveAiProvider } from "./resolver";
-import type { AiProvider, AiProviderModelMappings, EmbedImageParams, EmbedTextParams, EmbeddingResult, ImageAiMetadata } from "./types";
+import { prepareImageForModel } from "./image-format";
+import { resolveAiConfig } from "./resolver";
+import { kv } from "@/global/kv";
+import { AiConfigurationError } from "./errors";
+import { createPromiseCache } from "./promise-cache";
+import { createProviderLimiter, createRedisRateLimitStore } from "./rate-limit";
+import type {
+    EmbedImageParams,
+    EmbedTextParams,
+    EmbeddingBindingRole,
+    EmbeddingResult,
+    EmbeddingRoleProviders,
+    ImageAiMetadata,
+    LanguageProvider,
+    RerankProvider,
+    ResolvedAiConfig,
+    TextEmbeddingProvider,
+    VisualEmbeddingProvider,
+} from "./types";
+
+const providerLimiter = createProviderLimiter(createRedisRateLimitStore(kv));
+
+/**
+ * Recent query vectors, keyed by embedding space and query text. A vector depends only on the
+ * space (model, dimension, template), never on the library or user, so entries are shared.
+ * Holds in-flight promises too, so concurrent identical queries make one provider call.
+ */
+const queryEmbeddingCache = createPromiseCache<EmbeddingResult>(10 * 60 * 1000, 500);
+
+/** Rerank scores per model, query and candidate list, so paging through results reranks once. */
+const rerankCache = createPromiseCache<number[]>(10 * 60 * 1000, 200);
+
+/**
+ * How callers react to a provider at its rate limit:
+ * - background: fail fast with AiThrottledError so the job system reschedules the unit;
+ * - interactive: wait briefly, since a user is waiting for the result.
+ */
+export type AiCallMode = "background" | "interactive";
+const MAX_WAIT_MS: Record<AiCallMode, number> = { background: 0, interactive: 3_000 };
 
 export class AiService {
     constructor(
-        readonly provider: AiProvider,
-        readonly mappings: AiProviderModelMappings = {},
+        readonly config: ResolvedAiConfig,
+        private readonly mode: AiCallMode = "background",
     ) {}
 
-    static async forLibrary(libraryId: string): Promise<AiService | null> {
-        const resolved = await resolveAiProvider({ libraryId });
+    static async forLibrary(libraryId: string, mode: AiCallMode = "background"): Promise<AiService | null> {
+        const resolved = await resolveAiConfig({ libraryId });
         if (!resolved) return null;
-        return new AiService(resolved.provider, resolved.mappings);
+        return new AiService(resolved, mode);
     }
 
-    get providerFingerprint(): string {
-        const chatModelName = this.provider.chatModelName;
-        const textEmbeddingModelName = this.provider.textEmbeddingModelName;
-        const visualEmbeddingModelName = this.provider.visualEmbeddingModelName;
+    private limited<T>(providerId: string, call: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+        const limits = this.config.limits[providerId];
+        if (!limits) {
+            throw new AiConfigurationError(`Provider ${providerId} has no resolved request limits.`);
+        }
+        return providerLimiter.run(providerId, limits, call, { maxWaitMs: MAX_WAIT_MS[this.mode], signal });
+    }
 
-        return [
-            this.provider.providerName,
-            `provider=${this.provider.id}`,
-            `chat=${chatModelName}->${this.mappings.describeImageMapTo || chatModelName}`,
-            `text=${textEmbeddingModelName}->${this.mappings.embeddingTextMapTo || textEmbeddingModelName}`,
-            `visual=${visualEmbeddingModelName}->${this.mappings.embeddingImageMapTo || visualEmbeddingModelName}`,
-        ].join("|");
+    get describeProvider(): LanguageProvider | null {
+        return this.config.describeProvider;
+    }
+
+    get textEmbedding(): EmbeddingRoleProviders<TextEmbeddingProvider> {
+        return this.config.textEmbedding;
+    }
+
+    get imageEmbedding(): EmbeddingRoleProviders<VisualEmbeddingProvider> {
+        return this.config.imageEmbedding;
     }
 
     get chatModelName(): string | null {
-        return this.provider.chatModelName;
+        return this.describeProvider?.modelName || null;
     }
 
-    get metadataPipelineId(): string {
-        return `${this.provider.providerName}:${this.chatModelName || "none"}:${IMAGE_METADATA_PIPELINE_VERSION}`;
+    /**
+     * Identifies stored image metadata by model, prompt version and output language, independent
+     * of the serving provider. Changing any of them regenerates descriptions.
+     */
+    get metadataPipelineId(): string | null {
+        return this.chatModelName ? `${this.chatModelName}:${IMAGE_METADATA_PIPELINE_VERSION}:${this.config.language}` : null;
     }
 
-    async embedText(params: EmbedTextParams): Promise<EmbeddingResult> {
-        const modelName = this.provider.textEmbeddingModelName;
-        if (!modelName) {
-            throw new Error(`The text embedding model is not configured for AI provider "${this.provider.providerName}".`);
+    /**
+     * Embeds a search query in the active space of `role`. Query vectors are cached per space and
+     * text, so roles sharing a space (one multimodal model) embed a query once, and paging through
+     * results reuses it.
+     */
+    async embedQuery(role: EmbeddingBindingRole, text: string, abortSignal?: AbortSignal): Promise<EmbeddingResult> {
+        const provider = this.config[role].active;
+        if (!provider) {
+            throw new AiConfigurationError(`No active ${role} space is configured for this library.`);
         }
-        const mapToId = this.mappings.embeddingTextMapTo;
-
-        const capabilities = assertTextEmbeddingCapability(modelName, mapToId);
-        const textValue = formatEmbeddingText(params, capabilities);
-        warnIfTextMayExceedModelLimits(textValue, capabilities);
-
-        const model = this.provider.textEmbeddingModel;
-        if (!model) {
-            throw new Error(`The text embedding model is not configured for AI provider "${this.provider.providerName}".`);
-        }
-
-        const { embedding } = await embed({
-            model,
-            value: textValue,
-        });
-
-        const dimension = embedding.length;
-        const spaceId = `${this.provider.providerName}:${modelName}:${dimension}:cosine:v1`;
-
-        return {
-            embedding,
-            spaceId,
-            dimension,
-        };
+        return queryEmbeddingCache.getOrCreate(`${provider.spaceId}\n${text}`, () =>
+            this.limited(provider.providerId, () => provider.embedText({ text, purpose: "QUERY", abortSignal }), abortSignal),
+        );
     }
 
-    async embedTextWithVisualModel(params: EmbedTextParams): Promise<EmbeddingResult> {
-        if (typeof this.provider.embedTextWithVisualModel === "function") {
-            return this.provider.embedTextWithVisualModel(params);
-        }
-
-        const modelName = this.provider.visualEmbeddingModelName;
-        if (!modelName) {
-            throw new Error(`The visual embedding model is not configured for AI provider "${this.provider.providerName}".`);
-        }
-        const mapToId = this.mappings.embeddingImageMapTo;
-
-        const capabilities = assertTextEmbeddingCapability(modelName, mapToId);
-        const textValue = formatEmbeddingText(params, capabilities);
-        warnIfTextMayExceedModelLimits(textValue, capabilities);
-
-        const model = this.provider.visualEmbeddingModel;
-        if (!model) {
-            throw new Error(`The visual embedding model is not configured for AI provider "${this.provider.providerName}".`);
-        }
-
-        const { embedding } = await embed({
-            model,
-            value: textValue,
-        });
-
-        const dimension = embedding.length;
-        const spaceId = `${this.provider.providerName}:${modelName}:${dimension}:cosine:v1`;
-
-        return {
-            embedding,
-            spaceId,
-            dimension,
-        };
+    get rerankProvider(): RerankProvider | null {
+        return this.config.rerankProvider;
     }
 
-    async embedImage(params: EmbedImageParams): Promise<EmbeddingResult> {
-        const modelName = this.provider.visualEmbeddingModelName;
-        if (!modelName) {
-            throw new Error(`The visual embedding model is not configured for AI provider "${this.provider.providerName}".`);
-        }
-        const mapToId = this.mappings.embeddingImageMapTo;
-
-        const capabilities = assertImageEmbeddingCapability(modelName, mapToId);
-        assertImageWithinModelLimits(params, capabilities);
-
-        return this.provider.embedImage(params);
+    /** Relevance scores of `documents` for `query`, keyed by `documentKeys` for caching. */
+    async rerank(query: string, documentKeys: string[], documents: string[], abortSignal?: AbortSignal): Promise<number[]> {
+        const provider = this.config.rerankProvider;
+        if (!provider) throw new AiConfigurationError("No rerank model is configured for this library.");
+        const key = `${provider.providerId}\n${provider.modelName}\n${query}\n${documentKeys.join(",")}`;
+        return rerankCache.getOrCreate(key, () =>
+            this.limited(provider.providerId, () => provider.rerank(query, documents, abortSignal), abortSignal),
+        );
     }
 
-    async describeImage(image: Buffer | Uint8Array | string, mimeType: string = "image/jpeg"): Promise<ImageAiMetadata> {
-        const modelName = this.provider.chatModelName;
-        if (!modelName) {
-            throw new Error(`The chat model for image description is not configured for AI provider "${this.provider.providerName}".`);
-        }
-        const mapToId = this.mappings.describeImageMapTo;
+    /** Embeds documents in one provider request; `params.length` must not exceed `provider.textBatchSize`. */
+    async embedDocuments(
+        provider: TextEmbeddingProvider,
+        params: EmbedTextParams[],
+        abortSignal?: AbortSignal,
+    ): Promise<EmbeddingResult[]> {
+        return this.limited(provider.providerId, () => provider.embedTexts(params, abortSignal), abortSignal);
+    }
 
-        assertVisionCapability(modelName, mapToId);
-        const model = this.provider.chatModel;
-        if (!model) {
-            throw new Error(`The chat model for image description is not configured for AI provider "${this.provider.providerName}".`);
-        }
+    /** Embeds images in one provider request; `images.length` must not exceed `provider.imageBatchSize`. */
+    async embedImages(
+        provider: VisualEmbeddingProvider,
+        images: EmbedImageParams[],
+        abortSignal?: AbortSignal,
+    ): Promise<EmbeddingResult[]> {
+        const prepared = await Promise.all(
+            images.map(async (image) => {
+                const converted = await prepareImageForModel(image.imageBuffer, image.mimeType, provider.capabilities.imageFormats);
+                return { imageBuffer: converted.image, mimeType: converted.mimeType };
+            }),
+        );
+        return this.limited(provider.providerId, () => provider.embedImages(prepared, abortSignal), abortSignal);
+    }
 
-        return describeImageWithModel(model, image, mimeType);
+    async describeImage(image: Buffer | Uint8Array, mimeType: string = "image/jpeg", abortSignal?: AbortSignal): Promise<ImageAiMetadata> {
+        const provider = this.describeProvider;
+        if (!provider) {
+            throw new AiConfigurationError("Image description provider is not configured for this library.");
+        }
+        const prepared = await prepareImageForModel(image, mimeType, provider.capabilities.imageFormats);
+        return this.limited(
+            provider.providerId,
+            () =>
+                describeImageWithModel(provider.chatModel, prepared.image, prepared.mimeType, this.config.language, {
+                    ...provider.describeOptions,
+                    abortSignal,
+                }),
+            abortSignal,
+        );
     }
 }

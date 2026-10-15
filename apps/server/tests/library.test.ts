@@ -8,6 +8,7 @@ const resolveSrc = (relativePath: string) => join(import.meta.dir, "..", relativ
 
 Object.assign(process.env, {
     AUTH_SECRET: "test-auth-secret",
+    SECRETS_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString("base64"),
     RESEND_API_KEY: "test-resend-key",
     RESEND_EMAIL_SENDER: "test@example.com",
     S3_ENDPOINT: "http://localhost:9000",

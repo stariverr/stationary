@@ -3,6 +3,7 @@ import * as v from "valibot";
 
 Object.assign(process.env, {
     AUTH_SECRET: "test-auth-secret",
+    SECRETS_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString("base64"),
     RESEND_API_KEY: "test-resend-key",
     S3_ENDPOINT: "http://localhost:9000",
     S3_ACCESS_KEY_ID: "test-access-key",

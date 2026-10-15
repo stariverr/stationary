@@ -1,6 +1,6 @@
 import { db } from "@/global/db";
 import { Post, DeleteStatus } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { AiEnrichmentService } from "@/features/ai/enrich";
 
 async function runBackfill() {
@@ -11,7 +11,7 @@ async function runBackfill() {
         const activePosts = await db
             .select({ id: Post.id, title: Post.title })
             .from(Post)
-            .where(eq(Post.delete_status, DeleteStatus.ACTIVE));
+            .where(and(eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time)));
 
         console.log(`[BACKFILL] Found ${activePosts.length} active posts to process.`);
 

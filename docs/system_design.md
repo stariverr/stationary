@@ -97,7 +97,7 @@ The user interface supports two primary data viewing flows:
 
 ## 5. Multitenancy & Sharing (User Group & Library)
 
-The system supports group collaboration using fine-grained permissions:
+The system supports group collaboration using fine-grained permissions. Ownership (who holds and pays for resources such as AI providers) is separate from access; see [ownership_and_teams.md](ownership_and_teams.md), including the planned team model.
 
 ### 5.1 Resource Entity
 - **Library**: The physical isolation boundary for assets. All posts and media files must specify their parent `library_id` on creation.

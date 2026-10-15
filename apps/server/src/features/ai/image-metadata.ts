@@ -1,19 +1,39 @@
 import { generateText, jsonSchema, Output, type LanguageModel } from "ai";
 import { toJsonSchema } from "@valibot/to-json-schema";
 import * as v from "valibot";
-import type { ImageAiMetadata } from "./types";
+import type { DescribeImageRequestOptions, ImageAiMetadata } from "./types";
+import { AiProviderError } from "./errors";
 
-export const IMAGE_METADATA_PIPELINE_VERSION = "image-metadata:zh-en:v1";
+/** Bump whenever the prompt or schema changes; stored metadata of older versions is regenerated. */
+export const IMAGE_METADATA_PIPELINE_VERSION = "image-metadata:v2";
 
-const IMAGE_METADATA_PROMPT =
-    "Analyze the provided image in detail. Extract structured metadata representing the image content. " +
-    "Provide: \n" +
-    "1. An accurate descriptive caption containing rich keywords suitable for search.\n" +
-    "2. A concise summary.\n" +
-    "3. Visual tags, physical objects identified, and dominant colors.\n" +
-    "4. Aesthetic/artistic styles (e.g. tech, minimal, cyberpunk, pastel).\n" +
-    "5. Scene description (e.g. rainy street, coffee shop, neon lights, desk setup).\n" +
-    "6. Full OCR text of any visible writing, characters, or text. If no text exists, leave ocrText empty.";
+/** English name of a BCP 47 language tag, e.g. "zh-Hans" → "Chinese, Simplified". */
+export function languageName(language: string): string {
+    return new Intl.DisplayNames(["en"], { type: "language" }).of(language) ?? language;
+}
+
+/** True for well-formed BCP 47 tags that have a known display name. */
+export function isSupportedLanguage(language: string): boolean {
+    try {
+        return Intl.getCanonicalLocales(language).length === 1 && languageName(language) !== language;
+    } catch {
+        return false;
+    }
+}
+
+function buildImageMetadataPrompt(language: string): string {
+    return (
+        "Analyze the provided image in detail. Extract structured metadata representing the image content. " +
+        "Provide: \n" +
+        "1. An accurate descriptive caption containing rich keywords suitable for search.\n" +
+        "2. Visual tags, physical objects identified, and dominant colors.\n" +
+        "3. Aesthetic/artistic styles (e.g. tech, minimal, cyberpunk, pastel).\n" +
+        "4. Scene description (e.g. rainy street, coffee shop, neon lights, desk setup).\n" +
+        "5. Full OCR text of any visible writing, characters, or text. If no text exists, leave ocrText empty.\n" +
+        `Write the caption, tags, objects, colors, styles and scene in ${languageName(language)} (${language}). ` +
+        "Transcribe ocrText exactly as it appears in the image, in its original language; never translate it."
+    );
+}
 
 const imageMetadataSchema = v.object({
     caption: v.string(),
@@ -25,23 +45,39 @@ const imageMetadataSchema = v.object({
     ocrText: v.string(),
 });
 
-const ImageMetadataOutput = Output.object({
-    schema: jsonSchema(toJsonSchema(imageMetadataSchema) as any),
-});
-
-function toImageContent(
-    image: Buffer | Uint8Array | string,
-    mimeType: string = "image/jpeg",
-): {
-    type: "file";
-    data: URL | Buffer;
-    mediaType: string;
-} {
-    const validMime = mimeType && mimeType.includes("/") ? mimeType : "image/jpeg";
-    if (typeof image === "string") {
-        return { type: "file", data: new URL(image), mediaType: validMime };
+/**
+ * OpenAI strict structured outputs require `additionalProperties: false` on every
+ * object node. @valibot/to-json-schema does not emit it, so add it recursively.
+ */
+function enforceStrictObjectSchema(node: unknown): unknown {
+    if (Array.isArray(node)) {
+        return node.map(enforceStrictObjectSchema);
     }
+    if (node && typeof node === "object") {
+        const result: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(node)) {
+            result[key] = enforceStrictObjectSchema(value);
+        }
+        if (result.type === "object" && result.additionalProperties === undefined) {
+            result.additionalProperties = false;
+        }
+        return result;
+    }
+    return node;
+}
 
+function buildImageMetadataOutput(strict: boolean) {
+    const jsonSchemaValue = toJsonSchema(imageMetadataSchema);
+    return Output.object({
+        schema: jsonSchema((strict ? enforceStrictObjectSchema(jsonSchemaValue) : jsonSchemaValue) as any),
+    });
+}
+
+const StrictImageMetadataOutput = buildImageMetadataOutput(true);
+const DefaultImageMetadataOutput = buildImageMetadataOutput(false);
+
+function toImageContent(image: Buffer | Uint8Array, mimeType: string = "image/jpeg"): { type: "file"; data: Buffer; mediaType: string } {
+    const validMime = mimeType && mimeType.includes("/") ? mimeType : "image/jpeg";
     return { type: "file", data: Buffer.from(image), mediaType: validMime };
 }
 
@@ -57,21 +93,34 @@ function normalizeImageAiMetadata(output: Partial<ImageAiMetadata>): ImageAiMeta
     };
 }
 
+/** Describes an image; descriptive fields are written in `language` (BCP 47). */
 export async function describeImageWithModel(
     model: LanguageModel,
-    image: Buffer | Uint8Array | string,
-    mimeType: string = "image/jpeg",
+    image: Buffer | Uint8Array,
+    mimeType: string,
+    language: string,
+    request: DescribeImageRequestOptions = {},
 ): Promise<ImageAiMetadata> {
     const { output } = await generateText({
         model,
-        output: ImageMetadataOutput,
+        maxRetries: 0,
+        abortSignal: request.abortSignal,
+        output: request.strictJsonSchema === false ? DefaultImageMetadataOutput : StrictImageMetadataOutput,
+        maxOutputTokens: request.maxOutputTokens,
+        reasoning: request.reasoning,
+        providerOptions: request.providerOptions as any,
         messages: [
             {
                 role: "user",
-                content: [{ type: "text", text: IMAGE_METADATA_PROMPT }, toImageContent(image, mimeType)],
+                content: [{ type: "text", text: buildImageMetadataPrompt(language) }, toImageContent(image, mimeType)],
             },
         ],
     });
 
-    return normalizeImageAiMetadata(output as any);
+    const parsed = v.safeParse(imageMetadataSchema, output);
+    if (!parsed.success) {
+        throw new AiProviderError("UNSUPPORTED", "AI provider returned invalid image metadata output");
+    }
+
+    return normalizeImageAiMetadata(parsed.output);
 }

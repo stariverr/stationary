@@ -21,12 +21,19 @@ RUN bun run build
 FROM base AS release
 ENV NODE_ENV=production
 
+COPY package.json bun.lock bunfig.toml .npmrc ./
+COPY apps/server/package.json apps/server/package.json
+COPY apps/web/package.json apps/web/package.json
+RUN --mount=type=cache,id=stationary-server-bun,target=/root/.bun/install/cache \
+    bun install --frozen-lockfile --production --filter @stationary/server
+
 # Install FFmpeg and ImageMagick for media cover frame extraction
 USER root
 RUN apk add --no-cache ffmpeg imagemagick imagemagick-heic imagemagick-jxl
 USER bun
 
-COPY --from=build /app/apps/server/dist/index.js index.js
+COPY --from=build /app/apps/server/dist/index.js apps/server/dist/index.js
+WORKDIR /app/apps/server
 
 EXPOSE 9400
-ENTRYPOINT [ "bun", "run", "--bun", "index.js" ]
+ENTRYPOINT [ "bun", "run", "--bun", "dist/index.js" ]

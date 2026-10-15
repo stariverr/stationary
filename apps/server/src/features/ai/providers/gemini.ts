@@ -1,101 +1,113 @@
-import ky from "ky";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import type { EmbeddingModel, LanguageModel } from "ai";
-import type { AiProvider, EmbedImageParams, EmbeddingResult } from "../types";
+import type { LanguageModel } from "ai";
+import type { EmbeddingModelCapabilities, GeneratedTextModelCapabilities } from "../model-schema";
+import type {
+    DescribeImageRequestOptions,
+    EmbedImageParams,
+    EmbeddingResult,
+    LanguageProvider,
+    ResolvedModelConfig,
+    VisualEmbeddingProvider,
+} from "../types";
+import { AiConfigurationError } from "../errors";
+import { toEmbeddingResult } from "../utils";
+import { guardedFetch } from "./egress";
+import { postJson } from "./http";
+import { SdkTextEmbeddingProvider } from "./sdk-embedding";
 
-const GEMINI_CHAT_MODEL = "gemini-3.1-flash-lite";
-const GEMINI_TEXT_EMBEDDING_MODEL = "gemini-embedding-2";
-const GEMINI_MULTIMODAL_EMBEDDING_MODEL = "gemini-embedding-2";
-const GEMINI_MULTIMODAL_EMBEDDING_DIMENSION = 1408;
-
-interface GeminiEmbedResponse {
-    embedding?: {
-        values?: number[];
-    };
+export function geminiApiBaseUrl(baseUrl: string): string {
+    const normalized = (baseUrl || "https://generativelanguage.googleapis.com").replace(/\/+$/, "");
+    return normalized.endsWith("/v1beta") ? normalized : `${normalized}/v1beta`;
 }
 
-export class GeminiProvider implements AiProvider {
-    readonly id = `gemini:${GEMINI_TEXT_EMBEDDING_MODEL}:${GEMINI_MULTIMODAL_EMBEDDING_MODEL}:${GEMINI_CHAT_MODEL}`;
-    readonly providerName = "gemini";
+/**
+ * Google Gemini speaks its own wire protocol: the AI SDK covers chat + text embeddings,
+ * while image embeddings use the native embedContent REST endpoint.
+ */
+export class GeminiLanguageProvider implements LanguageProvider {
+    readonly providerId: string;
+    readonly providerName: string;
+    readonly modelName: string;
     readonly chatModel: LanguageModel;
-    readonly chatModelName = GEMINI_CHAT_MODEL;
-    readonly textEmbeddingModel: EmbeddingModel;
-    readonly textEmbeddingModelName = GEMINI_TEXT_EMBEDDING_MODEL;
-    readonly visualEmbeddingModel: EmbeddingModel;
-    readonly visualEmbeddingModelName = GEMINI_MULTIMODAL_EMBEDDING_MODEL;
-    private apiKey?: string | null;
-    private baseUrl?: string | null;
-    private google: ReturnType<typeof createGoogleGenerativeAI>;
+    readonly capabilities: GeneratedTextModelCapabilities;
+    readonly describeOptions: DescribeImageRequestOptions;
 
-    constructor(options: { apiKey?: string | null; baseUrl?: string | null } = {}) {
-        this.apiKey = options.apiKey;
-        this.baseUrl = options.baseUrl;
+    constructor(config: ResolvedModelConfig) {
+        const spec = config.capabilities as GeneratedTextModelCapabilities;
 
-        this.google = createGoogleGenerativeAI({
-            apiKey: this.apiKey || "",
-            baseURL: this.baseUrl || "https://generativelanguage.googleapis.com/v1beta",
+        this.providerId = config.providerId;
+        this.providerName = config.providerName;
+        this.modelName = config.modelName;
+        this.capabilities = spec;
+        this.describeOptions = {
+            maxOutputTokens: spec.maxOutputTokens,
+            reasoning: spec.reasoning,
+            providerOptions: spec.options ? { google: spec.options } : undefined,
+            // Gemini rejects additionalProperties in its response schema.
+            strictJsonSchema: false,
+        };
+
+        const google = createGoogleGenerativeAI({
+            apiKey: config.apiKey || "",
+            baseURL: geminiApiBaseUrl(config.baseUrl),
+            fetch: guardedFetch as typeof fetch,
         });
+        this.chatModel = google.chat(this.modelName);
+    }
+}
 
-        this.chatModel = this.google.chat(GEMINI_CHAT_MODEL);
-        this.textEmbeddingModel = this.google.embeddingModel(GEMINI_TEXT_EMBEDDING_MODEL);
-        this.visualEmbeddingModel = this.google.embeddingModel(GEMINI_MULTIMODAL_EMBEDDING_MODEL);
+function embeddingOptions(spec: EmbeddingModelCapabilities) {
+    return spec.mrl ? { google: { outputDimensionality: spec.dimension } } : undefined;
+}
+
+function createEmbeddingModel(config: ResolvedModelConfig) {
+    return createGoogleGenerativeAI({
+        apiKey: config.apiKey || "",
+        baseURL: geminiApiBaseUrl(config.baseUrl),
+        fetch: guardedFetch as typeof fetch,
+    }).embeddingModel(config.modelName);
+}
+
+export class GeminiTextEmbeddingProvider extends SdkTextEmbeddingProvider {
+    constructor(config: ResolvedModelConfig) {
+        super(config, createEmbeddingModel(config), embeddingOptions(config.capabilities as EmbeddingModelCapabilities));
+    }
+}
+
+/** Gemini image embeddings use the native batchEmbedContents endpoint, one request per batch. */
+export class GeminiVisualEmbeddingProvider extends GeminiTextEmbeddingProvider implements VisualEmbeddingProvider {
+    /** Keeps inline image payloads well below the request size limit. */
+    readonly imageBatchSize = 6;
+    private readonly apiKey: string;
+    private readonly baseUrl: string;
+
+    constructor(config: ResolvedModelConfig) {
+        super(config);
+        this.apiKey = config.apiKey || "";
+        this.baseUrl = geminiApiBaseUrl(config.baseUrl);
     }
 
-    private getApiKey(): string {
-        const apiKey = this.apiKey;
-        if (!apiKey) {
-            throw new Error("GEMINI_API_KEY is not configured for this library.");
-        }
-        return apiKey;
-    }
-
-    private getBaseUrl(): string {
-        return (this.baseUrl || "https://generativelanguage.googleapis.com").replace(/\/$/, "");
-    }
-
-    async embedImage(params: EmbedImageParams): Promise<EmbeddingResult> {
-        const apiKey = this.getApiKey();
-        const baseUrl = this.getBaseUrl();
-        const model = GEMINI_MULTIMODAL_EMBEDDING_MODEL;
-        const dimension = GEMINI_MULTIMODAL_EMBEDDING_DIMENSION;
-        const spaceId = `${this.providerName}:${model}:${dimension}:cosine:v1`;
-
-        const url = `${baseUrl}/v1beta/models/${model}:embedContent?key=${apiKey}`;
-        const base64Data = Buffer.from(params.imageBuffer).toString("base64");
-
-        const requestBody = {
-            content: {
-                parts: [
-                    {
-                        inlineData: {
-                            mimeType: params.mimeType,
-                            data: base64Data,
-                        },
+    async embedImages(params: EmbedImageParams[], abortSignal?: AbortSignal): Promise<EmbeddingResult[]> {
+        const model = `models/${this.modelName}`;
+        const resJson = await postJson<{ embeddings?: Array<{ values?: number[] }> }>(`${this.baseUrl}/${model}:batchEmbedContents`, {
+            headers: { "Content-Type": "application/json", "x-goog-api-key": this.apiKey },
+            json: {
+                requests: params.map((image) => ({
+                    model,
+                    content: {
+                        parts: [{ inlineData: { mimeType: image.mimeType, data: Buffer.from(image.imageBuffer).toString("base64") } }],
                     },
-                ],
+                    ...(this.capabilities.mrl ? { outputDimensionality: this.capabilities.dimension } : {}),
+                })),
             },
-        };
-
-        const resJson = await ky
-            .post(url, {
-                json: requestBody,
-            })
-            .json<GeminiEmbedResponse>();
-
-        const vector = resJson?.embedding?.values;
-
-        if (!Array.isArray(vector)) {
-            throw new Error(`Invalid response format from Gemini embedImage: ${JSON.stringify(resJson)}`);
+            signal: abortSignal,
+        });
+        const embeddings = resJson?.embeddings ?? [];
+        if (embeddings.length !== params.length) {
+            throw new AiConfigurationError(
+                `Model '${this.modelName}' returned ${embeddings.length} embeddings for ${params.length} images.`,
+            );
         }
-
-        if (vector.length !== dimension) {
-            throw new Error(`Gemini embedImage dimension mismatch. Expected ${dimension}, got ${vector.length}.`);
-        }
-
-        return {
-            embedding: vector,
-            spaceId,
-            dimension,
-        };
+        return embeddings.map((embedding) => toEmbeddingResult(embedding.values, this.modelName, this.capabilities));
     }
 }

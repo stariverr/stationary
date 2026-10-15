@@ -4,31 +4,77 @@ import {
     Media,
     AssetSearchDocument,
     AssetAiMetadata,
-    AssetEmbedding,
     DeleteStatus,
     ProcessingStatus,
-    EmbeddingStatus,
-    TrackType,
-    TrackPurpose,
-    MediaType,
     EntityType,
     ModalityType,
     EmbeddingRole,
-    Library,
     PostTag,
+    MediaTag,
     Tag,
     TagStatus,
 } from "@/db/schema";
-import { eq, and, sql, inArray, or } from "drizzle-orm";
+import { eq, and, isNull, isNotNull, sql, inArray, or, ne } from "drizzle-orm";
 import { s3 } from "@/global/s3";
+import { enqueueEmbeddings, notifyEmbeddingQueue } from "./embedding-queue";
 import { AiService } from "./service";
+import { resolveAiImageSource } from "./image-source";
 import { computeSha256 } from "./utils";
-import { buildCdnUrl } from "@/lib/utils/cdn";
-import { env } from "@/global/env";
+import type { ImageAiMetadata } from "./types";
 
-type EnrichmentPost = Omit<Pick<typeof Post.$inferSelect, "id" | "source" | "title" | "description" | "author_name">, "id"> & {
+type EnrichmentPost = Omit<
+    Pick<
+        typeof Post.$inferSelect,
+        "id" | "source" | "eid" | "title" | "description" | "author_name" | "author_external_id" | "url" | "published_time"
+    >,
+    "id"
+> & {
     id: string | null;
 };
+
+type StoredAiMetadata = typeof AssetAiMetadata.$inferSelect;
+
+const emptyImageMetadata: ImageAiMetadata = {
+    caption: "",
+    tags: [],
+    objects: [],
+    colors: [],
+    styles: [],
+    scene: "",
+    ocrText: "",
+};
+
+/**
+ * The stored description a media item is searched and shown by: the current pipeline's result,
+ * otherwise the newest result of an earlier pipeline (e.g. while a language change re-describes the
+ * library). Rows without `input_hash` hold no result yet.
+ */
+export function selectStoredMetadata<
+    T extends Pick<StoredAiMetadata, "metadata_pipeline_id" | "input_hash" | "update_time" | "create_time">,
+>(rows: T[], currentPipelineId: string | null): T | null {
+    const results = rows.filter((row) => row.input_hash !== null);
+    const current = results.find((row) => row.metadata_pipeline_id === currentPipelineId);
+    if (current) return current;
+    const timeOf = (row: T) => (row.update_time ?? row.create_time).epochMilliseconds;
+    return results.sort((a, b) => timeOf(b) - timeOf(a))[0] ?? null;
+}
+
+function toImageAiMetadata(row: StoredAiMetadata): ImageAiMetadata {
+    return {
+        caption: row.caption,
+        tags: row.tags,
+        objects: row.objects,
+        colors: row.colors,
+        styles: row.styles,
+        scene: row.scene,
+        ocrText: row.ocr_text,
+    };
+}
+
+/** Searchable text of a media item: one non-empty field per line, duplicates dropped. */
+export function buildSearchContent(fields: Array<string | null | undefined>): string {
+    return [...new Set(fields.map((field) => field?.trim() ?? "").filter(Boolean))].join("\n");
+}
 
 export const AiEnrichmentService = {
     /**
@@ -39,7 +85,7 @@ export const AiEnrichmentService = {
         const postList = await db
             .select()
             .from(Post)
-            .where(and(eq(Post.id, postId), eq(Post.delete_status, DeleteStatus.ACTIVE)))
+            .where(and(eq(Post.id, postId), eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time)))
             .limit(1);
         const post = postList[0];
         if (!post) {
@@ -47,11 +93,11 @@ export const AiEnrichmentService = {
             return;
         }
 
-        // 2. Fetch active Media records for the Post
+        // 2. Fetch active Media records for the Post (recycled media are excluded)
         const mediaList = await db
             .select()
             .from(Media)
-            .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE)));
+            .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)));
 
         console.log(`[AI ENRICH] Enriching post ${postId} containing ${mediaList.length} active media items.`);
 
@@ -65,62 +111,74 @@ export const AiEnrichmentService = {
     },
 
     /**
-     * Enrich a single Media item (Image or Video Cover)
+     * Indexes a single Media item and, when the library has AI configured, enriches it from its best
+     * available cover or image content.
+     *
+     * Each artifact is keyed by its own input so unrelated edits never redo expensive work:
+     * - image metadata: describe pipeline + source image hash
+     * - image embedding: embedding space + source image hash
+     * - search document / text embedding: the document text (and the embedding space)
+     *
+     * The search document is always written, with or without AI: keyword search depends on it, and a
+     * failed description must not hide the item. It carries the best stored description; once a new
+     * description lands, the document and its text vectors follow. Embeddings are queued for every
+     * space the library writes (active and building) and computed in batches by the embedding worker.
      */
-    async enrichMediaItem(media: typeof Media.$inferSelect, post: EnrichmentPost): Promise<void> {
-        // 1. Resolve targeted Track (COVER for Videos, CONTENT IMAGE for others)
-        const isVideo = media.type === MediaType.VIDEO;
-        const trackType = TrackType.IMAGE;
-        const trackPurpose = isVideo ? TrackPurpose.COVER : TrackPurpose.CONTENT;
-
-        // Fetch Library to resolve owner_id
-        const libraryRows = await db.select().from(Library).where(eq(Library.id, media.library_id)).limit(1);
-        const library = libraryRows[0];
-        if (!library) {
-            console.log(`[AI ENRICH] Target library not found for media ${media.id}. skipping.`);
-            return;
-        }
-
+    async enrichMediaItem(media: typeof Media.$inferSelect, post: EnrichmentPost, abortSignal?: AbortSignal): Promise<void> {
         const aiService = await AiService.forLibrary(media.library_id);
-        if (!aiService) {
-            console.log(`[AI ENRICH] AI is not configured for library ${media.library_id}. Skipping.`);
-            return;
+        const describeProvider = aiService?.describeProvider ?? null;
+        const metadataPipelineId = aiService?.metadataPipelineId ?? null;
+        const textSpaces = aiService
+            ? [aiService.textEmbedding.active, aiService.textEmbedding.building].filter((provider) => provider !== null)
+            : [];
+        const imageSpaces = aiService
+            ? [aiService.imageEmbedding.active, aiService.imageEmbedding.building].filter((provider) => provider !== null)
+            : [];
+
+        const imageSource = describeProvider || imageSpaces.length > 0 ? await resolveAiImageSource(media.id, media.library_id) : null;
+        const sourceFile = imageSource?.file;
+        const sourceHash = sourceFile ? sourceFile.hash || `file:${sourceFile.id}` : null;
+
+        const storedMetadata = await db
+            .select()
+            .from(AssetAiMetadata)
+            .where(
+                and(
+                    eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
+                    eq(AssetAiMetadata.entity_id, media.id),
+                    isNotNull(AssetAiMetadata.input_hash),
+                ),
+            );
+        const currentMetadata = storedMetadata.find((row) => row.metadata_pipeline_id === metadataPipelineId);
+        const canReuseMetadata = Boolean(sourceHash && currentMetadata?.input_hash === sourceHash);
+        const shouldRunDescription = Boolean(describeProvider && sourceFile && !canReuseMetadata);
+
+        let described: ImageAiMetadata | null = null;
+        let describeError: unknown = null;
+
+        if (aiService && sourceFile && shouldRunDescription) {
+            console.log(`[AI ENRICH] Running image analysis for media ${media.id}...`);
+            const presignedUrl = await s3.getPresignedUrl(sourceFile.path, {
+                bucket: sourceFile.bucket,
+                expiresInSeconds: 600,
+            });
+            const downloadResponse = await fetch(presignedUrl, { signal: abortSignal });
+            if (!downloadResponse.ok) {
+                throw new Error(`Failed to download physical file from S3: ${downloadResponse.statusText}`);
+            }
+            const imageBuffer = new Uint8Array(await downloadResponse.arrayBuffer());
+
+            try {
+                described = await aiService.describeImage(imageBuffer, sourceFile.mime_type, abortSignal);
+            } catch (error) {
+                describeError = error;
+            }
         }
-        const metadataPipelineId = aiService.metadataPipelineId;
 
-        const track = await db.query.Track.findFirst({
-            where: {
-                media_id: media.id,
-                type: trackType,
-                purpose: trackPurpose,
-                priority: 0,
-                delete_status: DeleteStatus.ACTIVE,
-            },
-        });
+        const fallbackMetadata = selectStoredMetadata(storedMetadata, metadataPipelineId);
+        const aiMetadata = described ?? (fallbackMetadata ? toImageAiMetadata(fallbackMetadata) : emptyImageMetadata);
 
-        if (!track || !track.file_id) {
-            console.log(`[AI ENRICH] Target file not found/completed for media ${media.id} (${trackType}:${trackPurpose}). skipping.`);
-            return;
-        }
-
-        const file = await db.query.File.findFirst({
-            where: {
-                id: track.file_id,
-                delete_status: DeleteStatus.ACTIVE,
-            },
-        });
-
-        if (!file) {
-            console.log(`[AI ENRICH] Physical S3 file ${track.file_id} not found in DB for media ${media.id}. skipping.`);
-            return;
-        }
-
-        // 2. Calculate content hash for strict idempotency
-        // If content is unmodified, we bypass expensive LLM/VLM calls entirely.
-        const sourceHashInput = `${file.hash || file.id}:${media.title}:${media.description}:${metadataPipelineId}:${aiService.providerFingerprint}`;
-        const contentHash = await computeSha256(sourceHashInput);
-
-        // Fetch relational tags of the post for search document indexing
+        // Both direct and canonical tag aliases affect search content.
         const postTagsList = post.id
             ? await db
                   .select({
@@ -134,13 +192,20 @@ export const AiEnrichmentService = {
             : [];
         const postTags = postTagsList.map((pt) => pt.name);
 
+        const mediaTagsList = await db
+            .select({
+                id: Tag.id,
+                name: Tag.name,
+                canonical_tag_id: Tag.canonical_tag_id,
+            })
+            .from(MediaTag)
+            .innerJoin(Tag, eq(MediaTag.tag_id, Tag.id))
+            .where(and(eq(MediaTag.media_id, media.id), eq(Tag.status, TagStatus.ACTIVE)));
+        const mediaTags = mediaTagsList.map((tag) => tag.name);
+
         const canonicalTagIds = new Set<string>();
-        for (const pt of postTagsList) {
-            if (pt.canonical_tag_id) {
-                canonicalTagIds.add(pt.canonical_tag_id);
-            } else {
-                canonicalTagIds.add(pt.id);
-            }
+        for (const tag of [...postTagsList, ...mediaTagsList]) {
+            canonicalTagIds.add(tag.canonical_tag_id || tag.id);
         }
 
         let allGroupTags: (typeof Tag.$inferSelect)[] = [];
@@ -153,223 +218,161 @@ export const AiEnrichmentService = {
         }
 
         const allSearchDocTags = Array.from(new Set(allGroupTags.map((t) => t.name)));
-        const postTagAliases = allSearchDocTags.filter((name) => !postTags.includes(name));
+        const directTags = new Set([...postTags, ...mediaTags]);
+        const tagAliases = allSearchDocTags.filter((name) => !directTags.has(name));
 
-        // 3. Verify if active indexing documents already match this content hash
-        const existingDoc = await db.query.AssetSearchDocument.findFirst({
-            where: {
-                entity_type: EntityType.MEDIA,
-                entity_id: media.id,
-                content_hash: contentHash,
-            },
-        });
+        // Plain values only: field labels would make every document match words like "title" or "tags".
+        const searchContent = buildSearchContent([
+            media.title,
+            media.description,
+            post.title,
+            post.description,
+            postTags.join(", "),
+            mediaTags.join(", "),
+            tagAliases.join(", "),
+            aiMetadata.scene,
+            aiMetadata.caption,
+            aiMetadata.ocrText,
+        ]);
 
-        if (existingDoc) {
-            console.log(`[AI ENRICH] Media item ${media.id} is already enriched and up-to-date (hash match). Skipping.`);
-            return;
-        }
+        const searchDocument = {
+            library_id: media.library_id,
+            source: post.source,
+            media_type: media.type,
+            title: media.title || post.title || "",
+            content: searchContent,
+            tags: allSearchDocTags,
+            ai_tags: aiMetadata.tags,
+            author_name: post.author_name,
+            published_time: media.published_time,
+        };
+        const documentHash = await computeSha256(JSON.stringify(searchDocument));
+        const existingDoc = (
+            await db
+                .select({ id: AssetSearchDocument.id, content_hash: AssetSearchDocument.content_hash })
+                .from(AssetSearchDocument)
+                .where(and(eq(AssetSearchDocument.entity_type, EntityType.MEDIA), eq(AssetSearchDocument.entity_id, media.id)))
+                .limit(1)
+        )[0];
 
-        console.log(`[AI ENRICH] Running AI Analysis pipeline for Media ${media.id}...`);
+        // The document title (media title, else post title) is what both search and embeddings see.
+        const textInputHash = await computeSha256(JSON.stringify({ text: searchContent, title: searchDocument.title }));
 
-        // 4. Download private file buffer from S3 via secure short-lived presigned URL
-        const presignedUrl = await s3.getPresignedUrl(file.path, {
-            bucket: file.bucket,
-            expiresInSeconds: 600, // 10 minutes
-        });
-
-        const downloadResponse = await fetch(presignedUrl);
-        if (!downloadResponse.ok) {
-            throw new Error(`Failed to download physical file from S3: ${downloadResponse.statusText}`);
-        }
-
-        const arrayBuffer = await downloadResponse.arrayBuffer();
-        const imageBuffer = new Uint8Array(arrayBuffer);
-
-        // 5. Determine whether to pass public CDN URL or fallback to local buffer
-        const cdnUrl = buildCdnUrl(file.bucket, file.path);
-        let describeInput: Buffer | Uint8Array | string = imageBuffer;
-
-        const storageIsPublic = env.STORAGE_IS_PUBLIC;
-        if (storageIsPublic && cdnUrl) {
-            describeInput = cdnUrl;
-            console.log(`[AI ENRICH] Passing public CDN URL to describeImage: ${cdnUrl}`);
-        } else {
-            console.log(`[AI ENRICH] Fallback to buffer. storageIsPublic: ${storageIsPublic}, cdnUrl: ${cdnUrl}`);
-        }
-
-        /** Image Metadata by AI */
-        const aiMetadata = await aiService.describeImage(describeInput, file.mime_type);
-
-        /** Image Embedding Vectors */
-        const imageEmbeddingResult = await aiService.embedImage({
-            imageBuffer,
-            mimeType: file.mime_type,
-        });
-
-        // 7. Prepare combined text mapping for FTS indexing and text-embedding
-        const combinedFtsContent =
-            `Media Title: ${media.title || ""}\n` +
-            `Media Description: ${media.description || ""}\n` +
-            `Post Title: ${post.title || ""}\n` +
-            `Post Description: ${post.description || ""}\n` +
-            `Post Tags: ${postTags.join(", ")}\n` +
-            `Post Tag Aliases: ${postTagAliases.join(", ")}\n` +
-            `AI Scene: ${aiMetadata.scene}\n` +
-            `AI Caption: ${aiMetadata.caption}\n` +
-            `OCR: ${aiMetadata.ocrText}`;
-
-        /** Text Embedding Vectors */
-        const textEmbeddingResult = await aiService.embedText({
-            text: combinedFtsContent,
-            purpose: "DOCUMENT",
-            title: media.title || undefined,
-        });
-
-        // 9. Save all structures inside a transactional atomic commit
-        await db.transaction(async (tx) => {
-            // Write AI metadata
-            await tx
-                .insert(AssetAiMetadata)
-                .values({
-                    library_id: media.library_id,
-                    entity_type: EntityType.MEDIA,
-                    entity_id: media.id,
-                    caption: aiMetadata.caption,
-                    summary: aiMetadata.caption, // Summary fallback
-                    tags: aiMetadata.tags,
-                    objects: aiMetadata.objects,
-                    colors: aiMetadata.colors,
-                    styles: aiMetadata.styles,
-                    scene: aiMetadata.scene,
-                    ocr_text: aiMetadata.ocrText,
-                    model: aiService.chatModelName || "none",
-                    metadata_pipeline_id: metadataPipelineId,
-                    processing_status: ProcessingStatus.COMPLETED,
-                })
-                .onConflictDoUpdate({
-                    target: [AssetAiMetadata.entity_type, AssetAiMetadata.entity_id, AssetAiMetadata.metadata_pipeline_id],
-                    set: {
-                        caption: aiMetadata.caption,
-                        summary: aiMetadata.caption,
-                        tags: aiMetadata.tags,
-                        objects: aiMetadata.objects,
-                        colors: aiMetadata.colors,
-                        styles: aiMetadata.styles,
-                        scene: aiMetadata.scene,
-                        ocr_text: aiMetadata.ocrText,
+        const queued = await db.transaction(async (tx) => {
+            if (describeProvider && metadataPipelineId) {
+                const metadataKey = and(
+                    eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
+                    eq(AssetAiMetadata.entity_id, media.id),
+                    eq(AssetAiMetadata.metadata_pipeline_id, metadataPipelineId),
+                );
+                if (!sourceFile) {
+                    await tx
+                        .update(AssetAiMetadata)
+                        .set({
+                            processing_status: ProcessingStatus.FAILED,
+                            last_error: "No usable image source is available for AI description",
+                            update_time: sql`now()`,
+                        })
+                        .where(metadataKey);
+                } else if (described) {
+                    const result = {
+                        caption: described.caption,
+                        summary: described.caption,
+                        tags: described.tags,
+                        objects: described.objects,
+                        colors: described.colors,
+                        styles: described.styles,
+                        scene: described.scene,
+                        ocr_text: described.ocrText,
+                        model: describeProvider.modelName,
+                        input_hash: sourceHash,
                         processing_status: ProcessingStatus.COMPLETED,
-                        update_time: sql`now()`,
-                    },
-                });
+                        last_error: null,
+                    };
+                    await tx
+                        .insert(AssetAiMetadata)
+                        .values({
+                            library_id: media.library_id,
+                            entity_type: EntityType.MEDIA,
+                            entity_id: media.id,
+                            metadata_pipeline_id: metadataPipelineId,
+                            ...result,
+                        })
+                        .onConflictDoUpdate({
+                            target: [AssetAiMetadata.entity_type, AssetAiMetadata.entity_id, AssetAiMetadata.metadata_pipeline_id],
+                            set: { ...result, update_time: sql`now()` },
+                        });
+                    // Results of earlier pipelines (other model, prompt or language) are superseded.
+                    await tx
+                        .delete(AssetAiMetadata)
+                        .where(
+                            and(
+                                eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
+                                eq(AssetAiMetadata.entity_id, media.id),
+                                ne(AssetAiMetadata.metadata_pipeline_id, metadataPipelineId),
+                            ),
+                        );
+                } else if (canReuseMetadata) {
+                    await tx
+                        .update(AssetAiMetadata)
+                        .set({ processing_status: ProcessingStatus.COMPLETED, last_error: null, update_time: sql`now()` })
+                        .where(and(metadataKey, ne(AssetAiMetadata.processing_status, ProcessingStatus.COMPLETED)));
+                }
+            }
 
-            // Write Search Document for GIN trigram / keyword matching
-            const docResults = await tx
-                .insert(AssetSearchDocument)
-                .values({
-                    library_id: media.library_id,
-                    entity_type: EntityType.MEDIA,
-                    entity_id: media.id,
-                    source: post.source,
-                    media_type: media.type,
-                    title: media.title || post.title || "",
-                    content: combinedFtsContent,
-                    tags: allSearchDocTags,
-                    ai_tags: aiMetadata.tags,
-                    author_name: post.author_name,
-                    published_time: media.published_time,
-                    content_hash: contentHash,
-                })
-                .onConflictDoUpdate({
-                    target: [AssetSearchDocument.entity_type, AssetSearchDocument.entity_id],
-                    set: {
-                        library_id: media.library_id,
-                        source: post.source,
-                        media_type: media.type,
-                        title: media.title || post.title || "",
-                        content: combinedFtsContent,
-                        tags: allSearchDocTags,
-                        ai_tags: aiMetadata.tags,
-                        author_name: post.author_name,
-                        published_time: media.published_time,
-                        content_hash: contentHash,
-                        update_time: sql`now()`,
-                    },
-                })
-                .returning({ id: AssetSearchDocument.id });
+            let documentId = existingDoc?.id;
+            if (existingDoc?.content_hash !== documentHash) {
+                const docResults = await tx
+                    .insert(AssetSearchDocument)
+                    .values({
+                        entity_type: EntityType.MEDIA,
+                        entity_id: media.id,
+                        ...searchDocument,
+                        content_hash: documentHash,
+                    })
+                    .onConflictDoUpdate({
+                        target: [AssetSearchDocument.entity_type, AssetSearchDocument.entity_id],
+                        set: { ...searchDocument, content_hash: documentHash, update_time: sql`now()` },
+                    })
+                    .returning({ id: AssetSearchDocument.id });
+                documentId = docResults[0]?.id;
+            }
 
-            const docId = docResults[0]?.id;
-
-            // Write Image Embedding
-            await tx
-                .insert(AssetEmbedding)
-                .values({
-                    library_id: media.library_id,
-                    entity_type: EntityType.MEDIA,
-                    entity_id: media.id,
-                    document_id: docId,
-                    embedding_space_id: imageEmbeddingResult.spaceId,
-                    embedding_role: EmbeddingRole.IMAGE_PRIMARY,
-                    input_modality: ModalityType.IMAGE,
-                    dimension: imageEmbeddingResult.dimension,
-                    embedding: imageEmbeddingResult.embedding,
-                    content_hash: contentHash,
-                    source_file_id: file.id,
-                    embedding_status: EmbeddingStatus.READY,
-                })
-                .onConflictDoUpdate({
-                    target: [
-                        AssetEmbedding.entity_type,
-                        AssetEmbedding.entity_id,
-                        AssetEmbedding.embedding_space_id,
-                        AssetEmbedding.embedding_role,
-                        AssetEmbedding.content_hash,
-                    ],
-                    set: {
-                        library_id: media.library_id,
-                        document_id: docId,
-                        embedding: imageEmbeddingResult.embedding,
-                        source_file_id: file.id,
-                        embedding_status: EmbeddingStatus.READY,
-                        update_time: sql`now()`,
-                    },
-                });
-
-            // Write Text Embedding
-            await tx
-                .insert(AssetEmbedding)
-                .values({
-                    library_id: media.library_id,
-                    entity_type: EntityType.MEDIA,
-                    entity_id: media.id,
-                    document_id: docId,
-                    embedding_space_id: textEmbeddingResult.spaceId,
-                    embedding_role: EmbeddingRole.AI_CAPTION,
-                    input_modality: ModalityType.TEXT,
-                    dimension: textEmbeddingResult.dimension,
-                    embedding: textEmbeddingResult.embedding,
-                    content_hash: contentHash,
-                    source_file_id: file.id,
-                    embedding_status: EmbeddingStatus.READY,
-                })
-                .onConflictDoUpdate({
-                    target: [
-                        AssetEmbedding.entity_type,
-                        AssetEmbedding.entity_id,
-                        AssetEmbedding.embedding_space_id,
-                        AssetEmbedding.embedding_role,
-                        AssetEmbedding.content_hash,
-                    ],
-                    set: {
-                        library_id: media.library_id,
-                        document_id: docId,
-                        embedding: textEmbeddingResult.embedding,
-                        source_file_id: file.id,
-                        embedding_status: EmbeddingStatus.READY,
-                        update_time: sql`now()`,
-                    },
-                });
+            return enqueueEmbeddings(tx, [
+                ...(sourceHash && sourceFile
+                    ? imageSpaces.map((provider) => ({
+                          libraryId: media.library_id,
+                          mediaId: media.id,
+                          role: EmbeddingRole.IMAGE_PRIMARY,
+                          modality: ModalityType.IMAGE,
+                          spaceId: provider.spaceId,
+                          dimension: provider.capabilities.dimension,
+                          inputHash: sourceHash,
+                          documentId,
+                          sourceFileId: sourceFile.id,
+                      }))
+                    : []),
+                ...(searchContent
+                    ? textSpaces.map((provider) => ({
+                          libraryId: media.library_id,
+                          mediaId: media.id,
+                          role: EmbeddingRole.AI_CAPTION,
+                          modality: ModalityType.TEXT,
+                          spaceId: provider.spaceId,
+                          dimension: provider.capabilities.dimension,
+                          inputHash: textInputHash,
+                          documentId,
+                          sourceFileId: sourceFile?.id,
+                          inputText: searchContent,
+                          inputTitle: searchDocument.title,
+                      }))
+                    : []),
+            ]);
         });
 
-        console.log(`[AI ENRICH] Successfully completed AI enrichment for media ${media.id}.`);
+        if (queued > 0) await notifyEmbeddingQueue();
+        if (describeError) throw describeError;
+
+        console.log(`[AI ENRICH] Completed enrichment for media ${media.id} (${queued} embeddings queued).`);
     },
 };
