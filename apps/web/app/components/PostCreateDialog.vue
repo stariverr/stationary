@@ -515,7 +515,7 @@ async function handleSubmit() {
                                             <span>{{ $t("post.add_media", "Add Media") }}</span>
                                         </Button>
                                     </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" :side-offset="6" class="w-48 z-[350]">
+                                    <DropdownMenuContent align="end" :side-offset="6" class="w-48">
                                         <DropdownMenuItem class="cursor-pointer gap-2 py-2" @click="openLibraryView">
                                             <Search class="w-4 h-4 text-slate-500 dark:text-zinc-400" />
                                             <span>{{ $t("post.choose_library", "Choose from Library") }}</span>
@@ -675,7 +675,7 @@ async function handleSubmit() {
                                                         <MoreHorizontal class="w-4 h-4" />
                                                     </Button>
                                                 </DropdownMenuTrigger>
-                                                <DropdownMenuContent align="end" class="w-40 z-[350]">
+                                                <DropdownMenuContent align="end" class="w-40">
                                                     <DropdownMenuItem
                                                         :disabled="idx === 0"
                                                         class="cursor-pointer gap-2 py-2"

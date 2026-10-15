@@ -63,10 +63,11 @@ export const useLibraryStore = defineStore("library", () => {
         activeLibraryId.value = id;
     };
 
-    const createLibrary = async (name: string, description: string = "") => {
+    /** `aiLanguage` (BCP 47) is the language AI image descriptions are written in, normally the UI locale. */
+    const createLibrary = async (name: string, description: string, aiLanguage: string) => {
         const response = await useApi<{ success: boolean; data: LibraryItem }>("/library/create", {
             method: "POST",
-            body: { name, description },
+            body: { name, description, ai_language: aiLanguage },
         });
         if (response && response.success) {
             await refetch();

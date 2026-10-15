@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { Toaster } from "@/components/ui/sonner";
 
+// Applies the saved theme on every page.
+useThemeMode();
+
 useHead({
     meta: [
         {

@@ -41,12 +41,17 @@ export const MediaListResponseBodySchema = v.object({
     last_error: v.optional(v.nullable(v.string())),
     ai_status: v.optional(v.nullable(v.string())),
     ai_error: v.optional(v.nullable(v.string())),
-    matched_reason: v.optional(v.nullable(v.unknown())),
     matched_details: v.optional(v.nullable(v.unknown())),
     score: v.optional(v.nullable(v.number())),
 });
 
 export type MediaListItem = v.InferOutput<typeof MediaListResponseBodySchema>;
+
+/** An AI channel that did not take part in a search, as reported by `/search`. */
+export interface SearchDegradation {
+    channel: "ai" | "text_semantic" | "visual_semantic" | "rerank";
+    reason: string;
+}
 
 export interface MatchedDetails {
     keyword?: Record<string, unknown> | null;
@@ -59,6 +64,8 @@ export interface MatchedDetails {
         scene?: string | null;
         styles?: string[] | null;
     } | null;
+    /** Reranker relevance score; higher is more relevant. */
+    rerank?: { score: number } | null;
 }
 
 export interface MappedMediaItem {
@@ -85,7 +92,6 @@ export interface MappedMediaItem {
     last_error: string | null;
     ai_status: string;
     ai_error: string | null;
-    matched_reason?: unknown;
     matched_details?: MatchedDetails;
     score?: number | null;
     date: string;
@@ -319,7 +325,6 @@ export const useMediaStore = defineStore("media", () => {
         last_error?: string | null;
         ai_status?: string | null;
         ai_error?: string | null;
-        matched_reason?: unknown;
         matched_details?: unknown;
         score?: number | null;
     }
@@ -348,7 +353,7 @@ export const useMediaStore = defineStore("media", () => {
         ]),
         enabled: isListEnabled,
         placeholderData: keepPreviousData,
-        queryFn: async (): Promise<{ list: MappedMediaItem[]; total: number }> => {
+        queryFn: async (): Promise<{ list: MappedMediaItem[]; total: number; degraded: SearchDegradation[] }> => {
             const hasKeyword = !!searchKeyword.value?.trim();
             const isAi = useAiSearch.value;
             console.log("[DEBUG STORE] queryFn called. hasKeyword:", hasKeyword, "isAi:", isAi, "useAiSearch:", useAiSearch.value);
@@ -356,7 +361,7 @@ export const useMediaStore = defineStore("media", () => {
                 console.log("[DEBUG STORE] Fetching from /search");
                 const response = await useApi<{
                     success: boolean;
-                    data: { list: ApiSearchItem[]; total: number; hasMore: boolean };
+                    data: { list: ApiSearchItem[]; total: number; hasMore: boolean; degraded: SearchDegradation[] };
                 }>("/search", {
                     query: {
                         page: page.value,
@@ -394,7 +399,6 @@ export const useMediaStore = defineStore("media", () => {
                             last_error: item.last_error || null,
                             ai_status: item.ai_status || "PENDING",
                             ai_error: item.ai_error || null,
-                            matched_reason: item.matched_reason,
                             matched_details: (item.matched_details as MatchedDetails) || undefined,
                             score: item.score || null,
                             date: displayTime
@@ -415,6 +419,7 @@ export const useMediaStore = defineStore("media", () => {
                     return {
                         list: mappedList,
                         total: response.data.total || 0,
+                        degraded: response.data.degraded ?? [],
                     };
                 }
             } else {
@@ -439,15 +444,18 @@ export const useMediaStore = defineStore("media", () => {
                     return {
                         list: response.data.list.map(mapApiMediaToUiMedia),
                         total: response.data.total || 0,
+                        degraded: [],
                     };
                 }
             }
-            return { list: [], total: 0 };
+            return { list: [], total: 0, degraded: [] };
         },
     });
 
     const medias = computed<MappedMediaItem[]>(() => mediaData.value?.list || []);
     const total = computed(() => mediaData.value?.total || 0);
+    /** AI channels the last search ran without; non-empty means results may be incomplete. */
+    const searchDegraded = computed<SearchDegradation[]>(() => mediaData.value?.degraded ?? []);
     const isLoadingMedia = computed(() => isLoadingMediaQuery.value);
 
     watch(useAiSearch, () => {
@@ -528,6 +536,7 @@ export const useMediaStore = defineStore("media", () => {
         useAiSearch,
         medias,
         total,
+        searchDegraded,
         isLoadingMedia,
         refetchMedia,
         selectedMediaId,

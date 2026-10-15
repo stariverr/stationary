@@ -13,6 +13,7 @@ import {
     Filter,
     ChevronDown,
     Upload,
+    TriangleAlert,
 } from "@lucide/vue";
 import { useDebounceFn } from "@vueuse/core";
 import { PaginationRoot, PaginationList, PaginationListItem, PaginationPrev, PaginationNext, PaginationEllipsis } from "reka-ui";
@@ -31,6 +32,7 @@ const {
     source,
     displayMode,
     total,
+    searchDegraded,
     page,
     count,
     selectedMediaId,
@@ -40,10 +42,26 @@ const {
     mediaType,
 } = storeToRefs(store);
 const { refetchMedia, selectMedia } = store;
+const { t } = useI18n();
 const { toggleSidebar, isSidebarCollapsed, isCreateMediaOpen } = useAppLayout();
 const libraryStore = useLibraryStore();
 const { isMultiSelectClick } = useMultiSelectModifier();
 const visualViewportBottomOffsetStyle = useVisualViewportBottomOffset();
+
+/** Explains which AI channels the last search ran without, e.g. "Text semantic search (invalid credentials)". */
+const degradedSummary = computed(() =>
+    searchDegraded.value
+        .map((item) => {
+            const reasonKey = ["AUTHENTICATION", "CONFIGURATION", "THROTTLED", "RATE_LIMITED", "TIMEOUT", "TRANSIENT"].includes(item.reason)
+                ? item.reason.toLowerCase()
+                : "other";
+            return t("search.degraded_item", {
+                channel: t(`search.degraded_channel.${item.channel}`),
+                reason: t(`search.degraded_reason.${reasonKey}`),
+            });
+        })
+        .join(t("search.degraded_separator")),
+);
 
 const totalPages = computed(() => Math.ceil((total.value || 0) / (count.value || 20)));
 
@@ -506,6 +524,19 @@ onMounted(() => {
 
             <!-- Content Area -->
             <div ref="scrollContainer" class="flex-1 overflow-y-auto p-4 sm:p-6 bg-zinc-50/30">
+                <!-- AI channels the search ran without -->
+                <div
+                    v-if="degradedSummary"
+                    role="status"
+                    class="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2 text-xs text-amber-800"
+                >
+                    <TriangleAlert class="w-3.5 h-3.5 shrink-0" />
+                    <span>{{ $t("search.degraded", { channels: degradedSummary }) }}</span>
+                    <NuxtLink to="/settings/ai" class="font-semibold underline underline-offset-2 hover:text-amber-900">
+                        {{ $t("search.degraded_settings") }}
+                    </NuxtLink>
+                </div>
+
                 <!-- Skeletons when loading -->
                 <div v-if="isLoadingMedia" class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
                     <div

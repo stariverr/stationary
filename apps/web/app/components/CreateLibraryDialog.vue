@@ -18,6 +18,7 @@ const emit = defineEmits<{
 }>();
 
 const libraryStore = useLibraryStore();
+const { locale } = useI18n();
 
 const name = ref("");
 const description = ref("");
@@ -77,7 +78,7 @@ const handleSubmit = async () => {
 
     try {
         isCreating.value = true;
-        await libraryStore.createLibrary(name.value.trim(), description.value.trim());
+        await libraryStore.createLibrary(name.value.trim(), description.value.trim(), locale.value);
         emit("update:open", false);
         toast.success("Library created", {
             description: `${name.value.trim()} is now your active library.`,
