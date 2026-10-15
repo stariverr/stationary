@@ -33,7 +33,7 @@ Consequences:
 - API keys are encrypted at rest with AES-256-GCM using `SECRETS_ENCRYPTION_KEY` (32 bytes, base64). Ciphertexts carry a version prefix (`v1:`).
 - Plaintext keys never leave the server. Responses carry a hint (`••••abcd`) only. Editing a provider without a new key keeps the stored one.
 - Every environment that shares a database must use the same `SECRETS_ENCRYPTION_KEY`. Changing it makes stored keys unreadable; they must be entered again.
-- Provider URLs are entered by users and requested by the server, so by default they may not point at private networks (loopback, LAN, link-local addresses including cloud metadata endpoints). Addresses are resolved and checked when a provider is saved and before every request, and redirects are refused. Self-hosted model servers (Ollama, vLLM, etc.) need `AI_ALLOW_PRIVATE_NETWORK=true`. Provider error bodies are echoed only when they are JSON.
+- Provider URLs are entered by users and requested by the server, so they are unrestricted by default (self-hosted Ollama, vLLM and LAN gateways just work). When untrusted users can add providers, set `AI_BLOCKED_CIDRS` to a comma-separated list of IPv4/IPv6 CIDR blocks, e.g. `169.254.0.0/16,fe80::/10` for cloud metadata endpoints. With it set, addresses are resolved and checked when a provider is saved and before every request, and redirects are refused. Provider error bodies are echoed only when they are JSON.
 
 ## 4. Teams (planned)
 
