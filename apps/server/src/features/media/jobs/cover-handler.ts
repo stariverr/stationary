@@ -10,7 +10,7 @@ import {
     AsyncSubjectType,
     AsyncOutcomeCode,
 } from "@/db/schema";
-import { and, eq, gt, asc, inArray, type SQL } from "drizzle-orm";
+import { and, eq, gt, asc, inArray, isNull, type SQL } from "drizzle-orm";
 import { RECIPE_VERSION } from "@/lib/utils/cover_profiles";
 import * as v from "valibot";
 import { Quality } from "@/lib/types";
@@ -44,10 +44,13 @@ const CoverUnitInputSchema = v.object({
  *    Non-targeted qualities (e.g. HIGH if config is LOW+MEDIUM) are NOT dispatched, deleted, or pruned.
  * 2. Completion Check: If !isForce, checks if an active cover Track already exists for the expected
  *    variant_key and matching source_file_id. If so, marks isAlreadyCompleted = true to avoid re-rendering.
+ * 3. Recycle Bin: Media with a recycle_time are excluded from discovery; recycled media are only
+ *    covered again after they are restored to the library.
  */
 function buildUnitsForMedia(
     media: typeof Media.$inferSelect,
     existingTracks: (typeof Track.$inferSelect)[],
+    activeFiles: Map<string, typeof DbFile.$inferSelect>,
     source: ResolvedCoverSource,
     targetQualities: Quality[],
     configVersion: number,
@@ -64,7 +67,13 @@ function buildUnitsForMedia(
                     t.purpose === TrackPurpose.COVER &&
                     (t.variant_key === expectedVariantKey || (!t.is_generated && t.quality === quality)),
             );
-            if (existingTrack && existingTrack.sync_status === SyncStatus.COMPLETED && existingTrack.file_id) {
+            if (
+                existingTrack &&
+                existingTrack.sync_status === SyncStatus.COMPLETED &&
+                !existingTrack.is_stale &&
+                existingTrack.file_id &&
+                activeFiles.has(existingTrack.file_id)
+            ) {
                 const metadata = existingTrack.metadata || {};
                 if (!existingTrack.is_generated || metadata.source_file_id === source.fileId) {
                     isAlreadyCompleted = true;
@@ -149,6 +158,8 @@ export const CoverJobHandler: TaskHandler = {
         let nextCursor: Record<string, unknown> | null = null;
 
         if (inputSnapshot.media_ids && inputSnapshot.media_ids.length > 0 && sourceType === "MANUAL") {
+            // Recycled media stay in the trash until purged; cover generation rejects them at
+            // persistence time, so they must never be dispatched as units.
             mediaBatch = await db
                 .select()
                 .from(Media)
@@ -156,13 +167,18 @@ export const CoverJobHandler: TaskHandler = {
                     and(
                         eq(Media.library_id, task.library_id),
                         eq(Media.delete_status, DeleteStatus.ACTIVE),
+                        isNull(Media.recycle_time),
                         inArray(Media.id, inputSnapshot.media_ids),
                     ),
                 );
         } else {
             // RECONCILE mode with JSONB discovery cursor
             const lastMediaId = (discoveryCursor?.lastMediaId as string) || null;
-            const queryConditions: SQL[] = [eq(Media.library_id, task.library_id), eq(Media.delete_status, DeleteStatus.ACTIVE)];
+            const queryConditions: SQL[] = [
+                eq(Media.library_id, task.library_id),
+                eq(Media.delete_status, DeleteStatus.ACTIVE),
+                isNull(Media.recycle_time),
+            ];
             if (lastMediaId) {
                 queryConditions.push(gt(Media.id, lastMediaId));
             }
@@ -201,10 +217,8 @@ export const CoverJobHandler: TaskHandler = {
             list.push(t);
         }
 
-        // 2. Bulk fetch all content files referenced by tracks
-        const fileIds = Array.from(
-            new Set(allTracks.filter((t) => t.purpose === TrackPurpose.CONTENT && t.file_id).map((t) => t.file_id!)),
-        );
+        // 2. Bulk fetch files for both content sources and existing cover completion checks
+        const fileIds = Array.from(new Set(allTracks.flatMap((track) => (track.file_id ? [track.file_id] : []))));
 
         const filesMap = new Map<string, typeof DbFile.$inferSelect>();
         if (fileIds.length > 0) {
@@ -224,7 +238,7 @@ export const CoverJobHandler: TaskHandler = {
             const source = resolveSourceTrackInBatch(tracks, filesMap);
             if (!source) continue;
 
-            const mediaUnits = buildUnitsForMedia(media, tracks, source, targetQualities, task.config_version, Boolean(isForce));
+            const mediaUnits = buildUnitsForMedia(media, tracks, filesMap, source, targetQualities, task.config_version, Boolean(isForce));
             units.push(...mediaUnits);
         }
 
@@ -247,15 +261,16 @@ export const CoverJobHandler: TaskHandler = {
         const mediaList = await db
             .select()
             .from(Media)
-            .where(and(eq(Media.id, unit.subject_id), eq(Media.delete_status, DeleteStatus.ACTIVE)))
+            .where(and(eq(Media.id, unit.subject_id), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
             .limit(1);
         const media = mediaList[0];
         if (!media) {
             return {
                 success: false,
+                skipped: true,
                 retryable: false,
                 outcomeCode: AsyncOutcomeCode.MEDIA_NOT_FOUND,
-                error: `Media ${unit.subject_id} not found`,
+                error: `Media ${unit.subject_id} was recycled or deleted before cover generation`,
             };
         }
 

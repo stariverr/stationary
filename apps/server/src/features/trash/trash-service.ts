@@ -1,11 +1,26 @@
 import { and, asc, count, desc, eq, ilike, inArray, isNotNull, isNull, or, sql, SQL } from "drizzle-orm";
 import { db } from "@/global/db";
-import { Author, DeleteStatus, File as DbFile, Library, Media, MediaType, Post, PostSource, PostTag, Tag, TagStatus } from "@/db/schema";
+import {
+    AsyncTaskType,
+    Author,
+    DeleteStatus,
+    File as DbFile,
+    Library,
+    Media,
+    MediaType,
+    Post,
+    PostSource,
+    PostTag,
+    Tag,
+    TagStatus,
+} from "@/db/schema";
 import { batchDeletePost, batchRestorePost } from "@/features/post/lifecycle";
 import { batchDeleteMedia, batchRestoreMedia } from "@/features/media/lifecycle";
 import { MediaService, type PreviewItem } from "@/features/media/queries";
+import { JobManager } from "@/infra/jobs/manager";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { toIsoTimestamp } from "@/lib/utils/time";
+import { Quality } from "@/lib/types";
 
 export type TrashFilterType = "all" | "post" | "media";
 
@@ -277,7 +292,7 @@ export class TrashService {
 
         // Verify library ownership
         const [library] = await db
-            .select({ id: Library.id })
+            .select({ id: Library.id, cover_qualities: Library.cover_qualities, cover_config_version: Library.cover_config_version })
             .from(Library)
             .where(and(eq(Library.id, libraryId), eq(Library.owner_id, ownerId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
             .limit(1);
@@ -288,6 +303,7 @@ export class TrashService {
 
         let restoredPosts = 0;
         let restoredMedia = 0;
+        const restoredMediaIds: string[] = [];
 
         if (postIds.length > 0) {
             const validPosts = await db
@@ -303,8 +319,24 @@ export class TrashService {
                 );
 
             if (validPosts.length > 0) {
-                const res = await batchRestorePost(validPosts.map((p) => p.id));
+                const validPostIds = validPosts.map((p) => p.id);
+                const postMedia = await db
+                    .select({ id: Media.id })
+                    .from(Media)
+                    .where(
+                        and(
+                            inArray(Media.post_id, validPostIds),
+                            eq(Media.delete_status, DeleteStatus.ACTIVE),
+                            isNotNull(Media.recycle_time),
+                        ),
+                    );
+
+                const res = await batchRestorePost(validPostIds);
                 restoredPosts = res.postUpdated;
+
+                if (res.postUpdated > 0) {
+                    restoredMediaIds.push(...postMedia.map((m) => m.id));
+                }
             }
         }
 
@@ -324,10 +356,57 @@ export class TrashService {
             if (validMedia.length > 0) {
                 const res = await batchRestoreMedia(validMedia.map((m) => m.id));
                 restoredMedia = res.mediaUpdated;
+
+                if (res.mediaUpdated > 0) {
+                    restoredMediaIds.push(...validMedia.map((m) => m.id));
+                }
             }
         }
 
+        await TrashService.enqueueCoverGenerationForRestoredMedia(
+            libraryId,
+            ownerId,
+            restoredMediaIds,
+            library.cover_qualities,
+            library.cover_config_version,
+        );
+
         return { restored_posts: restoredPosts, restored_media: restoredMedia };
+    }
+
+    /**
+     * Cover generation only applies to media that live in the library, so restoring items from the
+     * recycle bin must re-queue cover generation. Units whose covers are already up to date settle
+     * as skipped during discovery and do not re-render anything.
+     */
+    private static async enqueueCoverGenerationForRestoredMedia(
+        libraryId: string,
+        ownerId: string,
+        mediaIds: string[],
+        qualities: Quality[],
+        configVersion: number,
+    ): Promise<void> {
+        const uniqueMediaIds = Array.from(new Set(mediaIds));
+        const CHUNK_SIZE = 500;
+
+        try {
+            for (let i = 0; i < uniqueMediaIds.length; i += CHUNK_SIZE) {
+                await JobManager.createTask({
+                    type: AsyncTaskType.COVER_BATCH,
+                    libraryId,
+                    ownerId,
+                    inputSnapshot: {
+                        source_type: "MANUAL",
+                        media_ids: uniqueMediaIds.slice(i, i + CHUNK_SIZE),
+                        qualities,
+                    },
+                    configVersion,
+                });
+            }
+        } catch (error) {
+            // Restoring already succeeded; cover backfill is a follow-up and must not fail the request.
+            console.error(`[TrashService] Failed to queue cover generation for restored media in library ${libraryId}:`, error);
+        }
     }
 
     /**
