@@ -1,4 +1,11 @@
+import { isIP } from "node:net";
 import * as v from "valibot";
+
+function isCidr(value: string): boolean {
+    const [address = "", prefix = "", ...rest] = value.split("/");
+    const family = isIP(address);
+    return rest.length === 0 && family !== 0 && /^\d+$/.test(prefix) && Number(prefix) <= (family === 4 ? 32 : 128);
+}
 
 const envSchema = v.object({
     SERVER_ENV: v.optional(v.picklist(["development", "production", "test"]), "development"),
@@ -78,12 +85,22 @@ const envSchema = v.object({
     CRON_SECRET: v.optional(v.string()),
 
     /**
-     * Lets AI provider URLs point at private networks (localhost, LAN, cluster services). Off by
-     * default because provider URLs are user input; enable it for self-hosted model servers.
+     * Comma-separated IPv4/IPv6 CIDR blocks AI provider URLs must not resolve to. Empty by default,
+     * so every destination is allowed; set it when untrusted users can add providers, e.g.
+     * "169.254.0.0/16,fe80::/10" to keep cloud metadata endpoints out of reach.
      */
-    AI_ALLOW_PRIVATE_NETWORK: v.pipe(
-        v.optional(v.string(), "false"),
-        v.transform((v) => v === "true"),
+    AI_BLOCKED_CIDRS: v.pipe(
+        v.optional(v.string(), ""),
+        v.transform((value) =>
+            value
+                .split(",")
+                .map((cidr) => cidr.trim())
+                .filter(Boolean),
+        ),
+        v.check(
+            (cidrs) => cidrs.every(isCidr),
+            "AI_BLOCKED_CIDRS must be comma-separated IPv4 or IPv6 CIDR blocks, e.g. 10.0.0.0/8,fc00::/7",
+        ),
     ),
 });
 

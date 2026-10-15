@@ -18,5 +18,5 @@ data:
   NUXT_PUBLIC_CDN_BASE_URL: "/api"
   S3_REGION: "auto"
   STORAGE_IS_PUBLIC: "false"
-  # AI provider URLs may not reach private networks (cluster services, metadata endpoints).
-  AI_ALLOW_PRIVATE_NETWORK: "false"
+  # AI provider URLs may not resolve to these CIDR blocks (cloud metadata endpoints).
+  AI_BLOCKED_CIDRS: "169.254.0.0/16,fe80::/10"

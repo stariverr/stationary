@@ -22,7 +22,7 @@ import { computeEmbeddingSpaceId } from "@/features/ai/utils";
 import { AI_PROVIDER_TEMPLATES, adapterSupportsModel, getProviderTemplate } from "@/features/ai/provider-templates";
 import { probeModel } from "@/features/ai/probe";
 import { listProviderModels } from "@/features/ai/providers/connection";
-import { assertPublicEndpoint } from "@/features/ai/providers/egress";
+import { assertAllowedEndpoint } from "@/features/ai/providers/egress";
 import { resolveBindingConfig } from "@/features/ai/resolver";
 import { db } from "@/global/db";
 import { secretBox } from "@/global/secrets";
@@ -142,7 +142,7 @@ async function clearBindingsForModels(ownerId: string, modelIds: Set<string>) {
 /** Rejects base URLs the server must not request (see providers/egress.ts); returns the reason, or null. */
 async function checkBaseUrl(baseUrl: string): Promise<string | null> {
     try {
-        await assertPublicEndpoint(baseUrl);
+        await assertAllowedEndpoint(baseUrl);
         return null;
     } catch (err) {
         return getSafeAiErrorMessage(err);
