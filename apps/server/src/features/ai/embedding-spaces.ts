@@ -11,9 +11,9 @@ import {
 } from "@/db/schema";
 import { db, type Transaction } from "@/global/db";
 import { queueLibraryAiEnrichment } from "./queue-enrichment";
-import { countEmbeddings, EMBEDDING_ROLE_FOR } from "./embedding-queue";
+import { countEmbeddings, EMBEDDING_ROLE_FOR, latestEmbeddingError } from "./embedding-queue";
 import { parseModelCapabilities, type EmbeddingModelCapabilities } from "./model-schema";
-import type { EmbeddingBindingRole } from "./types";
+import type { AiErrorView, EmbeddingBindingRole } from "./types";
 import { computeEmbeddingSpaceId } from "./utils";
 
 /**
@@ -294,6 +294,8 @@ export interface EmbeddingSpaceStatusView {
     blocked: SpaceBlockReason | null;
     /** RETIRED only: when the space is dropped. */
     retainedUntil: string | null;
+    /** Latest error of the vectors still queued or failed; null for RETIRED spaces. */
+    lastError: AiErrorView | null;
 }
 
 /** Progress of every embedding space of a library, plus how many media it should cover. */
@@ -331,6 +333,10 @@ export async function getLibraryEmbeddingStatus(libraryId: string) {
                     space.status === LibraryEmbeddingSpaceStatus.RETIRED
                         ? (space.update_time ?? space.create_time).add({ hours: RETIRED_SPACE_RETENTION_DAYS * 24 }).toString()
                         : null,
+                lastError:
+                    space.status === LibraryEmbeddingSpaceStatus.RETIRED
+                        ? null
+                        : await latestEmbeddingError(libraryId, space.space_id, EMBEDDING_ROLE_FOR[role]),
             });
         }
     }

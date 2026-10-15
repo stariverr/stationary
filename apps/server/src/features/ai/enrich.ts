@@ -19,6 +19,7 @@ import { s3 } from "@/global/s3";
 import { enqueueEmbeddings, notifyEmbeddingQueue } from "./embedding-queue";
 import { AiService } from "./service";
 import { resolveAiImageSource } from "./image-source";
+import { classifyAiError, getSafeAiErrorMessage } from "./errors";
 import { computeSha256 } from "./utils";
 import type { ImageAiMetadata } from "./types";
 
@@ -312,6 +313,26 @@ export const AiEnrichmentService = {
                                 ne(AssetAiMetadata.metadata_pipeline_id, metadataPipelineId),
                             ),
                         );
+                } else if (describeError) {
+                    // Retryable errors stay PENDING for the task's next attempt; the error shows in the library's AI settings.
+                    const failure = {
+                        processing_status: classifyAiError(describeError).retryable ? ProcessingStatus.PENDING : ProcessingStatus.FAILED,
+                        last_error: getSafeAiErrorMessage(describeError),
+                    };
+                    await tx
+                        .insert(AssetAiMetadata)
+                        .values({
+                            library_id: media.library_id,
+                            entity_type: EntityType.MEDIA,
+                            entity_id: media.id,
+                            metadata_pipeline_id: metadataPipelineId,
+                            model: describeProvider.modelName,
+                            ...failure,
+                        })
+                        .onConflictDoUpdate({
+                            target: [AssetAiMetadata.entity_type, AssetAiMetadata.entity_id, AssetAiMetadata.metadata_pipeline_id],
+                            set: { ...failure, update_time: sql`now()` },
+                        });
                 } else if (canReuseMetadata) {
                     await tx
                         .update(AssetAiMetadata)

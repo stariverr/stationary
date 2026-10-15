@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { AiConfigurationError } from "@/features/ai/errors";
+import { AiConfigurationError, AiProviderError } from "@/features/ai/errors";
 import { parseModelCapabilities, type EmbeddingModelCapabilities } from "@/features/ai/model-schema";
 import { DashScopeMultimodalEmbeddingProvider, GeminiVisualEmbeddingProvider } from "@/features/ai/providers";
 import type { ResolvedModelConfig } from "@/features/ai/types";
@@ -72,7 +72,8 @@ describe("embedding spaces", () => {
 
     it("reject vectors whose length differs from the model definition", () => {
         expect(() => toEmbeddingResult(vector(768), "model", multimodalSpec)).toThrow(AiConfigurationError);
-        expect(() => toEmbeddingResult(undefined, "model", multimodalSpec)).toThrow(AiConfigurationError);
+        // A malformed vector may be a gateway hiccup, so it is a retryable provider error.
+        expect(() => toEmbeddingResult(undefined, "model", multimodalSpec)).toThrow(AiProviderError);
         expect(toEmbeddingResult(vector(1024), "model", multimodalSpec)).toMatchObject({ dimension: 1024 });
     });
 });
@@ -137,7 +138,7 @@ describe("Gemini image embedding adapter", () => {
                 { imageBuffer: new Uint8Array([1]), mimeType: "image/png" },
                 { imageBuffer: new Uint8Array([2]), mimeType: "image/png" },
             ]),
-        ).rejects.toBeInstanceOf(AiConfigurationError);
+        ).rejects.toBeInstanceOf(AiProviderError);
     });
 });
 

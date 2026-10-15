@@ -103,11 +103,36 @@ export interface AiEmbeddingSpaceStatus {
     /** BUILDING only: why the drained space does not replace the ACTIVE one yet. */
     blocked: "low_coverage" | "too_many_failures" | null;
     retainedUntil: string | null;
+    /** Latest error of the vectors still queued or failed. */
+    lastError: AiErrorView | null;
 }
 
-export interface AiLibraryEmbeddingStatus {
+export interface AiErrorView {
+    message: string;
+    at: string;
+}
+
+export interface AiDescribeStatus {
+    completed: number;
+    pending: number;
+    failed: number;
+    lastError: AiErrorView | null;
+}
+
+/** A bound model the server cannot use; its role is left out until the binding is fixed. */
+export interface AiConfigIssue {
+    role: AiRoleKey;
+    /** The model serves a space that is still being built. */
+    building: boolean;
+    message: string;
+}
+
+export interface AiLibraryStatus {
     mediaTotal: number;
     spaces: AiEmbeddingSpaceStatus[];
+    /** Null when no usable description model is bound. */
+    describe: AiDescribeStatus | null;
+    issues: AiConfigIssue[];
 }
 
 export type AiBindings = Partial<Record<AiRoleKey, { modelId: string } | null>> & {

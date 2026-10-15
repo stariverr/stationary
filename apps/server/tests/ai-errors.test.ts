@@ -25,6 +25,22 @@ describe("AI error classification", () => {
         expect(classifyAiError(new Error("request failed", { cause: refused }))).toEqual({ kind: "TRANSIENT", retryable: true });
     });
 
+    it("treats only abort signals as cancellation, not messages that mention it", () => {
+        expect(classifyAiError(new DOMException("The operation was aborted.", "AbortError"))).toEqual({ kind: "CANCELLED", retryable: false });
+        // The AI SDK's RetryError wraps the final attempt's error in `lastError`.
+        const retryError = Object.assign(new Error("Failed after 3 attempts."), { lastError: new DOMException("aborted", "AbortError") });
+        expect(classifyAiError(retryError)).toEqual({ kind: "CANCELLED", retryable: false });
+        expect(classifyAiError(new DOMException("signal timed out", "TimeoutError"))).toEqual({ kind: "TIMEOUT", retryable: true });
+        expect(classifyAiError(new Error("Request cancelled by upstream; aborting"))).toEqual({ kind: "UNKNOWN", retryable: false });
+    });
+
+    it("retries malformed provider responses", () => {
+        expect(classifyAiError(new AiProviderError("TRANSIENT", "Model 'm' returned 1 embeddings for 2 inputs."))).toEqual({
+            kind: "TRANSIENT",
+            retryable: true,
+        });
+    });
+
     it("does not retry invalid configuration or unknown errors", () => {
         expect(classifyAiError(new AiConfigurationError("missing embedding provider"))).toEqual({
             kind: "CONFIGURATION",

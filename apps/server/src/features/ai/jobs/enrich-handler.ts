@@ -3,7 +3,7 @@ import { AiEnrichmentService } from "@/features/ai/enrich";
 import { CoverNotReadyError } from "@/features/ai/image-source";
 import { db } from "@/global/db";
 import { Media, Post, AssetAiMetadata, AsyncSubjectType, AsyncTaskUnitKind, ProcessingStatus, EntityType, DeleteStatus } from "@/db/schema";
-import { eq, and, asc, gt, inArray, isNull } from "drizzle-orm";
+import { eq, and, asc, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { TaskRetryReason } from "@/infra/jobs/types";
 import { classifyAiError, getSafeAiErrorMessage } from "@/features/ai/errors";
 
@@ -110,17 +110,26 @@ export const AiEnrichHandler: TaskHandler = {
 
         const inputMediaIds = task.input_snapshot.media_ids;
         const mediaIds = Array.isArray(inputMediaIds) ? inputMediaIds.filter((id): id is string => typeof id === "string") : [];
-        if (mediaIds.length === 0) return;
+        // Library-wide runs queue no PENDING rows up front: the rows a failed attempt left an error on are its failures.
+        const scope =
+            mediaIds.length > 0
+                ? inArray(AssetAiMetadata.entity_id, mediaIds)
+                : task.input_snapshot.scope === "library" && task.library_id
+                  ? and(eq(AssetAiMetadata.library_id, task.library_id), isNotNull(AssetAiMetadata.last_error))
+                  : null;
+        if (!scope) return;
 
         await tx
             .update(AssetAiMetadata)
             .set({
                 processing_status: ProcessingStatus.FAILED,
-                last_error: "AI enrichment task failed",
+                // Keep the provider error recorded by the last attempt.
+                last_error: sql`coalesce(${AssetAiMetadata.last_error}, 'AI enrichment task failed')`,
+                update_time: sql`now()`,
             })
             .where(
                 and(
-                    inArray(AssetAiMetadata.entity_id, mediaIds),
+                    scope,
                     eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
                     eq(AssetAiMetadata.processing_status, ProcessingStatus.PENDING),
                 ),

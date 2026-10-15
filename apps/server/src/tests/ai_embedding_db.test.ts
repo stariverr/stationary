@@ -22,6 +22,7 @@ import { kv } from "@/global/kv";
 import { secretBox } from "@/global/secrets";
 import { enqueueEmbeddings, processNextEmbeddingBatch, retryFailedEmbeddings } from "@/features/ai/embedding-queue";
 import { getLibraryEmbeddingStatus, promoteBuiltSpaces, syncEmbeddingSpace } from "@/features/ai/embedding-spaces";
+import { getLibraryAiStatus } from "@/features/ai/status";
 import { batchDeleteMedia } from "@/features/media/lifecycle";
 import { createRedisRateLimitStore } from "@/features/ai/rate-limit";
 import { HybridSearchService } from "@/features/ai/search";
@@ -277,6 +278,12 @@ describe("AI embedding queue (PostgreSQL + Redis)", () => {
         expect(failed.every((row) => row.embedding_status === EmbeddingStatus.FAILED && row.attempt_count === 1)).toBe(true);
         // The previous vectors keep serving search while the new input is unresolved.
         expect((await rowsIn(spaceId)).filter((row) => row.embedding_status === EmbeddingStatus.READY)).toHaveLength(3);
+        // Settings show the provider's error next to the failed count.
+        const status = await getLibraryAiStatus(libraryId);
+        const space = status.spaces.find((view) => view.spaceId === spaceId && view.status === LibraryEmbeddingSpaceStatus.ACTIVE);
+        expect(space?.failed).toBe(3);
+        expect(space?.lastError?.message).toContain("bad input");
+        expect(status.issues).toEqual([]);
 
         expect(await retryFailedEmbeddings(libraryId)).toBe(3);
         await createRedisRateLimitStore(kv).coolDown(providerId, 5_000);

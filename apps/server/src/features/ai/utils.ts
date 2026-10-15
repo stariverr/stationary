@@ -1,4 +1,4 @@
-import { AiConfigurationError } from "./errors";
+import { AiConfigurationError, AiProviderError } from "./errors";
 import type { EmbeddingModelCapabilities } from "./model-schema";
 import type { EmbedTextParams, EmbeddingResult } from "./types";
 
@@ -21,8 +21,10 @@ export function computeEmbeddingSpaceId(modelName: string, spec: EmbeddingModelC
 /** Validates a provider vector against the model definition before it can reach the index. */
 export function toEmbeddingResult(vector: unknown, modelName: string, spec: EmbeddingModelCapabilities): EmbeddingResult {
     if (!Array.isArray(vector) || !vector.every((value) => typeof value === "number" && Number.isFinite(value))) {
-        throw new AiConfigurationError(`Model '${modelName}' returned an invalid embedding.`);
+        throw new AiProviderError("TRANSIENT", `Model '${modelName}' returned an invalid embedding.`);
     }
+    // A wrong vector shape may be a gateway hiccup; a wrong dimension repeats on every call, since
+    // the model ignores or lacks the declared dimension, so it is a configuration error.
     if (vector.length !== spec.dimension) {
         throw new AiConfigurationError(
             `Model '${modelName}' returned ${vector.length}-dimensional embeddings, but its definition declares ${spec.dimension}.`,

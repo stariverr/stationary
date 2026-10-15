@@ -122,6 +122,13 @@ export interface AiConfigIssue {
     message: string;
 }
 
+/** The most recent error of a role's background work, for display. */
+export interface AiErrorView {
+    message: string;
+    /** ISO timestamp of when it was recorded. */
+    at: string;
+}
+
 export interface ResolvedAiConfig {
     /** Library language for image descriptions (BCP 47). */
     language: string;

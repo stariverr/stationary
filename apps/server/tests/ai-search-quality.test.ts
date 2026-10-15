@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { isSupportedLanguage, languageName } from "@/features/ai/image-metadata";
+import { isSupportedLanguage, languageName, normalizeImageAiMetadata } from "@/features/ai/image-metadata";
 import { parseModelCapabilities, supportsAiBindingRole } from "@/features/ai/model-schema";
 import { adapterSupportsModel } from "@/features/ai/provider-templates";
 import { buildSearchContent, selectStoredMetadata } from "@/features/ai/enrich";
@@ -78,6 +78,25 @@ describe("description language", () => {
         expect(isSupportedLanguage("en-US")).toBe(true);
         expect(isSupportedLanguage("not a language")).toBe(false);
         expect(languageName("zh-Hans")).toContain("Chinese");
+    });
+});
+
+describe("description output bounds", () => {
+    it("cuts runaway fields instead of failing the description", () => {
+        const metadata = normalizeImageAiMetadata({
+            caption: "x".repeat(5000),
+            tags: [...Array.from({ length: 100 }, (_, index) => `tag ${index}`), "tag 0", " "],
+            objects: ["cat", " cat ", "y".repeat(500)],
+            colors: [],
+            styles: [],
+            scene: "street",
+            ocrText: "z".repeat(10_000),
+        });
+        expect(metadata.caption).toHaveLength(1000);
+        expect(metadata.tags).toHaveLength(30);
+        expect(metadata.objects).toEqual(["cat", "y".repeat(80)]);
+        expect(metadata.scene).toBe("street");
+        expect(metadata.ocrText).toHaveLength(4000);
     });
 });
 
