@@ -11,6 +11,17 @@ import {
 import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
+/** Thrown by `S3.read` when the object is larger than the caller accepts. */
+export class S3ObjectTooLargeError extends Error {
+    constructor(
+        public readonly size: number,
+        public readonly maxBytes: number,
+    ) {
+        super(`Object is ${size} bytes, over the ${maxBytes} byte limit`);
+        this.name = "S3ObjectTooLargeError";
+    }
+}
+
 const s3Client = new S3Client({
     region: env.S3_REGION,
     credentials: {
@@ -31,6 +42,23 @@ class S3 {
         return getSignedUrl(s3Client, command, {
             expiresIn: options.expiresInSeconds ?? 900,
         });
+    }
+
+    /** Reads a whole object through the S3 endpoint, rejecting objects over `maxBytes` before downloading them. */
+    public async read(key: string, options: { bucket: string; maxBytes: number; signal?: AbortSignal }): Promise<Uint8Array> {
+        const command = new GetObjectCommand({
+            Bucket: options.bucket,
+            Key: key.startsWith("/") ? key.slice(1) : key,
+        });
+        // The signal stays attached until the body is consumed, so it also aborts the download.
+        const response = await s3Client.send(command, { abortSignal: options.signal });
+        const size = response.ContentLength ?? 0;
+        if (size > options.maxBytes) {
+            await response.Body?.transformToWebStream().cancel();
+            throw new S3ObjectTooLargeError(size, options.maxBytes);
+        }
+        if (!response.Body) throw new Error(`Object ${key} has no body`);
+        return response.Body.transformToByteArray();
     }
 
     public async getUploadPresignedUrl(

@@ -11,7 +11,12 @@ import {
     TrackType,
 } from "@/db/schema";
 import { db } from "@/global/db";
+import { s3, S3ObjectTooLargeError } from "@/global/s3";
 import { Quality } from "@/lib/types";
+import { AiProviderError } from "./errors";
+
+const SOURCE_READ_TIMEOUT_MS = 60_000;
+const SOURCE_MAX_BYTES = 50 * 1024 * 1024;
 
 type ImageSourceRow = {
     track: Pick<
@@ -116,4 +121,31 @@ export async function resolveAiImageSource(mediaId: string, libraryId: string) {
     if (pendingCoverTask.length > 0) throw new CoverNotReadyError(mediaId);
 
     return source;
+}
+
+/**
+ * Reads a source image for a model that receives image bytes. It goes through the S3 SDK, so the
+ * server reaches storage over the configured (possibly private) endpoint rather than a public URL.
+ */
+export async function readAiSourceImage(
+    file: Pick<typeof DbFile.$inferSelect, "id" | "path" | "bucket">,
+    signal?: AbortSignal,
+): Promise<Uint8Array> {
+    const timeout = AbortSignal.timeout(SOURCE_READ_TIMEOUT_MS);
+    try {
+        return await s3.read(file.path, {
+            bucket: file.bucket,
+            maxBytes: SOURCE_MAX_BYTES,
+            signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        });
+    } catch (error) {
+        // The SDK reports every abort as AbortError, so tell our timeout apart from cancellation here.
+        if (timeout.aborted && !signal?.aborted) {
+            throw new AiProviderError("TIMEOUT", `Reading source file ${file.id} timed out after ${SOURCE_READ_TIMEOUT_MS / 1000}s`);
+        }
+        if (error instanceof S3ObjectTooLargeError) {
+            throw new AiProviderError("INVALID_REQUEST", `Source file ${file.id} is ${error.size} bytes, over the ${error.maxBytes} byte limit`);
+        }
+        throw error;
+    }
 }
