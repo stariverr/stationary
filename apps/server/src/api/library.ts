@@ -20,6 +20,7 @@ import { LibraryMoveItemsBodySchema } from "@/features/library/schema";
 import { LibraryDeleteError, LibraryMoveError } from "@/features/library/errors";
 import { moveLibraryItems } from "@/features/library/move-items";
 import { deleteLibrary } from "@/features/library/delete-library";
+import { isSupportedLanguage } from "@/features/ai/image-metadata";
 
 const router = new Hono<AuthEnv>();
 
@@ -48,26 +49,14 @@ export const LibraryListQuerySchema = v.object({
 export const LibraryCreateBodySchema = v.strictObject({
     name: v.pipe(v.string(), v.nonEmpty("Name is required")),
     description: v.optional(v.string(), ""),
+    /** BCP 47 language AI image descriptions are written in; the creator's UI language by default. */
+    ai_language: v.optional(v.pipe(v.string(), v.check(isSupportedLanguage, "Unsupported language"))),
 });
 
 export const LibraryUpdateBodySchema = v.strictObject({
     id: v.pipe(v.string(), v.uuid("Invalid library ID format")),
     name: v.optional(v.pipe(v.string(), v.nonEmpty("Name is required"))),
     description: v.optional(v.string()),
-});
-
-export const LibraryAiConfigSchema = v.object({
-    ai_provider: v.optional(v.nullable(v.picklist(["gemini", "openai"]))),
-    openai_api_key: v.optional(v.nullable(v.string())),
-    openai_base_url: v.optional(v.nullable(v.string())),
-    openai_model_embedding_text: v.optional(v.nullable(v.string())),
-    openai_model_embedding_text_map_to: v.optional(v.nullable(v.string())),
-    openai_model_embedding_image: v.optional(v.nullable(v.string())),
-    openai_model_embedding_image_map_to: v.optional(v.nullable(v.string())),
-    openai_model_describe_image: v.optional(v.nullable(v.string())),
-    openai_model_describe_image_map_to: v.optional(v.nullable(v.string())),
-    gemini_api_key: v.optional(v.nullable(v.string())),
-    gemini_base_url: v.optional(v.nullable(v.string())),
 });
 
 export const LibraryCoverJobsBodySchema = v.object({
@@ -144,6 +133,7 @@ router.post("/create", requireAuth, validate("json", LibraryCreateBodySchema), a
             name: body.name,
             description: body.description,
             owner_id: user.id,
+            ...(body.ai_language ? { ai_language: body.ai_language } : {}),
         })
         .returning();
     return c.json(success(Code.SUCCESS, newLib[0]));
@@ -214,77 +204,6 @@ router.post("/move-items", requireAuth, validate("json", LibraryMoveItemsBodySch
         const message = cause instanceof Error ? cause.message : String(cause);
         return c.json(error(Code.INTERNAL_SERVER_ERROR, message), 500);
     }
-});
-
-// GET Library AI Config
-router.get("/:id/ai-config", requireAuth, validate("param", LibraryIdParamSchema), async (c) => {
-    const { id } = c.req.valid("param");
-
-    const libraryRows = await db.select().from(Library).where(eq(Library.id, id)).limit(1);
-    const library = libraryRows[0];
-
-    if (!library) {
-        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
-    }
-
-    return c.json(
-        success(Code.SUCCESS, {
-            ai_provider: library.ai_provider,
-            openai_api_key: maskKey(library.openai_api_key),
-            openai_base_url: library.openai_base_url,
-            openai_model_embedding_text: library.openai_model_embedding_text,
-            openai_model_embedding_text_map_to: library.openai_model_embedding_text_map_to,
-            openai_model_embedding_image: library.openai_model_embedding_image,
-            openai_model_embedding_image_map_to: library.openai_model_embedding_image_map_to,
-            openai_model_describe_image: library.openai_model_describe_image,
-            openai_model_describe_image_map_to: library.openai_model_describe_image_map_to,
-            gemini_api_key: maskKey(library.gemini_api_key),
-            gemini_base_url: library.gemini_base_url,
-        }),
-    );
-});
-
-// POST Library AI Config
-router.post("/:id/ai-config", requireAuth, validate("param", LibraryIdParamSchema), validate("json", LibraryAiConfigSchema), async (c) => {
-    const { id } = c.req.valid("param");
-    const body = c.req.valid("json");
-
-    const libraryRows = await db.select().from(Library).where(eq(Library.id, id)).limit(1);
-    const library = libraryRows[0];
-
-    if (!library) {
-        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
-    }
-
-    let geminiApiKey = body.gemini_api_key;
-    if (geminiApiKey && geminiApiKey.includes("...")) {
-        geminiApiKey = library.gemini_api_key;
-    }
-
-    let openaiApiKey = body.openai_api_key;
-    if (openaiApiKey && openaiApiKey.includes("...")) {
-        openaiApiKey = library.openai_api_key;
-    }
-
-    await db
-        .update(Library)
-        .set({
-            ai_provider: body.ai_provider,
-            openai_api_key: openaiApiKey,
-            openai_base_url: body.openai_base_url,
-            openai_model_embedding_text: body.openai_model_embedding_text,
-            openai_model_embedding_text_map_to: body.openai_model_embedding_text_map_to,
-            openai_model_embedding_image: body.openai_model_embedding_image,
-            openai_model_embedding_image_map_to: body.openai_model_embedding_image_map_to,
-            openai_model_describe_image: body.openai_model_describe_image,
-            openai_model_describe_image_map_to: body.openai_model_describe_image_map_to,
-            gemini_api_key: geminiApiKey,
-            gemini_base_url: body.gemini_base_url,
-            update_time: sql`now()`,
-        })
-        .where(eq(Library.id, id));
-
-    return c.json(success(Code.SUCCESS, null, "Library AI configuration updated successfully"));
 });
 
 router.post(

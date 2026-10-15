@@ -24,10 +24,7 @@ async function main() {
         }
 
         console.log("📝 Generating text embedding for: 'Hello, Stationary!'...");
-        const result = await aiService.embedText({
-            text: "Hello, Stationary!",
-            purpose: "QUERY",
-        });
+        const result = await aiService.embedQuery("textEmbedding", "Hello, Stationary!");
 
         console.log("✅ Embedding generated successfully!");
         console.log(`📊 Vector space ID: ${result.spaceId}`);

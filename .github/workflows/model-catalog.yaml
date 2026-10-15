@@ -1,0 +1,54 @@
+name: Refresh Model Catalog
+
+# Regenerates the committed AI model catalog from models.dev and opens a PR with the diff,
+# so catalog changes are reviewed like code. See apps/server/src/features/ai/catalog/curated.ts.
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: model-catalog
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    name: Regenerate & Open PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Regenerate Catalog
+        working-directory: apps/server
+        run: bun run generate:model-catalog
+
+      - name: Validate Catalog
+        working-directory: apps/server
+        run: bun test tests/ai-catalog.test.ts
+
+      - name: Open Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: chore/model-catalog
+          delete-branch: true
+          commit-message: "chore(ai): refresh model catalog from models.dev"
+          title: "chore(ai): refresh model catalog from models.dev"
+          body: |
+            Weekly regeneration of `apps/server/src/features/ai/catalog/catalog.json`.
+
+            Review the diff before merging. Fix wrong upstream data in `curated.ts`
+            (`GENERATION_MODEL_PATCHES`) rather than editing the generated file.
+          add-paths: apps/server/src/features/ai/catalog/catalog.json

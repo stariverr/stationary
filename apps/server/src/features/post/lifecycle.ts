@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, isNotNull } from "drizzle-orm";
 import { db } from "@/global/db";
 import { DeleteStatus, File, Media, MediaTag, Post, PostTag, Track } from "@/db/schema";
+import { deleteMediaAiData } from "@/features/ai/cleanup";
 
 export async function trashPost(postId: string) {
     const recycleTime = Temporal.Now.instant();
@@ -172,6 +173,7 @@ export async function batchDeletePost(postIds: string[]): Promise<{
                     .where(inArray(Media.id, mediaIds))
                     .returning({ id: Media.id });
                 mediaUpdated = updatedMedias.length;
+                await deleteMediaAiData(tx, mediaIds);
 
                 await tx
                     .update(Track)

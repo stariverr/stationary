@@ -1,4 +1,6 @@
 import * as v from "valibot";
+import { isSupportedLanguage } from "./image-metadata";
+import { LibraryAiBindingsSchema } from "./model-schema";
 
 export const QueueAiSchema = v.pipe(
     v.object({
@@ -9,3 +11,10 @@ export const QueueAiSchema = v.pipe(
 );
 
 export type QueueAiInput = v.InferOutput<typeof QueueAiSchema>;
+
+/** Body of `POST /api/ai/bindings/:library_id`: every role binding plus library-level AI options. */
+export const UpdateLibraryAiBindingsSchema = v.object({
+    ...LibraryAiBindingsSchema.entries,
+    /** BCP 47 language for image descriptions. */
+    language: v.optional(v.pipe(v.string(), v.check(isSupportedLanguage, "Unsupported language"))),
+});

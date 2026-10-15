@@ -1,9 +1,11 @@
 import { and, count, eq, inArray } from "drizzle-orm";
 import {
+    AssetEmbedding,
     Author,
     DeleteStatus,
     File,
     Library,
+    LibraryEmbeddingSpace,
     LibraryGroupAccess,
     LibraryUserAccess,
     Media,
@@ -113,6 +115,9 @@ export async function deleteLibrary(libraryId: string, auth: LibraryDeleteAuth) 
 
             await tx.delete(LibraryUserAccess).where(eq(LibraryUserAccess.library_id, libraryId));
             await tx.delete(LibraryGroupAccess).where(eq(LibraryGroupAccess.library_id, libraryId));
+            // Stops queued embedding work and frees the library's vectors.
+            await tx.delete(LibraryEmbeddingSpace).where(eq(LibraryEmbeddingSpace.library_id, libraryId));
+            await tx.delete(AssetEmbedding).where(eq(AssetEmbedding.library_id, libraryId));
 
             return {
                 libraryUpdated: 1,

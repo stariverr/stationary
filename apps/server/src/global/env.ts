@@ -29,6 +29,11 @@ const envSchema = v.object({
     RESEND_API_KEY: v.string(),
     RESEND_EMAIL_SENDER: v.string(),
     AUTH_SECRET: v.string(),
+    /** 32-byte base64 key that encrypts stored credentials such as AI provider API keys (`openssl rand -base64 32`). */
+    SECRETS_ENCRYPTION_KEY: v.pipe(
+        v.string(),
+        v.check((value) => Buffer.from(value, "base64").length === 32, "SECRETS_ENCRYPTION_KEY must be 32 bytes encoded as base64"),
+    ),
 
     /** Cloudflare Turnstile Keys */
     TURNSTILE_SITE_KEY: v.optional(v.string(), "1x00000000000000000000AA"),
@@ -71,6 +76,15 @@ const envSchema = v.object({
         v.transform((v) => parseInt(v, 10)),
     ),
     CRON_SECRET: v.optional(v.string()),
+
+    /**
+     * Lets AI provider URLs point at private networks (localhost, LAN, cluster services). Off by
+     * default because provider URLs are user input; enable it for self-hosted model servers.
+     */
+    AI_ALLOW_PRIVATE_NETWORK: v.pipe(
+        v.optional(v.string(), "false"),
+        v.transform((v) => v === "true"),
+    ),
 });
 
 export const env = v.parse(envSchema, process.env);

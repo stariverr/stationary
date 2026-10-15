@@ -1,0 +1,2994 @@
+{
+  "providers": {
+    "alibaba": [
+      {
+        "name": "deepseek-v4-flash-0731",
+        "displayName": "DeepSeek V4 Flash 0731",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 384000,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "high"
+          ]
+        },
+        "releaseDate": "2026-07-31"
+      },
+      {
+        "name": "glm-5.2",
+        "displayName": "GLM-5.2",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-06-13"
+      },
+      {
+        "name": "kimi-k3",
+        "displayName": "Kimi K3",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 1048576,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-07-16"
+      },
+      {
+        "name": "qwen-flash",
+        "displayName": "Qwen Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 32768,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-07-28"
+      },
+      {
+        "name": "qwen3-coder-flash",
+        "displayName": "Qwen3 Coder Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-07-28"
+      },
+      {
+        "name": "qwen3-coder-plus",
+        "displayName": "Qwen3 Coder Plus",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-07-23"
+      },
+      {
+        "name": "qwen3-next-80b-a3b-instruct",
+        "displayName": "Qwen3-Next 80B-A3B Instruct",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 131072,
+          "maxOutputTokens": 32768,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-09"
+      },
+      {
+        "name": "qwen3-next-80b-a3b-thinking",
+        "displayName": "Qwen3-Next 80B-A3B (Thinking)",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 131072,
+          "maxOutputTokens": 32768,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-09"
+      },
+      {
+        "name": "qwen3-vl-plus",
+        "displayName": "Qwen3-VL Plus",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 32768,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-09-23"
+      },
+      {
+        "name": "qwen3.5-122b-a10b",
+        "displayName": "Qwen3.5 122B-A10B",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2026-02-23"
+      },
+      {
+        "name": "qwen3.5-397b-a17b",
+        "displayName": "Qwen3.5 397B-A17B",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2026-02-15"
+      },
+      {
+        "name": "qwen3.6-27b",
+        "displayName": "Qwen3.6 27B",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2026-04-22"
+      },
+      {
+        "name": "qwen3.6-35b-a3b",
+        "displayName": "Qwen3.6 35B-A3B",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "audio"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2026-04-17"
+      },
+      {
+        "name": "qwen3.7-plus",
+        "displayName": "Qwen3.7 Plus",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2026-06-02"
+      },
+      {
+        "name": "qwen3.8-flash",
+        "displayName": "Qwen3.8 Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-08-26"
+      },
+      {
+        "name": "qwen3.8-max",
+        "displayName": "Qwen3.8 Max",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-08-03"
+      },
+      {
+        "name": "qwen3.8-omni-flash",
+        "displayName": "Qwen3.8 Omni Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "audio",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "low",
+            "medium",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-09-17"
+      }
+    ],
+    "alibaba-cn": [
+      {
+        "name": "deepseek-v4-pro",
+        "displayName": "DeepSeek V4 Pro",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 384000,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "high"
+          ]
+        },
+        "releaseDate": "2026-04-24"
+      },
+      {
+        "name": "deepseek-v4.1-flash",
+        "displayName": "DeepSeek V4.1 Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 384000,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-09-10"
+      },
+      {
+        "name": "glm-5.3",
+        "displayName": "GLM-5.3",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-08-14"
+      },
+      {
+        "name": "kimi-k2-thinking",
+        "displayName": "Moonshot Kimi K2 Thinking",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 16384,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2025-11-06"
+      },
+      {
+        "name": "kimi-k3",
+        "displayName": "Kimi K3",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 1048576,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-07-16"
+      },
+      {
+        "name": "MiniMax/MiniMax-M2.7",
+        "displayName": "MiniMax-M2.7",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 204800,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2026-03-18"
+      },
+      {
+        "name": "qwen-flash",
+        "displayName": "Qwen Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 32768,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-07-28"
+      },
+      {
+        "name": "qwen3-coder-flash",
+        "displayName": "Qwen3 Coder Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-07-28"
+      },
+      {
+        "name": "qwen3-coder-plus",
+        "displayName": "Qwen3 Coder Plus",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-07-23"
+      },
+      {
+        "name": "qwen3-next-80b-a3b-instruct",
+        "displayName": "Qwen3-Next 80B-A3B Instruct",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 131072,
+          "maxOutputTokens": 32768,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-09"
+      },
+      {
+        "name": "qwen3-next-80b-a3b-thinking",
+        "displayName": "Qwen3-Next 80B-A3B (Thinking)",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 131072,
+          "maxOutputTokens": 32768,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-09"
+      },
+      {
+        "name": "qwen3-vl-embedding",
+        "displayName": "Qwen3-VL Embedding",
+        "category": "embedding",
+        "capabilities": {
+          "dimension": 1024,
+          "mrl": true,
+          "maxInputTokens": 32000,
+          "multimodal": true,
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ]
+        },
+        "supportedDimensions": [
+          256,
+          512,
+          768,
+          1024,
+          1536,
+          2048,
+          2560
+        ]
+      },
+      {
+        "name": "qwen3-vl-plus",
+        "displayName": "Qwen3-VL Plus",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 32768,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-09-23"
+      },
+      {
+        "name": "qwen3.5-397b-a17b",
+        "displayName": "Qwen3.5 397B-A17B",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2026-02-16"
+      },
+      {
+        "name": "qwen3.7-plus",
+        "displayName": "Qwen3.7 Plus",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 64000,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2026-06-02"
+      },
+      {
+        "name": "qwen3.8-flash",
+        "displayName": "Qwen3.8 Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-08-26"
+      },
+      {
+        "name": "qwen3.8-max",
+        "displayName": "Qwen3.8 Max",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-08-03"
+      },
+      {
+        "name": "qwen3.8-omni-flash",
+        "displayName": "Qwen3.8 Omni Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "audio",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "low",
+            "medium",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-09-17"
+      },
+      {
+        "name": "siliconflow/deepseek-v3.1-terminus",
+        "displayName": "siliconflow/deepseek-v3.1-terminus",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 163840,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2025-09-29"
+      },
+      {
+        "name": "siliconflow/deepseek-v3.2",
+        "displayName": "siliconflow/deepseek-v3.2",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 163840,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2025-12-03"
+      },
+      {
+        "name": "text-embedding-v4",
+        "displayName": "Qwen Text Embedding v4",
+        "category": "embedding",
+        "capabilities": {
+          "dimension": 1024,
+          "mrl": true,
+          "maxInputTokens": 8192,
+          "multimodal": false
+        },
+        "supportedDimensions": [
+          256,
+          512,
+          768,
+          1024,
+          1536,
+          2048
+        ]
+      }
+    ],
+    "anthropic": [
+      {
+        "name": "claude-fable-5-1",
+        "displayName": "Claude Fable 5.1",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/gif",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-09-01"
+      },
+      {
+        "name": "claude-haiku-5-5",
+        "displayName": "Claude Haiku 5.5",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/gif",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-10-07"
+      },
+      {
+        "name": "claude-opus-5-5",
+        "displayName": "Claude Opus 5.5",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/gif",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-09-22"
+      },
+      {
+        "name": "claude-sonnet-5-5",
+        "displayName": "Claude Sonnet 5.5",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 128000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/gif",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-09-28"
+      }
+    ],
+    "cohere": [
+      {
+        "name": "command-a-plus-05-2026",
+        "displayName": "Command A Plus",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 128000,
+          "maxOutputTokens": 64000,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2026-05-20"
+      },
+      {
+        "name": "command-a-reasoning-08-2025",
+        "displayName": "Command A Reasoning",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 256000,
+          "maxOutputTokens": 32000,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-08-21"
+      },
+      {
+        "name": "command-a-translate-08-2025",
+        "displayName": "Command A Translate",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 8000,
+          "maxOutputTokens": 8000,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-08-28"
+      },
+      {
+        "name": "command-a-vision-07-2025",
+        "displayName": "Command A Vision",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 128000,
+          "maxOutputTokens": 8000,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-07-31"
+      },
+      {
+        "name": "north-mini-code-1-0",
+        "displayName": "North Mini Code",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 256000,
+          "maxOutputTokens": 64000,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "high"
+          ]
+        },
+        "releaseDate": "2026-06-09"
+      },
+      {
+        "name": "north-small-translate-09-2026",
+        "displayName": "North Small Translate",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 32768,
+          "maxOutputTokens": 16000,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2026-09-09"
+      },
+      {
+        "name": "tiny-aya-earth",
+        "displayName": "Tiny Aya Earth",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 8000,
+          "maxOutputTokens": 8000,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2026-02-17"
+      },
+      {
+        "name": "tiny-aya-fire",
+        "displayName": "Tiny Aya Fire",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 8000,
+          "maxOutputTokens": 8000,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2026-02-17"
+      },
+      {
+        "name": "tiny-aya-global",
+        "displayName": "Tiny Aya Global",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 8000,
+          "maxOutputTokens": 8000,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2026-02-17"
+      },
+      {
+        "name": "tiny-aya-water",
+        "displayName": "Tiny Aya Water",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 8000,
+          "maxOutputTokens": 8000,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2026-02-17"
+      }
+    ],
+    "deepseek": [
+      {
+        "name": "deepseek-flash",
+        "displayName": "DeepSeek V4.1 Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 393216,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-09-10"
+      },
+      {
+        "name": "deepseek-v4-pro",
+        "displayName": "DeepSeek V4 Pro",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 393216,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-08-12"
+      }
+    ],
+    "google": [
+      {
+        "name": "gemini-2.5-computer-use-preview-10-2025",
+        "displayName": "Gemini 2.5 Computer Use Preview 10-2025",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 128000,
+          "maxOutputTokens": 64000,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/heic",
+            "image/heif"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-10-07"
+      },
+      {
+        "name": "gemini-3.1-pro-preview",
+        "displayName": "Gemini 3.1 Pro Preview",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/heic",
+            "image/heif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-02-19"
+      },
+      {
+        "name": "gemini-3.1-pro-preview-customtools",
+        "displayName": "Gemini 3.1 Pro Preview Custom Tools",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/heic",
+            "image/heif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-02-19"
+      },
+      {
+        "name": "gemini-3.5-flash-lite",
+        "displayName": "Gemini 3.5 Flash Lite",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/heic",
+            "image/heif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-07-21"
+      },
+      {
+        "name": "gemini-3.8-flash",
+        "displayName": "Gemini 3.8 Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/heic",
+            "image/heif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-09-02"
+      },
+      {
+        "name": "gemini-4-argon",
+        "displayName": "Gemini 4 Argon",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 32768,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/heic",
+            "image/heif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-10-13"
+      },
+      {
+        "name": "gemini-embedding-2",
+        "displayName": "Gemini Embedding 2",
+        "category": "embedding",
+        "capabilities": {
+          "dimension": 768,
+          "mrl": true,
+          "maxInputTokens": 8192,
+          "multimodal": true,
+          "imageFormats": [
+            "image/png",
+            "image/jpeg"
+          ],
+          "taskPrefixType": "gemini-asymmetric"
+        },
+        "supportedDimensions": [
+          256,
+          384,
+          512,
+          768,
+          1024,
+          1536,
+          2048,
+          2560,
+          3072
+        ]
+      },
+      {
+        "name": "gemini-flash-latest",
+        "displayName": "Gemini Flash Latest",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/heic",
+            "image/heif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-08-13"
+      },
+      {
+        "name": "gemini-flash-lite-latest",
+        "displayName": "Gemini Flash-Lite Latest",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "audio",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/heic",
+            "image/heif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-07-21"
+      },
+      {
+        "name": "gemma-4-26b-a4b-it",
+        "displayName": "Gemma 4 26B A4B IT",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 32768,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/heic",
+            "image/heif"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2026-04-02"
+      },
+      {
+        "name": "gemma-4-31b-it",
+        "displayName": "Gemma 4 31B IT",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 32768,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/heic",
+            "image/heif"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2026-04-02"
+      }
+    ],
+    "minimax": [
+      {
+        "name": "MiniMax-M2.7-highspeed",
+        "displayName": "MiniMax-M2.7-highspeed",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 204800,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2026-03-18"
+      },
+      {
+        "name": "MiniMax-M3",
+        "displayName": "MiniMax-M3",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 512000,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2026-06-01"
+      }
+    ],
+    "mistral": [
+      {
+        "name": "codestral-2508",
+        "displayName": "Codestral 25.08",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 256000,
+          "maxOutputTokens": 8192,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2025-07-30"
+      },
+      {
+        "name": "ministral-14b-2512",
+        "displayName": "Ministral 3 14B",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 262144,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2025-12-02"
+      },
+      {
+        "name": "ministral-3b-2512",
+        "displayName": "Ministral 3 3B",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 131072,
+          "maxOutputTokens": 262144,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2025-12-02"
+      },
+      {
+        "name": "ministral-8b-2512",
+        "displayName": "Ministral 3 8B",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 262144,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2025-12-02"
+      },
+      {
+        "name": "mistral-large-4",
+        "displayName": "Mistral Large 4",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 262144,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "high"
+          ]
+        },
+        "releaseDate": "2026-10-06"
+      },
+      {
+        "name": "mistral-medium-2604",
+        "displayName": "Mistral Medium 3.5",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 262144,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "high"
+          ]
+        },
+        "releaseDate": "2026-04-29"
+      },
+      {
+        "name": "mistral-medium-latest",
+        "displayName": "Mistral Medium (latest)",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 262144,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "high"
+          ]
+        },
+        "releaseDate": "2026-04-29"
+      },
+      {
+        "name": "mistral-small-2603",
+        "displayName": "Mistral Small 4",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 256000,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false,
+          "reasoningLevels": [
+            "none",
+            "high"
+          ]
+        },
+        "releaseDate": "2026-03-16"
+      },
+      {
+        "name": "mistral-small-latest",
+        "displayName": "Mistral Small (latest)",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 256000,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false,
+          "reasoningLevels": [
+            "none",
+            "high"
+          ]
+        },
+        "releaseDate": "2026-03-16"
+      },
+      {
+        "name": "voxtral-small-2507",
+        "displayName": "Voxtral Small",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 32768,
+          "maxOutputTokens": 32000,
+          "inputModalities": [
+            "text",
+            "audio"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-07-15"
+      },
+      {
+        "name": "voxtral-small-latest",
+        "displayName": "Voxtral Small (latest)",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 32768,
+          "maxOutputTokens": 32000,
+          "inputModalities": [
+            "text",
+            "audio"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-07-15"
+      },
+      {
+        "name": "zai-glm-5-3",
+        "displayName": "GLM-5.3",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-08-14"
+      }
+    ],
+    "moonshotai": [
+      {
+        "name": "kimi-k2.7-code",
+        "displayName": "Kimi K2.7 Code",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 262144,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2026-06-12"
+      },
+      {
+        "name": "kimi-k2.7-code-highspeed",
+        "displayName": "Kimi K2.7 Code HighSpeed",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 262144,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2026-06-12"
+      },
+      {
+        "name": "kimi-k3",
+        "displayName": "Kimi K3",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 1048576,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-07-16"
+      }
+    ],
+    "moonshotai-cn": [
+      {
+        "name": "kimi-k2.7-code",
+        "displayName": "Kimi K2.7 Code",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 262144,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2026-06-12"
+      },
+      {
+        "name": "kimi-k2.7-code-highspeed",
+        "displayName": "Kimi K2.7 Code HighSpeed",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 262144,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2026-06-12"
+      },
+      {
+        "name": "kimi-k3",
+        "displayName": "Kimi K3",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 1048576,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-07-16"
+      }
+    ],
+    "openai": [
+      {
+        "name": "gpt-5.3-codex",
+        "displayName": "GPT-5.3 Codex",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 128000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-02-05"
+      },
+      {
+        "name": "gpt-5.3-codex-spark",
+        "displayName": "GPT-5.3 Codex Spark",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 128000,
+          "maxOutputTokens": 32000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-02-05"
+      },
+      {
+        "name": "gpt-5.4-mini",
+        "displayName": "GPT-5.4 mini",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 128000,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-03-17"
+      },
+      {
+        "name": "gpt-5.4-nano",
+        "displayName": "GPT-5.4 nano",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 128000,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-03-17"
+      },
+      {
+        "name": "gpt-5.5-pro",
+        "displayName": "GPT-5.5 Pro",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "medium",
+            "high",
+            "xhigh"
+          ]
+        },
+        "releaseDate": "2026-04-23"
+      },
+      {
+        "name": "gpt-5.6",
+        "displayName": "GPT-5.6",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-07-09"
+      },
+      {
+        "name": "gpt-5.6-terra",
+        "displayName": "GPT-5.6 Terra",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-07-09"
+      },
+      {
+        "name": "gpt-6-astra",
+        "displayName": "GPT-6 Astra",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-09-04"
+      },
+      {
+        "name": "gpt-6-luna",
+        "displayName": "GPT-6 Luna",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-09-22"
+      },
+      {
+        "name": "gpt-6.1-sol",
+        "displayName": "GPT-6.1 Sol",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-09-29"
+      },
+      {
+        "name": "gpt-daybreak-blue-latest",
+        "displayName": "Daybreak Blue",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1050000,
+          "maxOutputTokens": 128000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-08-07"
+      },
+      {
+        "name": "gpt-daybreak-red-latest",
+        "displayName": "Daybreak Red",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 400000,
+          "maxOutputTokens": 128000,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-08-07"
+      },
+      {
+        "name": "text-embedding-3-large",
+        "displayName": "OpenAI text-embedding-3-large",
+        "category": "embedding",
+        "capabilities": {
+          "dimension": 1536,
+          "mrl": true,
+          "maxInputTokens": 8191,
+          "multimodal": false
+        },
+        "supportedDimensions": [
+          256,
+          384,
+          512,
+          768,
+          1024,
+          1536,
+          2048,
+          2560,
+          3072
+        ]
+      },
+      {
+        "name": "text-embedding-3-small",
+        "displayName": "OpenAI text-embedding-3-small",
+        "category": "embedding",
+        "capabilities": {
+          "dimension": 1536,
+          "mrl": true,
+          "maxInputTokens": 8191,
+          "multimodal": false
+        },
+        "supportedDimensions": [
+          256,
+          384,
+          512,
+          768,
+          1024,
+          1536
+        ]
+      }
+    ],
+    "stepfun": [
+      {
+        "name": "step-3.7-flash",
+        "displayName": "Step 3.7 Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 256000,
+          "maxOutputTokens": 256000,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-05-29"
+      },
+      {
+        "name": "step-5-preview",
+        "displayName": "Step 5 Preview",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 65536,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-09-16"
+      }
+    ],
+    "volcengine": [
+      {
+        "name": "deepseek-v4-flash-ga-260731",
+        "displayName": "DeepSeek V4 Flash 0731",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 384000,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-07-31"
+      },
+      {
+        "name": "deepseek-v4-pro-ga-260813",
+        "displayName": "DeepSeek V4 Pro 0813",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 384000,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-08-12"
+      },
+      {
+        "name": "doubao-seed-1-6-flash-250828",
+        "displayName": "Seed 1.6 Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 256000,
+          "maxOutputTokens": 32000,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2025-08-28"
+      },
+      {
+        "name": "doubao-seed-1-6-vision-250815",
+        "displayName": "Seed 1.6 Vision",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 256000,
+          "maxOutputTokens": 32000,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2025-08-15"
+      },
+      {
+        "name": "doubao-seed-1-8-251228",
+        "displayName": "Seed 1.8",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 256000,
+          "maxOutputTokens": 64000,
+          "inputModalities": [
+            "text",
+            "image"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2025-12-28"
+      },
+      {
+        "name": "doubao-seed-2-0-code-preview-260215",
+        "displayName": "Seed 2.0 Code",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 262144,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-02-14"
+      },
+      {
+        "name": "doubao-seed-2-0-lite-260428",
+        "displayName": "Seed 2.0 Lite",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 256000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-02-14"
+      },
+      {
+        "name": "doubao-seed-2-0-mini-260428",
+        "displayName": "Seed 2.0 Mini",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 256000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-02-14"
+      },
+      {
+        "name": "doubao-seed-2-1-pro-260628",
+        "displayName": "Seed 2.1 Pro",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 256000,
+          "maxOutputTokens": 256000,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-06-23"
+      },
+      {
+        "name": "doubao-seed-2-1-turbo-260628",
+        "displayName": "Seed 2.1 Turbo",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 256000,
+          "maxOutputTokens": 256000,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-06-23"
+      },
+      {
+        "name": "doubao-seed-character-260628",
+        "displayName": "Seed Character",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 256000,
+          "maxOutputTokens": 256000,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "minimal",
+            "low",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-06-23"
+      },
+      {
+        "name": "doubao-seed-evolving",
+        "displayName": "Seed Evolving",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 256000,
+          "maxOutputTokens": 256000,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-06-23"
+      },
+      {
+        "name": "glm-5-2-260617",
+        "displayName": "GLM-5.2",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-06-13"
+      },
+      {
+        "name": "glm-5-3-flash-260828",
+        "displayName": "GLM-5.3-Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-08-26"
+      }
+    ],
+    "xai": [
+      {
+        "name": "grok-4.20-0309-non-reasoning",
+        "displayName": "Grok 4.20 (Non-Reasoning)",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 30000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2026-03-09"
+      },
+      {
+        "name": "grok-4.20-0309-reasoning",
+        "displayName": "Grok 4.20 (Reasoning)",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 30000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2026-03-09"
+      },
+      {
+        "name": "grok-4.20-multi-agent-0309",
+        "displayName": "Grok 4.20 Multi-Agent",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 30000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-03-09"
+      },
+      {
+        "name": "grok-4.7",
+        "displayName": "Grok 4.7",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 500000,
+          "maxOutputTokens": 500000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-09-21"
+      },
+      {
+        "name": "grok-build-0.1",
+        "displayName": "Grok Build 0.1",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 256000,
+          "maxOutputTokens": 256000,
+          "inputModalities": [
+            "text",
+            "image",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png"
+          ],
+          "structuredOutput": true
+        },
+        "releaseDate": "2026-04-16"
+      }
+    ],
+    "xiaomi": [
+      {
+        "name": "mimo-v2.5",
+        "displayName": "MiMo-V2.5",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "audio",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2026-04-22"
+      },
+      {
+        "name": "mimo-v2.6-flash",
+        "displayName": "MiMo-V2.6-Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "audio",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2026-09-22"
+      },
+      {
+        "name": "mimo-v2.6-pro",
+        "displayName": "MiMo-V2.6-Pro",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "audio",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2026-09-22"
+      },
+      {
+        "name": "mimo-v2.6-pro-ultraspeed",
+        "displayName": "MiMo-V2.6-Pro-UltraSpeed",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1048576,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "audio",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2026-09-21"
+      }
+    ],
+    "zhipuai": [
+      {
+        "name": "glm-4.5-air",
+        "displayName": "GLM-4.5-Air",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 131072,
+          "maxOutputTokens": 98304,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-07-28"
+      },
+      {
+        "name": "glm-4.6v",
+        "displayName": "GLM-4.6V",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 128000,
+          "maxOutputTokens": 32768,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-12-08"
+      },
+      {
+        "name": "glm-4.6v-flash",
+        "displayName": "GLM-4.6V-Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 128000,
+          "maxOutputTokens": 32768,
+          "inputModalities": [
+            "text",
+            "image",
+            "video"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2025-12-08"
+      },
+      {
+        "name": "glm-5.3",
+        "displayName": "GLM-5.3",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-08-14"
+      },
+      {
+        "name": "glm-5.3-flash",
+        "displayName": "GLM-5.3-Flash",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-08-26"
+      },
+      {
+        "name": "glm-5.3-flashx",
+        "displayName": "GLM-5.3-FlashX",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 1000000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": true,
+          "reasoningLevels": [
+            "low",
+            "high"
+          ],
+          "reasoning": "low"
+        },
+        "releaseDate": "2026-09-18"
+      },
+      {
+        "name": "glm-5v-turbo",
+        "displayName": "GLM-5V-Turbo",
+        "category": "generation",
+        "capabilities": {
+          "contextWindow": 200000,
+          "maxOutputTokens": 131072,
+          "inputModalities": [
+            "text",
+            "image",
+            "video",
+            "pdf"
+          ],
+          "imageFormats": [
+            "image/jpeg",
+            "image/png",
+            "image/webp"
+          ],
+          "structuredOutput": false
+        },
+        "releaseDate": "2026-04-01"
+      }
+    ]
+  }
+}

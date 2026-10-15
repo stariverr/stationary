@@ -20,6 +20,7 @@ import { v7 as createUuidV7 } from "uuid";
 
 import { sql } from "drizzle-orm";
 import { Quality } from "@/lib/types";
+import { AI_MODEL_CATEGORIES, EMBEDDING_DIMENSIONS } from "@/features/ai/model-schema";
 
 const uuidv7 = { generate: createUuidV7 };
 
@@ -193,17 +194,15 @@ export const Library = pgTable("library", {
     owner_id: uuid("owner_id").notNull(),
     /** 是否公开 */
     is_public: boolean("is_public").default(false).notNull(),
-    ai_provider: text("ai_provider"),
-    openai_api_key: text("openai_api_key"),
-    openai_base_url: text("openai_base_url"),
-    openai_model_embedding_text: text("openai_model_embedding_text"),
-    openai_model_embedding_text_map_to: text("openai_model_embedding_text_map_to"),
-    openai_model_embedding_image: text("openai_model_embedding_image"),
-    openai_model_embedding_image_map_to: text("openai_model_embedding_image_map_to"),
-    openai_model_describe_image: text("openai_model_describe_image"),
-    openai_model_describe_image_map_to: text("openai_model_describe_image_map_to"),
-    gemini_api_key: text("gemini_api_key"),
-    gemini_base_url: text("gemini_base_url"),
+    /** Language (BCP 47) AI image descriptions are written in; OCR text keeps its original language. */
+    ai_language: text("ai_language").default("en-US").notNull(),
+    /** AI role binding mapping (describe, textEmbedding, imageEmbedding) */
+    ai_bindings: jsonb("ai_bindings").$type<{
+        describe?: { modelId: string } | null;
+        textEmbedding?: { modelId: string } | null;
+        imageEmbedding?: { modelId: string } | null;
+        rerank?: { modelId: string } | null;
+    }>(),
     /** Cover Qualities: cover qualities for the library */
     cover_qualities: jsonb("cover_qualities").$type<Quality[]>().default([Quality.LOW, Quality.MEDIUM]).notNull(),
     cover_config_version: integer("cover_config_version").default(1).notNull(),
@@ -653,10 +652,13 @@ export const BetterVerification = pgTable("better_verification", {
 
 // ==== AI & Search Tables: START ====
 
-// Generic unconstrained vector type for pgvector
-export const genericVector = customType<{ data: number[] }>({
+/**
+ * Half-precision pgvector column without a fixed dimension, so one table can hold every
+ * embedding space. halfvec halves storage and lets HNSW index up to 4000 dimensions.
+ */
+export const genericHalfvec = customType<{ data: number[] }>({
     dataType() {
-        return "vector";
+        return "halfvec";
     },
     fromDriver(value: unknown) {
         if (typeof value === "string") {
@@ -678,40 +680,11 @@ export enum ModalityType {
 }
 export const ModalityEnum = pgEnum("modality_type", [ModalityType.TEXT, ModalityType.IMAGE, ModalityType.VIDEO_FRAME, ModalityType.AUDIO]);
 
-// NOTE: Reserved for future vector space model migration and upgrade management. Currently unused.
-export enum EmbeddingSpaceStatus {
-    ACTIVE = "ACTIVE",
-    DEPRECATED = "DEPRECATED",
-    EXPERIMENTAL = "EXPERIMENTAL",
-}
-export const EmbeddingSpaceStatusEnum = pgEnum("embedding_space_status", [
-    EmbeddingSpaceStatus.ACTIVE,
-    EmbeddingSpaceStatus.DEPRECATED,
-    EmbeddingSpaceStatus.EXPERIMENTAL,
-]);
-
 export enum EntityType {
     POST = "POST",
     MEDIA = "MEDIA",
 }
 export const EntityTypeEnum = pgEnum("entity_type", [EntityType.POST, EntityType.MEDIA]);
-
-/** Kind of Embeddings Vector Space
- * - `TEXT`: Text-only Embeddings
- * - `MULTI_MODAL`: Embeddings for Multi-modal data
- */
-export enum VectorSpaceKind {
-    TEXT = "TEXT",
-    MULTI_MODAL = "MULTI_MODAL",
-}
-export const VectorSpaceKindEnum = pgEnum("space_kind", [VectorSpaceKind.TEXT, VectorSpaceKind.MULTI_MODAL]);
-
-export enum MetricType {
-    COSINE = "COSINE",
-    INNER_PRODUCT = "INNER_PRODUCT",
-    L2 = "L2",
-}
-export const MetricTypeEnum = pgEnum("metric_type", [MetricType.COSINE, MetricType.INNER_PRODUCT, MetricType.L2]);
 
 export enum EmbeddingRole {
     CONTENT_TEXT = "CONTENT_TEXT",
@@ -728,13 +701,21 @@ export const EmbeddingRoleEnum = pgEnum("embedding_role", [
     EmbeddingRole.OCR_TEXT,
 ]);
 
+/**
+ * - `PENDING`: queued for the embedding worker; `embedding` is null until it completes.
+ * - `READY`: current vector for its input.
+ * - `STALE`: superseded by a newer input in the same space.
+ * - `FAILED`: gave up after repeated provider errors; retried on demand.
+ */
 export enum EmbeddingStatus {
+    PENDING = "PENDING",
     READY = "READY",
     STALE = "STALE",
     FAILED = "FAILED",
     DISABLED = "DISABLED",
 }
 export const EmbeddingStatusEnum = pgEnum("embedding_status", [
+    EmbeddingStatus.PENDING,
     EmbeddingStatus.READY,
     EmbeddingStatus.STALE,
     EmbeddingStatus.FAILED,
@@ -754,19 +735,55 @@ export const ProcessingStatusEnum = pgEnum("processing_status", [
     ProcessingStatus.FAILED,
 ]);
 
-// TODO: Reserved for future vector space upgrades, model migrations,
-// and background re-indexing status management (e.g., ACTIVE -> DEPRECATED).
-// Currently unused; space IDs and model metadata are derived dynamically in code.
-export const EmbeddingSpace = pgTable("embedding_space", {
-    id: text("id").primaryKey(), // e.g. "gemini:multimodal-embedding-004:1408:cosine:v1"
-    provider: text("provider").notNull(),
-    model: text("model").notNull(),
-    model_version: text("model_version").notNull(),
-    dimension: integer("dimension").notNull(),
-    space_kind: VectorSpaceKindEnum("space_kind").notNull(),
-    metric: MetricTypeEnum("metric").notNull(),
-    status: EmbeddingSpaceStatusEnum("status").default(EmbeddingSpaceStatus.ACTIVE).notNull(),
-    config: jsonb("config").default({}).notNull(),
+/**
+ * AI Provider: a connection (endpoint + credential) owned by the same principal that owns
+ * libraries. A library may only bind models from providers of its own owner; see
+ * docs/ownership_and_teams.md.
+ */
+export const AiProvider = pgTable(
+    "ai_provider",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        /** Same principal as `library.owner_id`. */
+        owner_id: uuid("owner_id").notNull(),
+        /** Provider template id; it fixes the wire adapter and the model catalog. */
+        template_id: text("template_id").notNull(),
+        name: text("name").notNull(),
+        base_url: text("base_url").notNull(),
+        /** API key encrypted with SECRETS_ENCRYPTION_KEY; plaintext never leaves the server. */
+        api_key_ciphertext: text("api_key_ciphertext"),
+        /** Simultaneous requests allowed across all server instances. */
+        max_concurrency: integer("max_concurrency").default(4).notNull(),
+        /** Requests per minute across all server instances; null when the provider sets no limit. */
+        requests_per_minute: integer("requests_per_minute"),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        update_time: temporal("update_time"),
+    },
+    (table) => [index("ai_provider_owner_idx").on(table.owner_id)],
+);
+
+export const AiModelCategoryEnum = pgEnum("ai_model_category", AI_MODEL_CATEGORIES);
+
+// AI Model table (supports custom user models and capability specifications)
+export const AiModel = pgTable("ai_model", {
+    id: uuid("id")
+        .primaryKey()
+        .notNull()
+        .$defaultFn(() => uuidv7.generate()),
+    provider_id: uuid("provider_id")
+        .notNull()
+        .references(() => AiProvider.id, { onDelete: "cascade" }),
+    name: text("name").notNull(), // 模型实际名字，如 qwen3-vl-embedding
+    /** Name shown to people, e.g. "Qwen3-VL Embedding". */
+    display_name: text("display_name").notNull(),
+    category: AiModelCategoryEnum("category").notNull(),
+    /** Capability snapshot validated by the category's schema in features/ai/model-schema.ts. */
+    capabilities: jsonb("capabilities").notNull().default({}),
     create_time: temporal("create_time")
         .default(sql`now()`)
         .notNull(),
@@ -797,7 +814,12 @@ export const AssetSearchDocument = pgTable(
             .notNull(),
         update_time: temporal("update_time"),
     },
-    (table) => [uniqueIndex("search_doc_entity_unique").on(table.entity_type, table.entity_id)],
+    (table) => [
+        uniqueIndex("search_doc_entity_unique").on(table.entity_type, table.entity_id),
+        // Keyword search runs ILIKE '%q%' and word_similarity() on these columns (requires pg_trgm).
+        index("search_doc_title_trgm_idx").using("gin", sql`${table.title} gin_trgm_ops`),
+        index("search_doc_content_trgm_idx").using("gin", sql`${table.content} gin_trgm_ops`),
+    ],
 );
 
 export const AssetAiMetadata = pgTable(
@@ -820,6 +842,8 @@ export const AssetAiMetadata = pgTable(
         ocr_text: text("ocr_text").default("").notNull(),
         model: text("model").notNull(),
         metadata_pipeline_id: text("metadata_pipeline_id").notNull(),
+        /** Hash of the source image the stored result was generated from; null until a result exists. */
+        input_hash: text("input_hash"),
         processing_status: ProcessingStatusEnum("processing_status").default(ProcessingStatus.PENDING).notNull(),
         last_error: text("last_error"),
         create_time: temporal("create_time")
@@ -845,16 +869,31 @@ export const AssetEmbedding = pgTable(
         embedding_role: EmbeddingRoleEnum("embedding_role").notNull(),
         input_modality: ModalityEnum("input_modality").notNull(),
         dimension: integer("dimension").notNull(),
-        embedding: genericVector("embedding").notNull(),
+        /** Null while the row is a queued request (PENDING). */
+        embedding: genericHalfvec("embedding"),
+        /** Hash of this embedding's own input: the source file for images, the embedded text for text roles. */
         content_hash: text("content_hash").notNull(),
         source_file_id: uuid("source_file_id"),
-        embedding_status: EmbeddingStatusEnum("embedding_status").default(EmbeddingStatus.READY).notNull(),
+        /** Text roles: the input waiting to be embedded; cleared once the vector is stored. */
+        input_text: text("input_text"),
+        input_title: text("input_title"),
+        embedding_status: EmbeddingStatusEnum("embedding_status").default(EmbeddingStatus.PENDING).notNull(),
+        /** Queue scheduling: a PENDING row is claimable once this has passed; claiming pushes it forward as a lease. */
+        available_at: temporal("available_at")
+            .default(sql`now()`)
+            .notNull(),
+        attempt_count: integer("attempt_count").default(0).notNull(),
+        last_error: text("last_error"),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),
         update_time: temporal("update_time"),
     },
     (table) => [
+        index("asset_emb_queue_idx")
+            .on(table.available_at)
+            .where(sql`${table.embedding_status} = 'PENDING'`),
+        index("asset_emb_library_space_idx").on(table.library_id, table.embedding_space_id, table.embedding_role, table.embedding_status),
         uniqueIndex("asset_emb_unique").on(
             table.entity_type,
             table.entity_id,
@@ -862,7 +901,59 @@ export const AssetEmbedding = pgTable(
             table.embedding_role,
             table.content_hash,
         ),
+        check("asset_emb_dimension_check", sql`vector_dims(${table.embedding}) = ${table.dimension}`),
+        // HNSW needs a fixed dimension, so each supported dimension gets its own partial expression index.
+        // Queries must cast with the same literal dimension and filter on it; see search.ts.
+        ...EMBEDDING_DIMENSIONS.map((dimension) =>
+            index(`asset_emb_hnsw_${dimension}`)
+                .using("hnsw", sql`(${table.embedding}::halfvec(${sql.raw(String(dimension))})) halfvec_cosine_ops`)
+                .where(sql`${table.dimension} = ${sql.raw(String(dimension))}`),
+        ),
     ],
+);
+
+export enum LibraryEmbeddingSpaceStatus {
+    /** Searched by the library. */
+    ACTIVE = "ACTIVE",
+    /** Being filled after a model change; becomes ACTIVE once it covers the library. */
+    BUILDING = "BUILDING",
+    /**
+     * The previous ACTIVE space, kept read-only for a while after a switch so choosing its model
+     * again restores it without re-embedding everything. Neither searched nor written.
+     */
+    RETIRED = "RETIRED",
+}
+export const LibraryEmbeddingSpaceStatusEnum = pgEnum("library_embedding_space_status", [
+    LibraryEmbeddingSpaceStatus.ACTIVE,
+    LibraryEmbeddingSpaceStatus.BUILDING,
+    LibraryEmbeddingSpaceStatus.RETIRED,
+]);
+
+/**
+ * Embedding spaces of a library, per embedding role. Search reads only the ACTIVE space, so
+ * changing the embedding model keeps search working until the new space is complete.
+ */
+export const LibraryEmbeddingSpace = pgTable(
+    "library_embedding_space",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        library_id: uuid("library_id").notNull(),
+        /** Binding role: "textEmbedding" | "imageEmbedding". */
+        role: text("role").$type<"textEmbedding" | "imageEmbedding">().notNull(),
+        model_id: uuid("model_id").notNull(),
+        space_id: text("space_id").notNull(),
+        status: LibraryEmbeddingSpaceStatusEnum("status").notNull(),
+        /** AI enrichment task that re-processes the library into a BUILDING space. */
+        backfill_task_id: uuid("backfill_task_id"),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        update_time: temporal("update_time"),
+    },
+    (table) => [uniqueIndex("library_embedding_space_role_status_unique").on(table.library_id, table.role, table.status)],
 );
 
 // ==== AI & Search Tables: END ====

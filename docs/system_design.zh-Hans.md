@@ -98,7 +98,7 @@ erDiagram
 
 ## 5. 多租户隔离与共享机制 (User Group & Library)
 
-为支持多用户团队协作，系统引入了多级权限控制：
+为支持多用户团队协作，系统引入了多级权限控制。所有权（谁持有并承担 AI 供应商等资源的费用）与访问权相互独立，详见 [ownership_and_teams.zh-Hans.md](ownership_and_teams.zh-Hans.md)，其中包括团队的规划方案。
 
 ### 5.1 访问资源实体
 - **Library (媒体库)**：资产的物理隔离单位。每一个 Post 和 Media（如果关联）在创建时都必须指定所属的 `library_id`。

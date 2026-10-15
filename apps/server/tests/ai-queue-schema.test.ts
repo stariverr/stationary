@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import * as v from "valibot";
-import { QueueAiSchema } from "../src/features/ai/schema";
+import { QueueAiSchema, UpdateLibraryAiBindingsSchema } from "../src/features/ai/schema";
 
 const postId = "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3";
 const mediaId = "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b4";
@@ -22,5 +22,17 @@ describe("queue AI schema", () => {
 
     test("rejects malformed target ids", () => {
         expect(v.safeParse(QueueAiSchema, { media_ids: ["not-a-uuid"] }).success).toBe(false);
+    });
+});
+
+describe("library AI bindings schema", () => {
+    test("keeps every role, including rerank", () => {
+        const modelId = "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b5";
+        const result = v.parse(UpdateLibraryAiBindingsSchema, {
+            describe: null,
+            rerank: { modelId },
+            language: "zh-Hans",
+        });
+        expect(result).toEqual({ describe: null, rerank: { modelId }, language: "zh-Hans" });
     });
 });

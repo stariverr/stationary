@@ -6,6 +6,7 @@ import task from "@/api/task";
 import { env } from "@/global/env";
 import user from "@/api/user";
 import library from "@/api/library";
+import { aiRouter } from "@/api/ai";
 import search from "@/api/search";
 import tag from "@/api/tag";
 import trash from "@/api/trash";
@@ -15,12 +16,14 @@ import { jobsApp } from "@/api/jobs";
 import { jobRunner } from "@/infra/jobs/runner";
 import { JobSweeper } from "@/infra/jobs/sweeper";
 import { initJobHandlers } from "@/infra/jobs/register-handlers";
+import { embeddingWorker } from "@/features/ai/embedding-worker";
 // 1. Initialize Task Handlers Strategy Registry
 initJobHandlers();
 
 // 2. Start In-Process Task JobRunner & Sweeper
 jobRunner.start();
 JobSweeper.start(30000);
+embeddingWorker.start();
 
 // 3. Graceful Shutdown Handlers
 let isShuttingDown = false;
@@ -31,7 +34,7 @@ const shutdown = async (signal: string) => {
 
     try {
         JobSweeper.stop();
-        await jobRunner.drain(15000);
+        await Promise.all([jobRunner.drain(15000), embeddingWorker.drain(15000)]);
         console.log("[Server] Graceful shutdown completed.");
     } catch (err) {
         console.error("[Server] Error during graceful shutdown:", err);
@@ -85,6 +88,7 @@ app.route("/api/import", importRouter);
 app.route("/api/task", task);
 app.route("/api/user", user);
 app.route("/api/library", library);
+app.route("/api/ai", aiRouter);
 app.route("/api/search", search);
 app.route("/api/tag", tag);
 app.route("/api/trash", trash);
