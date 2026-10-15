@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, lte, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, lte, ne, sql } from "drizzle-orm";
 import {
     AssetEmbedding,
     DeleteStatus,
@@ -17,7 +17,7 @@ import { s3 } from "@/global/s3";
 import { retryDelaySeconds } from "@/infra/jobs/policy";
 import { AiProviderError, AiThrottledError, classifyAiError, getSafeAiErrorMessage } from "./errors";
 import { AiService } from "./service";
-import type { EmbeddingBindingRole, EmbeddingResult, TextEmbeddingProvider, VisualEmbeddingProvider } from "./types";
+import type { AiErrorView, EmbeddingBindingRole, EmbeddingResult, TextEmbeddingProvider, VisualEmbeddingProvider } from "./types";
 
 /**
  * Embedding work is queued as PENDING `asset_embedding` rows: the row is the request and, once
@@ -380,6 +380,26 @@ export async function countEmbeddings(libraryId: string, spaceId: string, role: 
         .groupBy(AssetEmbedding.embedding_status);
     const count = (status: EmbeddingStatus) => rows.find((row) => row.status === status)?.count ?? 0;
     return { ready: count(EmbeddingStatus.READY), pending: count(EmbeddingStatus.PENDING), failed: count(EmbeddingStatus.FAILED) };
+}
+
+/** The latest error of a library space's queued or failed vectors; null once they have all been stored. */
+export async function latestEmbeddingError(libraryId: string, spaceId: string, role: EmbeddingRole): Promise<AiErrorView | null> {
+    const [row] = await db
+        .select({ message: AssetEmbedding.last_error, at: AssetEmbedding.update_time })
+        .from(AssetEmbedding)
+        .where(
+            and(
+                eq(AssetEmbedding.library_id, libraryId),
+                eq(AssetEmbedding.embedding_space_id, spaceId),
+                eq(AssetEmbedding.embedding_role, role),
+                inArray(AssetEmbedding.embedding_status, [EmbeddingStatus.PENDING, EmbeddingStatus.FAILED]),
+                isNotNull(AssetEmbedding.last_error),
+                ofActiveMedia,
+            ),
+        )
+        .orderBy(desc(AssetEmbedding.update_time))
+        .limit(1);
+    return row?.message && row.at ? { message: row.message, at: row.at.toString() } : null;
 }
 
 /** Puts FAILED vectors of the spaces a library writes back in the queue. Returns how many were requeued. */

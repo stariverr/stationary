@@ -85,19 +85,39 @@ function getNumericStatus(error: unknown): number | undefined {
     return typeof status === "number" ? status : undefined;
 }
 
+/**
+ * The error and what it wraps: `cause`, and `lastError` of the AI SDK's RetryError, which
+ * rethrows the final attempt's error (an abort included) inside itself.
+ */
+function getErrorChain(error: unknown): unknown[] {
+    const chain: unknown[] = [];
+    for (let current = error; current !== undefined && current !== null && chain.length < 5; ) {
+        chain.push(current);
+        if (!(current instanceof Error)) break;
+        current = current.cause ?? (current as { lastError?: unknown }).lastError;
+    }
+    return chain;
+}
+
 /** Name, message and system error code (e.g. ECONNREFUSED) of the error and its causes. */
 function getErrorText(error: unknown): string {
-    const parts: string[] = [];
-    for (let current = error, depth = 0; current !== undefined && current !== null && depth < 5; depth++) {
-        if (!(current instanceof Error)) {
-            parts.push(String(current));
-            break;
-        }
-        const code = (current as { code?: unknown }).code;
-        parts.push(current.name, current.message, typeof code === "string" ? code : "");
-        current = current.cause;
+    return getErrorChain(error)
+        .map((current) => {
+            if (!(current instanceof Error)) return String(current);
+            const code = (current as { code?: unknown }).code;
+            return `${current.name} ${current.message} ${typeof code === "string" ? code : ""}`;
+        })
+        .join(" ")
+        .toLowerCase();
+}
+
+/** Name of the first error in the chain that is a cancellation or timeout signal. */
+function getAbortName(error: unknown): "AbortError" | "TimeoutError" | null {
+    for (const current of getErrorChain(error)) {
+        const name = current instanceof Error || current instanceof DOMException ? current.name : null;
+        if (name === "AbortError" || name === "TimeoutError") return name;
     }
-    return parts.join(" ").toLowerCase();
+    return null;
 }
 
 export function getSafeAiErrorMessage(error: unknown): string {
@@ -129,10 +149,13 @@ export function classifyAiError(error: unknown): AiErrorClassification {
         };
     }
 
+    // Cancellation is decided by the error type, never by message text: a provider message that
+    // merely mentions "cancel" is not a cancelled job.
+    const abortName = getAbortName(error);
+    if (abortName === "AbortError") return { kind: "CANCELLED", retryable: false };
+    if (abortName === "TimeoutError") return { kind: "TIMEOUT", retryable: true };
+
     const text = getErrorText(error);
-    if (text.includes("abort") || text.includes("cancel")) {
-        return { kind: "CANCELLED", retryable: false };
-    }
 
     const status = getNumericStatus(error);
     if (status === 401 || status === 403) return { kind: "AUTHENTICATION", retryable: false };

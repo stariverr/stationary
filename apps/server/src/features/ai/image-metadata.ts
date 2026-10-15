@@ -81,15 +81,32 @@ function toImageContent(image: Buffer | Uint8Array, mimeType: string = "image/jp
     return { type: "file", data: Buffer.from(image), mediaType: validMime };
 }
 
-function normalizeImageAiMetadata(output: Partial<ImageAiMetadata>): ImageAiMetadata {
+/**
+ * Output token cap for one description. The model's own limit can be hundreds of thousands of
+ * tokens; a description with full OCR text fits well within this, with room for light reasoning.
+ */
+export const DESCRIBE_MAX_OUTPUT_TOKENS = 4096;
+
+/**
+ * Bounds of stored fields. Applied after generation rather than in the JSON schema, since strict
+ * structured output modes reject string length keywords; a runaway model is cut, not failed.
+ */
+const TEXT_LIMITS = { caption: 1000, scene: 300, ocrText: 4000 } as const;
+const LIST_LIMITS = { tags: 30, objects: 30, colors: 10, styles: 10 } as const;
+const LIST_ITEM_MAX_LENGTH = 80;
+
+const clampList = (items: string[], max: number) =>
+    [...new Set(items.map((item) => item.trim().slice(0, LIST_ITEM_MAX_LENGTH)).filter(Boolean))].slice(0, max);
+
+export function normalizeImageAiMetadata(output: ImageAiMetadata): ImageAiMetadata {
     return {
-        caption: output.caption || "",
-        tags: Array.isArray(output.tags) ? output.tags : [],
-        objects: Array.isArray(output.objects) ? output.objects : [],
-        colors: Array.isArray(output.colors) ? output.colors : [],
-        styles: Array.isArray(output.styles) ? output.styles : [],
-        scene: output.scene || "",
-        ocrText: output.ocrText || "",
+        caption: output.caption.slice(0, TEXT_LIMITS.caption),
+        tags: clampList(output.tags, LIST_LIMITS.tags),
+        objects: clampList(output.objects, LIST_LIMITS.objects),
+        colors: clampList(output.colors, LIST_LIMITS.colors),
+        styles: clampList(output.styles, LIST_LIMITS.styles),
+        scene: output.scene.slice(0, TEXT_LIMITS.scene),
+        ocrText: output.ocrText.slice(0, TEXT_LIMITS.ocrText),
     };
 }
 
@@ -106,7 +123,7 @@ export async function describeImageWithModel(
         maxRetries: 0,
         abortSignal: request.abortSignal,
         output: request.strictJsonSchema === false ? DefaultImageMetadataOutput : StrictImageMetadataOutput,
-        maxOutputTokens: request.maxOutputTokens,
+        maxOutputTokens: Math.min(request.maxOutputTokens ?? DESCRIBE_MAX_OUTPUT_TOKENS, DESCRIBE_MAX_OUTPUT_TOKENS),
         reasoning: request.reasoning,
         providerOptions: request.providerOptions as any,
         messages: [

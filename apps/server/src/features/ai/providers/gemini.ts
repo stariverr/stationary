@@ -9,7 +9,7 @@ import type {
     ResolvedModelConfig,
     VisualEmbeddingProvider,
 } from "../types";
-import { AiConfigurationError } from "../errors";
+import { AiProviderError } from "../errors";
 import { toEmbeddingResult } from "../utils";
 import { guardedFetch } from "./egress";
 import { postJson } from "./http";
@@ -104,7 +104,8 @@ export class GeminiVisualEmbeddingProvider extends GeminiTextEmbeddingProvider i
         });
         const embeddings = resJson?.embeddings ?? [];
         if (embeddings.length !== params.length) {
-            throw new AiConfigurationError(
+            throw new AiProviderError(
+                "TRANSIENT",
                 `Model '${this.modelName}' returned ${embeddings.length} embeddings for ${params.length} images.`,
             );
         }

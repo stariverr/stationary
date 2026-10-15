@@ -5,7 +5,8 @@ import { AiModel, AiProvider, DeleteStatus, Library } from "@/db/schema";
 import { getProviderCatalog, matchCatalogModels } from "@/features/ai/catalog";
 import { retryFailedEmbeddings } from "@/features/ai/embedding-queue";
 import { queueLibraryAiEnrichment } from "@/features/ai/queue-enrichment";
-import { dropSpacesOfModels, getLibraryEmbeddingStatus, restartStalledBackfills, syncEmbeddingSpace } from "@/features/ai/embedding-spaces";
+import { dropSpacesOfModels, restartStalledBackfills, syncEmbeddingSpace } from "@/features/ai/embedding-spaces";
+import { getLibraryAiStatus, getLibraryDescribeStatus } from "@/features/ai/status";
 import { classifyAiError, getSafeAiErrorMessage } from "@/features/ai/errors";
 import { UpdateLibraryAiBindingsSchema } from "@/features/ai/schema";
 import {
@@ -581,13 +582,13 @@ aiRouter.post(
     },
 );
 
-// Embedding progress of a library: what each space holds and what is still queued.
+// AI health of a library: embedding spaces, description progress, latest errors and unusable bindings.
 aiRouter.get("/status/:library_id", requireAuth, validate("param", LibraryParamSchema), async (c) => {
     const { library_id } = c.req.valid("param");
     const access = await loadOwnedLibrary(c, library_id);
     if (access.denied) return access.denied;
 
-    return c.json(success(Code.SUCCESS, await getLibraryEmbeddingStatus(library_id)));
+    return c.json(success(Code.SUCCESS, await getLibraryAiStatus(library_id)));
 });
 
 aiRouter.post("/status/:library_id/retry-failed", requireAuth, validate("param", LibraryParamSchema), async (c) => {
@@ -598,5 +599,8 @@ aiRouter.post("/status/:library_id/retry-failed", requireAuth, validate("param",
     // Failed vectors go back to the queue; a space held back for low coverage also gets a fresh backfill.
     const requeued = await retryFailedEmbeddings(library_id);
     const backfills = await restartStalledBackfills(access.library);
-    return c.json(success(Code.SUCCESS, { requeued, backfills }));
+    // Failed descriptions: re-process the library, which reuses stored results and retries only what is missing.
+    const describeFailed = ((await getLibraryDescribeStatus(library_id))?.failed ?? 0) > 0;
+    if (describeFailed && backfills === 0) await queueLibraryAiEnrichment(library_id, access.library.owner_id);
+    return c.json(success(Code.SUCCESS, { requeued, backfills, describeRequeued: describeFailed }));
 });

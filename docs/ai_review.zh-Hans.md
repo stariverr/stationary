@@ -25,7 +25,7 @@
 - 被替换的空间改为 `RETIRED`，保留 7 天。期间重新选择旧模型即可恢复，不重新计算全部向量；过期后由 embedding worker 删除。
 - 详见 [ai_hybrid_search.zh-Hans.md](ai_hybrid_search.zh-Hans.md) 第 4.1 节。
 
-### 1.2 降级是静默的（搜索部分已修复）
+### 1.2 降级是静默的（已修复）
 
 - `resolver.ts` 解析不了模型（模型无效、key 解不开）时只 `console.error`，返回 null，这个角色就消失了。
 - `search.ts` 的 `textSemanticSearch` / `visualSemanticSearch` 出错时返回 `[]`，`rerankTopCandidates` 出错时保持融合顺序。
@@ -36,13 +36,24 @@
 
 **已修复（2026-10-15）**：`resolveAiConfig()` 把无法解析的绑定记入 `issues`，不再只打日志。搜索响应新增 `degraded: { channel, reason }[]`，语义通道或重排序失败、绑定失效时都会列出；媒体页在结果上方提示"结果可能不完整"。
 
-**仍待处理**：设置页显示每个绑定的健康状态和最近一次错误。
+设置页部分也已修复（2026-10-15）：
 
-### 1.3 错误分类有误判
+- `/api/ai/status` 改由 `features/ai/status.ts` 汇总，新增 `issues`（无法使用的绑定及原因）和 `describe`（当前描述流水线的完成、排队、失败数）。每个空间以及描述都带 `lastError`，即仍在排队或已失败的条目中最近一次的错误。
+- 描述失败时，供应商的错误写入 `asset_ai_metadata.last_error`：可重试的保持 PENDING，不可重试的直接标记 FAILED。`finalizeTask` 不再用笼统的 "AI enrichment task failed" 覆盖原错误。库级任务原本不回写失败状态，现在会把记录过错误的行标记为 FAILED（见 async 文档第 7 节）。
+- 设置页在每个角色下显示绑定问题、描述进度和最近错误。"重试失败项"在有描述失败时会重新发起一次库级处理；已有结果会复用，只有缺失的部分会发给供应商。
+- rerank 只在搜索时调用，它的失败通过搜索响应的 `degraded` 展示，不单独记录。
+
+### 1.3 错误分类有误判（已修复）
 
 - provider 返回的条数或维度不对时，抛的是 `AiConfigurationError`（`providers/dashscope.ts`、`providers/gemini.ts`、`utils.ts` 的 `toEmbeddingResult`）。它会被归为 CONFIGURATION、不重试。但这类情况多半是网关的偶发问题，应归为 provider 错误。
 - `classifyAiError` 靠消息文本里是否出现 `"abort"`、`"cancel"`、`"network"` 等词来判断。provider 的报错文本只要带 "cancel"，就会被当成用户取消。取消应以 `signal.aborted` 或 `error.name === "AbortError"` 为准，文本匹配只作最后的兜底。
 
+**已修复（2026-10-15）**：
+
+- 取消只看错误类型：沿 `cause` 和 AI SDK `RetryError` 的 `lastError` 查找 `AbortError`（归为 CANCELLED）或 `TimeoutError`（归为 TIMEOUT，可重试），不再匹配消息文本。
+- 返回条数不对、向量不合法时，改为抛出可重试的 `AiProviderError("TRANSIENT")`。
+- 维度不对仍算配置错误：模型忽略或不支持声明的维度时，每次调用都会出错，重试没有意义。
+- 仅以系统错误码表示的连接失败（`ECONNREFUSED` 等）归为 TRANSIENT。
 ### 1.4 下载源图没有超时和大小上限
 
 - `enrich.ts`（描述）和 `embedding-queue.ts` 的 `downloadImages`（图片向量）都用全局 `fetch` 拉预签名 URL。除了任务的 `abortSignal` 没有超时，并且会把整张原图读进内存再转码。
@@ -149,7 +160,7 @@ rerank 只挂在 openai-compatible 适配器上，走 Cohere 风格的 `/rerank`
 - 供应商错误只回显 JSON 响应体。
 - 剩余风险：检查和建立连接之间 DNS 结果若被篡改（DNS rebinding），仍可能绕过。要彻底解决，需要在连接层固定解析结果，或者经由出站代理。
 
-### 4.2 描述输出长度不受控
+### 4.2 描述输出长度不受控（部分修复）
 
 - `maxOutputTokens` 直接取 catalog 里模型的输出上限，可能是几十万。
 - schema 对 tags 数量、caption 和 OCR 长度都没有限制。
@@ -157,6 +168,13 @@ rerank 只挂在 openai-compatible 适配器上，走 Cohere 风格的 `/rerank`
 
 **改造方向**：describe 固定一个合理的 `maxOutputTokens`（例如 2k）；schema 加 `maxItems` 和长度限制；prompt 带上已有的标题和描述。
 
+**已修复（2026-10-15）**：
+
+- `maxOutputTokens` 取模型上限和 `DESCRIBE_MAX_OUTPUT_TOKENS`（4096）中较小的一个，给轻量推理留出余量。
+- 生成后再截断：caption、scene、OCR 有长度上限；tags、objects、colors、styles 去重并限制条数。限制没有写进 JSON schema，因为严格结构化输出模式不接受字符串长度关键字。超长的输出会被截断，描述本身不会失败。
+- prompt 和 schema 没有改，因此 `IMAGE_METADATA_PIPELINE_VERSION` 不变，已有描述不会被重新生成。
+
+**仍待处理**：prompt 带上标题和描述作为上下文。这会改变描述的输入，需要提升流水线版本，复用判断（目前只比较图片 hash）也得把文本算进去。建议和 2.2"重新描述全部"一起做。
 ### 4.3 没有用量和费用记录
 
 不记 token 用量，也没有预算或上限。整库重新描述的成本，用户只看到一个确认框。
@@ -190,13 +208,13 @@ rerank 只挂在 openai-compatible 适配器上，走 Cohere 风格的 `/rerank`
    - ~~空间切换加覆盖率阈值并支持回滚（1.1）~~ 已修复
    - ~~堵住 SSRF（4.1）~~ 已修复
    - 新内容自动建索引（async 文档第 5 节）
-   - 把降级展示给用户（1.2）：搜索部分已修复，设置页健康状态待做
+   - ~~把降级展示给用户（1.2）~~ 已修复
 2. **P1**
    - provider 熔断（async 文档第 6 节）
    - 描述模型退回 JSON mode（2.3）
-   - 控制描述输出长度、记录用量（4.2、4.3）
+   - 控制描述输出长度（4.2，prompt 上下文待做）、记录用量（4.3）
    - 绑定只保留一份并原子写入（1.5）
-   - 修正错误分类（1.3）
+   - ~~修正错误分类（1.3）~~ 已修复
 3. **P2**
    - 删除残留代码（3.3）
    - 精简 catalog 和接入流程（3.1、2.5）

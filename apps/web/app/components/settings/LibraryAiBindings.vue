@@ -19,8 +19,8 @@ import {
     isEmbeddingCapabilities,
     isGenerationCapabilities,
     type AiBindings,
-    type AiEmbeddingSpaceStatus,
-    type AiLibraryEmbeddingStatus,
+    type AiErrorView,
+    type AiLibraryStatus,
     type AiModel,
     type AiProvider,
     type AiRoleKey,
@@ -68,7 +68,7 @@ const savedSelection = ref("");
 const isLoading = ref(false);
 const isSaving = ref(false);
 
-const status = ref<AiLibraryEmbeddingStatus | null>(null);
+const status = ref<AiLibraryStatus | null>(null);
 const isRetrying = ref(false);
 let statusTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -77,26 +77,32 @@ const SPACE_ORDER = { ACTIVE: 0, BUILDING: 1, RETIRED: 2 } as const;
 const spacesOf = (role: AiRoleKey) =>
     status.value?.spaces.filter((space) => space.role === role).sort((a, b) => SPACE_ORDER[a.status] - SPACE_ORDER[b.status]) ?? [];
 const modelName = (modelId: string) => models.value.find((model) => model.id === modelId)?.display_name ?? modelId;
+const issuesOf = (role: AiRoleKey) => status.value?.issues.filter((issue) => issue.role === role) ?? [];
 const failedTotal = computed(
-    () => status.value?.spaces.filter((space) => space.status !== "RETIRED").reduce((sum, space) => sum + space.failed, 0) ?? 0,
+    () =>
+        (status.value?.spaces.filter((space) => space.status !== "RETIRED").reduce((sum, space) => sum + space.failed, 0) ?? 0) +
+        (status.value?.describe?.failed ?? 0),
 );
+const formatError = (error: AiErrorView) =>
+    t("settings.ai_config.status_last_error", { message: error.message, time: formatTemporalDateTime(error.at, locale.value) });
 /** Retry also restarts the backfill of a space held back for low coverage. */
 const canRetry = computed(() => failedTotal.value > 0 || Boolean(status.value?.spaces.some((space) => space.blocked)));
 const formatDate = (iso: string) => formatTemporalDateTime(iso, locale.value, { year: "numeric", month: "2-digit", day: "2-digit" });
-const isProgressing = (spaces: AiEmbeddingSpaceStatus[]) =>
-    spaces.some((space) => space.pending > 0 || (space.status === "BUILDING" && !space.blocked));
+const isProgressing = (current: AiLibraryStatus) =>
+    (current.describe?.pending ?? 0) > 0 ||
+    current.spaces.some((space) => space.pending > 0 || (space.status === "BUILDING" && !space.blocked));
 
 /** Polls while embeddings are queued or a space is being rebuilt. */
 const loadStatus = async () => {
     if (statusTimer) clearTimeout(statusTimer);
     statusTimer = null;
     try {
-        const res = await useApi<ApiResponse<AiLibraryEmbeddingStatus>>(`/ai/status/${props.libraryId}`);
+        const res = await useApi<ApiResponse<AiLibraryStatus>>(`/ai/status/${props.libraryId}`);
         status.value = res?.data ?? null;
     } catch (err) {
         console.error("Failed to load embedding status", err);
     }
-    if (status.value && isProgressing(status.value.spaces)) {
+    if (status.value && isProgressing(status.value)) {
         statusTimer = setTimeout(loadStatus, 5_000);
     }
 };
@@ -240,6 +246,19 @@ const commit = async () => {
                         </SelectItem>
                     </SelectContent>
                 </Select>
+                <p v-for="issue in issuesOf(role.key)" :key="`${issue.role}-${issue.building}`" class="col-span-2 -mt-1 text-[11px] text-red-600">
+                    {{ t(issue.building ? "settings.ai_config.status_issue_building" : "settings.ai_config.status_issue", { message: issue.message }) }}
+                </p>
+                <div v-if="role.key === 'describe' && status?.describe" class="col-span-2 -mt-1 text-[11px] text-muted-foreground">
+                    {{ t("settings.ai_config.status_described", { ready: status.describe.completed, total: status.mediaTotal }) }}
+                    <template v-if="status.describe.pending > 0">
+                        · {{ t("settings.ai_config.status_pending", { count: status.describe.pending }) }}</template
+                    >
+                    <span v-if="status.describe.failed > 0" class="text-red-600">
+                        · {{ t("settings.ai_config.status_failed", { count: status.describe.failed }) }}</span
+                    >
+                    <span v-if="status.describe.lastError" class="block break-words">{{ formatError(status.describe.lastError) }}</span>
+                </div>
                 <div v-for="space in spacesOf(role.key)" :key="space.spaceId" class="col-span-2 -mt-1 text-[11px] text-muted-foreground">
                     <template v-if="space.status === 'RETIRED'">
                         {{
@@ -274,6 +293,7 @@ const commit = async () => {
                                 : t("settings.ai_config.status_blocked_failures")
                         }}
                     </span>
+                    <span v-if="space.lastError" class="block break-words">{{ formatError(space.lastError) }}</span>
                 </div>
             </div>
             <p v-if="models.length === 0" class="text-xs text-muted-foreground">{{ t("settings.ai_config.role_no_options") }}</p>

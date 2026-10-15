@@ -1,6 +1,6 @@
 import type { EmbeddingModelCapabilities } from "../model-schema";
 import type { EmbedImageParams, EmbedTextParams, EmbeddingResult, ResolvedModelConfig, VisualEmbeddingProvider } from "../types";
-import { AiConfigurationError } from "../errors";
+import { AiProviderError } from "../errors";
 import { computeEmbeddingSpaceId, formatEmbeddingText, toEmbeddingResult } from "../utils";
 import { postJson } from "./http";
 
@@ -57,7 +57,8 @@ export class DashScopeMultimodalEmbeddingProvider implements VisualEmbeddingProv
 
         const embeddings = [...(resJson?.output?.embeddings ?? [])].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
         if (embeddings.length !== contents.length) {
-            throw new AiConfigurationError(
+            throw new AiProviderError(
+                "TRANSIENT",
                 `Model '${this.modelName}' returned ${embeddings.length} embeddings for ${contents.length} inputs.`,
             );
         }

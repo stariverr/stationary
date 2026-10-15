@@ -119,6 +119,8 @@
 
 - `asset_ai_metadata.processing_status` 和 unit 状态各管一份。`queueAiEnrichment` 预先写入 PENDING 行，之后由 `AiEnrichHandler.finalizeTask` 把失败的改成 FAILED。
 - `finalizeTask` 只处理 `input_snapshot.media_ids`。库级回填任务（`scope: "library"`）的失败不会回写到元数据状态。
+  - 2026-10-15 补丁：描述失败时会把错误写进元数据行。库级任务结束且有失败 unit 时，`finalizeTask` 把本库中仍为 PENDING 且记录了错误的行标记为 FAILED。
+  - 这是从元数据反推 unit 结果。如果同一库里还有按媒体发起的任务在跑，可能误标。等状态统一到 unit 后应删除。
 
 **改造方向**：AI 处理状态统一以任务 unit 为准，`asset_ai_metadata` 只存结果。
 
