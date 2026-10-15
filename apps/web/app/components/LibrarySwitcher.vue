@@ -17,7 +17,6 @@ import CreateLibraryDialog from "@/components/CreateLibraryDialog.vue";
 
 const { $auth } = useNuxtApp();
 const session = $auth.useSession();
-const emit = defineEmits(["open-settings"]);
 
 const libraryStore = useLibraryStore();
 const { libraries, activeLibrary } = storeToRefs(libraryStore);
@@ -103,7 +102,7 @@ const showCreateDialog = ref(false);
 
             <DropdownMenuSeparator />
 
-            <DropdownMenuItem class="cursor-pointer" @click="$emit('open-settings')">
+            <DropdownMenuItem class="cursor-pointer" @click="navigateTo('/settings')">
                 <Settings class="mr-2 h-4 w-4" />
                 <span>{{ $t("common.settings", "Settings") }}</span>
             </DropdownMenuItem>

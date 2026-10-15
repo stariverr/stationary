@@ -107,7 +107,6 @@ interface MappedSiblingMedia {
     playback?: ApiPostMedia["playback"];
     audio_tracks?: any[];
     subtitle_tracks?: any[];
-    matched_reason?: unknown;
     matched_details?: MatchedDetails;
     score?: number;
     date?: string;
@@ -904,6 +903,19 @@ const handleAddTag = async (tagToAdd: string) => {
                                     <p class="text-xs text-zinc-400 pl-3 leading-relaxed">
                                         {{ $t("search.keyword_search_tooltip") }}
                                     </p>
+                                </div>
+
+                                <!-- Reranker -->
+                                <div v-if="currentMediaItem.matched_details.rerank" class="flex items-center justify-between gap-1.5">
+                                    <div class="flex items-center gap-1.5">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                        <span class="text-xs font-semibold text-zinc-100">{{ $t("search.rerank") }}</span>
+                                    </div>
+                                    <span
+                                        class="text-xs font-mono bg-emerald-950/30 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-900/35"
+                                    >
+                                        {{ currentMediaItem.matched_details.rerank.score.toFixed(4) }}
+                                    </span>
                                 </div>
 
                                 <!-- Text Embedding Dimension -->

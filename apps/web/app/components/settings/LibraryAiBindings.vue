@@ -1,0 +1,317 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { toast } from "vue-sonner";
+import { Loader2, RotateCcw, Save } from "@lucide/vue";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+    isEmbeddingCapabilities,
+    isGenerationCapabilities,
+    type AiBindings,
+    type AiEmbeddingSpaceStatus,
+    type AiLibraryEmbeddingStatus,
+    type AiModel,
+    type AiProvider,
+    type AiRoleKey,
+} from "@/types/ai";
+import type { ApiResponse } from "@/types/api";
+import { formatTemporalDateTime } from "@/utils/temporal";
+
+const props = defineProps<{ libraryId: string }>();
+
+const { t, locale, locales } = useI18n();
+
+/** Description languages: the languages the app itself is translated into. */
+const languageOptions = computed(() =>
+    locales.value.map((locale) =>
+        typeof locale === "string" ? { code: locale, name: locale } : { code: locale.code, name: locale.name ?? locale.code },
+    ),
+);
+const language = ref("en-US");
+const savedLanguage = ref("en-US");
+
+const NONE = "__NONE__";
+const roles: Array<{ key: AiRoleKey; supports: (model: AiModel) => boolean }> = [
+    {
+        key: "describe",
+        supports: (model) =>
+            isGenerationCapabilities(model.capabilities) &&
+            model.capabilities.inputModalities.includes("image") &&
+            model.capabilities.structuredOutput,
+    },
+    { key: "textEmbedding", supports: (model) => isEmbeddingCapabilities(model.capabilities) },
+    { key: "imageEmbedding", supports: (model) => isEmbeddingCapabilities(model.capabilities) && model.capabilities.multimodal },
+    { key: "rerank", supports: (model) => model.category === "rerank" },
+];
+const roleLabels: Record<AiRoleKey, { label: string; hint: string }> = {
+    describe: { label: "settings.ai_config.role_describe", hint: "settings.ai_config.role_describe_hint" },
+    textEmbedding: { label: "settings.ai_config.role_text_embedding", hint: "settings.ai_config.role_text_embedding_hint" },
+    imageEmbedding: { label: "settings.ai_config.role_image_embedding", hint: "settings.ai_config.role_image_embedding_hint" },
+    rerank: { label: "settings.ai_config.role_rerank", hint: "settings.ai_config.role_rerank_hint" },
+};
+
+const models = ref<AiModel[]>([]);
+const providers = ref<AiProvider[]>([]);
+const selection = ref<Record<AiRoleKey, string>>({ describe: NONE, textEmbedding: NONE, imageEmbedding: NONE, rerank: NONE });
+const savedSelection = ref("");
+const isLoading = ref(false);
+const isSaving = ref(false);
+
+const status = ref<AiLibraryEmbeddingStatus | null>(null);
+const isRetrying = ref(false);
+let statusTimer: ReturnType<typeof setTimeout> | null = null;
+
+const SPACE_ORDER = { ACTIVE: 0, BUILDING: 1, RETIRED: 2 } as const;
+/** Current space first, then the one being built, then the retained previous one. */
+const spacesOf = (role: AiRoleKey) =>
+    status.value?.spaces.filter((space) => space.role === role).sort((a, b) => SPACE_ORDER[a.status] - SPACE_ORDER[b.status]) ?? [];
+const modelName = (modelId: string) => models.value.find((model) => model.id === modelId)?.display_name ?? modelId;
+const failedTotal = computed(
+    () => status.value?.spaces.filter((space) => space.status !== "RETIRED").reduce((sum, space) => sum + space.failed, 0) ?? 0,
+);
+/** Retry also restarts the backfill of a space held back for low coverage. */
+const canRetry = computed(() => failedTotal.value > 0 || Boolean(status.value?.spaces.some((space) => space.blocked)));
+const formatDate = (iso: string) => formatTemporalDateTime(iso, locale.value, { year: "numeric", month: "2-digit", day: "2-digit" });
+const isProgressing = (spaces: AiEmbeddingSpaceStatus[]) =>
+    spaces.some((space) => space.pending > 0 || (space.status === "BUILDING" && !space.blocked));
+
+/** Polls while embeddings are queued or a space is being rebuilt. */
+const loadStatus = async () => {
+    if (statusTimer) clearTimeout(statusTimer);
+    statusTimer = null;
+    try {
+        const res = await useApi<ApiResponse<AiLibraryEmbeddingStatus>>(`/ai/status/${props.libraryId}`);
+        status.value = res?.data ?? null;
+    } catch (err) {
+        console.error("Failed to load embedding status", err);
+    }
+    if (status.value && isProgressing(status.value.spaces)) {
+        statusTimer = setTimeout(loadStatus, 5_000);
+    }
+};
+onBeforeUnmount(() => {
+    if (statusTimer) clearTimeout(statusTimer);
+});
+
+const retryFailed = async () => {
+    isRetrying.value = true;
+    try {
+        const res = await useApi<ApiResponse<{ requeued: number }>>(`/ai/status/${props.libraryId}/retry-failed`, { method: "POST" });
+        toast.success(t("settings.ai_config.retry_failed_done", { count: res?.data?.requeued ?? 0 }));
+        await loadStatus();
+    } catch (err) {
+        console.error("Failed to retry failed embeddings", err);
+        toast.error(t("settings.ai_config.err_save"));
+    } finally {
+        isRetrying.value = false;
+    }
+};
+
+const isDirty = computed(() => JSON.stringify(selection.value) !== savedSelection.value || language.value !== savedLanguage.value);
+
+const providerName = (providerId: string) => providers.value.find((provider) => provider.id === providerId)?.name ?? "";
+const optionsFor = (role: AiRoleKey) => models.value.filter(roles.find((item) => item.key === role)!.supports);
+
+const load = async () => {
+    isLoading.value = true;
+    try {
+        const [modelRes, providerRes, bindingRes] = await Promise.all([
+            useApi<ApiResponse<AiModel[]>>("/ai/models"),
+            useApi<ApiResponse<AiProvider[]>>("/ai/providers"),
+            useApi<ApiResponse<AiBindings>>(`/ai/bindings/${props.libraryId}`),
+        ]);
+        models.value = modelRes?.data ?? [];
+        providers.value = providerRes?.data ?? [];
+        const bindings = bindingRes?.data ?? {};
+        language.value = bindings.language ?? "en-US";
+        savedLanguage.value = language.value;
+        selection.value = {
+            describe: bindings.describe?.modelId ?? NONE,
+            textEmbedding: bindings.textEmbedding?.modelId ?? NONE,
+            imageEmbedding: bindings.imageEmbedding?.modelId ?? NONE,
+            rerank: bindings.rerank?.modelId ?? NONE,
+        };
+        savedSelection.value = JSON.stringify(selection.value);
+    } catch (err) {
+        console.error("Failed to load library AI bindings", err);
+        toast.error(t("settings.ai_config.err_load"));
+    } finally {
+        isLoading.value = false;
+    }
+};
+
+watch(
+    () => props.libraryId,
+    async () => {
+        await load();
+        await loadStatus();
+    },
+    { immediate: true },
+);
+
+const isConfirmingLanguage = ref(false);
+
+const save = () => {
+    // A new description language re-describes every item: the costliest AI operation, so it is confirmed.
+    if (language.value !== savedLanguage.value && selection.value.describe !== NONE) {
+        isConfirmingLanguage.value = true;
+        return;
+    }
+    commit();
+};
+
+const commit = async () => {
+    isConfirmingLanguage.value = false;
+    isSaving.value = true;
+    try {
+        const body = {
+            ...Object.fromEntries(Object.entries(selection.value).map(([role, modelId]) => [role, modelId === NONE ? null : { modelId }])),
+            language: language.value,
+        };
+        await useApi(`/ai/bindings/${props.libraryId}`, { method: "POST", body });
+        savedSelection.value = JSON.stringify(selection.value);
+        savedLanguage.value = language.value;
+        toast.success(t("settings.ai_config.bindings_saved"));
+        await loadStatus();
+    } catch (err) {
+        console.error("Failed to save library AI bindings", err);
+        toast.error(t("settings.ai_config.err_save"));
+    } finally {
+        isSaving.value = false;
+    }
+};
+</script>
+
+<template>
+    <div class="grid gap-3">
+        <div>
+            <p class="text-sm font-semibold">{{ t("settings.ai_config.bindings_title") }}</p>
+            <p class="text-xs text-muted-foreground">{{ t("settings.ai_config.bindings_desc") }}</p>
+        </div>
+
+        <div v-if="isLoading" class="flex justify-center py-6 text-muted-foreground">
+            <Loader2 class="h-5 w-5 animate-spin" />
+        </div>
+        <template v-else>
+            <div class="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] items-center gap-3">
+                <div>
+                    <Label class="text-xs">{{ t("settings.ai_config.label_language") }}</Label>
+                    <p class="text-[11px] text-muted-foreground">{{ t("settings.ai_config.language_hint") }}</p>
+                </div>
+                <Select v-model="language">
+                    <SelectTrigger class="h-8 text-xs">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem v-for="option in languageOptions" :key="option.code" :value="option.code" class="text-xs">
+                            {{ option.name }}
+                        </SelectItem>
+                    </SelectContent>
+                </Select>
+                <p v-if="language !== savedLanguage && selection.describe !== NONE" class="col-span-2 -mt-1 text-[11px] text-amber-600">
+                    {{ t("settings.ai_config.language_change_warning") }}
+                </p>
+            </div>
+            <div v-for="role in roles" :key="role.key" class="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] items-center gap-3">
+                <div>
+                    <Label class="text-xs">{{ t(roleLabels[role.key].label) }}</Label>
+                    <p class="text-[11px] text-muted-foreground">{{ t(roleLabels[role.key].hint) }}</p>
+                </div>
+                <Select v-model="selection[role.key]">
+                    <SelectTrigger class="h-8 text-xs">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem :value="NONE" class="text-xs">{{ t("settings.ai_config.role_unbound") }}</SelectItem>
+                        <SelectItem v-for="model in optionsFor(role.key)" :key="model.id" :value="model.id" class="text-xs">
+                            <span>{{ model.display_name }}</span>
+                            <span class="ml-1.5 text-muted-foreground">{{ providerName(model.provider_id) }}</span>
+                        </SelectItem>
+                    </SelectContent>
+                </Select>
+                <div v-for="space in spacesOf(role.key)" :key="space.spaceId" class="col-span-2 -mt-1 text-[11px] text-muted-foreground">
+                    <template v-if="space.status === 'RETIRED'">
+                        {{
+                            t("settings.ai_config.status_retired", {
+                                model: modelName(space.modelId),
+                                date: space.retainedUntil ? formatDate(space.retainedUntil) : "",
+                            })
+                        }}
+                    </template>
+                    <template v-else-if="space.status === 'BUILDING'">
+                        {{
+                            t("settings.ai_config.status_building", {
+                                model: modelName(space.modelId),
+                                ready: space.ready,
+                                total: status?.mediaTotal ?? 0,
+                            })
+                        }}
+                    </template>
+                    <template v-else>
+                        {{ t("settings.ai_config.status_indexed", { ready: space.ready, total: status?.mediaTotal ?? 0 }) }}
+                    </template>
+                    <template v-if="space.status !== 'RETIRED' && space.pending > 0">
+                        · {{ t("settings.ai_config.status_pending", { count: space.pending }) }}</template
+                    >
+                    <span v-if="space.status !== 'RETIRED' && space.failed > 0" class="text-red-600">
+                        · {{ t("settings.ai_config.status_failed", { count: space.failed }) }}</span
+                    >
+                    <span v-if="space.blocked" class="block text-amber-600">
+                        {{
+                            space.blocked === "low_coverage"
+                                ? t("settings.ai_config.status_blocked_low_coverage", { ready: space.ready })
+                                : t("settings.ai_config.status_blocked_failures")
+                        }}
+                    </span>
+                </div>
+            </div>
+            <p v-if="models.length === 0" class="text-xs text-muted-foreground">{{ t("settings.ai_config.role_no_options") }}</p>
+
+            <div class="flex items-center gap-2">
+                <Button size="sm" class="w-fit text-xs" :disabled="!isDirty || isSaving" @click="save">
+                    <Loader2 v-if="isSaving" class="h-3.5 w-3.5 animate-spin" />
+                    <Save v-else class="h-3.5 w-3.5" />
+                    {{ t("settings.ai_config.bindings_save") }}
+                </Button>
+                <Button
+                    v-if="canRetry"
+                    size="sm"
+                    variant="outline"
+                    class="w-fit text-xs"
+                    :disabled="isRetrying"
+                    @click="retryFailed"
+                >
+                    <Loader2 v-if="isRetrying" class="h-3.5 w-3.5 animate-spin" />
+                    <RotateCcw v-else class="h-3.5 w-3.5" />
+                    {{ t("settings.ai_config.retry_failed") }}
+                </Button>
+            </div>
+        </template>
+
+        <AlertDialog v-model:open="isConfirmingLanguage">
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>{{ t("settings.ai_config.language_change_title") }}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        {{ t("settings.ai_config.language_change_confirm", { count: status?.mediaTotal ?? 0 }) }}
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                    <AlertDialogCancel>{{ t("common.cancel") }}</AlertDialogCancel>
+                    <AlertDialogAction @click="commit">{{ t("settings.ai_config.language_change_btn") }}</AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
+    </div>
+</template>

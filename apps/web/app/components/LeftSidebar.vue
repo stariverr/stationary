@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 const route = useRoute();
 const router = useRouter();
 
-const isSettingsOpen = ref(false);
 const { toggleSidebar } = useAppLayout();
 const layoutStore = useLayoutStore();
 
@@ -51,7 +50,7 @@ function triggerCreateMedia() {
         <!-- Sidebar Header: Library Switcher & Collapse Toggle -->
         <div class="h-14 border-b border-zinc-200/80 px-3.5 flex items-center justify-between gap-2 shrink-0 bg-zinc-50/50">
             <div class="flex-1 min-w-0">
-                <LibrarySwitcher @open-settings="isSettingsOpen = true" />
+                <LibrarySwitcher />
             </div>
             <button
                 @click="toggleSidebar"
@@ -120,16 +119,13 @@ function triggerCreateMedia() {
 
         <!-- Settings -->
         <div class="mt-auto p-3.5 border-t border-zinc-200/60 flex flex-col gap-1 shrink-0">
-            <button
-                @click="isSettingsOpen = true"
-                :aria-label="$t('common.settings', 'Settings')"
+            <NuxtLink
+                to="/settings"
                 class="group h-9 flex items-center gap-3 w-full text-sm font-medium px-3 rounded-lg border border-transparent text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors duration-150 cursor-pointer active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950"
             >
                 <component :is="Settings" class="w-4.5 h-4.5 text-zinc-400 group-hover:text-zinc-700 transition-colors shrink-0" />
                 <span class="truncate leading-none">{{ $t("common.settings") }}</span>
-            </button>
+            </NuxtLink>
         </div>
-
-        <SettingsModal v-model:open="isSettingsOpen" />
     </aside>
 </template>
