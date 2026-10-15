@@ -8,6 +8,7 @@ import {
     TrackType,
     TrackPurpose,
     MediaType,
+    AsyncOutcomeCode,
     type TrackMetadata,
 } from "@/db/schema";
 import { and, eq, sql, isNull } from "drizzle-orm";
@@ -41,6 +42,10 @@ export interface GenerateCoverResult {
     error?: string;
     retryable?: boolean;
 }
+
+type CoverPersistenceOutcome =
+    | { status: "persisted"; fileId: string }
+    | { status: "skipped"; outcomeCode: AsyncOutcomeCode; error: string };
 
 export const UNSUPPORTED_COVER_EXTENSIONS = new Set(["vvic", "jxl"]);
 
@@ -143,6 +148,9 @@ export const CoverService = {
      *      targetWhere: sql`delete_status = 'ACTIVE'` to match partial unique index.
      *    - Non-targeted cover tracks (e.g. HIGH when only LOW+MEDIUM are generated) remain intact.
      * 5. Clean up superseded old cover files safely
+     *
+     * Recycled (trash) media and media without an active source track are skipped instead of
+     * failing the unit, since cover persistence only applies to active library media.
      */
     async generateCover(params: GenerateCoverParams): Promise<GenerateCoverResult> {
         const { media, quality, source } = params;
@@ -178,13 +186,19 @@ export const CoverService = {
 
         await uploadToS3(s3Key, renderResult.buffer, "image/avif", env.S3_BUCKET, renderResult.size);
 
-        const newFileId = await db.transaction(async (tx) => {
+        const persistence = await db.transaction(async (tx): Promise<CoverPersistenceOutcome> => {
             const [activeMedia] = await tx
                 .select({ id: Media.id })
                 .from(Media)
                 .where(and(eq(Media.id, media.id), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
                 .limit(1);
-            if (!activeMedia) throw new Error("Media was deleted before cover persistence");
+            if (!activeMedia) {
+                return {
+                    status: "skipped",
+                    outcomeCode: AsyncOutcomeCode.MEDIA_NOT_FOUND,
+                    error: "Media was recycled or deleted before cover persistence",
+                };
+            }
 
             const [activeSourceTrack] = await tx
                 .select({ id: Track.id })
@@ -193,12 +207,19 @@ export const CoverService = {
                     and(
                         eq(Track.id, sourceTrackId),
                         eq(Track.media_id, media.id),
+                        eq(Track.file_id, sourceFileId),
                         eq(Track.delete_status, DeleteStatus.ACTIVE),
                         eq(Track.sync_status, SyncStatus.COMPLETED),
                     ),
                 )
                 .limit(1);
-            if (!activeSourceTrack) throw new Error("Cover source track is no longer available");
+            if (!activeSourceTrack) {
+                return {
+                    status: "skipped",
+                    outcomeCode: AsyncOutcomeCode.SOURCE_CHANGED,
+                    error: "Cover source track is no longer available",
+                };
+            }
 
             const fileResults = await tx
                 .insert(DbFile)
@@ -256,6 +277,7 @@ export const CoverService = {
                         height: renderResult.height,
                         is_generated: true,
                         is_original: false,
+                        is_stale: false,
                         source_track_id: sourceTrackId,
                         update_time: completedNow,
                     })
@@ -278,6 +300,7 @@ export const CoverService = {
                         variant_key: variantKey,
                         is_generated: true,
                         is_original: false,
+                        is_stale: false,
                         source_track_id: sourceTrackId,
                         create_time: completedNow,
                         update_time: completedNow,
@@ -294,6 +317,7 @@ export const CoverService = {
                             height: renderResult.height,
                             is_generated: true,
                             is_original: false,
+                            is_stale: false,
                             source_track_id: sourceTrackId,
                             update_time: completedNow,
                             delete_status: DeleteStatus.ACTIVE,
@@ -309,9 +333,19 @@ export const CoverService = {
                     .where(and(eq(DbFile.id, oldFileIdToDelete), eq(DbFile.delete_status, DeleteStatus.ACTIVE)));
             }
 
-            return createdFileId;
+            return { status: "persisted", fileId: createdFileId };
         });
 
-        return { success: true, outcomeCode: "SUCCESS", fileId: newFileId };
+        if (persistence.status === "skipped") {
+            return {
+                success: false,
+                skipped: true,
+                retryable: false,
+                outcomeCode: persistence.outcomeCode,
+                error: persistence.error,
+            };
+        }
+
+        return { success: true, outcomeCode: "SUCCESS", fileId: persistence.fileId };
     },
 };
