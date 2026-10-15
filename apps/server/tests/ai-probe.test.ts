@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { AiModelCapabilities, AiModelCategory } from "@/features/ai/model-schema";
-import { probeModel } from "@/features/ai/probe";
+import { probeModel, summarizeProbeFailures } from "@/features/ai/probe";
 import type { ResolvedModelConfig } from "@/features/ai/types";
 
 function config(category: AiModelCategory, capabilities: AiModelCapabilities): ResolvedModelConfig {
@@ -109,5 +109,17 @@ describe("model probes", () => {
     it("check that rerankers rank the relevant document first", async () => {
         mockGateway({});
         expect(await probeModel(config("rerank", { maxInputTokens: 512 }))).toEqual([{ check: "rerank", ok: true }]);
+    });
+});
+
+describe("probe failure summary", () => {
+    it("is null when every check passed and names the failed checks otherwise", () => {
+        expect(summarizeProbeFailures([{ check: "imageInput", ok: true }])).toBeNull();
+        expect(
+            summarizeProbeFailures([
+                { check: "imageInput", ok: true },
+                { check: "structuredOutput", ok: false, message: "json_schema is not supported" },
+            ]),
+        ).toBe("structuredOutput: json_schema is not supported");
     });
 });

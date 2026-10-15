@@ -445,6 +445,35 @@
                         },
                         "total": {
                           "type": "integer"
+                        },
+                        "hasMore": {
+                          "type": "boolean"
+                        },
+                        "degraded": {
+                          "type": "array",
+                          "description": "AI channels that were skipped or failed; results may be incomplete when non-empty.",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "channel": {
+                                "type": "string",
+                                "enum": [
+                                  "ai",
+                                  "text_semantic",
+                                  "visual_semantic",
+                                  "rerank"
+                                ]
+                              },
+                              "reason": {
+                                "type": "string",
+                                "description": "Error kind, e.g. CONFIGURATION, AUTHENTICATION, THROTTLED, TIMEOUT"
+                              }
+                            },
+                            "required": [
+                              "channel",
+                              "reason"
+                            ]
+                          }
                         }
                       }
                     }
