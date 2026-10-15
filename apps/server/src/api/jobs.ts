@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "@/global/db";
 import { AsyncTask, AsyncTaskStatus, AsyncTaskType, AsyncTaskUnit, AsyncTaskUnitStatus } from "@/db/schema";
-import { eq, and, desc, count } from "drizzle-orm";
+import { eq, and, desc, count, sql } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
@@ -432,6 +432,18 @@ jobsApp.get("/:id/items", requireAuth, async (c) => {
 
     const total = Number(totalResult[0]?.count || 0);
 
+    // Status distribution of the whole task, so the UI can render accurate filter counts.
+    const statusRows = await db
+        .select({ status: AsyncTaskUnit.status, count: count() })
+        .from(AsyncTaskUnit)
+        .where(eq(AsyncTaskUnit.task_id, id))
+        .groupBy(AsyncTaskUnit.status);
+
+    const counts: Record<string, number> = {};
+    for (const row of statusRows) {
+        counts[row.status] = Number(row.count || 0);
+    }
+
     const units = await db
         .select({
             id: AsyncTaskUnit.id,
@@ -450,7 +462,17 @@ jobsApp.get("/:id/items", requireAuth, async (c) => {
         })
         .from(AsyncTaskUnit)
         .where(and(...conditions))
-        .orderBy(desc(AsyncTaskUnit.create_time))
+        // Failures surface first, then live work, then quiet outcomes.
+        .orderBy(
+            sql`case ${AsyncTaskUnit.status}
+                when ${AsyncTaskUnitStatus.FAILED} then 0
+                when ${AsyncTaskUnitStatus.RUNNING} then 1
+                when ${AsyncTaskUnitStatus.PENDING} then 2
+                when ${AsyncTaskUnitStatus.SUCCEEDED} then 3
+                else 4
+            end`,
+            desc(AsyncTaskUnit.update_time),
+        )
         .limit(limit)
         .offset(offset);
 
@@ -459,6 +481,7 @@ jobsApp.get("/:id/items", requireAuth, async (c) => {
     return c.json(
         success(Code.SUCCESS, {
             items: units,
+            counts,
             pagination: {
                 page,
                 limit,
@@ -501,6 +524,10 @@ jobsApp.get("/:id", requireAuth, async (c) => {
             control_requested: task.control_requested,
             discovery_complete: task.discovery_complete,
             input_snapshot: task.input_snapshot,
+            total_units: task.total_units,
+            succeeded_units: task.succeeded_units,
+            failed_units: task.failed_units,
+            cancelled_units: task.cancelled_units,
             progress: {
                 total_units: task.total_units,
                 succeeded_units: task.succeeded_units,
