@@ -13,9 +13,9 @@ import {
 } from "@/db/schema";
 import { db, type Transaction } from "@/global/db";
 import { kv } from "@/global/kv";
-import { s3 } from "@/global/s3";
 import { retryDelaySeconds } from "@/infra/jobs/policy";
 import { AiProviderError, AiThrottledError, classifyAiError, getSafeAiErrorMessage } from "./errors";
+import { readAiSourceImage } from "./image-source";
 import { AiService } from "./service";
 import type { AiErrorView, EmbeddingBindingRole, EmbeddingResult, TextEmbeddingProvider, VisualEmbeddingProvider } from "./types";
 
@@ -240,10 +240,7 @@ async function downloadImages(rows: EmbeddingRow[], signal?: AbortSignal) {
         rows.map(async (row) => {
             const file = files.find((item) => item.id === row.source_file_id);
             if (!file) throw new Error(`Source file of embedding ${row.id} no longer exists`);
-            const url = await s3.getPresignedUrl(file.path, { bucket: file.bucket, expiresInSeconds: 600 });
-            const response = await fetch(url, { signal });
-            if (!response.ok) throw new Error(`Failed to download source file ${file.id}: ${response.statusText}`);
-            return { imageBuffer: new Uint8Array(await response.arrayBuffer()), mimeType: file.mime_type };
+            return { imageBuffer: await readAiSourceImage(file, signal), mimeType: file.mime_type };
         }),
     );
 }

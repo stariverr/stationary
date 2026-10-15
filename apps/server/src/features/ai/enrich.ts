@@ -15,10 +15,9 @@ import {
     TagStatus,
 } from "@/db/schema";
 import { eq, and, isNull, isNotNull, sql, inArray, or, ne } from "drizzle-orm";
-import { s3 } from "@/global/s3";
 import { enqueueEmbeddings, notifyEmbeddingQueue } from "./embedding-queue";
 import { AiService } from "./service";
-import { resolveAiImageSource } from "./image-source";
+import { readAiSourceImage, resolveAiImageSource } from "./image-source";
 import { classifyAiError, getSafeAiErrorMessage } from "./errors";
 import { computeSha256 } from "./utils";
 import type { ImageAiMetadata } from "./types";
@@ -159,15 +158,7 @@ export const AiEnrichmentService = {
 
         if (aiService && sourceFile && shouldRunDescription) {
             console.log(`[AI ENRICH] Running image analysis for media ${media.id}...`);
-            const presignedUrl = await s3.getPresignedUrl(sourceFile.path, {
-                bucket: sourceFile.bucket,
-                expiresInSeconds: 600,
-            });
-            const downloadResponse = await fetch(presignedUrl, { signal: abortSignal });
-            if (!downloadResponse.ok) {
-                throw new Error(`Failed to download physical file from S3: ${downloadResponse.statusText}`);
-            }
-            const imageBuffer = new Uint8Array(await downloadResponse.arrayBuffer());
+            const imageBuffer = await readAiSourceImage(sourceFile, abortSignal);
 
             try {
                 described = await aiService.describeImage(imageBuffer, sourceFile.mime_type, abortSignal);
