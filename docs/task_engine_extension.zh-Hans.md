@@ -223,3 +223,5 @@ const task = await JobManager.createTask({
    查询实体时必须判断 `delete_status = DeleteStatus.ACTIVE`，避免处理已进回收站的数据。
 5. **代码格式化**：
    提交前请使用 `oxc` 规范格式化代码文件。
+6. **重试只有一层**：
+   任务引擎是唯一的重试层，外部调用内部不得自行重试。远端要求延迟时（例如 `Retry-After`），返回 `retryable: true` 并带上 `retryAfterSeconds`。若本地限流器在发出请求前就拒绝了调用，返回 `retryReason: THROTTLED`：子任务会在 `retryAfterSeconds` 后重新排队，且不消耗重试次数。AI 供应商通过 `features/ai/rate-limit.ts` 中的共享限流器遵循这一规则。

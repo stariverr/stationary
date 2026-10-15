@@ -10,6 +10,9 @@ export interface TaskUnitContext {
 
 export const TaskRetryReason = {
     LOCK_CONTENTION: "LOCK_CONTENTION",
+    DEPENDENCY_PENDING: "DEPENDENCY_PENDING",
+    /** An external rate limit had no capacity; nothing was attempted, so no attempt is consumed. */
+    THROTTLED: "THROTTLED",
 } as const;
 
 export type TaskRetryReason = (typeof TaskRetryReason)[keyof typeof TaskRetryReason];
@@ -20,6 +23,8 @@ export interface TaskResult {
     outcomeCode?: AsyncOutcomeCode | string;
     retryable?: boolean;
     retryReason?: TaskRetryReason;
+    /** Minimum delay before the next attempt, e.g. from a provider's Retry-After. */
+    retryAfterSeconds?: number;
     data?: Record<string, unknown> | null;
     error?: string;
 }

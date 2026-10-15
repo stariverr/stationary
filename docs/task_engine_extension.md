@@ -196,3 +196,4 @@ const masterTask = await JobManager.enqueueTaskWithUnits(
 3. **Temporal API**: Never use native JS `new Date()`. Use `@js-temporal/polyfill`.
 4. **Soft-delete Check**: Check `delete_status = DeleteStatus.ACTIVE` when fetching entities.
 5. **Formatting**: Format code using `oxc` before committing.
+6. **Retries**: The engine is the only retry layer; external calls must not retry internally. Return `retryable: true` with `retryAfterSeconds` when the remote side asks for a delay (e.g. `Retry-After`). Return `retryReason: THROTTLED` when a local rate limiter declined the call before anything was sent: the unit is rescheduled after `retryAfterSeconds` without consuming an attempt. AI providers follow this through the shared limiter in `features/ai/rate-limit.ts`.
