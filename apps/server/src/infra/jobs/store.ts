@@ -16,6 +16,7 @@ import {
     lockContentionDelaySeconds,
     requirePositiveInteger,
     retryDelaySeconds,
+    throttledDelaySeconds,
     taskStatusAfterDiscovery,
     terminalTaskStatus,
 } from "@/infra/jobs/policy";
@@ -604,7 +605,10 @@ export type UnitSettlement = "succeeded" | "retrying" | "failed" | "lease-lost";
 export async function settleTaskUnit(unit: TaskUnitRow, leaseToken: string, result: TaskResult): Promise<UnitSettlement> {
     const now = Temporal.Now.instant();
     const succeeded = result.success || result.skipped === true;
-    const exhausted = unit.attempt_count >= unit.max_attempts || result.retryable === false;
+    const waitingForDependency = result.retryReason === TaskRetryReason.DEPENDENCY_PENDING && result.retryable !== false;
+    const throttled = result.retryReason === TaskRetryReason.THROTTLED && result.retryable !== false;
+    const deferred = waitingForDependency || throttled;
+    const exhausted = result.retryable === false || (!deferred && unit.attempt_count >= unit.max_attempts);
 
     const settlement = await db.transaction(async (tx): Promise<UnitSettlement> => {
         const tasks = await tx.select().from(AsyncTask).where(eq(AsyncTask.id, unit.task_id)).for("update").limit(1);
@@ -643,15 +647,42 @@ export async function settleTaskUnit(unit: TaskUnitRow, leaseToken: string, resu
             return "succeeded";
         }
 
-        if (result.retryReason === TaskRetryReason.LOCK_CONTENTION && !exhausted) {
-            const lockBackoffSeconds = lockContentionDelaySeconds();
+        if (throttled && !exhausted) {
             const updated = await tx
                 .update(AsyncTaskUnit)
                 .set({
                     status: AsyncTaskUnitStatus.PENDING,
-                    outcome_code: AsyncOutcomeCode.LOCKED_CONCURRENT_EXECUTION,
-                    last_error: result.error ?? "LOCKED_CONCURRENT_EXECUTION",
-                    available_at: sql`now() + (${lockBackoffSeconds} * interval '1 second')`,
+                    outcome_code: "THROTTLED",
+                    last_error: result.error ?? "Waiting for rate limit capacity",
+                    available_at: sql`now() + (${throttledDelaySeconds(result.retryAfterSeconds)} * interval '1 second')`,
+                    // The claim counted an attempt, but no work was attempted.
+                    attempt_count: Math.max(0, unit.attempt_count - 1),
+                    lease_token: null,
+                    lease_expires_at: null,
+                    update_time: now,
+                    complete_time: null,
+                })
+                .where(
+                    and(
+                        eq(AsyncTaskUnit.id, unit.id),
+                        eq(AsyncTaskUnit.lease_token, leaseToken),
+                        eq(AsyncTaskUnit.status, AsyncTaskUnitStatus.RUNNING),
+                    ),
+                )
+                .returning({ id: AsyncTaskUnit.id });
+            return updated.length === 0 ? "lease-lost" : "retrying";
+        }
+
+        if ((result.retryReason === TaskRetryReason.LOCK_CONTENTION || waitingForDependency) && !exhausted) {
+            const delaySeconds = waitingForDependency ? 30 : lockContentionDelaySeconds();
+            const updated = await tx
+                .update(AsyncTaskUnit)
+                .set({
+                    status: AsyncTaskUnitStatus.PENDING,
+                    outcome_code: waitingForDependency ? "DEPENDENCY_PENDING" : AsyncOutcomeCode.LOCKED_CONCURRENT_EXECUTION,
+                    last_error: result.error ?? (waitingForDependency ? "Waiting for dependency" : "LOCKED_CONCURRENT_EXECUTION"),
+                    available_at: sql`now() + (${delaySeconds} * interval '1 second')`,
+                    ...(waitingForDependency ? { attempt_count: Math.max(0, unit.attempt_count - 1) } : {}),
                     lease_token: null,
                     lease_expires_at: null,
                     update_time: now,
@@ -669,7 +700,7 @@ export async function settleTaskUnit(unit: TaskUnitRow, leaseToken: string, resu
 
             await tx
                 .update(AsyncTask)
-                .set({ last_error: "Subtask waiting on concurrent execution lock", update_time: now })
+                .set({ last_error: waitingForDependency ? result.error ?? "Waiting for dependency" : "Subtask waiting on concurrent execution lock", update_time: now })
                 .where(eq(AsyncTask.id, task.id));
             return "retrying";
         }
@@ -681,7 +712,7 @@ export async function settleTaskUnit(unit: TaskUnitRow, leaseToken: string, resu
                     status: AsyncTaskUnitStatus.PENDING,
                     outcome_code: result.outcomeCode ?? AsyncOutcomeCode.UNHANDLED_EXCEPTION,
                     last_error: result.error ?? "Task unit execution failed",
-                    available_at: sql`now() + (${retryDelaySeconds(unit.attempt_count)} * interval '1 second')`,
+                    available_at: sql`now() + (${Math.max(retryDelaySeconds(unit.attempt_count), Math.ceil(result.retryAfterSeconds ?? 0))} * interval '1 second')`,
                     lease_token: null,
                     lease_expires_at: null,
                     update_time: now,

@@ -39,6 +39,13 @@ export function retryDelaySeconds(attemptCount: number, random = Math.random): n
     return Math.min(MAX_RETRY_DELAY_SECONDS, Math.max(1, Math.round(exponentialDelay * jitterMultiplier)));
 }
 
+/** Spreads throttled units over the wait window so they do not all reclaim capacity at once. */
+export function throttledDelaySeconds(retryAfterSeconds: number | undefined, random = Math.random): number {
+    const base = Math.max(1, retryAfterSeconds ?? 1);
+    const jitterMultiplier = 1 + Math.min(1, Math.max(0, random())) * 0.5;
+    return Math.min(MAX_RETRY_DELAY_SECONDS, Math.ceil(base * jitterMultiplier));
+}
+
 export function lockContentionDelaySeconds(random = Math.random): number {
     const normalizedRandom = Math.min(1, Math.max(0, random()));
     return Math.round(
