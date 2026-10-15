@@ -126,3 +126,10 @@ export function probeModel(config: ResolvedModelConfig): Promise<ModelProbeResul
     if (config.category === "embedding") return probeEmbedding(config);
     return probeRerank(config);
 }
+
+/** A message naming every failed check, or null when all of them passed. */
+export function summarizeProbeFailures(results: ModelProbeResult[]): string | null {
+    const failures = results.filter((result) => !result.ok);
+    if (failures.length === 0) return null;
+    return failures.map((result) => `${result.check}: ${result.message ?? "failed"}`).join("; ");
+}

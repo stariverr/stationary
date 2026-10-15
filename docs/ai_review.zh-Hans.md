@@ -105,9 +105,15 @@
 
 **改造方向**：换描述模型时，和换语言一样弹确认框，让用户选"只用于新内容"还是"重新描述全部"。
 
-### 2.3 描述模型必须支持 json_schema
+### 2.3 描述模型必须支持 json_schema（决定不改）
 
-`supportsAiBindingRole("describe")` 要求 `structuredOutput`。DeepSeek 和很多国产兼容端点只支持 `json_object`，因此根本不能绑定。AI SDK 可以退回 JSON mode 或 tool calling，再用 valibot 校验，不必卡死在 json_schema 上。
+`supportsAiBindingRole("describe")` 要求 `structuredOutput`。DeepSeek 和很多国产兼容端点只支持 `json_object`，因此根本不能绑定。
+**结论（2026-10-15）：不做运行时降级，改成绑定时强制验证（已实现）。**
+- 退回 JSON mode 要维护第二套解析和校验路径，不同模型的输出质量也不一致，出问题时很难排查。
+- 能力开关只是目录或用户的声明，不能保证端点真的支持。例如目录把 DeepSeek 标为支持结构化输出，而它的聊天接口文档只列了 `json_object`，没有 `json_schema`（未实测）。
+- 所以 `POST /api/ai/bindings/:library_id` 对新绑定的模型（与当前绑定不同的）跑一遍 `probeModel`，任何检查失败都返回 400 和原因，不会存下一个运行时才失败的绑定。没有改动的角色不重复探测。
+- 设置页保存失败时显示服务端的原因。
+- 代价是保存绑定时多几次小请求，而且只支持 `json_object` 的端点不能做描述模型，这是有意取舍。
 
 ### 2.4 关键词搜索是整串子串匹配
 
@@ -221,7 +227,7 @@ rerank 只挂在 openai-compatible 适配器上，走 Cohere 风格的 `/rerank`
    - ~~把降级展示给用户（1.2）~~ 已修复
 2. **P1**
    - provider 熔断（async 文档第 6 节）
-   - 描述模型退回 JSON mode（2.3）
+   - ~~描述模型退回 JSON mode（2.3）~~ 决定不做
    - 控制描述输出长度（4.2，prompt 上下文待做）、记录用量（4.3）
    - 绑定只保留一份并原子写入（1.5）
    - ~~修正错误分类（1.3）~~ 已修复

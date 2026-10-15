@@ -192,7 +192,7 @@ const commit = async () => {
         await loadStatus();
     } catch (err) {
         console.error("Failed to save library AI bindings", err);
-        toast.error(t("settings.ai_config.err_save"));
+        toast.error((err as { data?: { message?: string } })?.data?.message || t("settings.ai_config.err_save"));
     } finally {
         isSaving.value = false;
     }

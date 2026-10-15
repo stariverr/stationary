@@ -20,7 +20,7 @@ import {
 } from "@/features/ai/model-schema";
 import { computeEmbeddingSpaceId } from "@/features/ai/utils";
 import { AI_PROVIDER_TEMPLATES, adapterSupportsModel, getProviderTemplate } from "@/features/ai/provider-templates";
-import { probeModel } from "@/features/ai/probe";
+import { probeModel, summarizeProbeFailures } from "@/features/ai/probe";
 import { listProviderModels } from "@/features/ai/providers/connection";
 import { assertAllowedEndpoint } from "@/features/ai/providers/egress";
 import { resolveBindingConfig } from "@/features/ai/resolver";
@@ -550,6 +550,13 @@ aiRouter.post(
                 const resolved = await resolveBindingConfig(binding, category, access.library.owner_id, role);
                 if (!resolved) {
                     return c.json(error(Code.INVALID_PARAMETER, `${role} model was not found`), 400);
+                }
+                // Catalog flags only say what a model supports in principle: a newly bound model must work against the live provider.
+                if (binding.modelId !== access.library.ai_bindings?.[role]?.modelId) {
+                    const failure = summarizeProbeFailures(await probeModel(resolved));
+                    if (failure) {
+                        return c.json(error(Code.INVALID_PARAMETER, `${role} model failed verification (${failure})`), 400);
+                    }
                 }
             } catch (err) {
                 return c.json(error(Code.INVALID_PARAMETER, err instanceof Error ? err.message : `${role} model is invalid`), 400);
