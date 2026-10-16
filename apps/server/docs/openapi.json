@@ -3041,6 +3041,86 @@
                                 "type": "string",
                                 "nullable": true
                               },
+                              "ai": {
+                                "type": "object",
+                                "properties": {
+                                  "status": {
+                                    "enum": [
+                                      "PENDING",
+                                      "IN_PROGRESS",
+                                      "COMPLETED",
+                                      "FAILED"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "error": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "result": {
+                                    "type": "object",
+                                    "properties": {
+                                      "caption": {
+                                        "type": "string"
+                                      },
+                                      "tags": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "objects": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "colors": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "styles": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "scene": {
+                                        "type": "string"
+                                      },
+                                      "ocr_text": {
+                                        "type": "string"
+                                      },
+                                      "model": {
+                                        "type": "string"
+                                      },
+                                      "generated_time": {
+                                        "type": "string",
+                                        "nullable": true
+                                      }
+                                    },
+                                    "required": [
+                                      "caption",
+                                      "tags",
+                                      "objects",
+                                      "colors",
+                                      "styles",
+                                      "scene",
+                                      "ocr_text",
+                                      "model",
+                                      "generated_time"
+                                    ],
+                                    "nullable": true
+                                  }
+                                },
+                                "required": [
+                                  "status",
+                                  "error",
+                                  "result"
+                                ]
+                              },
                               "tags": {
                                 "type": "array",
                                 "items": {
@@ -4901,6 +4981,86 @@
                         "ai_error": {
                           "type": "string",
                           "nullable": true
+                        },
+                        "ai": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "enum": [
+                                "PENDING",
+                                "IN_PROGRESS",
+                                "COMPLETED",
+                                "FAILED"
+                              ],
+                              "type": "string"
+                            },
+                            "error": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "result": {
+                              "type": "object",
+                              "properties": {
+                                "caption": {
+                                  "type": "string"
+                                },
+                                "tags": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "objects": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "colors": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "styles": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "scene": {
+                                  "type": "string"
+                                },
+                                "ocr_text": {
+                                  "type": "string"
+                                },
+                                "model": {
+                                  "type": "string"
+                                },
+                                "generated_time": {
+                                  "type": "string",
+                                  "nullable": true
+                                }
+                              },
+                              "required": [
+                                "caption",
+                                "tags",
+                                "objects",
+                                "colors",
+                                "styles",
+                                "scene",
+                                "ocr_text",
+                                "model",
+                                "generated_time"
+                              ],
+                              "nullable": true
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "error",
+                            "result"
+                          ]
                         },
                         "tags": {
                           "type": "array",

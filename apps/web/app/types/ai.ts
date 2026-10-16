@@ -175,3 +175,20 @@ export function describeModelSpec(capabilities: AiModelCapabilities, t: (key: st
             : []),
     ].join(" · ");
 }
+
+/** AI-generated content of a media item, as returned by the media detail API. */
+export interface MediaAiView {
+    status: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "FAILED";
+    error: string | null;
+    result: {
+        caption: string;
+        tags: string[];
+        objects: string[];
+        colors: string[];
+        styles: string[];
+        scene: string;
+        ocr_text: string;
+        model: string;
+        generated_time: string | null;
+    } | null;
+}

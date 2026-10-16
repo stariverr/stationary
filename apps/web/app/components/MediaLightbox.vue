@@ -80,6 +80,11 @@ const closeLightbox = () => {
     store.selectMedia(null);
 };
 
+const searchFor = (term: string) => {
+    store.keyword = term;
+    closeLightbox();
+};
+
 interface MappedSiblingMedia {
     id: string;
     eid?: string;
@@ -883,6 +888,11 @@ const handleAddTag = async (tagToAdd: string) => {
                             </div>
 
                             <hr class="border-zinc-900" />
+
+                            <template v-if="mediaDetails?.ai">
+                                <MediaAiPanel :ai="mediaDetails.ai" @search="searchFor" />
+                                <hr class="border-zinc-900" />
+                            </template>
 
                             <!-- Match Details -->
                             <div

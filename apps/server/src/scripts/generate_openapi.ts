@@ -1,6 +1,6 @@
 import * as v from "valibot";
 import { toJsonSchema } from "@valibot/to-json-schema";
-import { MediaType, PostSource, TrackType, TrackPurpose, TrackStreamLayout } from "@/db/schema";
+import { MediaType, PostSource, TrackType, TrackPurpose, TrackStreamLayout, ProcessingStatus } from "@/db/schema";
 import { Quality } from "@/lib/types";
 
 // FormTimestampSchema helper
@@ -389,6 +389,25 @@ const MediaDetailResponseSchema = v.object({
     position: v.optional(v.pipe(v.number(), v.integer())),
     ai_status: v.optional(v.string()),
     ai_error: v.optional(v.nullable(v.string())),
+    ai: v.optional(
+        v.object({
+            status: v.enum(ProcessingStatus),
+            error: v.nullable(v.string()),
+            result: v.nullable(
+                v.object({
+                    caption: v.string(),
+                    tags: v.array(v.string()),
+                    objects: v.array(v.string()),
+                    colors: v.array(v.string()),
+                    styles: v.array(v.string()),
+                    scene: v.string(),
+                    ocr_text: v.string(),
+                    model: v.string(),
+                    generated_time: v.nullable(v.string()),
+                }),
+            ),
+        }),
+    ),
     tags: v.optional(v.array(v.string())),
 });
 

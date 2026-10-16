@@ -531,7 +531,21 @@
         "toast_create_failed": "Failed to create media",
         "toast_upload_failed": "Upload failed",
         "toast_remove_failed": "Failed to remove file",
-        "toast_invalid_composition": "Invalid track composition"
+        "toast_invalid_composition": "Invalid track composition",
+        "ai": {
+            "title": "AI generated",
+            "in_progress": "Generating…",
+            "scene": "Scene",
+            "tags": "AI tags",
+            "objects": "Objects",
+            "styles": "Styles",
+            "colors": "Colors",
+            "ocr": "Text in image",
+            "copy": "Copy",
+            "copied": "Copied",
+            "copy_failed": "Could not copy",
+            "search_for": "Search for “{term}”"
+        }
     },
     "search": {
         "matched_reason": "Match Details",
