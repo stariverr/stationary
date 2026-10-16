@@ -134,15 +134,12 @@ MVP 会在 `apps/server/src/db/schema/index.ts` 中引入以下逻辑表。
 
 帖子和媒体的反范式搜索文档。
 
-聚合以下可搜索文本：
+只存搜索会读的内容：
 
-- title
-- description/content
-- source platform
-- tags
-- AI tags
-- author name
-- AI metadata 中的 OCR 和 caption
+- `title`：媒体标题，没有时用帖子标题
+- `content`：媒体和帖子的标题与描述、帖子和媒体的标签及其别名，以及 AI 生成的 scene、caption 和 OCR 文本
+- `source`、`media_type`：过滤列
+- `content_hash`：决定是否重写文档、是否重新生成文本向量
 
 `content` 只存各字段的值，每行一个，不带字段名。如果带上 `Title:` 这类标签，搜索 "title" 就会命中所有文档。不论媒体库是否配置了 AI，每个被索引的媒体都会写入搜索文档；图像描述失败也不会阻止写入。文档使用当前最合适的已有描述，新描述生成后会重写文档。
 
@@ -154,12 +151,11 @@ MVP 会在 `apps/server/src/db/schema/index.ts` 中引入以下逻辑表。
 
 ### 4.3 `asset_ai_metadata`
 
-资产的结构化 AI 解析结果。
+资产的结构化 AI 解析结果，是 AI 生成内容的唯一来源：搜索把其中一部分复制进搜索文档，媒体详情接口把选中的结果作为 `ai` 返回给前端展示。
 
 典型字段：
 
 - caption
-- summary
 - tags
 - objects
 - colors
