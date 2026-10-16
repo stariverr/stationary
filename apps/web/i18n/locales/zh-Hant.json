@@ -453,7 +453,6 @@
         "toast_invalid_composition": "無效的軌道組合",
         "ai": {
             "title": "AI 生成",
-            "in_progress": "生成中…",
             "scene": "場景",
             "tags": "AI 標籤",
             "objects": "物體",

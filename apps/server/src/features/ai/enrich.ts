@@ -4,7 +4,6 @@ import {
     Media,
     AssetSearchDocument,
     AssetAiMetadata,
-    DeleteStatus,
     ProcessingStatus,
     EntityType,
     ModalityType,
@@ -14,7 +13,7 @@ import {
     Tag,
     TagStatus,
 } from "@/db/schema";
-import { eq, and, isNull, isNotNull, sql, inArray, or, ne } from "drizzle-orm";
+import { eq, and, isNotNull, sql, inArray, or, ne } from "drizzle-orm";
 import { enqueueEmbeddings, notifyEmbeddingQueue } from "./embedding-queue";
 import { AiService } from "./service";
 import { readAiSourceImage, resolveAiImageSource } from "./image-source";
@@ -77,39 +76,6 @@ export function buildSearchContent(fields: Array<string | null | undefined>): st
 }
 
 export const AiEnrichmentService = {
-    /**
-     * Orchestrates AI enrichment for all completed media items within a Post
-     */
-    async enrichPost(postId: string): Promise<void> {
-        // 1. Fetch Post details
-        const postList = await db
-            .select()
-            .from(Post)
-            .where(and(eq(Post.id, postId), eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time)))
-            .limit(1);
-        const post = postList[0];
-        if (!post) {
-            console.log(`[AI ENRICH] Post ${postId} not found or inactive. Skipping.`);
-            return;
-        }
-
-        // 2. Fetch active Media records for the Post (recycled media are excluded)
-        const mediaList = await db
-            .select()
-            .from(Media)
-            .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)));
-
-        console.log(`[AI ENRICH] Enriching post ${postId} containing ${mediaList.length} active media items.`);
-
-        for (const m of mediaList) {
-            try {
-                await this.enrichMediaItem(m, post);
-            } catch (err) {
-                console.error(`[AI ENRICH] Failed to enrich media item ${m.id}:`, err);
-            }
-        }
-    },
-
     /**
      * Indexes a single Media item and, when the library has AI configured, enriches it from its best
      * available cover or image content.

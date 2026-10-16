@@ -543,7 +543,6 @@ export const HybridSearchService = {
             const byId = new Map(docs.map((doc) => [doc.id, doc.content || doc.title]));
             const scores = await aiService.rerank(
                 query,
-                ids,
                 head.map((candidate) => byId.get(candidate.mediaId) ?? candidate.title ?? ""),
             );
             head.forEach((candidate, index) => {

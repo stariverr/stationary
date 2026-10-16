@@ -4,6 +4,7 @@ import { resolveAiConfig } from "./resolver";
 import { kv } from "@/global/kv";
 import { AiConfigurationError } from "./errors";
 import { createPromiseCache } from "./promise-cache";
+import { computeSha256 } from "./utils";
 import { createProviderLimiter, createRedisRateLimitStore } from "./rate-limit";
 import type {
     EmbedImageParams,
@@ -102,11 +103,11 @@ export class AiService {
         return this.config.rerankProvider;
     }
 
-    /** Relevance scores of `documents` for `query`, keyed by `documentKeys` for caching. */
-    async rerank(query: string, documentKeys: string[], documents: string[], abortSignal?: AbortSignal): Promise<number[]> {
+    /** Relevance scores of `documents` for `query`. Cached by document content, so an edited document is rescored. */
+    async rerank(query: string, documents: string[], abortSignal?: AbortSignal): Promise<number[]> {
         const provider = this.config.rerankProvider;
         if (!provider) throw new AiConfigurationError("No rerank model is configured for this library.");
-        const key = `${provider.providerId}\n${provider.modelName}\n${query}\n${documentKeys.join(",")}`;
+        const key = `${provider.providerId}\n${provider.modelName}\n${query}\n${await computeSha256(JSON.stringify(documents))}`;
         return rerankCache.getOrCreate(key, () =>
             this.limited(provider.providerId, () => provider.rerank(query, documents, abortSignal), abortSignal),
         );
