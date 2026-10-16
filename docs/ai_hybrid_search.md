@@ -134,15 +134,12 @@ During a switch, enrichment writes both ACTIVE and BUILDING spaces while search 
 
 A denormalized search document for posts and media.
 
-It aggregates searchable text such as:
+It holds what search reads and nothing else:
 
-- title
-- description/content
-- source platform
-- tags
-- AI tags
-- author name
-- OCR text and captions from AI metadata when available
+- `title`: the media title, else the post title
+- `content`: media and post titles and descriptions, post and media tags with their aliases, and the AI scene, caption and OCR text when available
+- `source` and `media_type`: filter columns
+- `content_hash`: decides whether the document and its text embeddings are rewritten
 
 `content` holds plain field values, one per line, without field labels: a label such as `Title:` would make every document match the word "title". The document is written for every indexed media item whether or not the library has AI configured, and a failed image description never withholds it; it carries the best stored description and is rewritten when a new one lands.
 
@@ -154,12 +151,11 @@ Recommended uniqueness:
 
 ### 4.3 `asset_ai_metadata`
 
-Structured AI analysis results for an asset.
+Structured AI analysis results for an asset. It is the source of truth for AI-generated content: search copies parts of it into the search document, and the media detail API returns the selected result as `ai` for display.
 
 Typical fields:
 
 - caption
-- summary
 - tags
 - objects
 - colors

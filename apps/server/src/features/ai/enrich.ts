@@ -233,10 +233,6 @@ export const AiEnrichmentService = {
             media_type: media.type,
             title: media.title || post.title || "",
             content: searchContent,
-            tags: allSearchDocTags,
-            ai_tags: aiMetadata.tags,
-            author_name: post.author_name,
-            published_time: media.published_time,
         };
         const documentHash = await computeSha256(JSON.stringify(searchDocument));
         const existingDoc = (
@@ -269,7 +265,6 @@ export const AiEnrichmentService = {
                 } else if (described) {
                     const result = {
                         caption: described.caption,
-                        summary: described.caption,
                         tags: described.tags,
                         objects: described.objects,
                         colors: described.colors,

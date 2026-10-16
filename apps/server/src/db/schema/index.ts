@@ -810,10 +810,6 @@ export const AssetSearchDocument = pgTable(
         media_type: text("media_type"),
         title: text("title").notNull().default(""),
         content: text("content").notNull().default(""),
-        tags: jsonb("tags").$type<string[]>().default([]).notNull(),
-        ai_tags: jsonb("ai_tags").$type<string[]>().default([]).notNull(),
-        author_name: text("author_name").default("").notNull(),
-        published_time: temporal("published_time"),
         // Stored so keyword search neither folds every row nor recomputes it to rank matches.
         folded_title: text("folded_title").generatedAlwaysAs(searchFold(sql`${sql.identifier("title")}`)),
         folded_content: text("folded_content").generatedAlwaysAs(searchFold(sql`${sql.identifier("content")}`)),
@@ -843,7 +839,6 @@ export const AssetAiMetadata = pgTable(
         entity_type: EntityTypeEnum("entity_type").notNull(),
         entity_id: uuid("entity_id").notNull(),
         caption: text("caption").default("").notNull(),
-        summary: text("summary").default("").notNull(),
         tags: jsonb("tags").$type<string[]>().default([]).notNull(),
         objects: jsonb("objects").$type<string[]>().default([]).notNull(),
         colors: jsonb("colors").$type<string[]>().default([]).notNull(),
