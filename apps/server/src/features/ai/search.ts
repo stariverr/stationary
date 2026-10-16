@@ -15,8 +15,9 @@ import {
     TrackPurpose,
     PostSource,
     MediaType,
+    searchFold,
 } from "@/db/schema";
-import { and, desc, eq, inArray, isNull, or, ilike, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { AiService } from "./service";
 import { selectStoredMetadata } from "./enrich";
 import { buildCdnUrl } from "@/lib/utils/cdn";
@@ -97,6 +98,65 @@ const CHANNEL_FOR_ROLE: Partial<Record<AiBindingRole, SearchChannel>> = {
 /** Escapes LIKE wildcards so a query matches literally. */
 export function escapeLikePattern(text: string): string {
     return text.replace(/[\\%_]/g, "\\$&");
+}
+
+/** Escapes regular expression syntax so a term matches literally. */
+function escapeRegExp(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const MAX_KEYWORD_TERMS = 8;
+const wordSegmenter = new Intl.Segmenter(undefined, { granularity: "word" });
+const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const SINGLE_HAN = /^\p{Script=Han}$/u;
+const SINGLE_HIRAGANA = /^\p{Script=Hiragana}$/u;
+
+/**
+ * Splits Chinese or Japanese text into words with ICU. ICU breaks words missing from its dictionary
+ * into single Han characters, so adjacent ones are joined back ("赛博朋克"); lone hiragana are
+ * particles ("の", "は") and are dropped. Falls back to the whole text when nothing is left.
+ */
+function segmentUnspaced(text: string): string[] {
+    const words: string[] = [];
+    let joinable = false;
+    for (const { segment, isWordLike } of wordSegmenter.segment(text)) {
+        if (!isWordLike || SINGLE_HIRAGANA.test(segment)) {
+            joinable = false;
+            continue;
+        }
+        const singleHan = SINGLE_HAN.test(segment);
+        if (singleHan && joinable) {
+            words[words.length - 1] += segment;
+        } else {
+            words.push(segment);
+        }
+        joinable = singleHan;
+    }
+    return words.length > 0 ? words : [text];
+}
+
+/**
+ * Splits a query into distinct terms; every term must match. Whitespace (full-width included)
+ * separates terms, and Chinese or Japanese runs are segmented further. Terms are NFKC-normalized
+ * before LIKE escaping, since NFKC turns full-width ％ and ＿ into wildcards.
+ */
+export function splitSearchTerms(query: string): string[] {
+    const terms = query
+        .normalize("NFKC")
+        .split(/\s+/)
+        .filter((term) => term.length > 0)
+        .flatMap((term) => (UNSPACED_SCRIPT.test(term) ? segmentUnspaced(term) : [term]));
+    return [...new Set(terms)].slice(0, MAX_KEYWORD_TERMS);
+}
+
+/** Folded `LIKE '%text%'` pattern, matching `text` literally. */
+function containsPattern(text: string): SQL {
+    return searchFold(sql`${`%${escapeLikePattern(text)}%`}::text`);
+}
+
+/** Folded regular expression matching `text` as a whole word. */
+function wholeWordPattern(text: string): SQL {
+    return sql`('\\m' || ${searchFold(sql`${escapeRegExp(text)}::text`)} || '\\M')`;
 }
 
 export const HybridSearchService = {
@@ -288,8 +348,11 @@ export const HybridSearchService = {
     },
 
     /**
-     * Keyword pathway: substring match on the search document (trigram indexed). Ranked so RRF has a
-     * meaningful order: title matches first, then by how well the query matches words of the content.
+     * Keyword pathway: every term of the query (see `splitSearchTerms`) must appear, as a substring
+     * of the stored folded title or content (trigram indexed), so "red car" finds "car, red" and "红色跑车"
+     * finds "红色的跑车". Ranked so RRF has a meaningful order: the whole query in the title, then
+     * terms matched as whole words (so "art" ranks "art" above "start"), terms matched in the
+     * title, and the whole query in the content.
      */
     async keywordSearch(
         query: string,
@@ -297,13 +360,32 @@ export const HybridSearchService = {
         limit: number,
         params: SearchParams,
     ): Promise<Array<{ id: string; title: string }>> {
-        const pattern = `%${escapeLikePattern(query)}%`;
+        const terms = splitSearchTerms(query);
+        if (terms.length === 0) return [];
+        const title = AssetSearchDocument.folded_title;
+        const content = AssetSearchDocument.folded_content;
+        const termPatterns = terms.map(containsPattern);
+        const phrasePattern = containsPattern(query.normalize("NFKC").trim());
         const whereClause = [
             eq(Media.delete_status, DeleteStatus.ACTIVE),
             isNull(Media.recycle_time),
             eq(Media.library_id, libraryId),
-            or(ilike(AssetSearchDocument.title, pattern), ilike(AssetSearchDocument.content, pattern)),
+            // Narrows the scan to the library's documents; Media stays the authority for access.
+            eq(AssetSearchDocument.library_id, libraryId),
+            ...termPatterns.map((pattern) => sql`(${title} like ${pattern} or ${content} like ${pattern})`),
         ];
+        const countOf = (conditions: SQL[]) =>
+            sql<number>`(${sql.join(
+                conditions.map((condition) => sql`(${condition})::int`),
+                sql` + `,
+            )})`;
+        const wholeWordMatches = countOf(
+            terms.map((term) => {
+                const pattern = wholeWordPattern(term);
+                return sql`${title} ~ ${pattern} or ${content} ~ ${pattern}`;
+            }),
+        );
+        const titleMatches = countOf(termPatterns.map((pattern) => sql`${title} like ${pattern}`));
 
         if (params.source) {
             whereClause.push(eq(AssetSearchDocument.source, params.source));
@@ -321,8 +403,10 @@ export const HybridSearchService = {
             .innerJoin(Media, and(eq(AssetSearchDocument.entity_id, Media.id), eq(AssetSearchDocument.entity_type, EntityType.MEDIA)))
             .where(and(...whereClause))
             .orderBy(
-                desc(sql`${AssetSearchDocument.title} ilike ${pattern}`),
-                desc(sql`word_similarity(${query}, ${AssetSearchDocument.content})`),
+                desc(sql`${title} like ${phrasePattern}`),
+                desc(wholeWordMatches),
+                desc(titleMatches),
+                desc(sql`${content} like ${phrasePattern}`),
                 desc(Media.create_time),
             )
             .limit(limit);

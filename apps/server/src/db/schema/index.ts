@@ -18,7 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { v7 as createUuidV7 } from "uuid";
 
-import { sql } from "drizzle-orm";
+import { sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { Quality } from "@/lib/types";
 import { AI_MODEL_CATEGORIES, EMBEDDING_DIMENSIONS } from "@/features/ai/model-schema";
 
@@ -788,6 +788,14 @@ export const AiModel = pgTable("ai_model", {
     update_time: temporal("update_time"),
 });
 
+/**
+ * Keyword search folding: NFKC (full-width and half-width forms), lowercase, ß as ss. Search
+ * documents store their folded title and content; queries fold their patterns the same way.
+ */
+export function searchFold(value: SQLWrapper): SQL {
+    return sql`replace(lower(normalize(${value}, NFKC)), 'ß', 'ss')`;
+}
+
 export const AssetSearchDocument = pgTable(
     "asset_search_document",
     {
@@ -806,6 +814,9 @@ export const AssetSearchDocument = pgTable(
         ai_tags: jsonb("ai_tags").$type<string[]>().default([]).notNull(),
         author_name: text("author_name").default("").notNull(),
         published_time: temporal("published_time"),
+        // Stored so keyword search neither folds every row nor recomputes it to rank matches.
+        folded_title: text("folded_title").generatedAlwaysAs(searchFold(sql`${sql.identifier("title")}`)),
+        folded_content: text("folded_content").generatedAlwaysAs(searchFold(sql`${sql.identifier("content")}`)),
         content_hash: text("content_hash").notNull(),
         create_time: temporal("create_time")
             .default(sql`now()`)
@@ -814,9 +825,10 @@ export const AssetSearchDocument = pgTable(
     },
     (table) => [
         uniqueIndex("search_doc_entity_unique").on(table.entity_type, table.entity_id),
-        // Keyword search runs ILIKE '%q%' and word_similarity() on these columns (requires pg_trgm).
-        index("search_doc_title_trgm_idx").using("gin", sql`${table.title} gin_trgm_ops`),
-        index("search_doc_content_trgm_idx").using("gin", sql`${table.content} gin_trgm_ops`),
+        // Keyword search runs LIKE '%term%' on the folded columns (requires pg_trgm).
+        index("search_doc_folded_title_trgm_idx").using("gin", table.folded_title.op("gin_trgm_ops")),
+        index("search_doc_folded_content_trgm_idx").using("gin", table.folded_content.op("gin_trgm_ops")),
+        index("search_doc_library_idx").on(table.library_id),
     ],
 );
 
