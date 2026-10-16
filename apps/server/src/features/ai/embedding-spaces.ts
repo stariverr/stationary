@@ -65,8 +65,8 @@ export function assessBuildingSpace(progress: BuildProgress): BuildAssessment {
 
 type SpaceRow = typeof LibraryEmbeddingSpace.$inferSelect;
 
-async function modelSpaceId(modelId: string): Promise<string> {
-    const model = (await db.select().from(AiModel).where(eq(AiModel.id, modelId)).limit(1))[0];
+async function modelSpaceId(tx: Transaction, modelId: string): Promise<string> {
+    const model = (await tx.select().from(AiModel).where(eq(AiModel.id, modelId)).limit(1))[0];
     const capabilities = model ? parseModelCapabilities("embedding", model.capabilities) : null;
     if (!model || !capabilities) throw new Error(`Embedding model ${modelId} is missing or invalid`);
     return computeEmbeddingSpaceId(model.name, capabilities as EmbeddingModelCapabilities);
@@ -87,84 +87,91 @@ async function dropSpace(tx: Transaction, space: SpaceRow) {
 }
 
 /** Starts a library-wide enrichment that fills `space`, and records it as the space's backfill. */
-async function startBackfill(library: { id: string; owner_id: string }, spaceRowId: string) {
+export async function startBackfill(library: { id: string; owner_id: string }, spaceRowId: string) {
     const taskId = await queueLibraryAiEnrichment(library.id, library.owner_id);
     await db.update(LibraryEmbeddingSpace).set({ backfill_task_id: taskId }).where(eq(LibraryEmbeddingSpace.id, spaceRowId));
 }
 
 /**
- * Aligns a library's spaces for `role` with the chosen model (null removes the role).
- * Called whenever the role binding is saved.
+ * Aligns a library's spaces for `role` with the chosen model (null removes the role) inside the
+ * caller's transaction. Returns the space that now needs a backfill, which the caller starts
+ * after committing.
  */
+export async function alignEmbeddingSpace(
+    tx: Transaction,
+    library: { id: string },
+    role: EmbeddingBindingRole,
+    modelId: string | null,
+): Promise<string | null> {
+    const spaceId = modelId ? await modelSpaceId(tx, modelId) : null;
+    const spaces = await tx
+        .select()
+        .from(LibraryEmbeddingSpace)
+        .where(and(eq(LibraryEmbeddingSpace.library_id, library.id), eq(LibraryEmbeddingSpace.role, role)))
+        .for("update");
+    const active = spaces.find((space) => space.status === LibraryEmbeddingSpaceStatus.ACTIVE);
+    const building = spaces.find((space) => space.status === LibraryEmbeddingSpaceStatus.BUILDING);
+    const retired = spaces.find((space) => space.status === LibraryEmbeddingSpaceStatus.RETIRED);
+
+    if (!modelId || !spaceId) {
+        for (const space of spaces) await dropSpace(tx, space);
+        return null;
+    }
+
+    // A space that never got a backfill task (starting it failed after an earlier save) gets one now.
+    if (active?.space_id === spaceId) {
+        // Same vectors (possibly served by another provider): keep the space, drop any rebuild.
+        if (building) await dropSpace(tx, building);
+        await tx
+            .update(LibraryEmbeddingSpace)
+            .set({ model_id: modelId, update_time: sql`now()` })
+            .where(eq(LibraryEmbeddingSpace.id, active.id));
+        return active.backfill_task_id ? null : active.id;
+    }
+
+    if (building?.space_id === spaceId) {
+        await tx
+            .update(LibraryEmbeddingSpace)
+            .set({ model_id: modelId, update_time: sql`now()` })
+            .where(eq(LibraryEmbeddingSpace.id, building.id));
+        return building.backfill_task_id ? null : building.id;
+    }
+
+    if (building) await dropSpace(tx, building);
+    // Without an active space nothing else can serve, so the new space serves right away.
+    const status = active ? LibraryEmbeddingSpaceStatus.BUILDING : LibraryEmbeddingSpaceStatus.ACTIVE;
+
+    if (retired?.space_id === spaceId) {
+        // Switching back: the retired vectors are reused and the backfill only fills what changed since.
+        await tx
+            .update(LibraryEmbeddingSpace)
+            .set({ model_id: modelId, status, backfill_task_id: null, update_time: sql`now()` })
+            .where(eq(LibraryEmbeddingSpace.id, retired.id));
+        return retired.id;
+    }
+
+    const [inserted] = await tx
+        .insert(LibraryEmbeddingSpace)
+        .values({ library_id: library.id, role, model_id: modelId, space_id: spaceId, status })
+        .returning({ id: LibraryEmbeddingSpace.id });
+    return inserted!.id;
+}
+
+/** Aligns one role on its own and starts the backfill it needs. */
 export async function syncEmbeddingSpace(
     library: { id: string; owner_id: string },
     role: EmbeddingBindingRole,
     modelId: string | null,
 ): Promise<void> {
-    const spaceId = modelId ? await modelSpaceId(modelId) : null;
-    const backfillSpaceRowId = await db.transaction(async (tx): Promise<string | null> => {
-        const spaces = await tx
-            .select()
-            .from(LibraryEmbeddingSpace)
-            .where(and(eq(LibraryEmbeddingSpace.library_id, library.id), eq(LibraryEmbeddingSpace.role, role)))
-            .for("update");
-        const active = spaces.find((space) => space.status === LibraryEmbeddingSpaceStatus.ACTIVE);
-        const building = spaces.find((space) => space.status === LibraryEmbeddingSpaceStatus.BUILDING);
-        const retired = spaces.find((space) => space.status === LibraryEmbeddingSpaceStatus.RETIRED);
-
-        if (!modelId || !spaceId) {
-            for (const space of spaces) await dropSpace(tx, space);
-            return null;
-        }
-
-        if (active?.space_id === spaceId) {
-            // Same vectors (possibly served by another provider): keep the space, drop any rebuild.
-            if (building) await dropSpace(tx, building);
-            await tx
-                .update(LibraryEmbeddingSpace)
-                .set({ model_id: modelId, update_time: sql`now()` })
-                .where(eq(LibraryEmbeddingSpace.id, active.id));
-            return null;
-        }
-
-        if (building?.space_id === spaceId) {
-            await tx
-                .update(LibraryEmbeddingSpace)
-                .set({ model_id: modelId, update_time: sql`now()` })
-                .where(eq(LibraryEmbeddingSpace.id, building.id));
-            return null;
-        }
-
-        if (building) await dropSpace(tx, building);
-        // Without an active space nothing else can serve, so the new space serves right away.
-        const status = active ? LibraryEmbeddingSpaceStatus.BUILDING : LibraryEmbeddingSpaceStatus.ACTIVE;
-
-        if (retired?.space_id === spaceId) {
-            // Switching back: the retired vectors are reused and the backfill only fills what changed since.
-            await tx
-                .update(LibraryEmbeddingSpace)
-                .set({ model_id: modelId, status, backfill_task_id: null, update_time: sql`now()` })
-                .where(eq(LibraryEmbeddingSpace.id, retired.id));
-            return retired.id;
-        }
-
-        const [inserted] = await tx
-            .insert(LibraryEmbeddingSpace)
-            .values({ library_id: library.id, role, model_id: modelId, space_id: spaceId, status })
-            .returning({ id: LibraryEmbeddingSpace.id });
-        return inserted!.id;
-    });
-
+    const backfillSpaceRowId = await db.transaction((tx) => alignEmbeddingSpace(tx, library, role, modelId));
     if (backfillSpaceRowId) await startBackfill(library, backfillSpaceRowId);
 }
 
 /** Drops every library space served by one of `modelIds`; used when models or providers are deleted. */
-export async function dropSpacesOfModels(modelIds: string[]): Promise<void> {
+export async function dropSpacesOfModels(tx: Transaction, modelIds: string[]): Promise<void> {
     if (modelIds.length === 0) return;
-    await db.transaction(async (tx) => {
-        const spaces = await tx.select().from(LibraryEmbeddingSpace).where(inArray(LibraryEmbeddingSpace.model_id, modelIds)).for("update");
-        for (const space of spaces) await dropSpace(tx, space);
-    });
+    const spaces = await tx.select().from(LibraryEmbeddingSpace).where(inArray(LibraryEmbeddingSpace.model_id, modelIds)).for("update");
+    for (const space of spaces) await dropSpace(tx, space);
 }
 
 /** Progress of a BUILDING space against the ACTIVE space of its role. */

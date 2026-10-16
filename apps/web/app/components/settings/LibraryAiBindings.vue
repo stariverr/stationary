@@ -185,10 +185,15 @@ const commit = async () => {
             ...Object.fromEntries(Object.entries(selection.value).map(([role, modelId]) => [role, modelId === NONE ? null : { modelId }])),
             language: language.value,
         };
-        await useApi(`/ai/bindings/${props.libraryId}`, { method: "POST", body });
-        savedSelection.value = JSON.stringify(selection.value);
-        savedLanguage.value = language.value;
-        toast.success(t("settings.ai_config.bindings_saved"));
+        const res = await useApi<ApiResponse<{ indexingStarted: boolean }>>(`/ai/bindings/${props.libraryId}`, { method: "POST", body });
+        if (res?.data?.indexingStarted === false) {
+            // Saved, but queuing the indexing failed. The form stays unsaved so saving again retries it.
+            toast.warning(t("settings.ai_config.bindings_saved_not_indexed"));
+        } else {
+            savedSelection.value = JSON.stringify(selection.value);
+            savedLanguage.value = language.value;
+            toast.success(t("settings.ai_config.bindings_saved"));
+        }
         await loadStatus();
     } catch (err) {
         console.error("Failed to save library AI bindings", err);

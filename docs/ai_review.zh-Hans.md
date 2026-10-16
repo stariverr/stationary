@@ -71,13 +71,23 @@
 - 来源本来就优先选封面（`selectAiImageSource`），没有改。
 - 同一个文件仍会被描述和图片向量各读一次，这属于 async 文档第 1 节的"两跳"问题。
 
-### 1.5 配置写入不是原子的，同一份信息存了两处
+### 1.5 配置写入不是原子的，同一份信息存了两处（已修复）
 
 - `POST /api/ai/bindings/:library_id` 先更新 `library.ai_bindings`，再逐个角色调用 `syncEmbeddingSpace`。中途失败的话，两边就不一致了。
 - 删除 provider 或 model 时，`clearBindingsForModels` 和后续的删除分成好几条语句，没有包在一个事务里。
 - `ai_bindings.textEmbedding/imageEmbedding` 和 `library_embedding_space` 记的是同一件事。resolver 只读 spaces，bindings 实际只用来给前端回显。
 
 **改造方向**：embedding 角色只以 `library_embedding_space` 为准，`ai_bindings` 只保留 describe 和 rerank。整个绑定更新放进一个事务。
+
+**已修复（2026-10-15）**：
+- 每个角色只有一处存放：描述和重排序存在 `library.ai_bindings`；文本向量和图片向量只存在 `library_embedding_space`，不再写进 `ai_bindings`。`GET /bindings` 从空间读出：重建中显示正在构建的模型，否则显示在用的模型。
+- `saveLibraryBindings()`（`bindings.ts`）把绑定、语言和各向量空间的调整放进同一个事务，并且锁住 library 行再合并，任何一步失败都全部回滚。回填任务和换语言后的重新描述在提交之后再排队。
+- 删除 provider 或 model 时，清理绑定、删除向量空间和删除记录本身在同一个事务里（`clearModelBindings()`）。
+- 修改模型定义时，判断"是否正在被某个角色使用"同样同时看这两处（`getRolesUsingModel()`）。
+- 提交之后排队（回填、换语言后重新描述）如果失败，绑定已经保存，接口返回 `indexingStarted: false`，设置页提示"已保存，但没能启动索引"，表单保持未保存状态。
+  - 再保存一次会重试回填：没有回填任务的在用或重建中的空间，会被重新返回去启动回填。
+  - 例外：换语言触发的重新描述不会重试，因为再保存时服务端看到语言已经是新的了。
+- 只有在用和重建中的空间算"正在使用"。退役空间只为切回去保留向量，不会拦住对模型的修改。
 
 ### 1.6 搜索分页每页都重跑整条管线
 
@@ -229,7 +239,7 @@ rerank 只挂在 openai-compatible 适配器上，走 Cohere 风格的 `/rerank`
    - provider 熔断（async 文档第 6 节）
    - ~~描述模型退回 JSON mode（2.3）~~ 决定不做
    - 控制描述输出长度（4.2，prompt 上下文待做）、记录用量（4.3）
-   - 绑定只保留一份并原子写入（1.5）
+   - ~~绑定只保留一份并原子写入（1.5）~~ 已修复
    - ~~修正错误分类（1.3）~~ 已修复
 3. **P2**
    - 删除残留代码（3.3）

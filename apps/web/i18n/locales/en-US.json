@@ -323,6 +323,7 @@
             "language_change_confirm": "Re-describe all {count} items in the new language? Every image is sent to the description model again, which takes time and incurs provider costs.",
             "bindings_save": "Save",
             "bindings_saved": "Model selection saved",
+            "bindings_saved_not_indexed": "Saved, but indexing could not be started. Save again to retry.",
             "status_indexed": "Indexed {ready}/{total}",
             "status_pending": "{count} queued",
             "status_failed": "{count} failed",

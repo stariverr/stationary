@@ -1,18 +1,18 @@
 import { Hono, type Context } from "hono";
 import * as v from "valibot";
-import { and, eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { AiModel, AiProvider, DeleteStatus, Library } from "@/db/schema";
 import { getProviderCatalog, matchCatalogModels } from "@/features/ai/catalog";
 import { retryFailedEmbeddings } from "@/features/ai/embedding-queue";
 import { queueLibraryAiEnrichment } from "@/features/ai/queue-enrichment";
-import { dropSpacesOfModels, restartStalledBackfills, syncEmbeddingSpace } from "@/features/ai/embedding-spaces";
+import { clearModelBindings, getLibraryBindings, getRolesUsingModel, saveLibraryBindings } from "@/features/ai/bindings";
+import { restartStalledBackfills } from "@/features/ai/embedding-spaces";
 import { getLibraryAiStatus, getLibraryDescribeStatus } from "@/features/ai/status";
 import { classifyAiError, getSafeAiErrorMessage } from "@/features/ai/errors";
 import { UpdateLibraryAiBindingsSchema } from "@/features/ai/schema";
 import {
     AiModelCategorySchema,
     parseModelCapabilities,
-    AI_BINDING_ROLES,
     supportsAiBindingRole,
     type AiBindingRole,
     type AiModelCategory,
@@ -111,32 +111,6 @@ function toProviderResponse(provider: ProviderRow) {
         create_time: provider.create_time,
         update_time: provider.update_time,
     };
-}
-
-/** Clears role bindings and embedding spaces in the owner's libraries that use any of `modelIds`. */
-async function clearBindingsForModels(ownerId: string, modelIds: Set<string>) {
-    if (modelIds.size === 0) return;
-    await dropSpacesOfModels([...modelIds]);
-    const libraries = await db
-        .select({ id: Library.id, ai_bindings: Library.ai_bindings })
-        .from(Library)
-        .where(and(eq(Library.owner_id, ownerId), isNotNull(Library.ai_bindings)));
-
-    for (const library of libraries) {
-        if (!library.ai_bindings) continue;
-        const bindings = { ...library.ai_bindings };
-        let changed = false;
-        for (const role of AI_BINDING_ROLES) {
-            const binding = bindings[role];
-            if (binding && modelIds.has(binding.modelId)) {
-                bindings[role] = null;
-                changed = true;
-            }
-        }
-        if (changed) {
-            await db.update(Library).set({ ai_bindings: bindings }).where(eq(Library.id, library.id));
-        }
-    }
 }
 
 /** Rejects base URLs the server must not request (see providers/egress.ts); returns the reason, or null. */
@@ -265,9 +239,15 @@ aiRouter.delete("/providers/:id", requireAuth, validate("param", IdParamSchema),
     if (access.denied) return access.denied;
 
     const models = await db.select({ id: AiModel.id }).from(AiModel).where(eq(AiModel.provider_id, id));
-    await clearBindingsForModels(access.user.id, new Set(models.map((model) => model.id)));
-    await db.delete(AiModel).where(eq(AiModel.provider_id, id));
-    await db.delete(AiProvider).where(eq(AiProvider.id, id));
+    await db.transaction(async (tx) => {
+        await clearModelBindings(
+            tx,
+            access.user.id,
+            models.map((model) => model.id),
+        );
+        await tx.delete(AiModel).where(eq(AiModel.provider_id, id));
+        await tx.delete(AiProvider).where(eq(AiProvider.id, id));
+    });
 
     return c.json(success(Code.SUCCESS, null, "Provider deleted successfully"));
 });
@@ -471,13 +451,9 @@ aiRouter.put("/models/:id", requireAuth, validate("param", IdParamSchema), valid
         return c.json(error(Code.INVALID_PARAMETER, "This change produces different vectors; add it as a new model instead"), 400);
     }
 
-    const libraries = await db
-        .select({ ai_bindings: Library.ai_bindings })
-        .from(Library)
-        .where(and(eq(Library.owner_id, access.user.id), isNotNull(Library.ai_bindings)));
-    for (const role of AI_BINDING_ROLES) {
-        const bound = libraries.some((library) => library.ai_bindings?.[role]?.modelId === id);
-        if (bound && !supportsAiBindingRole(role, capabilities)) {
+    const boundRoles = await getRolesUsingModel(access.user.id, id);
+    for (const role of boundRoles) {
+        if (!supportsAiBindingRole(role, capabilities)) {
             return c.json(error(Code.INVALID_PARAMETER, `The model is used for ${role} and would no longer support it`), 400);
         }
     }
@@ -505,8 +481,10 @@ aiRouter.delete("/models/:id", requireAuth, validate("param", IdParamSchema), as
         return c.json(error(Code.NOT_FOUND, "Model not found"), 404);
     }
 
-    await clearBindingsForModels(access.user.id, new Set([id]));
-    await db.delete(AiModel).where(eq(AiModel.id, id));
+    await db.transaction(async (tx) => {
+        await clearModelBindings(tx, access.user.id, [id]);
+        await tx.delete(AiModel).where(eq(AiModel.id, id));
+    });
 
     return c.json(success(Code.SUCCESS, null, "Model deleted successfully"));
 });
@@ -521,7 +499,7 @@ aiRouter.get("/bindings/:library_id", requireAuth, validate("param", LibraryPara
     const access = await loadOwnedLibrary(c, library_id);
     if (access.denied) return access.denied;
 
-    return c.json(success(Code.SUCCESS, { ...access.library.ai_bindings, language: access.library.ai_language }));
+    return c.json(success(Code.SUCCESS, { ...(await getLibraryBindings(library_id)), language: access.library.ai_language }));
 });
 
 aiRouter.post(
@@ -535,7 +513,7 @@ aiRouter.post(
         if (access.denied) return access.denied;
 
         const { language, ...bindings } = c.req.valid("json");
-        const nextBindings = { ...access.library.ai_bindings, ...bindings };
+        const current = await getLibraryBindings(library_id);
         const roleCategories: Array<[AiBindingRole, AiModelCategory]> = [
             ["describe", "generation"],
             ["textEmbedding", "embedding"],
@@ -552,7 +530,7 @@ aiRouter.post(
                     return c.json(error(Code.INVALID_PARAMETER, `${role} model was not found`), 400);
                 }
                 // Catalog flags only say what a model supports in principle: a newly bound model must work against the live provider.
-                if (binding.modelId !== access.library.ai_bindings?.[role]?.modelId) {
+                if (binding.modelId !== current[role]?.modelId) {
                     const failure = summarizeProbeFailures(await probeModel(resolved));
                     if (failure) {
                         return c.json(error(Code.INVALID_PARAMETER, `${role} model failed verification (${failure})`), 400);
@@ -563,26 +541,11 @@ aiRouter.post(
             }
         }
 
-        const languageChanged = language !== undefined && language !== access.library.ai_language;
-        await db
-            .update(Library)
-            .set({ ai_bindings: nextBindings, ...(languageChanged ? { ai_language: language } : {}) })
-            .where(eq(Library.id, library_id));
-        // Descriptions in the old language are stale: re-describe the library (search documents and
-        // text vectors follow automatically).
-        if (languageChanged && nextBindings.describe?.modelId) {
-            await queueLibraryAiEnrichment(library_id, access.library.owner_id);
-        }
-        // Embedding roles are served from spaces; a model change starts a rebuild while the old space keeps serving.
-        for (const role of ["textEmbedding", "imageEmbedding"] as const) {
-            if (bindings[role] !== undefined) {
-                await syncEmbeddingSpace(access.library, role, bindings[role]?.modelId ?? null);
-            }
-        }
+        const { indexingStarted } = await saveLibraryBindings(access.library, bindings, language);
         return c.json(
             success(
                 Code.SUCCESS,
-                { ...nextBindings, language: language ?? access.library.ai_language },
+                { ...(await getLibraryBindings(library_id)), language: language ?? access.library.ai_language, indexingStarted },
                 "AI bindings updated successfully",
             ),
         );

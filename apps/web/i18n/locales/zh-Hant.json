@@ -291,6 +291,7 @@
             "language_change_confirm": "要以新語言重新描述全部 {count} 個媒體嗎？每張圖片都會重新傳送給描述模型，需要一段時間並產生呼叫費用。",
             "bindings_save": "儲存",
             "bindings_saved": "模型選擇已儲存",
+            "bindings_saved_not_indexed": "已儲存，但無法啟動索引。再儲存一次即可重試。",
             "status_indexed": "已索引 {ready}/{total}",
             "status_pending": "排隊 {count}",
             "status_failed": "失敗 {count}",
