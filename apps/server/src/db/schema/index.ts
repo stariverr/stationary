@@ -673,10 +673,8 @@ export const genericHalfvec = customType<{ data: number[] }>({
 export enum ModalityType {
     TEXT = "TEXT",
     IMAGE = "IMAGE",
-    VIDEO_FRAME = "VIDEO_FRAME",
-    AUDIO = "AUDIO",
 }
-export const ModalityEnum = pgEnum("modality_type", [ModalityType.TEXT, ModalityType.IMAGE, ModalityType.VIDEO_FRAME, ModalityType.AUDIO]);
+export const ModalityEnum = pgEnum("modality_type", [ModalityType.TEXT, ModalityType.IMAGE]);
 
 export enum EntityType {
     POST = "POST",
@@ -685,19 +683,10 @@ export enum EntityType {
 export const EntityTypeEnum = pgEnum("entity_type", [EntityType.POST, EntityType.MEDIA]);
 
 export enum EmbeddingRole {
-    CONTENT_TEXT = "CONTENT_TEXT",
     AI_CAPTION = "AI_CAPTION",
     IMAGE_PRIMARY = "IMAGE_PRIMARY",
-    VIDEO_KEYFRAME = "VIDEO_KEYFRAME",
-    OCR_TEXT = "OCR_TEXT",
 }
-export const EmbeddingRoleEnum = pgEnum("embedding_role", [
-    EmbeddingRole.CONTENT_TEXT,
-    EmbeddingRole.AI_CAPTION,
-    EmbeddingRole.IMAGE_PRIMARY,
-    EmbeddingRole.VIDEO_KEYFRAME,
-    EmbeddingRole.OCR_TEXT,
-]);
+export const EmbeddingRoleEnum = pgEnum("embedding_role", [EmbeddingRole.AI_CAPTION, EmbeddingRole.IMAGE_PRIMARY]);
 
 /**
  * - `PENDING`: queued for the embedding worker; `embedding` is null until it completes.
@@ -710,25 +699,21 @@ export enum EmbeddingStatus {
     READY = "READY",
     STALE = "STALE",
     FAILED = "FAILED",
-    DISABLED = "DISABLED",
 }
 export const EmbeddingStatusEnum = pgEnum("embedding_status", [
     EmbeddingStatus.PENDING,
     EmbeddingStatus.READY,
     EmbeddingStatus.STALE,
     EmbeddingStatus.FAILED,
-    EmbeddingStatus.DISABLED,
 ]);
 
 export enum ProcessingStatus {
     PENDING = "PENDING",
-    IN_PROGRESS = "IN_PROGRESS",
     COMPLETED = "COMPLETED",
     FAILED = "FAILED",
 }
 export const ProcessingStatusEnum = pgEnum("processing_status", [
     ProcessingStatus.PENDING,
-    ProcessingStatus.IN_PROGRESS,
     ProcessingStatus.COMPLETED,
     ProcessingStatus.FAILED,
 ]);
@@ -768,25 +753,29 @@ export const AiProvider = pgTable(
 export const AiModelCategoryEnum = pgEnum("ai_model_category", AI_MODEL_CATEGORIES);
 
 // AI Model table (supports custom user models and capability specifications)
-export const AiModel = pgTable("ai_model", {
-    id: uuid("id")
-        .primaryKey()
-        .notNull()
-        .$defaultFn(() => uuidv7.generate()),
-    provider_id: uuid("provider_id")
-        .notNull()
-        .references(() => AiProvider.id, { onDelete: "cascade" }),
-    name: text("name").notNull(), // 模型实际名字，如 qwen3-vl-embedding
-    /** Name shown to people, e.g. "Qwen3-VL Embedding". */
-    display_name: text("display_name").notNull(),
-    category: AiModelCategoryEnum("category").notNull(),
-    /** Capability snapshot validated by the category's schema in features/ai/model-schema.ts. */
-    capabilities: jsonb("capabilities").notNull().default({}),
-    create_time: temporal("create_time")
-        .default(sql`now()`)
-        .notNull(),
-    update_time: temporal("update_time"),
-});
+export const AiModel = pgTable(
+    "ai_model",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        provider_id: uuid("provider_id")
+            .notNull()
+            .references(() => AiProvider.id, { onDelete: "cascade" }),
+        name: text("name").notNull(), // 模型实际名字，如 qwen3-vl-embedding
+        /** Name shown to people, e.g. "Qwen3-VL Embedding". */
+        display_name: text("display_name").notNull(),
+        category: AiModelCategoryEnum("category").notNull(),
+        /** Capability snapshot validated by the category's schema in features/ai/model-schema.ts. */
+        capabilities: jsonb("capabilities").notNull().default({}),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        update_time: temporal("update_time"),
+    },
+    (table) => [uniqueIndex("ai_model_provider_name_unique").on(table.provider_id, table.name)],
+);
 
 /**
  * Keyword search folding: NFKC (full-width and half-width forms), lowercase, ß as ss. Search
