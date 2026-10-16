@@ -112,10 +112,11 @@ export async function saveLibraryBindings(
     // The bindings are saved either way. If queuing fails, saving the same bindings again retries
     // it: a space without a backfill task is returned by alignEmbeddingSpace.
     try {
-        // Descriptions in the old language are stale: re-describe the library (search documents and
-        // text vectors follow automatically).
-        if (languageChanged && describeModelId) await queueLibraryAiEnrichment(library.id, library.owner_id);
-        for (const spaceRowId of backfills) await startBackfill(library, spaceRowId);
+        // A backfill is already a full library enrichment, so it also re-describes after a language
+        // change. Descriptions in the old language are stale: re-describe the library (search
+        // documents and text vectors follow automatically).
+        if (backfills.length > 0) await startBackfill(library, backfills);
+        else if (languageChanged && describeModelId) await queueLibraryAiEnrichment(library.id, library.owner_id);
         return { indexingStarted: true };
     } catch (error) {
         console.error(`[AI BINDINGS] Saved bindings of library ${library.id} but could not start indexing:`, error);

@@ -86,10 +86,15 @@ async function dropSpace(tx: Transaction, space: SpaceRow) {
     await tx.delete(LibraryEmbeddingSpace).where(eq(LibraryEmbeddingSpace.id, space.id));
 }
 
-/** Starts a library-wide enrichment that fills `space`, and records it as the space's backfill. */
-export async function startBackfill(library: { id: string; owner_id: string }, spaceRowId: string) {
+/**
+ * Starts one library-wide enrichment that fills all of `spaceRowIds`, and records it as their
+ * backfill. One task serves every space: concurrent tasks over the same media would describe it
+ * twice, and the two different descriptions would supersede each other's text vectors.
+ */
+export async function startBackfill(library: { id: string; owner_id: string }, spaceRowIds: string[]) {
+    if (spaceRowIds.length === 0) return;
     const taskId = await queueLibraryAiEnrichment(library.id, library.owner_id);
-    await db.update(LibraryEmbeddingSpace).set({ backfill_task_id: taskId }).where(eq(LibraryEmbeddingSpace.id, spaceRowId));
+    await db.update(LibraryEmbeddingSpace).set({ backfill_task_id: taskId }).where(inArray(LibraryEmbeddingSpace.id, spaceRowIds));
 }
 
 /**
@@ -164,7 +169,7 @@ export async function syncEmbeddingSpace(
     modelId: string | null,
 ): Promise<void> {
     const backfillSpaceRowId = await db.transaction((tx) => alignEmbeddingSpace(tx, library, role, modelId));
-    if (backfillSpaceRowId) await startBackfill(library, backfillSpaceRowId);
+    if (backfillSpaceRowId) await startBackfill(library, [backfillSpaceRowId]);
 }
 
 /** Drops every library space served by one of `modelIds`; used when models or providers are deleted. */
@@ -279,14 +284,13 @@ export async function dropExpiredRetiredSpaces(): Promise<number> {
  * Returns how many backfills were started.
  */
 export async function restartStalledBackfills(library: { id: string; owner_id: string }): Promise<number> {
-    let restarted = 0;
+    const stalled: string[] = [];
     for (const { space, backfillStatus } of await buildingSpaces(library.id)) {
         const assessment = assessBuildingSpace(await buildProgress(space, backfillStatus));
-        if (assessment.state !== "blocked" || assessment.reason !== "low_coverage") continue;
-        await startBackfill(library, space.id);
-        restarted += 1;
+        if (assessment.state === "blocked" && assessment.reason === "low_coverage") stalled.push(space.id);
     }
-    return restarted;
+    await startBackfill(library, stalled);
+    return stalled.length;
 }
 
 export interface EmbeddingSpaceStatusView {
