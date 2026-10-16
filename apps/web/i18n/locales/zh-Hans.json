@@ -531,7 +531,21 @@
         "toast_create_failed": "创建媒体失败",
         "toast_upload_failed": "上传失败",
         "toast_remove_failed": "删除文件失败",
-        "toast_invalid_composition": "无效的轨道组合"
+        "toast_invalid_composition": "无效的轨道组合",
+        "ai": {
+            "title": "AI 生成",
+            "in_progress": "生成中…",
+            "scene": "场景",
+            "tags": "AI 标签",
+            "objects": "物体",
+            "styles": "风格",
+            "colors": "颜色",
+            "ocr": "图中文字",
+            "copy": "复制",
+            "copied": "已复制",
+            "copy_failed": "复制失败",
+            "search_for": "搜索“{term}”"
+        }
     },
     "search": {
         "matched_reason": "匹配原因",

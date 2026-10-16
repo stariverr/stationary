@@ -38,6 +38,7 @@ import { validate } from "@/lib/validation/validator";
 import { AddTracksFromDraftSchema } from "@/features/media/schema";
 import { AddTracksFromDraftError, addTracksFromDraft } from "@/features/media/add-tracks-from-draft";
 import { deleteMedia, restoreMedia, trashMedia } from "@/features/media/lifecycle";
+import { getMediaAiView, summarizeAiStatus } from "@/features/ai/media-view";
 import { assertMediaAccess, MediaAccessError } from "@/features/media/access";
 import { replaceMediaTags } from "@/features/media/tags";
 import { updateMediaInfo } from "@/features/media/update-info";
@@ -150,37 +151,22 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
         MediaService.getVideosMap(mediaIds),
     ]);
 
-    const aiMetadataMap = new Map<string, { ai_status: string; ai_error: string | null }>();
-
-    if (mediaIds.length > 0) {
-        const aiMetadatas = await db
-            .select({
-                entity_id: AssetAiMetadata.entity_id,
-                processing_status: AssetAiMetadata.processing_status,
-                last_error: AssetAiMetadata.last_error,
-            })
-            .from(AssetAiMetadata)
-            .where(and(inArray(AssetAiMetadata.entity_id, mediaIds), eq(AssetAiMetadata.entity_type, EntityType.MEDIA)));
-
-        for (const meta of aiMetadatas) {
-            const existing = aiMetadataMap.get(meta.entity_id);
-            if (
-                !existing ||
-                meta.processing_status === "COMPLETED" ||
-                (existing.ai_status !== "COMPLETED" && meta.processing_status === "FAILED")
-            ) {
-                aiMetadataMap.set(meta.entity_id, {
-                    ai_status: meta.processing_status,
-                    ai_error: meta.last_error,
-                });
-            }
-        }
-    }
+    const aiRows =
+        mediaIds.length > 0
+            ? await db
+                  .select({
+                      entity_id: AssetAiMetadata.entity_id,
+                      processing_status: AssetAiMetadata.processing_status,
+                      last_error: AssetAiMetadata.last_error,
+                  })
+                  .from(AssetAiMetadata)
+                  .where(and(inArray(AssetAiMetadata.entity_id, mediaIds), eq(AssetAiMetadata.entity_type, EntityType.MEDIA)))
+            : [];
 
     const medias = rawMedia.map((m) => {
         const covers = coversByMediaId.get(m.id) || [];
         const videos = videosByMediaId.get(m.id) || [];
-        const aiMeta = aiMetadataMap.get(m.id);
+        const aiStatus = summarizeAiStatus(aiRows.filter((row) => row.entity_id === m.id));
 
         const lowCover = covers.find((c) => c.quality === Quality.LOW)?.url || null;
         const mediumCover = covers.find((c) => c.quality === Quality.MEDIUM)?.url || null;
@@ -203,8 +189,8 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
             published_time: toIsoTimestamp(m.published_time) ?? undefined,
             sync_status: m.sync_status,
             last_error: m.last_error,
-            ai_status: aiMeta?.ai_status ?? "PENDING",
-            ai_error: aiMeta?.ai_error ?? null,
+            ai_status: aiStatus.status,
+            ai_error: aiStatus.error,
             url: mainUrl,
             cover_url: coverUrl,
             width: null,
@@ -236,26 +222,6 @@ router.get("/detail/:id", requireAuth, async (c) => {
     if (access.errorResponse) return access.errorResponse;
     const media = access.media!;
 
-    const aiMetadatas = await db
-        .select({
-            processing_status: AssetAiMetadata.processing_status,
-            last_error: AssetAiMetadata.last_error,
-        })
-        .from(AssetAiMetadata)
-        .where(and(eq(AssetAiMetadata.entity_id, media.id), eq(AssetAiMetadata.entity_type, EntityType.MEDIA)));
-
-    let aiStatus = "PENDING";
-    let aiError: string | null = null;
-    for (const meta of aiMetadatas) {
-        if (
-            aiStatus !== "COMPLETED" &&
-            (meta.processing_status === "COMPLETED" || (aiStatus !== "FAILED" && meta.processing_status === "FAILED"))
-        ) {
-            aiStatus = meta.processing_status;
-            aiError = meta.last_error;
-        }
-    }
-
     const mediaTagsList = await db
         .select({ name: Tag.name })
         .from(MediaTag)
@@ -264,12 +230,11 @@ router.get("/detail/:id", requireAuth, async (c) => {
         .orderBy(asc(MediaTag.id));
     const mediaTags = mediaTagsList.map((mt) => mt.name);
 
-    const mediaDetail = await MediaService.getDetail(media);
+    const [mediaDetail, ai] = await Promise.all([MediaService.getDetail(media), getMediaAiView(media.id)]);
 
     const response = {
         ...mediaDetail,
-        ai_status: aiStatus,
-        ai_error: aiError,
+        ai,
         tags: mediaTags,
     };
     return c.json(success(Code.SUCCESS, response));

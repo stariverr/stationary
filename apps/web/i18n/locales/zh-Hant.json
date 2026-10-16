@@ -450,7 +450,21 @@
         "toast_create_failed": "建立媒體失敗",
         "toast_upload_failed": "上傳失敗",
         "toast_remove_failed": "刪除檔案失敗",
-        "toast_invalid_composition": "無效的軌道組合"
+        "toast_invalid_composition": "無效的軌道組合",
+        "ai": {
+            "title": "AI 生成",
+            "in_progress": "生成中…",
+            "scene": "場景",
+            "tags": "AI 標籤",
+            "objects": "物體",
+            "styles": "風格",
+            "colors": "顏色",
+            "ocr": "圖中文字",
+            "copy": "複製",
+            "copied": "已複製",
+            "copy_failed": "複製失敗",
+            "search_for": "搜尋「{term}」"
+        }
     },
     "search": {
         "matched_reason": "匹配原因",
