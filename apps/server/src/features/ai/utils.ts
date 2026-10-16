@@ -18,6 +18,17 @@ export function computeEmbeddingSpaceId(modelName: string, spec: EmbeddingModelC
     return `${modelName}:${spec.dimension}:${spec.taskPrefixType ?? "plain"}`;
 }
 
+/**
+ * Cuts a Matryoshka vector longer than the model's declared dimension and renormalizes it, for
+ * servers that return the model's full output. Other vectors pass through for validation.
+ */
+export function shortenMrlVector(vector: unknown, spec: EmbeddingModelCapabilities): unknown {
+    if (!spec.mrl || !Array.isArray(vector) || vector.length <= spec.dimension) return vector;
+    const head: number[] = vector.slice(0, spec.dimension);
+    const norm = Math.hypot(...head);
+    return norm > 0 ? head.map((value) => value / norm) : head;
+}
+
 /** Validates a provider vector against the model definition before it can reach the index. */
 export function toEmbeddingResult(vector: unknown, modelName: string, spec: EmbeddingModelCapabilities): EmbeddingResult {
     if (!Array.isArray(vector) || !vector.every((value) => typeof value === "number" && Number.isFinite(value))) {

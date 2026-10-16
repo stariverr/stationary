@@ -1,7 +1,7 @@
 import * as v from "valibot";
 import { AI_REASONING_LEVELS, AiModalitySchema, parseModelCapabilities, type ReasoningLevel } from "../model-schema";
 import { AI_PROVIDER_TEMPLATES } from "../provider-templates";
-import { CURATED_EMBEDDING_MODELS, GENERATION_MODEL_PATCHES } from "./curated";
+import { CURATED_EMBEDDING_MODELS, GENERATION_MODEL_PATCHES, OPEN_WEIGHTS_PROVIDER } from "./curated";
 import { dropSupersededModels, isRetiredModel } from "./lifecycle";
 import { normalizeModelId, type CatalogData, type CatalogModel } from "./types";
 import { MODEL_VENDORS, findModelVendor } from "./vendors";
@@ -108,16 +108,18 @@ export function buildCatalog(modelsDev: Record<string, unknown>): CatalogData {
     const providers: CatalogData["providers"] = {};
 
     for (const providerId of catalogProviderIds()) {
+        const curated = CURATED_EMBEDDING_MODELS.filter((model) => model.catalogProviderId === providerId);
         const listing = modelsDev[providerId];
-        if (!listing || typeof listing !== "object" || !("models" in listing) || !listing.models || typeof listing.models !== "object") {
+        const hasListing = Boolean(listing) && typeof listing === "object" && "models" in listing! && Boolean(listing.models) && typeof listing.models === "object";
+        if (!hasListing && providerId !== OPEN_WEIGHTS_PROVIDER) {
             throw new Error(`models.dev has no provider '${providerId}'; update the vendors or templates that reference it.`);
         }
+        const models = hasListing ? Object.values((listing as { models: object }).models) : [];
         const patches = GENERATION_MODEL_PATCHES[providerId] ?? {};
-        const curated = CURATED_EMBEDDING_MODELS.filter((model) => model.catalogProviderId === providerId);
         const curatedIds = new Set(curated.map((model) => normalizeModelId(model.name)));
 
         const generated = dropSupersededModels(
-            Object.values(listing.models)
+            models
                 .map((entry) => v.safeParse(ModelsDevModelSchema, entry))
                 .flatMap((result) => (result.success ? [toGenerationCatalogModel(result.output, patches[result.output.id])] : []))
                 .filter((model): model is CatalogModel => model !== null && !isRetiredModel(model)),

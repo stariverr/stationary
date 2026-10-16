@@ -1,3 +1,4 @@
+import { OPEN_WEIGHTS_PROVIDER } from "./catalog/curated";
 import type { AiModelCapabilities, AiModelCategory, AiProviderAdapter } from "./model-schema";
 
 /**
@@ -38,6 +39,22 @@ export const AI_PROVIDER_TEMPLATES: AiProviderTemplate[] = [
         defaultBaseUrl: "https://dashscope.aliyuncs.com",
         description: "DashScope native multimodal embedding API",
         catalogProviderId: "alibaba-cn",
+    },
+    {
+        id: "llama-cpp",
+        name: "llama.cpp (self-hosted)",
+        adapter: "llama-cpp",
+        defaultBaseUrl: "http://localhost:8080/v1",
+        description: "llama-server with --embeddings and --mmproj, for multimodal embedding models",
+        catalogProviderId: OPEN_WEIGHTS_PROVIDER,
+    },
+    {
+        id: "vllm",
+        name: "vLLM (self-hosted)",
+        adapter: "vllm",
+        defaultBaseUrl: "http://localhost:8000/v1",
+        description: "vLLM serving a multimodal embedding model as a pooling model",
+        catalogProviderId: OPEN_WEIGHTS_PROVIDER,
     },
     {
         id: "dashscope-compatible",
@@ -101,14 +118,14 @@ export function getProviderTemplate(templateId: string): AiProviderTemplate | nu
 }
 
 /**
- * Which model kinds an adapter can serve: the DashScope native adapter only speaks the multimodal
- * embedding API, the OpenAI embeddings protocol has no image input, and rerankers are served through
- * the Cohere-style `/rerank` endpoint of OpenAI-compatible servers.
+ * Which model kinds an adapter can serve: rerankers are served through the Cohere-style `/rerank`
+ * endpoint of OpenAI-compatible servers, the OpenAI embeddings protocol has no image input, and
+ * the DashScope, llama.cpp and vLLM adapters only speak their multimodal embedding APIs.
  */
 export function adapterSupportsModel(adapter: AiProviderAdapter, category: AiModelCategory, capabilities: AiModelCapabilities): boolean {
     if (category === "rerank") return adapter === "openai-compatible";
     const multimodalEmbedding = category === "embedding" && "multimodal" in capabilities && capabilities.multimodal;
-    if (adapter === "dashscope-native") return multimodalEmbedding;
     if (adapter === "openai-compatible") return !multimodalEmbedding;
-    return true;
+    if (adapter === "gemini") return true;
+    return multimodalEmbedding;
 }

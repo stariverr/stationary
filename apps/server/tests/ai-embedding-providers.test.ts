@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { AiConfigurationError, AiProviderError } from "@/features/ai/errors";
 import { parseModelCapabilities, type EmbeddingModelCapabilities } from "@/features/ai/model-schema";
-import { DashScopeMultimodalEmbeddingProvider, GeminiVisualEmbeddingProvider } from "@/features/ai/providers";
+import {
+    DashScopeMultimodalEmbeddingProvider,
+    GeminiVisualEmbeddingProvider,
+    LlamaCppEmbeddingProvider,
+    VllmEmbeddingProvider,
+} from "@/features/ai/providers";
 import type { ResolvedModelConfig } from "@/features/ai/types";
 import { computeEmbeddingSpaceId, estimateTokens, formatEmbeddingText, toEmbeddingResult } from "@/features/ai/utils";
 
@@ -163,6 +168,70 @@ describe("DashScope text batching", () => {
 
         expect(requests[0]?.body.input).toEqual({ contents: [{ text: "a" }, { text: "b" }] });
         expect(results.map((result) => result.embedding[0])).toEqual([first[0], second[0]]);
+    });
+});
+
+describe("self-hosted multimodal embedding adapters", () => {
+    const selfHosted = (overrides: Partial<ResolvedModelConfig> = {}) =>
+        config({ adapter: "llama-cpp", baseUrl: "http://llama.local:8080/v1/", apiKey: "", modelName: "embeddinggemma-2", ...overrides });
+    const gemmaSpec: EmbeddingModelCapabilities = {
+        dimension: 256,
+        mrl: true,
+        maxInputTokens: 8192,
+        multimodal: true,
+        imageFormats: ["image/jpeg", "image/png"],
+        taskPrefixType: "gemini-asymmetric",
+    };
+    const image = { imageBuffer: new Uint8Array([1, 2, 3]), mimeType: "image/png" };
+
+    it("llama.cpp wraps image parts in a content object per input", async () => {
+        const requests = mockFetch({ data: [{ index: 0, embedding: vector(1024) }, { index: 1, embedding: vector(1024) }] });
+        const provider = new LlamaCppEmbeddingProvider(selfHosted());
+
+        await provider.embedImages([image, image]);
+
+        expect(requests[0]?.url).toBe("http://llama.local:8080/v1/embeddings");
+        expect(requests[0]?.headers.get("authorization")).toBeNull();
+        const part = { type: "image_url", image_url: { url: "data:image/png;base64,AQID" } };
+        expect(requests[0]?.body).toEqual({ model: "embeddinggemma-2", input: [{ content: [part] }, { content: [part] }] });
+    });
+
+    it("vLLM sends one chat-style conversation per image", async () => {
+        const requests = mockFetch({ data: [{ index: 0, embedding: vector(1024) }] });
+        const provider = new VllmEmbeddingProvider(selfHosted({ adapter: "vllm", apiKey: "token" }));
+
+        await provider.embedImages([image]);
+
+        expect(provider.imageBatchSize).toBe(1);
+        expect(requests[0]?.headers.get("authorization")).toBe("Bearer token");
+        expect(requests[0]?.body).toEqual({
+            model: "embeddinggemma-2",
+            messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AQID" } }] }],
+        });
+    });
+
+    it("sends texts as plain strings with the task prefix", async () => {
+        const requests = mockFetch({ data: [{ index: 0, embedding: vector(768) }] });
+        const provider = new LlamaCppEmbeddingProvider(selfHosted({ capabilities: { ...gemmaSpec, dimension: 768 } }));
+
+        await provider.embedText({ text: "a red car", purpose: "QUERY" });
+
+        expect(requests[0]?.body).toEqual({ model: "embeddinggemma-2", input: ["task: search result | query: a red car"] });
+    });
+
+    it("shortens a full-size MRL vector to the declared dimension and renormalizes it", async () => {
+        mockFetch({ data: [{ index: 0, embedding: vector(768) }] });
+        const provider = new LlamaCppEmbeddingProvider(selfHosted({ capabilities: gemmaSpec }));
+
+        const [result] = await provider.embedImages([image]);
+
+        expect(result?.embedding).toHaveLength(256);
+        expect(Math.hypot(...result!.embedding)).toBeCloseTo(1, 6);
+    });
+
+    it("rejects an embedding count that differs from the inputs", async () => {
+        mockFetch({ data: [] });
+        await expect(new LlamaCppEmbeddingProvider(selfHosted()).embedImages([image])).rejects.toThrow(AiProviderError);
     });
 });
 

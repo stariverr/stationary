@@ -146,10 +146,10 @@ describe("catalog generation", () => {
 
     it("replaces models.dev entries with curated embedding definitions", () => {
         const body = emptyModelsDev();
-        body.openai = { models: { "text-embedding-3-small": { ...visionModel, id: "text-embedding-3-small" }, "vision-1": visionModel } };
-        const openai = buildCatalog(body).providers.openai!;
-        expect(openai.map((model) => model.name)).toEqual(["text-embedding-3-large", "text-embedding-3-small", "vision-1"]);
-        expect(openai.find((model) => model.name === "text-embedding-3-small")?.category).toBe("embedding");
+        body["alibaba-cn"] = { models: { "qwen3-vl-embedding": { ...visionModel, id: "qwen3-vl-embedding" }, "vision-1": visionModel } };
+        const alibaba = buildCatalog(body).providers["alibaba-cn"]!;
+        expect(alibaba.map((model) => model.name)).toEqual(["qwen3-vl-embedding", "vision-1"]);
+        expect(alibaba.find((model) => model.name === "qwen3-vl-embedding")?.category).toBe("embedding");
     });
 });
 
@@ -193,6 +193,7 @@ describe("catalog lookup", () => {
             deepseek: [generation("deepseek-flash", 1000)],
             "alibaba-cn": [generation("deepseek-flash", 2000, false), generation("qwen-vl", 3000), ...CATALOG_DATA.providers["alibaba-cn"]!],
             google: [generation("gemini-3-flash", 4000)],
+            "open-weights": CATALOG_DATA.providers["open-weights"]!,
         },
     });
     const custom = getProviderTemplate("custom-openai-compatible")!;
@@ -214,6 +215,8 @@ describe("catalog lookup", () => {
         const native = getProviderTemplate("dashscope-native")!;
         const offered = (template: typeof custom) => catalog.getProviderCatalog(template).flatMap((group) => group.models.map((model) => model.name));
         expect(offered(native)).toEqual(["qwen3-vl-embedding"]);
+        expect(offered(getProviderTemplate("llama-cpp")!)).toEqual(["embeddinggemma-2", "qwen3-vl-embedding"]);
+        expect(match(getProviderTemplate("vllm")!, "google/EmbeddingGemma-2")?.capabilities).toMatchObject({ dimension: 768, mrl: true });
         expect(offered(dashscope)).not.toContain("deepseek-flash");
         expect(match(custom, "qwen3-vl-embedding")).toBeNull();
     });
@@ -230,7 +233,6 @@ describe("catalog lookup", () => {
         const openai = getProviderTemplate("openai")!;
         const groups = getProviderCatalog(openai);
         expect(groups.map((group) => group.name)).toEqual(["OpenAI"]);
-        expect(matchCatalogModels(custom, ["openai/Text-Embedding-3-Small"])[0]?.category).toBe("embedding");
         for (const model of groups[0]!.models) {
             expect(adapterSupportsModel(openai.adapter, model.category, model.capabilities)).toBe(true);
             expect(normalizeModelId(model.name)).toBe(model.name.toLowerCase());

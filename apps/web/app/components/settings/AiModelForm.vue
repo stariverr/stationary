@@ -83,6 +83,9 @@ interface ModelDraft {
     matchImage: number | "";
 }
 
+/** These adapters only speak a multimodal embedding API. */
+const embeddingOnly = computed(() => ["dashscope-native", "llama-cpp", "vllm"].includes(props.adapter));
+
 const draft = ref<ModelDraft | null>(null);
 /** Once edited by hand, the display name no longer follows the matched model. */
 const displayNameEdited = ref(false);
@@ -93,7 +96,7 @@ const startCustom = () => {
     draft.value = {
         name: "",
         displayName: "",
-        category: props.adapter === "dashscope-native" ? "embedding" : "generation",
+        category: embeddingOnly.value ? "embedding" : "generation",
         contextLimit: 128000,
         outputLimit: 8192,
         inputModalities: ["text", "image"],
@@ -241,7 +244,7 @@ const matchedWithoutImages = computed(() => {
 });
 
 const hasImageInput = computed(() => draft.value?.inputModalities.includes("image") ?? false);
-/** The OpenAI embeddings protocol has no image input, so only Gemini and DashScope models embed images. */
+/** The OpenAI embeddings protocol has no image input, so only the other adapters embed images. */
 const canEmbedImages = computed(() => props.adapter !== "openai-compatible");
 const customImageFormats = computed(() => {
     const known = new Set(imageFormatChoices.map((format) => format.mimeType));
@@ -467,7 +470,7 @@ const save = async () => {
                 </div>
                 <div v-if="!model && !matched" class="grid gap-2">
                     <Label>{{ t("settings.ai_config.label_category") }}</Label>
-                    <Select :model-value="draft.category" :disabled="adapter === 'dashscope-native'" @update:model-value="setCategory">
+                    <Select :model-value="draft.category" :disabled="embeddingOnly" @update:model-value="setCategory">
                         <SelectTrigger class="w-full">
                             <SelectValue />
                         </SelectTrigger>
