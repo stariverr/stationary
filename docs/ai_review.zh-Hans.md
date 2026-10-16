@@ -144,9 +144,11 @@
 
 **改造方向**：提供"选供应商、填 key、套用推荐组合"的一步式接入。高级字段默认折叠，只在自定义模型时出现。
 
-### 2.6 Rerank 的接入方式不直观
+### 2.6 Rerank 的接入方式不直观（暂不处理）
 
 rerank 只挂在 openai-compatible 适配器上，走 Cohere 风格的 `/rerank`，但 OpenAI 官方根本没有 rerank 接口。Cohere、Jina、Voyage 都没有对应模板，用户要选"Other OpenAI-compatible"自己拼 base URL 才能用。应补上这几家的模板。
+
+**决定（2026-10-16）**：暂时不接 rerank 供应商，不加 Cohere、Jina、Voyage 的模板。Voyage 的 `/rerank` 用 `top_k`，响应放在 `data[]` 里，和现有的 Cohere 风格适配器不兼容，接入时要单独写适配器。
 
 ### 2.7 AI 标签和正式标签体系完全分开
 
@@ -168,7 +170,7 @@ rerank 只挂在 openai-compatible 适配器上，走 Cohere 风格的 `/rerank`
 
 `reasoningLevels`、`contextWindow`，以及 audio/video/pdf 这几种输入模态，对目前唯一的生成任务（描述图片）几乎没有作用。
 
-### 3.3 未使用的代码和残留
+### 3.3 未使用的代码和残留（已修复）
 
 按 AGENTS.md 应直接删除：
 
@@ -176,6 +178,8 @@ rerank 只挂在 openai-compatible 适配器上，走 Cohere 风格的 `/rerank`
 - 字段：`asset_ai_metadata.summary`（与 `caption` 重复）
 - `providers/http.ts` 的 `postForm`、`getText`（Batch API 删除后的残留）
 - `AiEnrichmentService.enrichPost` 和 `scripts/backfill_ai.ts`（绕过任务系统的旧路径，见 async 文档第 9 节）
+
+**已修复（2026-10-16）**：以上全部删除。`asset_ai_metadata.summary` 在此前的提交里已删。枚举值从 TS 和 Postgres 枚举类型里一并移除，网页端对 `IN_PROGRESS` 的展示分支和 `media.ai.in_progress` 文案也一起删了。`asset_embedding` 和 `asset_ai_metadata` 里不存在这些值的行，因为代码从不写入。`providers/http.ts` 的 `body` 选项只有 `postForm` 用，也一并删除。
 
 ## 4. 不符合最佳实践
 
@@ -219,15 +223,15 @@ rerank 只挂在 openai-compatible 适配器上，走 Cohere 风格的 `/rerank`
 
 ### 4.5 小问题
 
-- `ai_model` 没有 `(provider_id, name)` 唯一约束，同一模型可以重复添加。
-- rerank 缓存键只包含文档 id，不包含文档内容；文档在 10 分钟内被修改的话，用的仍是旧分数。
+- `ai_model` 没有 `(provider_id, name)` 唯一约束，同一模型可以重复添加。**已修复（2026-10-16）**：加了唯一索引 `ai_model_provider_name_unique`，`POST /api/ai/models` 重复时返回 409。库里已有重复行的话，建索引会失败，需要先删掉多余的。
+- rerank 缓存键只包含文档 id，不包含文档内容；文档在 10 分钟内被修改的话，用的仍是旧分数。**已修复（2026-10-16）**：缓存键改为模型、查询和文档内容的哈希，调用方不再传文档 id。
 
 ## 5. 缺失的功能
 
 - **新内容自动建索引**：最大的缺口，见 async 文档第 5 节。
 - **以图搜图 / 相似图片**：图片向量已经有了，却没有相应接口。
 - **近重复检测**：基于同一批向量即可实现。
-- **图片 embedding 供应商太少**：openai-compatible 适配器不支持图片 embedding，目前只有 Gemini 和 DashScope 能用。自托管的 CLIP/SigLIP（vLLM、Infinity、Ollama），以及 Jina、Voyage、Cohere 的多模态 embedding 都用不了。
+- **图片 embedding 供应商**：已支持 Gemini、DashScope，以及自托管的 llama.cpp（`llama-cpp` 适配器）和 vLLM（`vllm` 适配器），模型限定为 qwen3-vl-embedding 和 embeddinggemma-2。各家请求格式不统一，因此一种线协议对应一个适配器：SGLang 与 Jina 共用 `input:[{text},{image}]`，Voyage（`inputs[].content[]`）和 Cohere（顶层 `images`）各是一种，暂不支持。图片目前只以 base64 data URI 发送；按图片选择预签名 URL 传输尚未实现（原图满足模型格式和尺寸限制时发 URL，否则发 base64）。
 - **常用供应商模板**：Anthropic 原生、OpenRouter、Azure OpenAI、Ollama。
 - **视频只用封面一帧**：没有关键帧、字幕或语音转写。
 - **搜索能力**：只能搜 Media，不能搜 Post；没有按日期、作者、标签过滤。
@@ -248,6 +252,6 @@ rerank 只挂在 openai-compatible 适配器上，走 Cohere 风格的 `/rerank`
    - ~~绑定只保留一份并原子写入（1.5）~~ 已修复
    - ~~修正错误分类（1.3）~~ 已修复
 3. **P2**
-   - 删除残留代码（3.3）
+   - ~~删除残留代码（3.3）~~ 已修复
    - 精简 catalog 和接入流程（3.1、2.5）
    - 以图搜图、近重复检测等新功能（第 5 节）

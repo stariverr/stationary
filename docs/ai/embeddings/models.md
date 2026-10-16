@@ -162,3 +162,12 @@ res_level integer （可选）
 max_video_frames integer （可选）
 
 控制视频的最大采样帧数上限，最大不超过 64，默认值为 8。仅 tongyi-embedding-vision-plus-2026-03-06 和 tongyi-embedding-vision-flash-2026-03-06 模型支持该参数。
+
+## 自托管多模态 embedding（llama.cpp / vLLM）
+
+`llama-cpp` 与 `vllm` 适配器只服务多模态 embedding，目录里的模型为 embeddinggemma-2 和 qwen3-vl-embedding。文本一律以字符串 `input` 发送到 `{baseUrl}/embeddings`，图片的放法因服务而异：
+
+- llama.cpp（`llama-server --embeddings --mmproj …`，#29556）：`input:[{content:[{type:"image_url", image_url:{url:"data:…"}}]}]`。内容必须包在 `{content:[…]}` 里，裸的 part 数组会被 400 拒绝；旧的 `multimodal_data` 格式对 embeddinggemma-2 不可用（没有图像占位 token）。
+- vLLM：用 chat 式 `messages` 代替 `input`，schema 与 Chat Completions 相同；一次请求是一段对话，只产生一个向量。
+- 服务端返回模型的完整输出时，适配器按目录声明的维度截断并重新归一化（Matryoshka），不依赖服务端的 `dimensions` 参数。
+- embeddinggemma-2：原生 768 维，MRL 128/256/512/768（本项目可索引的维度为 256/512/768），文本使用 `task: search result | query: …` 与 `title: … | text: …` 前缀，需用 bf16/fp32 运行（不要用 fp16）。
