@@ -264,13 +264,6 @@ const handleQueueAi = async () => {
                                 <span>AI Pending</span>
                             </span>
                             <span
-                                v-else-if="media.ai_status === 'IN_PROGRESS'"
-                                class="inline-flex items-center gap-1 text-xs font-medium text-indigo-400 animate-pulse"
-                            >
-                                <Loader2 class="size-3 animate-spin shrink-0" />
-                                <span>Enriching...</span>
-                            </span>
-                            <span
                                 v-else-if="media.ai_status === 'FAILED'"
                                 class="inline-flex items-center gap-1 text-xs font-medium text-red-400 cursor-help"
                                 :title="media.ai_error || 'AI Enrichment failed'"

@@ -534,7 +534,6 @@
         "toast_invalid_composition": "Invalid track composition",
         "ai": {
             "title": "AI generated",
-            "in_progress": "Generating…",
             "scene": "Scene",
             "tags": "AI tags",
             "objects": "Objects",

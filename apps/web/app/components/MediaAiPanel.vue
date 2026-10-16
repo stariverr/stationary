@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Copy, Loader2, Sparkles } from "@lucide/vue";
+import { Copy, Sparkles } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { Temporal } from "@js-temporal/polyfill";
 import type { MediaAiView } from "@/types/ai";
@@ -43,14 +43,11 @@ const copyOcr = async () => {
 </script>
 
 <template>
-    <section v-if="result || ai.status === 'IN_PROGRESS' || ai.status === 'FAILED'" class="space-y-3">
+    <section v-if="result || ai.status === 'FAILED'" class="space-y-3">
         <div class="flex items-center justify-between gap-2">
             <label class="text-xs font-bold text-zinc-500 uppercase flex items-center gap-1.5">
                 <Sparkles class="w-3.5 h-3.5 text-violet-400" /> {{ $t("media.ai.title", "AI generated") }}
             </label>
-            <span v-if="ai.status === 'IN_PROGRESS'" class="text-xs text-zinc-500 flex items-center gap-1">
-                <Loader2 class="w-3 h-3 animate-spin" /> {{ $t("media.ai.in_progress", "Generating…") }}
-            </span>
         </div>
 
         <p v-if="ai.status === 'FAILED' && ai.error" class="text-xs text-red-400 leading-relaxed break-words">

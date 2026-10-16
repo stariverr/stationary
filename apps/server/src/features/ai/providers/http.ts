@@ -5,8 +5,6 @@ import { guardedFetch } from "./egress";
 export interface RequestJsonOptions {
     headers?: Record<string, string>;
     json?: unknown;
-    /** Raw request body (e.g. FormData for file uploads); mutually exclusive with `json`. */
-    body?: FormData;
     timeout?: number;
     signal?: AbortSignal;
 }
@@ -41,38 +39,23 @@ export function postJson<T>(url: string, options: RequestJsonOptions & { json: u
 }
 
 /** GET JSON with the same error handling as postJson. */
-export function getJson<T>(url: string, options: Omit<RequestJsonOptions, "json" | "body"> = {}): Promise<T> {
+export function getJson<T>(url: string, options: Omit<RequestJsonOptions, "json"> = {}): Promise<T> {
     return requestJson<T>("get", url, options);
 }
 
-/** POST multipart form data (file uploads) and parse the JSON response. */
-export function postForm<T>(url: string, options: Omit<RequestJsonOptions, "json"> & { body: FormData }): Promise<T> {
-    return requestJson<T>("post", url, options);
-}
-
-/** GET a text body, e.g. a JSONL result file. */
-export function getText(url: string, options: Omit<RequestJsonOptions, "json" | "body"> = {}): Promise<string> {
-    return request("get", url, options, "text") as Promise<string>;
-}
-
-function requestJson<T>(method: "get" | "post", url: string, options: RequestJsonOptions): Promise<T> {
-    return request(method, url, options, "json") as Promise<T>;
-}
-
-async function request(method: "get" | "post", url: string, options: RequestJsonOptions, parse: "json" | "text"): Promise<unknown> {
+async function requestJson<T>(method: "get" | "post", url: string, options: RequestJsonOptions): Promise<T> {
     try {
         const response = ky(url, {
             method,
             headers: options.headers,
             json: options.json,
-            body: options.body,
             timeout: options.timeout ?? PROVIDER_TIMEOUT_MS,
             signal: options.signal,
             // Retries belong to the job system, which honors Retry-After and the provider rate limit.
             retry: 0,
             fetch: guardedFetch as typeof fetch,
         });
-        return await (parse === "json" ? response.json() : response.text());
+        return await response.json<T>();
     } catch (error) {
         if (error instanceof HTTPError) {
             // Ky 2 consumes the response body when it populates HTTPError.data. Only JSON error bodies are

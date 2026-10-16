@@ -355,13 +355,6 @@ const getPlatformBadgeClass = (platform: string) => {
                                 <span>AI Pending</span>
                             </span>
                             <span
-                                v-else-if="post.media[0].ai_status === 'IN_PROGRESS'"
-                                class="inline-flex items-center gap-1 text-xs font-medium text-indigo-400 animate-pulse"
-                            >
-                                <Loader2 class="size-3 animate-spin shrink-0" />
-                                <span>Enriching...</span>
-                            </span>
-                            <span
                                 v-else-if="post.media[0].ai_status === 'FAILED'"
                                 class="inline-flex items-center gap-1 text-xs font-medium text-red-400 cursor-help"
                                 :title="post.media[0].ai_error || 'AI Enrichment failed'"
