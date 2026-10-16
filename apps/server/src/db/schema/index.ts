@@ -196,11 +196,9 @@ export const Library = pgTable("library", {
     is_public: boolean("is_public").default(false).notNull(),
     /** Language (BCP 47) AI image descriptions are written in; OCR text keeps its original language. */
     ai_language: text("ai_language").default("en-US").notNull(),
-    /** AI role binding mapping (describe, textEmbedding, imageEmbedding) */
+    /** Models of the roles that have no space of their own (describe, rerank); embedding roles live in library_embedding_space. */
     ai_bindings: jsonb("ai_bindings").$type<{
         describe?: { modelId: string } | null;
-        textEmbedding?: { modelId: string } | null;
-        imageEmbedding?: { modelId: string } | null;
         rerank?: { modelId: string } | null;
     }>(),
     /** Cover Qualities: cover qualities for the library */

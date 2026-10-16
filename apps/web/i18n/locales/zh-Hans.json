@@ -323,6 +323,7 @@
             "language_change_confirm": "要用新语言重新描述全部 {count} 个媒体吗？每张图片都会重新发送给描述模型，需要一段时间并产生调用费用。",
             "bindings_save": "保存",
             "bindings_saved": "模型选择已保存",
+            "bindings_saved_not_indexed": "已保存，但没能启动索引。再保存一次即可重试。",
             "status_indexed": "已索引 {ready}/{total}",
             "status_pending": "排队 {count}",
             "status_failed": "失败 {count}",

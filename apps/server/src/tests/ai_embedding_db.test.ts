@@ -21,6 +21,7 @@ import { db } from "@/global/db";
 import { kv } from "@/global/kv";
 import { secretBox } from "@/global/secrets";
 import { enqueueEmbeddings, processNextEmbeddingBatch, retryFailedEmbeddings } from "@/features/ai/embedding-queue";
+import { clearModelBindings, getLibraryBindings, getRolesUsingModel, saveLibraryBindings } from "@/features/ai/bindings";
 import { getLibraryEmbeddingStatus, promoteBuiltSpaces, syncEmbeddingSpace } from "@/features/ai/embedding-spaces";
 import { getLibraryAiStatus } from "@/features/ai/status";
 import { batchDeleteMedia } from "@/features/media/lifecycle";
@@ -334,6 +335,36 @@ describe("AI embedding queue (PostgreSQL + Redis)", () => {
         await batchDeleteMedia([mediaIds.cat]);
         const leftovers = await db.select({ id: AssetEmbedding.id }).from(AssetEmbedding).where(eq(AssetEmbedding.entity_id, mediaIds.cat));
         expect(leftovers).toHaveLength(0);
+    });
+
+    databaseTest("saves role bindings atomically and reads embedding roles from their spaces", async () => {
+        const library = { id: libraryId, owner_id: ownerId };
+        const before = await getLibraryBindings(libraryId);
+
+        // The embedding model does not exist, so nothing else in the request may be applied either.
+        await expect(
+            saveLibraryBindings(library, { rerank: { modelId: modelA }, imageEmbedding: { modelId: crypto.randomUUID() } }),
+        ).rejects.toThrow();
+        expect(await getLibraryBindings(libraryId)).toEqual(before);
+
+        await saveLibraryBindings(library, { rerank: { modelId: modelA }, imageEmbedding: { modelId: modelA } });
+        expect(await getLibraryBindings(libraryId)).toMatchObject({ rerank: { modelId: modelA }, imageEmbedding: { modelId: modelA } });
+        // The library row holds only the roles that have no space.
+        const [row] = await db.select({ ai_bindings: Library.ai_bindings }).from(Library).where(eq(Library.id, libraryId));
+        expect(row!.ai_bindings).toEqual({ rerank: { modelId: modelA } });
+        // A RETIRED text space of modelA does not count as use.
+        expect(await getRolesUsingModel(ownerId, modelA)).toEqual(["imageEmbedding", "rerank"]);
+
+        // Saving again starts the backfill of a space whose earlier start failed.
+        const imageSpace = () => spaces().then((rows) => rows.find((space) => space.role === "imageEmbedding")!);
+        await db.update(LibraryEmbeddingSpace).set({ backfill_task_id: null }).where(eq(LibraryEmbeddingSpace.id, (await imageSpace()).id));
+        expect(await saveLibraryBindings(library, { imageEmbedding: { modelId: modelA } })).toEqual({ indexingStarted: true });
+        expect((await imageSpace()).backfill_task_id).not.toBeNull();
+
+        // Deleting the model clears every role that used it, spaces included.
+        await db.transaction((tx) => clearModelBindings(tx, ownerId, [modelA]));
+        expect(await getRolesUsingModel(ownerId, modelA)).toEqual([]);
+        expect((await getLibraryBindings(libraryId)).rerank).toBeNull();
     });
 });
 
