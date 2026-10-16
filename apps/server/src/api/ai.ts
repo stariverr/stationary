@@ -402,7 +402,9 @@ aiRouter.post("/models", requireAuth, validate("json", CreateModelBodySchema), a
             category: body.category,
             capabilities,
         })
+        .onConflictDoNothing()
         .returning();
+    if (!model) return c.json(error(Code.ALREADY_EXISTS, "This provider already has a model with that name"), 409);
 
     return c.json(success(Code.SUCCESS, model));
 });
