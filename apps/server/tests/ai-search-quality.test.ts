@@ -3,7 +3,7 @@ import { isSupportedLanguage, languageName, normalizeImageAiMetadata } from "@/f
 import { parseModelCapabilities, supportsAiBindingRole } from "@/features/ai/model-schema";
 import { adapterSupportsModel } from "@/features/ai/provider-templates";
 import { buildSearchContent, selectStoredMetadata } from "@/features/ai/enrich";
-import { escapeLikePattern, HybridSearchService } from "@/features/ai/search";
+import { escapeLikePattern, HybridSearchService, splitSearchTerms } from "@/features/ai/search";
 import { CohereRerankProvider } from "@/features/ai/providers/cohere-rerank";
 import type { ResolvedModelConfig } from "@/features/ai/types";
 
@@ -104,6 +104,28 @@ describe("keyword search input", () => {
     it("matches LIKE wildcards literally", () => {
         expect(escapeLikePattern("100%_off\\")).toBe("100\\%\\_off\\\\");
         expect(escapeLikePattern("cat")).toBe("cat");
+    });
+
+    it("splits queries into distinct terms on any whitespace", () => {
+        expect(splitSearchTerms("  red   car ")).toEqual(["red", "car"]);
+        expect(splitSearchTerms("红色　汽车\t红色")).toEqual(["红色", "汽车"]);
+        expect(splitSearchTerms("   ")).toEqual([]);
+        expect(splitSearchTerms(Array.from({ length: 20 }, (_, i) => `t${i}`).join(" "))).toHaveLength(8);
+    });
+
+    it("segments Chinese and Japanese runs, keeping unknown words whole and dropping particles", () => {
+        expect(splitSearchTerms("红色跑车")).toEqual(["红色", "跑车"]);
+        expect(splitSearchTerms("赛博朋克2077截图")).toEqual(["赛博朋克", "2077", "截图"]);
+        expect(splitSearchTerms("iPhone15红色手机壳")).toEqual(["iPhone15", "红色", "手机", "壳"]);
+        expect(splitSearchTerms("東京タワーの夜景")).toEqual(["東京タワー", "夜景"]);
+        expect(splitSearchTerms("の")).toEqual(["の"]);
+    });
+
+    it("leaves English and German terms whole and unifies full-width forms", () => {
+        expect(splitSearchTerms("e-mail Straße")).toEqual(["e-mail", "Straße"]);
+        expect(splitSearchTerms("ＩＰＨＯＮＥ１５ ｶﾀｶﾅ")).toEqual(["IPHONE15", "カタカナ"]);
+        // Full-width ％ becomes % before LIKE escaping, so it still matches literally.
+        expect(splitSearchTerms("100％").map(escapeLikePattern)).toEqual(["100\\%"]);
     });
 
     it("stores plain field values, so field names never match every document", () => {

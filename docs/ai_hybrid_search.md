@@ -259,16 +259,58 @@ Operational notes:
 
 ### 5.4 Keyword Indexes
 
-Use `pg_trgm` indexes for fuzzy keyword retrieval:
+`asset_search_document` stores its folded title and content as generated columns (folding rules in 5.5), and the trigram indexes are built on them:
 
 ```sql
-CREATE INDEX IF NOT EXISTS asset_search_doc_title_trgm_idx
-ON asset_search_document
-USING gin (title gin_trgm_ops);
+ALTER TABLE asset_search_document
+  ADD COLUMN folded_title text GENERATED ALWAYS AS (replace(lower(normalize(title, NFKC)), 'ß', 'ss')) STORED,
+  ADD COLUMN folded_content text GENERATED ALWAYS AS (replace(lower(normalize(content, NFKC)), 'ß', 'ss')) STORED;
 
-CREATE INDEX IF NOT EXISTS asset_search_doc_content_trgm_idx
-ON asset_search_document
-USING gin (content gin_trgm_ops);
+CREATE INDEX search_doc_folded_title_trgm_idx ON asset_search_document USING gin (folded_title gin_trgm_ops);
+CREATE INDEX search_doc_folded_content_trgm_idx ON asset_search_document USING gin (folded_content gin_trgm_ops);
+CREATE INDEX search_doc_library_idx ON asset_search_document (library_id);
+```
+
+The folding expression is defined once in code (`searchFold`) and used for both the generated columns and the query patterns. Queries filter on both `asset_search_document.library_id` and `media.library_id`: the first limits the scan to the library, the second remains the authority for access.
+
+Why stored columns rather than expression indexes: when a term is common or only two characters long, the query scans the whole library and computes sort keys for every match, and with expression indexes every row re-runs `normalize()`. Measured on a single library of 200k documents, the worst case dropped from 1.3–2.4 s to 0.13–0.26 s; selective terms that use the index stay under 10 ms. The cost is roughly double the text storage.
+
+### 5.5 Keyword Search (Multilingual)
+
+Supported languages today: Chinese, Japanese, English, German.
+
+The keyword channel is for **exact recall**: names, brands, identifiers, proper nouns, and mixed CJK/Latin text that vectors tend to miss. Synonyms, full natural-language sentences, and cross-language search belong to the semantic channels, so the text embedding model should be multilingual.
+
+**Principle: store the original text, segment only the query, match substrings.** Every segment is a substring of the query, so a segmentation mistake only widens the match and never recalls less than matching the whole query. Documents are never tokenized, so there is no index-side dictionary to maintain and changing the segmenter never requires rebuilding data.
+
+1. **Folding** (a database expression shared by documents and queries): NFKC unifies full-width and half-width forms (`ＩＰＨＯＮＥ１５` → `iphone15`, `ｶﾀｶﾅ` → `カタカナ`), then lowercase, then `ß` → `ss`. Diacritics are kept so `Bar` does not match `Bär`. `title` and `content` keep the original text, which embeddings and reranking use; the folded copies live in generated columns.
+2. **Query segmentation**: split on whitespace first; English and German stop here. Segments containing Han or kana go through `Intl.Segmenter` (the runtime's ICU), then:
+   - adjacent single Han characters are joined back, restoring words missing from ICU's dictionary (ICU splits `赛博朋克` into single characters);
+   - lone hiragana characters (particles such as `の`, `は`, `が`) are dropped.
+
+   Every segment must appear as a substring of the title or the content. Full natural-language sentences may therefore miss here and are left to the semantic channels.
+3. **Ranking** (so RRF ranks carry meaning):
+   1. the title contains the whole query;
+   2. number of whole-word matches (`\m…\M` word boundaries: `art` ranks above `start`, `Tür` above `Haustür`; Chinese and Japanese have no word boundaries, so this has no effect there);
+   3. number of terms matched in the title;
+   4. the content contains the whole query;
+   5. creation time.
+
+Known limitations:
+
+- Terms shorter than three characters (most two-character Chinese words) cannot use trigram indexes and fall back to a sequential scan within one library.
+- Hiragana and katakana are not interchangeable; diacritics of other Latin languages and scripts such as Thai are not handled yet.
+
+Upgrade path (only when a trigger is hit; the architecture stays the same):
+
+| Trigger | Upgrade |
+|---|---|
+| Two-character queries become noticeably slow | Add `pg_bigm` |
+| More queries that ICU plus the joining rule handles poorly | In the segmentation function, use jieba for Chinese and Lindera / kuromoji for Japanese (surface forms only, no lemmatization) |
+| Documents get long (OCR, transcripts, PDF text) and the Postgres image is under our control | ParadeDB `pg_search` (BM25) |
+| Product requires search-as-you-type and typo tolerance | Meilisearch for the keyword channel only; Postgres stays the single source of truth |
+
+Rejected: `tsvector` (needs a per-document language configuration; the default parser does not segment Chinese), sparse vectors such as SPLADE (the keyword channel would depend on AI configuration), Elasticsearch / Typesense (too costly to operate for self-hosting).
 ```
 
 Also maintain B-tree indexes for filtering:
@@ -361,7 +403,7 @@ async function search(params: SearchParams, userId: string) {
 
 Important details:
 
-- Keyword search should be strongest for exact names, source text, author names, brands, and platform-specific identifiers. It matches the query literally (`%` and `_` are escaped) against the title and content through trigram GIN indexes, and ranks title matches first, then by `word_similarity`, so its RRF ranks carry meaning.
+- Keyword search should be strongest for exact names, source text, author names, brands, and platform-specific identifiers. The query is folded and segmented, and every segment must match the title or content as a literal substring (`%` and `_` escaped); ranking is described in 5.5.
 - Text semantic search should cover paraphrases and conceptual matches over composed documents.
 - Visual/multimodal search should cover style, mood, color, composition, and visual-language descriptions.
 - Vector channels should retrieve more candidates than the final page size before RRF.

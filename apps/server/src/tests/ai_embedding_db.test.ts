@@ -464,4 +464,96 @@ describe("AI search reranking (PostgreSQL + Redis)", () => {
         expect(unresolved.list.map((item) => item.id)).toEqual([media.cat]);
         expect(unresolved.degraded).toEqual([{ channel: "rerank", reason: "CONFIGURATION" }]);
     });
+
+    databaseTest("matches keyword queries term by term, in any order", async () => {
+        const find = async (keyword: string) =>
+            (await HybridSearchService.keywordSearch(keyword, rerankLibraryId, 10, { library_id: rerankLibraryId, keyword })).map((item) => item.id);
+
+        // "dog" is in the title, "Media Title: a" only in the content: each term may match either.
+        expect(await find("dog a")).toEqual([media.dog]);
+        expect(await find("a dog")).toEqual([media.dog]);
+        expect(await find("  dog  ")).toEqual([media.dog]);
+        // Every term must match.
+        expect(await find("dog cat")).toEqual([]);
+        expect(await find("   ")).toEqual([]);
+    });
+});
+
+describe("Multilingual keyword search (PostgreSQL)", () => {
+    const keywordOwnerId = crypto.randomUUID();
+    const keywordLibraryId = crypto.randomUUID();
+    const docs = {
+        redCar: { title: "photo", content: "一辆红色的跑车停在路边" },
+        cyberpunk: { title: "赛博朋克2077截图", content: "游戏" },
+        scattered: { title: "photo", content: "赛车，博物馆，朋友，克隆" },
+        tokyo: { title: "東京タワーの夜景", content: "" },
+        katakana: { title: "photo", content: "ｶﾀｶﾅのロゴ" },
+        art: { title: "art", content: "modern art" },
+        start: { title: "start", content: "start screen" },
+        cars: { title: "photo", content: "two cars" },
+        strasse: { title: "Straße in Berlin", content: "" },
+        door: { title: "photo", content: "Die Tür ist offen" },
+        frontDoor: { title: "photo", content: "Haustür aus Holz" },
+        phone: { title: "photo", content: "ＩＰＨＯＮＥ１５ case" },
+        percent: { title: "photo", content: "100% cotton" },
+        thousand: { title: "photo", content: "1000 items" },
+    };
+    const ids = Object.fromEntries(Object.keys(docs).map((key) => [key, crypto.randomUUID()])) as Record<keyof typeof docs, string>;
+    const find = async (keyword: string) =>
+        (await HybridSearchService.keywordSearch(keyword, keywordLibraryId, 20, { library_id: keywordLibraryId, keyword })).map((item) => item.id);
+
+    beforeAll(async () => {
+        if (process.env.RUN_AI_DB_TESTS !== "1") return;
+        await db.insert(Library).values({ id: keywordLibraryId, name: "Keyword search test", description: "", owner_id: keywordOwnerId });
+        const entries = Object.entries(docs) as Array<[keyof typeof docs, { title: string; content: string }]>;
+        await db.insert(Media).values(
+            entries.map(([key, doc], index) => ({
+                id: ids[key],
+                library_id: keywordLibraryId,
+                eid: `keyword-${ids[key]}`,
+                title: doc.title,
+                description: "",
+                type: MediaType.IMAGE,
+                sort_order: index,
+            })),
+        );
+        await db.insert(AssetSearchDocument).values(
+            entries.map(([key, doc]) => ({
+                library_id: keywordLibraryId,
+                entity_type: EntityType.MEDIA,
+                entity_id: ids[key],
+                source: "MANUAL",
+                title: doc.title,
+                content: doc.content,
+                content_hash: key,
+            })),
+        );
+    });
+
+    afterAll(async () => {
+        if (process.env.RUN_AI_DB_TESTS !== "1") return;
+        await db.delete(AssetSearchDocument).where(eq(AssetSearchDocument.library_id, keywordLibraryId));
+        await db.delete(Media).where(eq(Media.library_id, keywordLibraryId));
+        await db.delete(Library).where(eq(Library.id, keywordLibraryId));
+    });
+
+    databaseTest("finds Chinese and Japanese words without spaces, but not scattered characters", async () => {
+        expect(await find("红色跑车")).toEqual([ids.redCar]);
+        expect(await find("赛博朋克")).toEqual([ids.cyberpunk]);
+        expect(await find("東京タワーの夜景")).toEqual([ids.tokyo]);
+        expect(await find("カタカナ")).toEqual([ids.katakana]);
+    });
+
+    databaseTest("ranks whole English and German words above substrings", async () => {
+        expect(await find("art")).toEqual([ids.art, ids.start]);
+        expect(await find("car")).toEqual([ids.cars]);
+        expect(await find("Tür")).toEqual([ids.door, ids.frontDoor]);
+    });
+
+    databaseTest("folds case, ß and full-width forms on both sides, and keeps wildcards literal", async () => {
+        expect(await find("STRASSE")).toEqual([ids.strasse]);
+        expect(await find("straße")).toEqual([ids.strasse]);
+        expect(await find("iphone15")).toEqual([ids.phone]);
+        expect(await find("100％")).toEqual([ids.percent]);
+    });
 });

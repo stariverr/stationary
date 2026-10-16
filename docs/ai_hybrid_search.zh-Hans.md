@@ -259,16 +259,58 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 ### 5.4 Keyword Indexes
 
-使用 `pg_trgm` index 做模糊关键词检索：
+`asset_search_document` 把规范化后的标题和正文存为生成列（规范化规则见 5.5），trigram 索引建在这两列上：
 
 ```sql
-CREATE INDEX IF NOT EXISTS asset_search_doc_title_trgm_idx
-ON asset_search_document
-USING gin (title gin_trgm_ops);
+ALTER TABLE asset_search_document
+  ADD COLUMN folded_title text GENERATED ALWAYS AS (replace(lower(normalize(title, NFKC)), 'ß', 'ss')) STORED,
+  ADD COLUMN folded_content text GENERATED ALWAYS AS (replace(lower(normalize(content, NFKC)), 'ß', 'ss')) STORED;
 
-CREATE INDEX IF NOT EXISTS asset_search_doc_content_trgm_idx
-ON asset_search_document
-USING gin (content gin_trgm_ops);
+CREATE INDEX search_doc_folded_title_trgm_idx ON asset_search_document USING gin (folded_title gin_trgm_ops);
+CREATE INDEX search_doc_folded_content_trgm_idx ON asset_search_document USING gin (folded_content gin_trgm_ops);
+CREATE INDEX search_doc_library_idx ON asset_search_document (library_id);
+```
+
+规范化表达式只在代码里定义一次（`searchFold`），生成列和查询模式都用它。查询同时按 `asset_search_document.library_id` 和 `media.library_id` 过滤：前者把扫描限制在当前媒体库，后者仍是访问控制的依据。
+
+之所以存生成列而不是建表达式索引：词常见或只有两个字时，查询会顺序扫描整个库，还要对每个命中行计算排序键，表达式索引下每行都要重新算一次 `normalize()`。20 万条文档的单库实测，最坏情况从 1.3–2.4 秒降到 0.13–0.26 秒；词少见、能走索引的查询在 10 毫秒以内。代价是文本存储大约翻倍。
+
+### 5.5 关键词检索（多语言）
+
+当前支持的语言：中文、日文、英文、德文。
+
+关键词通道负责**精确召回**：名称、品牌、编号、专有名词、中英混排等向量容易漏掉的内容。同义词、整句自然语言和跨语言检索由语义通道负责，因此文本 embedding 模型应使用多语言模型。
+
+**原则：文档存原文，只切查询，按子串匹配。** 切出的每一段都是原查询的子串，分词出错只会让匹配变宽，不会比整句匹配少召回；文档端不分词，所以不用维护索引侧词典，换分词器也不需要重建数据。
+
+1. **规范化**（数据库表达式，文档和查询共用）：NFKC 统一全角与半角（`ＩＰＨＯＮＥ１５` → `iphone15`，`ｶﾀｶﾅ` → `カタカナ`），转小写，`ß` → `ss`。不去变音符号，以免 `Bar` 匹配 `Bär`。`title` 和 `content` 保留原文，供 embedding 和 rerank 使用；规范化后的副本存在生成列里。
+2. **查询分词**：先按空白切分，英文和德文到此为止。含汉字或假名的片段再交给 `Intl.Segmenter`（运行时自带的 ICU）切分，之后：
+   - 把相邻的单个汉字拼回去，还原 ICU 词典没有的新词（ICU 会把 `赛博朋克` 切成单字）；
+   - 去掉单独的平假名（`の`、`は`、`が` 等助词）。
+
+   每一段都必须作为子串出现在标题或正文中。整句自然语言查询可能因此匹配不到，交给语义通道。
+3. **排序**（让 RRF 名次有意义）：
+   1. 标题包含完整查询；
+   2. 完整单词命中的数量（`\m…\M` 词边界：`art` 排在 `start` 前，`Tür` 排在 `Haustür` 前；中日文没有词边界，此项不起作用）；
+   3. 标题命中的词数；
+   4. 正文包含完整查询；
+   5. 创建时间。
+
+已知局限：
+
+- 少于三个字符的词（多数中文双字词）用不上 trigram 索引，在单个媒体库内退化为顺序扫描。
+- 平假名与片假名不互通；其他拉丁语言的变音符号和泰文等语言暂不支持。
+
+升级路径（达到触发条件再做，架构不变）：
+
+| 触发条件 | 升级方向 |
+|---|---|
+| 双字词查询明显变慢 | 引入 `pg_bigm` |
+| ICU 加拼字规则处理不好的情况增多 | 分词函数中，中文换 jieba，日文换 Lindera / kuromoji（只用切出的原样片段，不用词形还原） |
+| 文档变长（OCR、语音转写、PDF 正文）且能控制 Postgres 镜像 | ParadeDB `pg_search`（BM25） |
+| 产品要求边打字边出结果、拼写容错 | Meilisearch 只承担关键词通道，Postgres 仍是唯一数据来源 |
+
+不采用的方案：`tsvector`（需要按文档区分语言配置，默认解析器不切中文）、SPLADE 等稀疏向量（关键词通道会依赖 AI 配置）、Elasticsearch / Typesense（自托管运维成本过高）。
 ```
 
 同时维护过滤用 B-tree index：
@@ -361,7 +403,7 @@ async function search(params: SearchParams, userId: string) {
 
 关键细节：
 
-- 关键词搜索最适合精确名称、原文、作者名、品牌名和平台标识。它对查询做字面匹配（转义 `%` 和 `_`），通过 trigram GIN 索引匹配标题和正文，排序时标题命中优先，其次按 `word_similarity`，因此它在 RRF 中的名次有实际意义。
+- 关键词搜索最适合精确名称、原文、作者名、品牌名和平台标识。查询经规范化与分词后，每一段都按字面子串（转义 `%` 和 `_`）匹配标题或正文，排序规则见 5.5。
 - 文本语义搜索用于拼接文档上的同义表达与概念匹配。
 - 视觉/多模态搜索用于风格、氛围、色彩、构图和视觉语言描述。
 - 向量通道应先取多于最终页面大小的候选，再进入 RRF。
