@@ -1,7 +1,7 @@
 import * as v from "valibot";
 
 /** The wire protocol implemented by a provider adapter. Vendor names are not adapters. */
-export const AiProviderAdapterSchema = v.picklist(["openai-compatible", "gemini", "dashscope-native"]);
+export const AiProviderAdapterSchema = v.picklist(["openai-compatible", "gemini", "dashscope-native", "llama-cpp", "vllm"]);
 export type AiProviderAdapter = v.InferOutput<typeof AiProviderAdapterSchema>;
 
 export const AI_MODEL_CATEGORIES = ["generation", "embedding", "rerank"] as const;

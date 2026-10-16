@@ -189,5 +189,10 @@ describe("image embeddings over the OpenAI protocol", () => {
         expect(adapterSupportsModel("openai-compatible", "embedding", multimodal)).toBe(false);
         expect(adapterSupportsModel("openai-compatible", "embedding", textOnly)).toBe(true);
         expect(adapterSupportsModel("gemini", "embedding", multimodal)).toBe(true);
+        // Self-hosted adapters speak only their multimodal embedding API.
+        for (const adapter of ["llama-cpp", "vllm", "dashscope-native"] as const) {
+            expect(adapterSupportsModel(adapter, "embedding", multimodal)).toBe(true);
+            expect(adapterSupportsModel(adapter, "embedding", textOnly)).toBe(false);
+        }
     });
 });

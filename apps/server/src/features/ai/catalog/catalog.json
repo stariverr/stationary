@@ -733,25 +733,6 @@
           "structuredOutput": true
         },
         "releaseDate": "2025-12-03"
-      },
-      {
-        "name": "text-embedding-v4",
-        "displayName": "Qwen Text Embedding v4",
-        "category": "embedding",
-        "capabilities": {
-          "dimension": 1024,
-          "mrl": true,
-          "maxInputTokens": 8192,
-          "multimodal": false
-        },
-        "supportedDimensions": [
-          256,
-          512,
-          768,
-          1024,
-          1536,
-          2048
-        ]
       }
     ],
     "anthropic": [
@@ -1812,6 +1793,53 @@
         "releaseDate": "2026-07-16"
       }
     ],
+    "open-weights": [
+      {
+        "name": "embeddinggemma-2",
+        "displayName": "EmbeddingGemma 2",
+        "category": "embedding",
+        "capabilities": {
+          "dimension": 768,
+          "mrl": true,
+          "maxInputTokens": 8192,
+          "multimodal": true,
+          "imageFormats": [
+            "image/jpeg",
+            "image/png"
+          ],
+          "taskPrefixType": "gemini-asymmetric"
+        },
+        "supportedDimensions": [
+          256,
+          512,
+          768
+        ]
+      },
+      {
+        "name": "qwen3-vl-embedding",
+        "displayName": "Qwen3-VL Embedding",
+        "category": "embedding",
+        "capabilities": {
+          "dimension": 1024,
+          "mrl": true,
+          "maxInputTokens": 32000,
+          "multimodal": true,
+          "imageFormats": [
+            "image/jpeg",
+            "image/png"
+          ]
+        },
+        "supportedDimensions": [
+          256,
+          512,
+          768,
+          1024,
+          1536,
+          2048,
+          2560
+        ]
+      }
+    ],
     "openai": [
       {
         "name": "gpt-5.3-codex",
@@ -2164,47 +2192,6 @@
           "reasoning": "low"
         },
         "releaseDate": "2026-08-07"
-      },
-      {
-        "name": "text-embedding-3-large",
-        "displayName": "OpenAI text-embedding-3-large",
-        "category": "embedding",
-        "capabilities": {
-          "dimension": 1536,
-          "mrl": true,
-          "maxInputTokens": 8191,
-          "multimodal": false
-        },
-        "supportedDimensions": [
-          256,
-          384,
-          512,
-          768,
-          1024,
-          1536,
-          2048,
-          2560,
-          3072
-        ]
-      },
-      {
-        "name": "text-embedding-3-small",
-        "displayName": "OpenAI text-embedding-3-small",
-        "category": "embedding",
-        "capabilities": {
-          "dimension": 1536,
-          "mrl": true,
-          "maxInputTokens": 8191,
-          "multimodal": false
-        },
-        "supportedDimensions": [
-          256,
-          384,
-          512,
-          768,
-          1024,
-          1536
-        ]
       }
     ],
     "stepfun": [

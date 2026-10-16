@@ -5,6 +5,9 @@ import type { EmbeddingDimension, EmbeddingModelCapabilities, GeneratedTextModel
  * into catalog.json, the only catalog read at runtime; rerun it after editing this file.
  */
 
+/** Catalog provider of open-weights models run on the operator's own servers; models.dev has no listing for it. */
+export const OPEN_WEIGHTS_PROVIDER = "open-weights";
+
 export interface CuratedEmbeddingModel {
     /** Catalog provider whose API serves this model under `name`. */
     catalogProviderId: string;
@@ -49,39 +52,31 @@ export const CURATED_EMBEDDING_MODELS: CuratedEmbeddingModel[] = [
         },
     },
     {
-        catalogProviderId: "alibaba-cn",
-        name: "text-embedding-v4",
-        displayName: "Qwen Text Embedding v4",
-        supportedDimensions: [256, 512, 768, 1024, 1536, 2048],
+        // Image formats are the common ground of the self-hosted decoders.
+        catalogProviderId: OPEN_WEIGHTS_PROVIDER,
+        name: "embeddinggemma-2",
+        displayName: "EmbeddingGemma 2",
+        supportedDimensions: [256, 512, 768],
+        capabilities: {
+            dimension: 768,
+            mrl: true,
+            maxInputTokens: 8192,
+            multimodal: true,
+            imageFormats: ["image/jpeg", "image/png"],
+            taskPrefixType: "gemini-asymmetric",
+        },
+    },
+    {
+        catalogProviderId: OPEN_WEIGHTS_PROVIDER,
+        name: "qwen3-vl-embedding",
+        displayName: "Qwen3-VL Embedding",
+        supportedDimensions: [256, 512, 768, 1024, 1536, 2048, 2560],
         capabilities: {
             dimension: 1024,
             mrl: true,
-            maxInputTokens: 8192,
-            multimodal: false,
-        },
-    },
-    {
-        catalogProviderId: "openai",
-        name: "text-embedding-3-large",
-        displayName: "OpenAI text-embedding-3-large",
-        supportedDimensions: [256, 384, 512, 768, 1024, 1536, 2048, 2560, 3072],
-        capabilities: {
-            dimension: 1536,
-            mrl: true,
-            maxInputTokens: 8191,
-            multimodal: false,
-        },
-    },
-    {
-        catalogProviderId: "openai",
-        name: "text-embedding-3-small",
-        displayName: "OpenAI text-embedding-3-small",
-        supportedDimensions: [256, 384, 512, 768, 1024, 1536],
-        capabilities: {
-            dimension: 1536,
-            mrl: true,
-            maxInputTokens: 8191,
-            multimodal: false,
+            maxInputTokens: 32000,
+            multimodal: true,
+            imageFormats: ["image/jpeg", "image/png"],
         },
     },
 ];

@@ -7,14 +7,17 @@ import {
     OpenAiCompatibleLanguageProvider,
     OpenAiCompatibleTextEmbeddingProvider,
 } from "./openai-compatible";
+import { LlamaCppEmbeddingProvider, VllmEmbeddingProvider } from "./self-hosted-embedding";
 
 export {
     DashScopeMultimodalEmbeddingProvider,
     GeminiLanguageProvider,
     GeminiTextEmbeddingProvider,
     GeminiVisualEmbeddingProvider,
+    LlamaCppEmbeddingProvider,
     OpenAiCompatibleLanguageProvider,
     OpenAiCompatibleTextEmbeddingProvider,
+    VllmEmbeddingProvider,
 };
 
 /**
@@ -28,7 +31,9 @@ export function buildLanguageProvider(config: ResolvedModelConfig): LanguageProv
         case "gemini":
             return new GeminiLanguageProvider(config);
         case "dashscope-native":
-            throw new AiConfigurationError("The DashScope native adapter does not support text generation.");
+        case "llama-cpp":
+        case "vllm":
+            throw new AiConfigurationError(`The ${config.adapter} adapter does not support text generation.`);
         default:
             throw new AiConfigurationError(`Unsupported provider adapter '${String(config.adapter)}'.`);
     }
@@ -47,6 +52,10 @@ export function buildTextEmbeddingProvider(config: ResolvedModelConfig): TextEmb
             return new GeminiTextEmbeddingProvider(config);
         case "dashscope-native":
             return new DashScopeMultimodalEmbeddingProvider(config);
+        case "llama-cpp":
+            return new LlamaCppEmbeddingProvider(config);
+        case "vllm":
+            return new VllmEmbeddingProvider(config);
         default:
             throw new AiConfigurationError(`Unsupported provider adapter '${String(config.adapter)}'.`);
     }
@@ -60,6 +69,10 @@ export function buildVisualEmbeddingProvider(config: ResolvedModelConfig): Visua
             return new GeminiVisualEmbeddingProvider(config);
         case "dashscope-native":
             return new DashScopeMultimodalEmbeddingProvider(config);
+        case "llama-cpp":
+            return new LlamaCppEmbeddingProvider(config);
+        case "vllm":
+            return new VllmEmbeddingProvider(config);
         default:
             throw new AiConfigurationError(`Unsupported provider adapter '${String(config.adapter)}'.`);
     }

@@ -1,6 +1,6 @@
 /** Mirrors apps/server/src/features/ai/model-schema.ts and the /api/ai responses. */
 
-export type AiProviderAdapter = "openai-compatible" | "gemini" | "dashscope-native";
+export type AiProviderAdapter = "openai-compatible" | "gemini" | "dashscope-native" | "llama-cpp" | "vllm";
 export type AiModelCategory = "generation" | "embedding" | "rerank";
 export type AiModality = "text" | "image" | "audio" | "video" | "pdf";
 export type AiRoleKey = "describe" | "textEmbedding" | "imageEmbedding" | "rerank";
