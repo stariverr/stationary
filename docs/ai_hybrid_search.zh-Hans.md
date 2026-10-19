@@ -167,11 +167,13 @@ MVP 会在 `apps/server/src/db/schema/index.ts` 中引入以下逻辑表。
 - processing status
 - last error
 
-metadata pipeline 应独立于原始模型名进行版本化。推荐 ID 形态：
+metadata pipeline 独立于模型名进行版本化：由 prompt 版本和输出语言组成，例如：
 
 ```text
-gemini:gemini-2.5-flash:image-metadata:v1
+image-metadata:v2:zh-Hans
 ```
+
+`model` 列记录是哪个模型写的描述。因此更换描述模型时，已有描述保留，只有新增或变更的内容用新模型；用户选择"重新描述全部"时，才会跑一次带 `redescribe` 的全库任务，把由其他模型写的描述重新生成。
 
 推荐唯一约束：
 
@@ -179,7 +181,7 @@ gemini:gemini-2.5-flash:image-metadata:v1
 (entity_type, entity_id, metadata_pipeline_id)
 ```
 
-搜索文档和结果说明优先使用当前描述管线的结果；当前管线还没有结果时，使用较早管线中最新的结果。这样在更换模型或语言、重新描述整个库期间，描述依然可以被搜索到。当前管线为某个媒体写入结果后，该媒体在旧管线中的行会被删除。
+搜索文档和结果说明优先使用当前描述管线的结果；当前管线还没有结果时，使用较早管线中最新的结果。这样在更换语言、重新描述整个库期间，描述依然可以被搜索到。当前管线为某个媒体写入结果后，该媒体在旧管线中的行会被删除。
 
 ### 4.4 `asset_embedding`
 

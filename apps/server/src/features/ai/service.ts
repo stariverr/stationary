@@ -77,11 +77,12 @@ export class AiService {
     }
 
     /**
-     * Identifies stored image metadata by model, prompt version and output language, independent
-     * of the serving provider. Changing any of them regenerates descriptions.
+     * Identifies stored image metadata by prompt version and output language. Changing either
+     * regenerates descriptions. The model is not part of it: switching models leaves existing
+     * descriptions in place (each records its model), and re-describing them is a separate choice.
      */
     get metadataPipelineId(): string | null {
-        return this.chatModelName ? `${this.chatModelName}:${IMAGE_METADATA_PIPELINE_VERSION}:${this.config.language}` : null;
+        return this.chatModelName ? `${IMAGE_METADATA_PIPELINE_VERSION}:${this.config.language}` : null;
     }
 
     /**

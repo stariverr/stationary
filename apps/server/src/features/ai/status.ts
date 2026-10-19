@@ -7,6 +7,8 @@ import type { AiConfigIssue, AiErrorView } from "./types";
 
 export interface DescribeStatusView {
     completed: number;
+    /** Completed descriptions that another model than the current one wrote. */
+    otherModel: number;
     pending: number;
     failed: number;
     /** Latest error of the descriptions still pending or failed. */
@@ -27,20 +29,31 @@ const ofActiveMedia = sql`exists (
       and ${Media.recycle_time} is null
 )`;
 
-/** Description progress of the library's current pipeline (model, prompt version and language). */
-async function getDescribeStatus(libraryId: string, pipelineId: string): Promise<DescribeStatusView> {
+/**
+ * Description progress of the library's current pipeline (prompt version and language) under its
+ * describe model. Null when no usable description model is bound.
+ */
+async function getDescribeStatus(libraryId: string, aiService: AiService | null): Promise<DescribeStatusView | null> {
+    const pipelineId = aiService?.metadataPipelineId;
+    const modelName = aiService?.chatModelName;
+    if (!pipelineId || !modelName) return null;
     const ofPipeline = and(
         eq(AssetAiMetadata.library_id, libraryId),
         eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
         eq(AssetAiMetadata.metadata_pipeline_id, pipelineId),
         ofActiveMedia,
     );
-    const [counts, [latest]] = await Promise.all([
+    const isStatus = (status: ProcessingStatus) => sql`${AssetAiMetadata.processing_status} = ${status}`;
+    const [[counts], [latest]] = await Promise.all([
         db
-            .select({ status: AssetAiMetadata.processing_status, count: sql<number>`count(*)::int` })
+            .select({
+                completed: sql<number>`(count(*) filter (where ${isStatus(ProcessingStatus.COMPLETED)}))::int`,
+                otherModel: sql<number>`(count(*) filter (where ${isStatus(ProcessingStatus.COMPLETED)} and ${AssetAiMetadata.model} <> ${modelName}))::int`,
+                pending: sql<number>`(count(*) filter (where ${isStatus(ProcessingStatus.PENDING)}))::int`,
+                failed: sql<number>`(count(*) filter (where ${isStatus(ProcessingStatus.FAILED)}))::int`,
+            })
             .from(AssetAiMetadata)
-            .where(ofPipeline)
-            .groupBy(AssetAiMetadata.processing_status),
+            .where(ofPipeline),
         db
             .select({ message: AssetAiMetadata.last_error, updated: AssetAiMetadata.update_time, created: AssetAiMetadata.create_time })
             .from(AssetAiMetadata)
@@ -54,27 +67,22 @@ async function getDescribeStatus(libraryId: string, pipelineId: string): Promise
             .orderBy(sql`coalesce(${AssetAiMetadata.update_time}, ${AssetAiMetadata.create_time}) desc`)
             .limit(1),
     ]);
-    const count = (status: ProcessingStatus) => counts.find((row) => row.status === status)?.count ?? 0;
     return {
-        completed: count(ProcessingStatus.COMPLETED),
-        pending: count(ProcessingStatus.PENDING),
-        failed: count(ProcessingStatus.FAILED),
+        ...counts!,
         lastError: latest?.message ? { message: latest.message, at: (latest.updated ?? latest.created).toString() } : null,
     };
 }
 
 /** Null when no usable description model is bound. */
 export async function getLibraryDescribeStatus(libraryId: string): Promise<DescribeStatusView | null> {
-    const pipelineId = (await AiService.forLibrary(libraryId))?.metadataPipelineId;
-    return pipelineId ? getDescribeStatus(libraryId, pipelineId) : null;
+    return getDescribeStatus(libraryId, await AiService.forLibrary(libraryId));
 }
 
 export async function getLibraryAiStatus(libraryId: string): Promise<LibraryAiStatus> {
     const [embedding, aiService] = await Promise.all([getLibraryEmbeddingStatus(libraryId), AiService.forLibrary(libraryId)]);
-    const pipelineId = aiService?.metadataPipelineId;
     return {
         ...embedding,
-        describe: pipelineId ? await getDescribeStatus(libraryId, pipelineId) : null,
+        describe: await getDescribeStatus(libraryId, aiService),
         issues: aiService?.config.issues ?? [],
     };
 }

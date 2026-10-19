@@ -11,6 +11,7 @@ export const AiEnrichHandler: TaskHandler = {
     /**
      * Library-wide runs (`input_snapshot.scope = "library"`, e.g. embedding space backfills) discover
      * their media page by page. Explicit runs are enqueued with their units already built.
+     * `input_snapshot.redescribe` makes a run describe items again when another model wrote their description.
      */
     async discoverUnits(task, discoveryCursor, batchSize) {
         if (!task.library_id || task.input_snapshot?.scope !== "library") {
@@ -85,7 +86,10 @@ export const AiEnrichHandler: TaskHandler = {
 
         try {
             context.signal.throwIfAborted();
-            await AiEnrichmentService.enrichMediaItem(media, postContext, context.signal);
+            await AiEnrichmentService.enrichMediaItem(media, postContext, {
+                abortSignal: context.signal,
+                redescribe: context.task.input_snapshot?.redescribe === true,
+            });
             context.signal.throwIfAborted();
             return { success: true };
         } catch (error) {

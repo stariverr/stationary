@@ -15,19 +15,21 @@ import { JobManager } from "@/infra/jobs/manager";
 import { jobRunner } from "@/infra/jobs/runner";
 import { AiService } from "./service";
 import { QueueAiError } from "./errors";
+import type { EnrichmentOptions } from "./enrich";
 import type { QueueAiInput } from "./schema";
 
 /**
  * Re-processes every media item of a library (pages through them via unit discovery). Used
  * when library-wide inputs change: a new embedding space, or the description language.
- * Unchanged artifacts are reused, so only what actually changed reaches a provider.
+ * Unchanged artifacts are reused, so only what actually changed reaches a provider; `redescribe`
+ * also replaces descriptions written by another model than the current one.
  */
-export async function queueLibraryAiEnrichment(libraryId: string, ownerId: string): Promise<string> {
+export async function queueLibraryAiEnrichment(libraryId: string, ownerId: string, options: EnrichmentOptions): Promise<string> {
     const task = await JobManager.createTask({
         type: AsyncTaskType.AI_ENRICH,
         libraryId,
         ownerId,
-        inputSnapshot: { scope: "library" },
+        inputSnapshot: { scope: "library", redescribe: options.redescribe === true },
     });
     return task.id;
 }

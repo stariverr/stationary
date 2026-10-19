@@ -65,11 +65,13 @@ const models = ref<AiModel[]>([]);
 const providers = ref<AiProvider[]>([]);
 const selection = ref<Record<AiRoleKey, string>>({ describe: NONE, textEmbedding: NONE, imageEmbedding: NONE, rerank: NONE });
 const savedSelection = ref("");
+const savedDescribe = ref(NONE);
 const isLoading = ref(false);
 const isSaving = ref(false);
 
 const status = ref<AiLibraryStatus | null>(null);
 const isRetrying = ref(false);
+const isRedescribing = ref(false);
 let statusTimer: ReturnType<typeof setTimeout> | null = null;
 
 const SPACE_ORDER = { ACTIVE: 0, BUILDING: 1, RETIRED: 2 } as const;
@@ -90,6 +92,7 @@ const canRetry = computed(() => failedTotal.value > 0 || Boolean(status.value?.s
 const formatDate = (iso: string) => formatTemporalDateTime(iso, locale.value, { year: "numeric", month: "2-digit", day: "2-digit" });
 const isProgressing = (current: AiLibraryStatus) =>
     (current.describe?.pending ?? 0) > 0 ||
+    (isRedescribing.value && (current.describe?.otherModel ?? 0) > 0) ||
     current.spaces.some((space) => space.pending > 0 || (space.status === "BUILDING" && !space.blocked));
 
 /** Polls while embeddings are queued or a space is being rebuilt. */
@@ -124,6 +127,20 @@ const retryFailed = async () => {
     }
 };
 
+/** Replaces the descriptions other models wrote; they leave the count as the new ones land. */
+const startRedescribe = async () => {
+    isRedescribing.value = true;
+    try {
+        await useApi<ApiResponse<null>>(`/ai/status/${props.libraryId}/redescribe`, { method: "POST" });
+        toast.success(t("settings.ai_config.redescribe_started"));
+        await loadStatus();
+    } catch (err) {
+        isRedescribing.value = false;
+        console.error("Failed to start re-describing", err);
+        toast.error((err as { data?: { message?: string } })?.data?.message || t("settings.ai_config.err_save"));
+    }
+};
+
 const isDirty = computed(() => JSON.stringify(selection.value) !== savedSelection.value || language.value !== savedLanguage.value);
 
 const providerName = (providerId: string) => providers.value.find((provider) => provider.id === providerId)?.name ?? "";
@@ -149,6 +166,7 @@ const load = async () => {
             rerank: bindings.rerank?.modelId ?? NONE,
         };
         savedSelection.value = JSON.stringify(selection.value);
+        savedDescribe.value = selection.value.describe;
     } catch (err) {
         console.error("Failed to load library AI bindings", err);
         toast.error(t("settings.ai_config.err_load"));
@@ -167,23 +185,32 @@ watch(
 );
 
 const isConfirmingLanguage = ref(false);
+const isConfirmingModel = ref(false);
 
 const save = () => {
+    const describeBound = selection.value.describe !== NONE;
     // A new description language re-describes every item: the costliest AI operation, so it is confirmed.
-    if (language.value !== savedLanguage.value && selection.value.describe !== NONE) {
+    if (language.value !== savedLanguage.value && describeBound) {
         isConfirmingLanguage.value = true;
+        return;
+    }
+    // A new description model only serves new items unless the user also has the existing ones redone.
+    if (selection.value.describe !== savedDescribe.value && describeBound && (status.value?.mediaTotal ?? 0) > 0) {
+        isConfirmingModel.value = true;
         return;
     }
     commit();
 };
 
-const commit = async () => {
+const commit = async ({ redescribe = false }: { redescribe?: boolean } = {}) => {
     isConfirmingLanguage.value = false;
+    isConfirmingModel.value = false;
     isSaving.value = true;
     try {
         const body = {
             ...Object.fromEntries(Object.entries(selection.value).map(([role, modelId]) => [role, modelId === NONE ? null : { modelId }])),
             language: language.value,
+            redescribe,
         };
         const res = await useApi<ApiResponse<{ indexingStarted: boolean }>>(`/ai/bindings/${props.libraryId}`, { method: "POST", body });
         if (res?.data?.indexingStarted === false) {
@@ -191,6 +218,7 @@ const commit = async () => {
             toast.warning(t("settings.ai_config.bindings_saved_not_indexed"));
         } else {
             savedSelection.value = JSON.stringify(selection.value);
+            savedDescribe.value = selection.value.describe;
             savedLanguage.value = language.value;
             toast.success(t("settings.ai_config.bindings_saved"));
         }
@@ -262,6 +290,17 @@ const commit = async () => {
                     <span v-if="status.describe.failed > 0" class="text-red-600">
                         · {{ t("settings.ai_config.status_failed", { count: status.describe.failed }) }}</span
                     >
+                    <template v-if="status.describe.otherModel > 0">
+                        · {{ t("settings.ai_config.status_other_model", { count: status.describe.otherModel }) }}
+                        <button
+                            type="button"
+                            class="underline underline-offset-2 hover:text-foreground disabled:opacity-50"
+                            :disabled="isRedescribing"
+                            @click="startRedescribe"
+                        >
+                            {{ t("settings.ai_config.redescribe") }}
+                        </button>
+                    </template>
                     <span v-if="status.describe.lastError" class="block break-words">{{ formatError(status.describe.lastError) }}</span>
                 </div>
                 <div v-for="space in spacesOf(role.key)" :key="space.spaceId" class="col-span-2 -mt-1 text-[11px] text-muted-foreground">
@@ -334,7 +373,23 @@ const commit = async () => {
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                     <AlertDialogCancel>{{ t("common.cancel") }}</AlertDialogCancel>
-                    <AlertDialogAction @click="commit">{{ t("settings.ai_config.language_change_btn") }}</AlertDialogAction>
+                    <AlertDialogAction @click="commit()">{{ t("settings.ai_config.language_change_btn") }}</AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog v-model:open="isConfirmingModel">
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>{{ t("settings.ai_config.model_change_title") }}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        {{ t("settings.ai_config.model_change_confirm", { count: status?.mediaTotal ?? 0 }) }}
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                    <AlertDialogCancel>{{ t("common.cancel") }}</AlertDialogCancel>
+                    <Button variant="outline" @click="commit({ redescribe: false })">{{ t("settings.ai_config.model_change_new_only") }}</Button>
+                    <AlertDialogAction @click="commit({ redescribe: true })">{{ t("settings.ai_config.model_change_all") }}</AlertDialogAction>
                 </AlertDialogFooter>
             </AlertDialogContent>
         </AlertDialog>

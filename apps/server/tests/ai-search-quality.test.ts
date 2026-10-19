@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { isSupportedLanguage, languageName, normalizeImageAiMetadata } from "@/features/ai/image-metadata";
 import { parseModelCapabilities, supportsAiBindingRole } from "@/features/ai/model-schema";
 import { adapterSupportsModel } from "@/features/ai/provider-templates";
-import { buildSearchContent, selectStoredMetadata } from "@/features/ai/enrich";
+import { buildSearchContent, canReuseDescription, selectStoredMetadata } from "@/features/ai/enrich";
 import { escapeLikePattern, HybridSearchService, splitSearchTerms } from "@/features/ai/search";
 import { CohereRerankProvider } from "@/features/ai/providers/cohere-rerank";
 import type { ResolvedModelConfig } from "@/features/ai/types";
@@ -174,6 +174,25 @@ describe("stored description selection", () => {
         expect(selectStoredMetadata(rows, "m:v3:zh-Hans")?.metadata_pipeline_id).toBe("m:v2:en-US");
         expect(selectStoredMetadata(rows, null)?.metadata_pipeline_id).toBe("m:v2:en-US");
         expect(selectStoredMetadata([rows[2]!], "m:v3:zh-Hans")).toBeNull();
+    });
+});
+
+describe("reusing a stored description", () => {
+    const stored = { input_hash: "h", model: "old-model" };
+
+    it("keeps a description of the same image, whichever model wrote it", () => {
+        expect(canReuseDescription(stored, "h")).toBe(true);
+    });
+
+    it("describes again when the image changed or nothing is stored", () => {
+        expect(canReuseDescription(stored, "other")).toBe(false);
+        expect(canReuseDescription(undefined, "h")).toBe(false);
+        expect(canReuseDescription(stored, null)).toBe(false);
+    });
+
+    it("keeps only descriptions of the required model", () => {
+        expect(canReuseDescription(stored, "h", "new-model")).toBe(false);
+        expect(canReuseDescription({ ...stored, model: "new-model" }, "h", "new-model")).toBe(true);
     });
 });
 

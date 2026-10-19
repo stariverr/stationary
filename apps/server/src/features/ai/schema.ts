@@ -17,4 +17,8 @@ export const UpdateLibraryAiBindingsSchema = v.object({
     ...LibraryAiBindingsSchema.entries,
     /** BCP 47 language for image descriptions. */
     language: v.optional(v.pipe(v.string(), v.check(isSupportedLanguage, "Unsupported language"))),
+    /** Replace the descriptions other models wrote with the saved describe model's. */
+    redescribe: v.optional(v.boolean()),
 });
+
+export type UpdateLibraryAiBindings = v.InferOutput<typeof UpdateLibraryAiBindingsSchema>;
