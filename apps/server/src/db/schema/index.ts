@@ -834,8 +834,13 @@ export const AssetAiMetadata = pgTable(
         styles: jsonb("styles").$type<string[]>().default([]).notNull(),
         scene: text("scene").default("").notNull(),
         ocr_text: text("ocr_text").default("").notNull(),
+        /**
+         * What the stored result was generated with. A row with no result yet holds what it will be
+         * generated with. One row per media: a re-description keeps the old result until it is replaced.
+         */
         model: text("model").notNull(),
-        metadata_pipeline_id: text("metadata_pipeline_id").notNull(),
+        prompt_version: text("prompt_version").notNull(),
+        language: text("language").notNull(),
         /** Hash of the source image the stored result was generated from; null until a result exists. */
         input_hash: text("input_hash"),
         processing_status: ProcessingStatusEnum("processing_status").default(ProcessingStatus.PENDING).notNull(),
@@ -845,7 +850,18 @@ export const AssetAiMetadata = pgTable(
             .notNull(),
         update_time: temporal("update_time"),
     },
-    (table) => [uniqueIndex("ai_metadata_entity_pipeline_unique").on(table.entity_type, table.entity_id, table.metadata_pipeline_id)],
+    (table) => [
+        uniqueIndex("ai_metadata_entity_unique").on(table.entity_type, table.entity_id),
+        // Covers the library status counts, so they read only the index.
+        index("ai_metadata_library_status_idx").on(
+            table.library_id,
+            table.processing_status,
+            table.prompt_version,
+            table.language,
+            table.model,
+            table.entity_id,
+        ),
+    ],
 );
 
 export const AssetEmbedding = pgTable(

@@ -41,6 +41,8 @@ const ownerId = crypto.randomUUID();
 const libraryId = crypto.randomUUID();
 const mediaIds = { cat: crypto.randomUUID(), dog: crypto.randomUUID(), car: crypto.randomUUID() };
 let providerId = "";
+/** Model names are unique per provider, so the 1024-dimension model sits on a second provider. */
+let otherProviderId = "";
 let modelA = "";
 let modelB = "";
 
@@ -141,21 +143,24 @@ describe("AI embedding queue (PostgreSQL + Redis)", () => {
                 sort_order: index,
             })),
         );
-        const [provider] = await db
+        const [provider, otherProvider] = await db
             .insert(AiProvider)
-            .values({
-                owner_id: ownerId,
-                template_id: "dashscope-native",
-                name: "Fake DashScope",
-                base_url: "https://dashscope.aliyuncs.com",
-                api_key_ciphertext: secretBox.encrypt("test-key"),
-            })
+            .values(
+                ["Fake DashScope", "Fake DashScope 2"].map((name) => ({
+                    owner_id: ownerId,
+                    template_id: "dashscope-native",
+                    name,
+                    base_url: "https://dashscope.aliyuncs.com",
+                    api_key_ciphertext: secretBox.encrypt("test-key"),
+                })),
+            )
             .returning();
         providerId = provider!.id;
+        otherProviderId = otherProvider!.id;
         const [a, b] = await db
             .insert(AiModel)
             .values([
-                { provider_id: providerId, name: "qwen3-vl-embedding", display_name: "Qwen3-VL Embedding", category: "embedding", capabilities: capabilities(1024) },
+                { provider_id: otherProviderId, name: "qwen3-vl-embedding", display_name: "Qwen3-VL Embedding", category: "embedding", capabilities: capabilities(1024) },
                 { provider_id: providerId, name: "qwen3-vl-embedding", display_name: "Qwen3-VL Embedding", category: "embedding", capabilities: capabilities(768) },
             ])
             .returning();
@@ -170,8 +175,8 @@ describe("AI embedding queue (PostgreSQL + Redis)", () => {
         await db.delete(LibraryEmbeddingSpace).where(eq(LibraryEmbeddingSpace.library_id, libraryId));
         await db.delete(AsyncTask).where(eq(AsyncTask.library_id, libraryId));
         await db.delete(Media).where(inArray(Media.id, Object.values(mediaIds)));
-        await db.delete(AiModel).where(eq(AiModel.provider_id, providerId));
-        await db.delete(AiProvider).where(eq(AiProvider.id, providerId));
+        await db.delete(AiModel).where(inArray(AiModel.provider_id, [providerId, otherProviderId]));
+        await db.delete(AiProvider).where(inArray(AiProvider.id, [providerId, otherProviderId]));
         await db.delete(Library).where(eq(Library.id, libraryId));
     });
 
@@ -321,7 +326,7 @@ describe("AI embedding queue (PostgreSQL + Redis)", () => {
         // Recycled: not claimed, and invisible to progress counts.
         const claimed = await processNextEmbeddingBatch();
         expect(claimed.some((row) => row.entity_id === mediaIds.car)).toBe(false);
-        expect((await getLibraryEmbeddingStatus(libraryId)).mediaTotal).toBe(2);
+        expect((await getLibraryEmbeddingStatus(libraryId)).spaces.find((space) => space.spaceId === spaceId)?.total).toBe(2);
 
         // Restored: claimable again.
         await db.update(Media).set({ recycle_time: null }).where(eq(Media.id, mediaIds.car));

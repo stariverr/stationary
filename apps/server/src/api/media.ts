@@ -166,7 +166,7 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
     const medias = rawMedia.map((m) => {
         const covers = coversByMediaId.get(m.id) || [];
         const videos = videosByMediaId.get(m.id) || [];
-        const aiStatus = summarizeAiStatus(aiRows.filter((row) => row.entity_id === m.id));
+        const aiStatus = summarizeAiStatus(aiRows.find((row) => row.entity_id === m.id));
 
         const lowCover = covers.find((c) => c.quality === Quality.LOW)?.url || null;
         const mediumCover = covers.find((c) => c.quality === Quality.MEDIUM)?.url || null;

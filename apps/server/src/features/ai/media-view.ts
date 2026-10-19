@@ -2,7 +2,6 @@ import { db } from "@/global/db";
 import { AssetAiMetadata, EntityType, ProcessingStatus } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { toIsoTimestamp } from "@/lib/utils/time";
-import { selectStoredMetadata } from "./enrich";
 
 type StoredAiMetadata = typeof AssetAiMetadata.$inferSelect;
 
@@ -23,30 +22,24 @@ export interface MediaAiView {
     } | null;
 }
 
-/** Processing status of a media item across its pipeline rows: a completed result wins, then a failure. */
-export function summarizeAiStatus(rows: Pick<StoredAiMetadata, "processing_status" | "last_error">[]): {
+/** Processing status of a media item; one without a row has not been processed yet. */
+export function summarizeAiStatus(row: Pick<StoredAiMetadata, "processing_status" | "last_error"> | undefined): {
     status: ProcessingStatus;
     error: string | null;
 } {
-    const row =
-        rows.find((r) => r.processing_status === ProcessingStatus.COMPLETED) ??
-        rows.find((r) => r.processing_status === ProcessingStatus.FAILED) ??
-        rows[0];
     return { status: row?.processing_status ?? ProcessingStatus.PENDING, error: row?.last_error ?? null };
 }
 
-/**
- * The status and stored description of a media item. The description is the newest stored result,
- * which is the current pipeline's once it lands (earlier pipelines' results are deleted then).
- */
+/** The status and stored description of a media item. */
 export async function getMediaAiView(mediaId: string): Promise<MediaAiView> {
-    const rows = await db
+    const [row] = await db
         .select()
         .from(AssetAiMetadata)
-        .where(and(eq(AssetAiMetadata.entity_type, EntityType.MEDIA), eq(AssetAiMetadata.entity_id, mediaId)));
-    const stored = selectStoredMetadata(rows, null);
+        .where(and(eq(AssetAiMetadata.entity_type, EntityType.MEDIA), eq(AssetAiMetadata.entity_id, mediaId)))
+        .limit(1);
+    const stored = row?.input_hash ? row : null;
     return {
-        ...summarizeAiStatus(rows),
+        ...summarizeAiStatus(row),
         result: stored
             ? {
                   caption: stored.caption,

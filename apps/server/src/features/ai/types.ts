@@ -13,6 +13,13 @@ import type {
 
 export type EmbeddingPurpose = "QUERY" | "DOCUMENT";
 
+/** What an image description is generated with; stored with each description. */
+export interface DescribeTarget {
+    model: string;
+    promptVersion: string;
+    language: string;
+}
+
 export interface ImageAiMetadata {
     caption: string;
     tags: string[];

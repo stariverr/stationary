@@ -195,7 +195,7 @@ const save = () => {
         return;
     }
     // A new description model only serves new items unless the user also has the existing ones redone.
-    if (selection.value.describe !== savedDescribe.value && describeBound && (status.value?.mediaTotal ?? 0) > 0) {
+    if (selection.value.describe !== savedDescribe.value && describeBound && (status.value?.describe?.total ?? 0) > 0) {
         isConfirmingModel.value = true;
         return;
     }
@@ -283,7 +283,7 @@ const commit = async ({ redescribe = false }: { redescribe?: boolean } = {}) => 
                     {{ t(issue.building ? "settings.ai_config.status_issue_building" : "settings.ai_config.status_issue", { message: issue.message }) }}
                 </p>
                 <div v-if="role.key === 'describe' && status?.describe" class="col-span-2 -mt-1 text-[11px] text-muted-foreground">
-                    {{ t("settings.ai_config.status_described", { ready: status.describe.completed, total: status.mediaTotal }) }}
+                    {{ t("settings.ai_config.status_described", { ready: status.describe.completed, total: status.describe.total }) }}
                     <template v-if="status.describe.pending > 0">
                         · {{ t("settings.ai_config.status_pending", { count: status.describe.pending }) }}</template
                     >
@@ -317,12 +317,12 @@ const commit = async ({ redescribe = false }: { redescribe?: boolean } = {}) => 
                             t("settings.ai_config.status_building", {
                                 model: modelName(space.modelId),
                                 ready: space.ready,
-                                total: status?.mediaTotal ?? 0,
+                                total: space.total,
                             })
                         }}
                     </template>
                     <template v-else>
-                        {{ t("settings.ai_config.status_indexed", { ready: space.ready, total: status?.mediaTotal ?? 0 }) }}
+                        {{ t("settings.ai_config.status_indexed", { ready: space.ready, total: space.total }) }}
                     </template>
                     <template v-if="space.status !== 'RETIRED' && space.pending > 0">
                         · {{ t("settings.ai_config.status_pending", { count: space.pending }) }}</template
@@ -368,7 +368,7 @@ const commit = async ({ redescribe = false }: { redescribe?: boolean } = {}) => 
                 <AlertDialogHeader>
                     <AlertDialogTitle>{{ t("settings.ai_config.language_change_title") }}</AlertDialogTitle>
                     <AlertDialogDescription>
-                        {{ t("settings.ai_config.language_change_confirm", { count: status?.mediaTotal ?? 0 }) }}
+                        {{ t("settings.ai_config.language_change_confirm", { count: status?.describe?.total ?? 0 }) }}
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -383,7 +383,7 @@ const commit = async ({ redescribe = false }: { redescribe?: boolean } = {}) => 
                 <AlertDialogHeader>
                     <AlertDialogTitle>{{ t("settings.ai_config.model_change_title") }}</AlertDialogTitle>
                     <AlertDialogDescription>
-                        {{ t("settings.ai_config.model_change_confirm", { count: status?.mediaTotal ?? 0 }) }}
+                        {{ t("settings.ai_config.model_change_confirm", { count: status?.describe?.total ?? 0 }) }}
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

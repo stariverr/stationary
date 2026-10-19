@@ -162,26 +162,21 @@ MVP 会在 `apps/server/src/db/schema/index.ts` 中引入以下逻辑表。
 - styles
 - scene
 - OCR text
-- model
-- metadata pipeline ID
+- model、prompt 版本、语言
 - processing status
 - last error
 
-metadata pipeline 独立于模型名进行版本化：由 prompt 版本和输出语言组成，例如：
-
-```text
-image-metadata:v2:zh-Hans
-```
+每个媒体只有一行。`model`、`prompt_version`、`language` 记录它的描述是用什么生成的（还没有结果的行记录的是将要用什么生成）。prompt 版本较旧或语言不同的描述，会在下一次处理时重新生成；状态统计会把它计入总数，但不算作已描述。
 
 `model` 列记录是哪个模型写的描述。因此更换描述模型时，已有描述保留，只有新增或变更的内容用新模型；用户选择"重新描述全部"时，才会跑一次带 `redescribe` 的全库任务，把由其他模型写的描述重新生成。
 
-推荐唯一约束：
+唯一约束：
 
 ```text
-(entity_type, entity_id, metadata_pipeline_id)
+(entity_type, entity_id)
 ```
 
-搜索文档和结果说明优先使用当前描述管线的结果；当前管线还没有结果时，使用较早管线中最新的结果。这样在更换语言、重新描述整个库期间，描述依然可以被搜索到。当前管线为某个媒体写入结果后，该媒体在旧管线中的行会被删除。
+重新描述时，旧结果会一直保留，直到新结果把它替换。这样在更换语言、重新描述整个库期间，描述依然可以被搜索到。媒体库状态的计数走 `(library_id, processing_status, prompt_version, language, model, entity_id)` 索引，只读索引即可完成。
 
 ### 4.4 `asset_embedding`
 
@@ -367,7 +362,7 @@ export interface AiProvider {
 - 生成后立刻校验输出维度。
 - API key 只能来自环境变量。
 - 结构化图片解析结果必须做 schema validation。
-- 使用 `content_hash` 与 pipeline ID 保证幂等。
+- 使用 `content_hash`、prompt 版本与语言保证幂等。
 - 默认测试应 mock provider，不应真实调用外部 AI API。
 
 ---
@@ -411,7 +406,7 @@ async function search(params: SearchParams, userId: string) {
 - 媒体库绑定了重排序模型时，融合后的前 50 个候选会按其搜索文档文本交给重排序模型重新排序（Cohere 格式的 `/rerank`），其余保持融合顺序；重排序失败时保留融合顺序。得分会缓存，翻页只重排一次，并通过 `matched_details.rerank` 返回。
 - 某个 AI 通道本该参与却没有参与时（绑定的模型无法解析、调用失败、被限流），搜索照常返回其余通道的结果，并在 `degraded` 中列出 `{ channel, reason }`。`channel` 取 `text_semantic` / `visual_semantic` / `rerank`，AI 配置整体无法加载时为 `ai`；`reason` 是错误分类（如 `CONFIGURATION`、`AUTHENTICATION`、`THROTTLED`）。前端据此在结果上方提示"结果可能不完整"。
 - 结果只返回结构化的 `matched_details`，由客户端按浏览者的语言渲染说明。
-- 图像描述使用媒体库的 `ai_language` 输出（OCR 保留原文）。语言属于描述管线标识的一部分，修改后会对整个库重新生成描述。
+- 图像描述使用媒体库的 `ai_language` 输出（OCR 保留原文）。每条描述都记录了语言，修改语言后会对整个库重新生成描述。
 
 ---
 

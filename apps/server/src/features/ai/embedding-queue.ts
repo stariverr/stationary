@@ -362,9 +362,19 @@ export async function processNextEmbeddingBatch(signal?: AbortSignal): Promise<E
 }
 
 /** Queued, failed and stored vectors of one library space, for progress reporting. */
+/**
+ * Vectors of a library space by status, and how many media they cover: while a new input is queued,
+ * a media item keeps its previous vector, so it can have more than one row.
+ */
 export async function countEmbeddings(libraryId: string, spaceId: string, role: EmbeddingRole) {
-    const rows = await db
-        .select({ status: AssetEmbedding.embedding_status, count: sql<number>`count(*)::int` })
+    const isStatus = (status: EmbeddingStatus) => sql`${AssetEmbedding.embedding_status} = ${status}`;
+    const [counts] = await db
+        .select({
+            total: sql<number>`count(distinct ${AssetEmbedding.entity_id})::int`,
+            ready: sql<number>`(count(*) filter (where ${isStatus(EmbeddingStatus.READY)}))::int`,
+            pending: sql<number>`(count(*) filter (where ${isStatus(EmbeddingStatus.PENDING)}))::int`,
+            failed: sql<number>`(count(*) filter (where ${isStatus(EmbeddingStatus.FAILED)}))::int`,
+        })
         .from(AssetEmbedding)
         .where(
             and(
@@ -373,10 +383,8 @@ export async function countEmbeddings(libraryId: string, spaceId: string, role: 
                 eq(AssetEmbedding.embedding_role, role),
                 ofActiveMedia,
             ),
-        )
-        .groupBy(AssetEmbedding.embedding_status);
-    const count = (status: EmbeddingStatus) => rows.find((row) => row.status === status)?.count ?? 0;
-    return { ready: count(EmbeddingStatus.READY), pending: count(EmbeddingStatus.PENDING), failed: count(EmbeddingStatus.FAILED) };
+        );
+    return counts!;
 }
 
 /** The latest error of a library space's queued or failed vectors; null once they have all been stored. */

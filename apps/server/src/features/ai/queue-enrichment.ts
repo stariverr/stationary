@@ -17,6 +17,7 @@ import { AiService } from "./service";
 import { QueueAiError } from "./errors";
 import type { EnrichmentOptions } from "./enrich";
 import type { QueueAiInput } from "./schema";
+import type { DescribeTarget } from "./types";
 
 /**
  * Re-processes every media item of a library (pages through them via unit discovery). Used
@@ -87,17 +88,15 @@ export async function queueAiEnrichment(input: QueueAiInput, auth: QueueAiAuth) 
         throw new QueueAiError("FORBIDDEN", "You do not have access to some of the libraries");
     }
 
-    const pipelineByLibrary = new Map<string, { pipelineId: string; model: string } | null>();
+    const targetByLibrary = new Map<string, DescribeTarget | null>();
     for (const libraryId of libraryIds) {
-        const aiService = await AiService.forLibrary(libraryId);
-        const pipelineId = aiService?.metadataPipelineId;
-        pipelineByLibrary.set(libraryId, aiService?.chatModelName && pipelineId ? { pipelineId, model: aiService.chatModelName } : null);
+        targetByLibrary.set(libraryId, (await AiService.forLibrary(libraryId))?.describeTarget ?? null);
     }
 
     const masterTask = await db.transaction(async (tx) => {
         for (const media of mediaList) {
-            const pipeline = pipelineByLibrary.get(media.library_id);
-            if (!pipeline) continue;
+            const target = targetByLibrary.get(media.library_id);
+            if (!target) continue;
 
             await tx
                 .insert(AssetAiMetadata)
@@ -105,13 +104,15 @@ export async function queueAiEnrichment(input: QueueAiInput, auth: QueueAiAuth) 
                     library_id: media.library_id,
                     entity_type: EntityType.MEDIA,
                     entity_id: media.id,
-                    metadata_pipeline_id: pipeline.pipelineId,
-                    model: pipeline.model,
+                    model: target.model,
+                    prompt_version: target.promptVersion,
+                    language: target.language,
                     processing_status: ProcessingStatus.PENDING,
                     last_error: null,
                 })
                 .onConflictDoUpdate({
-                    target: [AssetAiMetadata.entity_type, AssetAiMetadata.entity_id, AssetAiMetadata.metadata_pipeline_id],
+                    // An existing row keeps its description, and what it was generated with, until it is replaced.
+                    target: [AssetAiMetadata.entity_type, AssetAiMetadata.entity_id],
                     set: {
                         processing_status: ProcessingStatus.PENDING,
                         last_error: null,
