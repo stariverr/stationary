@@ -1,4 +1,4 @@
-import { IMAGE_METADATA_PIPELINE_VERSION, describeImageWithModel } from "./image-metadata";
+import { IMAGE_METADATA_PROMPT_VERSION, describeImageWithModel } from "./image-metadata";
 import { prepareImageForModel } from "./image-format";
 import { resolveAiConfig } from "./resolver";
 import { kv } from "@/global/kv";
@@ -7,6 +7,7 @@ import { createPromiseCache } from "./promise-cache";
 import { computeSha256 } from "./utils";
 import { createProviderLimiter, createRedisRateLimitStore } from "./rate-limit";
 import type {
+    DescribeTarget,
     EmbedImageParams,
     EmbedTextParams,
     EmbeddingBindingRole,
@@ -77,12 +78,12 @@ export class AiService {
     }
 
     /**
-     * Identifies stored image metadata by prompt version and output language. Changing either
-     * regenerates descriptions. The model is not part of it: switching models leaves existing
-     * descriptions in place (each records its model), and re-describing them is a separate choice.
+     * What a description made now is generated with. A stored description of another prompt version
+     * or language is regenerated; one of another model stays until re-describing is asked for.
      */
-    get metadataPipelineId(): string | null {
-        return this.chatModelName ? `${IMAGE_METADATA_PIPELINE_VERSION}:${this.config.language}` : null;
+    get describeTarget(): DescribeTarget | null {
+        const model = this.chatModelName;
+        return model ? { model, promptVersion: IMAGE_METADATA_PROMPT_VERSION, language: this.config.language } : null;
     }
 
     /**

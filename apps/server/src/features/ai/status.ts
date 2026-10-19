@@ -6,6 +6,9 @@ import { AiService } from "./service";
 import type { AiConfigIssue, AiErrorView } from "./types";
 
 export interface DescribeStatusView {
+    /** Media the description pipeline has taken up. Library-wide runs only take up media with an image. */
+    total: number;
+    /** Described with the current prompt version and language. */
     completed: number;
     /** Completed descriptions that another model than the current one wrote. */
     otherModel: number;
@@ -30,36 +33,33 @@ const ofActiveMedia = sql`exists (
 )`;
 
 /**
- * Description progress of the library's current pipeline (prompt version and language) under its
- * describe model. Null when no usable description model is bound.
+ * Description progress of the library under its describe model. A description of an older prompt
+ * version or another language counts toward the total but not as completed. Null when no usable
+ * description model is bound.
  */
 async function getDescribeStatus(libraryId: string, aiService: AiService | null): Promise<DescribeStatusView | null> {
-    const pipelineId = aiService?.metadataPipelineId;
-    const modelName = aiService?.chatModelName;
-    if (!pipelineId || !modelName) return null;
-    const ofPipeline = and(
-        eq(AssetAiMetadata.library_id, libraryId),
-        eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
-        eq(AssetAiMetadata.metadata_pipeline_id, pipelineId),
-        ofActiveMedia,
-    );
+    const target = aiService?.describeTarget;
+    if (!target) return null;
+    const ofLibrary = and(eq(AssetAiMetadata.library_id, libraryId), eq(AssetAiMetadata.entity_type, EntityType.MEDIA), ofActiveMedia);
     const isStatus = (status: ProcessingStatus) => sql`${AssetAiMetadata.processing_status} = ${status}`;
+    const isCurrent = sql`${isStatus(ProcessingStatus.COMPLETED)} and ${AssetAiMetadata.prompt_version} = ${target.promptVersion} and ${AssetAiMetadata.language} = ${target.language}`;
     const [[counts], [latest]] = await Promise.all([
         db
             .select({
-                completed: sql<number>`(count(*) filter (where ${isStatus(ProcessingStatus.COMPLETED)}))::int`,
-                otherModel: sql<number>`(count(*) filter (where ${isStatus(ProcessingStatus.COMPLETED)} and ${AssetAiMetadata.model} <> ${modelName}))::int`,
+                total: sql<number>`count(*)::int`,
+                completed: sql<number>`(count(*) filter (where ${isCurrent}))::int`,
+                otherModel: sql<number>`(count(*) filter (where ${isCurrent} and ${AssetAiMetadata.model} <> ${target.model}))::int`,
                 pending: sql<number>`(count(*) filter (where ${isStatus(ProcessingStatus.PENDING)}))::int`,
                 failed: sql<number>`(count(*) filter (where ${isStatus(ProcessingStatus.FAILED)}))::int`,
             })
             .from(AssetAiMetadata)
-            .where(ofPipeline),
+            .where(ofLibrary),
         db
             .select({ message: AssetAiMetadata.last_error, updated: AssetAiMetadata.update_time, created: AssetAiMetadata.create_time })
             .from(AssetAiMetadata)
             .where(
                 and(
-                    ofPipeline,
+                    ofLibrary,
                     inArray(AssetAiMetadata.processing_status, [ProcessingStatus.PENDING, ProcessingStatus.FAILED]),
                     isNotNull(AssetAiMetadata.last_error),
                 ),

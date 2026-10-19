@@ -97,6 +97,8 @@ export interface AiEmbeddingSpaceStatus {
     status: "ACTIVE" | "BUILDING" | "RETIRED";
     modelId: string;
     spaceId: string;
+    /** Media the space has a vector or a queued request for. */
+    total: number;
     ready: number;
     pending: number;
     failed: number;
@@ -113,6 +115,9 @@ export interface AiErrorView {
 }
 
 export interface AiDescribeStatus {
+    /** Media the description pipeline has taken up. */
+    total: number;
+    /** Described with the current prompt version and language. */
     completed: number;
     /** Completed descriptions that another model than the current one wrote. */
     otherModel: number;
@@ -130,7 +135,6 @@ export interface AiConfigIssue {
 }
 
 export interface AiLibraryStatus {
-    mediaTotal: number;
     spaces: AiEmbeddingSpaceStatus[];
     /** Null when no usable description model is bound. */
     describe: AiDescribeStatus | null;

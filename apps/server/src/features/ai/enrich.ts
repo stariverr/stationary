@@ -13,13 +13,13 @@ import {
     Tag,
     TagStatus,
 } from "@/db/schema";
-import { eq, and, isNotNull, sql, inArray, or, ne } from "drizzle-orm";
+import { eq, and, sql, inArray, or, ne } from "drizzle-orm";
 import { enqueueEmbeddings, notifyEmbeddingQueue } from "./embedding-queue";
 import { AiService } from "./service";
 import { readAiSourceImage, resolveAiImageSource } from "./image-source";
 import { classifyAiError, getSafeAiErrorMessage } from "./errors";
 import { computeSha256 } from "./utils";
-import type { ImageAiMetadata } from "./types";
+import type { DescribeTarget, ImageAiMetadata } from "./types";
 
 type EnrichmentPost = Omit<
     Pick<
@@ -50,31 +50,19 @@ const emptyImageMetadata: ImageAiMetadata = {
 };
 
 /**
- * The stored description a media item is searched and shown by: the current pipeline's result,
- * otherwise the newest result of an earlier pipeline (e.g. while a language change re-describes the
- * library). Rows without `input_hash` hold no result yet.
- */
-export function selectStoredMetadata<
-    T extends Pick<StoredAiMetadata, "metadata_pipeline_id" | "input_hash" | "update_time" | "create_time">,
->(rows: T[], currentPipelineId: string | null): T | null {
-    const results = rows.filter((row) => row.input_hash !== null);
-    const current = results.find((row) => row.metadata_pipeline_id === currentPipelineId);
-    if (current) return current;
-    const timeOf = (row: T) => (row.update_time ?? row.create_time).epochMilliseconds;
-    return results.sort((a, b) => timeOf(b) - timeOf(a))[0] ?? null;
-}
-
-/**
- * Whether the stored description of the current pipeline still stands: it was made from the same
- * image and, when `requiredModel` is given, by that model. A model switch alone keeps old descriptions.
+ * Whether the stored description still stands: it was made from the same image with the current
+ * prompt version and language. A model switch alone keeps it, unless `redescribe` asks for
+ * descriptions of other models to be replaced.
  */
 export function canReuseDescription(
-    stored: Pick<StoredAiMetadata, "input_hash" | "model"> | undefined,
+    stored: Pick<StoredAiMetadata, "input_hash" | "model" | "prompt_version" | "language"> | undefined,
     sourceHash: string | null,
-    requiredModel?: string,
+    target: DescribeTarget,
+    { redescribe }: EnrichmentOptions = {},
 ): boolean {
     if (!stored || !sourceHash || stored.input_hash !== sourceHash) return false;
-    return requiredModel === undefined || stored.model === requiredModel;
+    if (stored.prompt_version !== target.promptVersion || stored.language !== target.language) return false;
+    return !redescribe || stored.model === target.model;
 }
 
 function toImageAiMetadata(row: StoredAiMetadata): ImageAiMetadata {
@@ -100,7 +88,7 @@ export const AiEnrichmentService = {
      * available cover or image content.
      *
      * Each artifact is keyed by its own input so unrelated edits never redo expensive work:
-     * - image metadata: describe pipeline + source image hash
+     * - image metadata: prompt version, language (and model when re-describing) + source image hash
      * - image embedding: embedding space + source image hash
      * - search document / text embedding: the document text (and the embedding space)
      *
@@ -116,7 +104,7 @@ export const AiEnrichmentService = {
     ): Promise<void> {
         const aiService = await AiService.forLibrary(media.library_id);
         const describeProvider = aiService?.describeProvider ?? null;
-        const metadataPipelineId = aiService?.metadataPipelineId ?? null;
+        const describeTarget = aiService?.describeTarget ?? null;
         const textSpaces = aiService
             ? [aiService.textEmbedding.active, aiService.textEmbedding.building].filter((provider) => provider !== null)
             : [];
@@ -128,18 +116,9 @@ export const AiEnrichmentService = {
         const sourceFile = imageSource?.file;
         const sourceHash = sourceFile ? sourceFile.hash || `file:${sourceFile.id}` : null;
 
-        const storedMetadata = await db
-            .select()
-            .from(AssetAiMetadata)
-            .where(
-                and(
-                    eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
-                    eq(AssetAiMetadata.entity_id, media.id),
-                    isNotNull(AssetAiMetadata.input_hash),
-                ),
-            );
-        const currentMetadata = storedMetadata.find((row) => row.metadata_pipeline_id === metadataPipelineId);
-        const canReuseMetadata = canReuseDescription(currentMetadata, sourceHash, redescribe ? describeProvider?.modelName : undefined);
+        const metadataKey = and(eq(AssetAiMetadata.entity_type, EntityType.MEDIA), eq(AssetAiMetadata.entity_id, media.id));
+        const [storedMetadata] = await db.select().from(AssetAiMetadata).where(metadataKey).limit(1);
+        const canReuseMetadata = describeTarget ? canReuseDescription(storedMetadata, sourceHash, describeTarget, { redescribe }) : false;
         const shouldRunDescription = Boolean(describeProvider && sourceFile && !canReuseMetadata);
 
         let described: ImageAiMetadata | null = null;
@@ -156,8 +135,8 @@ export const AiEnrichmentService = {
             }
         }
 
-        const fallbackMetadata = selectStoredMetadata(storedMetadata, metadataPipelineId);
-        const aiMetadata = described ?? (fallbackMetadata ? toImageAiMetadata(fallbackMetadata) : emptyImageMetadata);
+        // Until a new description lands, the stored one (even of another language) keeps the item searchable.
+        const aiMetadata = described ?? (storedMetadata?.input_hash ? toImageAiMetadata(storedMetadata) : emptyImageMetadata);
 
         // Both direct and canonical tag aliases affect search content.
         const postTagsList = post.id
@@ -236,12 +215,13 @@ export const AiEnrichmentService = {
         const textInputHash = await computeSha256(JSON.stringify({ text: searchContent, title: searchDocument.title }));
 
         const queued = await db.transaction(async (tx) => {
-            if (describeProvider && metadataPipelineId) {
-                const metadataKey = and(
-                    eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
-                    eq(AssetAiMetadata.entity_id, media.id),
-                    eq(AssetAiMetadata.metadata_pipeline_id, metadataPipelineId),
-                );
+            if (describeTarget) {
+                const generatedWith = {
+                    model: describeTarget.model,
+                    prompt_version: describeTarget.promptVersion,
+                    language: describeTarget.language,
+                };
+                const metadataTarget = [AssetAiMetadata.entity_type, AssetAiMetadata.entity_id];
                 if (!sourceFile) {
                     await tx
                         .update(AssetAiMetadata)
@@ -260,7 +240,7 @@ export const AiEnrichmentService = {
                         styles: described.styles,
                         scene: described.scene,
                         ocr_text: described.ocrText,
-                        model: describeProvider.modelName,
+                        ...generatedWith,
                         input_hash: sourceHash,
                         processing_status: ProcessingStatus.COMPLETED,
                         last_error: null,
@@ -271,25 +251,12 @@ export const AiEnrichmentService = {
                             library_id: media.library_id,
                             entity_type: EntityType.MEDIA,
                             entity_id: media.id,
-                            metadata_pipeline_id: metadataPipelineId,
                             ...result,
                         })
-                        .onConflictDoUpdate({
-                            target: [AssetAiMetadata.entity_type, AssetAiMetadata.entity_id, AssetAiMetadata.metadata_pipeline_id],
-                            set: { ...result, update_time: sql`now()` },
-                        });
-                    // Results of earlier pipelines (other model, prompt or language) are superseded.
-                    await tx
-                        .delete(AssetAiMetadata)
-                        .where(
-                            and(
-                                eq(AssetAiMetadata.entity_type, EntityType.MEDIA),
-                                eq(AssetAiMetadata.entity_id, media.id),
-                                ne(AssetAiMetadata.metadata_pipeline_id, metadataPipelineId),
-                            ),
-                        );
+                        .onConflictDoUpdate({ target: metadataTarget, set: { ...result, update_time: sql`now()` } });
                 } else if (describeError) {
                     // Retryable errors stay PENDING for the task's next attempt; the error shows in the library's AI settings.
+                    // A stored description is kept, and so is what it was generated with.
                     const failure = {
                         processing_status: classifyAiError(describeError).retryable ? ProcessingStatus.PENDING : ProcessingStatus.FAILED,
                         last_error: getSafeAiErrorMessage(describeError),
@@ -300,14 +267,10 @@ export const AiEnrichmentService = {
                             library_id: media.library_id,
                             entity_type: EntityType.MEDIA,
                             entity_id: media.id,
-                            metadata_pipeline_id: metadataPipelineId,
-                            model: describeProvider.modelName,
+                            ...generatedWith,
                             ...failure,
                         })
-                        .onConflictDoUpdate({
-                            target: [AssetAiMetadata.entity_type, AssetAiMetadata.entity_id, AssetAiMetadata.metadata_pipeline_id],
-                            set: { ...failure, update_time: sql`now()` },
-                        });
+                        .onConflictDoUpdate({ target: metadataTarget, set: { ...failure, update_time: sql`now()` } });
                 } else if (canReuseMetadata) {
                     await tx
                         .update(AssetAiMetadata)

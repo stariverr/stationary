@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { isSupportedLanguage, languageName, normalizeImageAiMetadata } from "@/features/ai/image-metadata";
 import { parseModelCapabilities, supportsAiBindingRole } from "@/features/ai/model-schema";
 import { adapterSupportsModel } from "@/features/ai/provider-templates";
-import { buildSearchContent, canReuseDescription, selectStoredMetadata } from "@/features/ai/enrich";
+import { buildSearchContent, canReuseDescription } from "@/features/ai/enrich";
 import { escapeLikePattern, HybridSearchService, splitSearchTerms } from "@/features/ai/search";
 import { CohereRerankProvider } from "@/features/ai/providers/cohere-rerank";
 import type { ResolvedModelConfig } from "@/features/ai/types";
@@ -153,46 +153,28 @@ describe("reciprocal rank fusion", () => {
     });
 });
 
-describe("stored description selection", () => {
-    const at = (iso: string) => Temporal.Instant.from(iso);
-    const rows = [
-        {
-            metadata_pipeline_id: "m:v2:en-US",
-            input_hash: "h",
-            create_time: at("2026-01-01T00:00:00Z"),
-            update_time: at("2026-03-01T00:00:00Z"),
-        },
-        { metadata_pipeline_id: "m:v2:zh-Hans", input_hash: "h", create_time: at("2026-02-01T00:00:00Z"), update_time: null },
-        { metadata_pipeline_id: "m:v3:zh-Hans", input_hash: null, create_time: at("2026-04-01T00:00:00Z"), update_time: null },
-    ];
-
-    it("prefers the current pipeline's result", () => {
-        expect(selectStoredMetadata(rows, "m:v2:zh-Hans")?.metadata_pipeline_id).toBe("m:v2:zh-Hans");
-    });
-
-    it("falls back to the newest result while the current pipeline has none", () => {
-        expect(selectStoredMetadata(rows, "m:v3:zh-Hans")?.metadata_pipeline_id).toBe("m:v2:en-US");
-        expect(selectStoredMetadata(rows, null)?.metadata_pipeline_id).toBe("m:v2:en-US");
-        expect(selectStoredMetadata([rows[2]!], "m:v3:zh-Hans")).toBeNull();
-    });
-});
-
 describe("reusing a stored description", () => {
-    const stored = { input_hash: "h", model: "old-model" };
+    const target = { model: "new-model", promptVersion: "v2", language: "zh-Hans" };
+    const stored = { input_hash: "h", model: "old-model", prompt_version: "v2", language: "zh-Hans" };
 
     it("keeps a description of the same image, whichever model wrote it", () => {
-        expect(canReuseDescription(stored, "h")).toBe(true);
+        expect(canReuseDescription(stored, "h", target)).toBe(true);
     });
 
     it("describes again when the image changed or nothing is stored", () => {
-        expect(canReuseDescription(stored, "other")).toBe(false);
-        expect(canReuseDescription(undefined, "h")).toBe(false);
-        expect(canReuseDescription(stored, null)).toBe(false);
+        expect(canReuseDescription(stored, "other", target)).toBe(false);
+        expect(canReuseDescription(undefined, "h", target)).toBe(false);
+        expect(canReuseDescription(stored, null, target)).toBe(false);
     });
 
-    it("keeps only descriptions of the required model", () => {
-        expect(canReuseDescription(stored, "h", "new-model")).toBe(false);
-        expect(canReuseDescription({ ...stored, model: "new-model" }, "h", "new-model")).toBe(true);
+    it("describes again for another prompt version or language", () => {
+        expect(canReuseDescription({ ...stored, prompt_version: "v1" }, "h", target)).toBe(false);
+        expect(canReuseDescription({ ...stored, language: "en-US" }, "h", target)).toBe(false);
+    });
+
+    it("replaces descriptions of other models when re-describing", () => {
+        expect(canReuseDescription(stored, "h", target, { redescribe: true })).toBe(false);
+        expect(canReuseDescription({ ...stored, model: "new-model" }, "h", target, { redescribe: true })).toBe(true);
     });
 });
 

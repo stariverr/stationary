@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { assessBuildingSpace, type BuildProgress } from "@/features/ai/embedding-spaces";
 
-const drained: BuildProgress = { backfillRunning: false, ready: 100, pending: 0, failed: 0, activeReady: 100 };
+const drained: BuildProgress = { backfillRunning: false, total: 100, ready: 100, pending: 0, failed: 0, activeReady: 100 };
 
 describe("assessBuildingSpace", () => {
     it("waits while the backfill runs or vectors are queued", () => {

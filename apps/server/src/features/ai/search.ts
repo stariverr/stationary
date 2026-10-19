@@ -19,7 +19,6 @@ import {
 } from "@/db/schema";
 import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { AiService } from "./service";
-import { selectStoredMetadata } from "./enrich";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { toIsoTimestamp } from "@/lib/utils/time";
 import { classifyAiError, type AiErrorClassification } from "./errors";
@@ -302,10 +301,7 @@ export const HybridSearchService = {
             const keywordMatch = channels.find((c) => c.name === "keyword");
             const textMatch = channels.find((c) => c.name === "text_semantic");
             const visualMatch = channels.find((c) => c.name === "visual_semantic");
-            const metadata = selectStoredMetadata(
-                aiMetadatas.filter((meta) => meta.entity_id === mediaId),
-                aiService?.metadataPipelineId ?? null,
-            );
+            const metadata = aiMetadatas.find((meta) => meta.entity_id === mediaId && meta.input_hash !== null);
             const highlights = metadata ? [...metadata.tags.slice(0, 4), ...metadata.styles.slice(0, 2)] : [];
 
             const matchedDetails: NonNullable<SearchResultItem["matched_details"]> = {};

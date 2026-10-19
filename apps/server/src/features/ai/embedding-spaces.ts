@@ -1,13 +1,11 @@
-import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import {
     AiModel,
     AssetEmbedding,
     AsyncTask,
     AsyncTaskStatus,
-    DeleteStatus,
     LibraryEmbeddingSpace,
     LibraryEmbeddingSpaceStatus,
-    Media,
 } from "@/db/schema";
 import { db, type Transaction } from "@/global/db";
 import type { EnrichmentOptions } from "./enrich";
@@ -41,6 +39,8 @@ export type SpaceBlockReason = "low_coverage" | "too_many_failures";
 export interface BuildProgress {
     /** The backfill task is still discovering, running or paused. */
     backfillRunning: boolean;
+    /** Media the space has a vector or a queued request for. */
+    total: number;
     ready: number;
     pending: number;
     failed: number;
@@ -303,6 +303,8 @@ export interface EmbeddingSpaceStatusView {
     status: LibraryEmbeddingSpaceStatus;
     modelId: string;
     spaceId: string;
+    /** Media the space has a vector or a queued request for. */
+    total: number;
     ready: number;
     pending: number;
     failed: number;
@@ -314,19 +316,15 @@ export interface EmbeddingSpaceStatusView {
     lastError: AiErrorView | null;
 }
 
-/** Progress of every embedding space of a library, plus how many media it should cover. */
+/** Progress of every embedding space of a library. */
 export async function getLibraryEmbeddingStatus(libraryId: string) {
     const spaces = await db.select().from(LibraryEmbeddingSpace).where(eq(LibraryEmbeddingSpace.library_id, libraryId));
     const building = new Map((await buildingSpaces(libraryId)).map((row) => [row.space.id, row.backfillStatus]));
-    const [{ total } = { total: 0 }] = await db
-        .select({ total: sql<number>`count(*)::int` })
-        .from(Media)
-        .where(and(eq(Media.library_id, libraryId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)));
 
     const views: EmbeddingSpaceStatusView[] = [];
     for (const role of EMBEDDING_ROLES) {
         for (const space of spaces.filter((row) => row.role === role)) {
-            let counts: { ready: number; pending: number; failed: number };
+            let counts: { total: number; ready: number; pending: number; failed: number };
             let blocked: SpaceBlockReason | null = null;
             if (space.status === LibraryEmbeddingSpaceStatus.BUILDING) {
                 const progress = await buildProgress(space, building.get(space.id) ?? null);
@@ -341,6 +339,7 @@ export async function getLibraryEmbeddingStatus(libraryId: string) {
                 status: space.status,
                 modelId: space.model_id,
                 spaceId: space.space_id,
+                total: counts.total,
                 ready: counts.ready,
                 pending: counts.pending,
                 failed: counts.failed,
@@ -356,5 +355,10 @@ export async function getLibraryEmbeddingStatus(libraryId: string) {
             });
         }
     }
-    return { mediaTotal: total, spaces: views };
+    // A rebuild covers what the active space covers; its backfill queues requests as it goes.
+    for (const view of views) {
+        const active = views.find((other) => other.role === view.role && other.status === LibraryEmbeddingSpaceStatus.ACTIVE);
+        if (view.status === LibraryEmbeddingSpaceStatus.BUILDING && active) view.total = Math.max(view.total, active.total);
+    }
+    return { spaces: views };
 }
