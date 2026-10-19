@@ -10,6 +10,7 @@ import {
     Media,
 } from "@/db/schema";
 import { db, type Transaction } from "@/global/db";
+import type { EnrichmentOptions } from "./enrich";
 import { queueLibraryAiEnrichment } from "./queue-enrichment";
 import { countEmbeddings, EMBEDDING_ROLE_FOR, latestEmbeddingError } from "./embedding-queue";
 import { parseModelCapabilities, type EmbeddingModelCapabilities } from "./model-schema";
@@ -91,9 +92,13 @@ async function dropSpace(tx: Transaction, space: SpaceRow) {
  * backfill. One task serves every space: concurrent tasks over the same media would describe it
  * twice, and the two different descriptions would supersede each other's text vectors.
  */
-export async function startBackfill(library: { id: string; owner_id: string }, spaceRowIds: string[]) {
+export async function startBackfill(
+    library: { id: string; owner_id: string },
+    spaceRowIds: string[],
+    options: EnrichmentOptions = {},
+) {
     if (spaceRowIds.length === 0) return;
-    const taskId = await queueLibraryAiEnrichment(library.id, library.owner_id);
+    const taskId = await queueLibraryAiEnrichment(library.id, library.owner_id, options);
     await db.update(LibraryEmbeddingSpace).set({ backfill_task_id: taskId }).where(inArray(LibraryEmbeddingSpace.id, spaceRowIds));
 }
 

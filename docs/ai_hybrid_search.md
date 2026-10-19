@@ -167,11 +167,13 @@ Typical fields:
 - processing status
 - last error
 
-The metadata pipeline should be versioned independently from the raw model name. A recommended ID shape is:
+The metadata pipeline is versioned independently from the model name: it is the prompt version plus the output language, for example:
 
 ```text
-gemini:gemini-2.5-flash:image-metadata:v1
+image-metadata:v2:zh-Hans
 ```
+
+The `model` column records which model wrote a description. Switching the describe model therefore leaves existing descriptions in place and only new or changed content uses the new model, unless the user asks to re-describe the library (a library-wide run with `redescribe`, which describes again every item whose description was written by another model).
 
 Recommended uniqueness:
 
@@ -179,7 +181,7 @@ Recommended uniqueness:
 (entity_type, entity_id, metadata_pipeline_id)
 ```
 
-Search documents and result explanations use the current pipeline's result, otherwise the newest result of an earlier pipeline, so a model or language change keeps descriptions searchable while the library is re-described. Once the current pipeline stores a result for a media item, that item's older pipeline rows are deleted.
+Search documents and result explanations use the current pipeline's result, otherwise the newest result of an earlier pipeline, so a language change keeps descriptions searchable while the library is re-described. Once the current pipeline stores a result for a media item, that item's older pipeline rows are deleted.
 
 ### 4.4 `asset_embedding`
 

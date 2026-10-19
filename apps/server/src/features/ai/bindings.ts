@@ -4,6 +4,7 @@ import { db, type Transaction } from "@/global/db";
 import { alignEmbeddingSpace, dropSpacesOfModels, startBackfill } from "./embedding-spaces";
 import { AI_BINDING_ROLES, type AiBindingRole, type LibraryAiBindings, type RoleBinding } from "./model-schema";
 import { queueLibraryAiEnrichment } from "./queue-enrichment";
+import type { UpdateLibraryAiBindings } from "./schema";
 import type { EmbeddingBindingRole } from "./types";
 
 /**
@@ -75,13 +76,14 @@ export async function getRolesUsingModel(ownerId: string, modelId: string): Prom
 /**
  * Applies the requested role changes and language to a library in one transaction, so a failure
  * leaves nothing half-applied. Work that needs the committed state (backfills, re-describing
- * after a language change) is queued afterwards.
+ * after a language change) is queued afterwards. A new describe model only describes new content
+ * unless `redescribe` asks for the existing descriptions of other models to be replaced.
  */
 export async function saveLibraryBindings(
     library: { id: string; owner_id: string },
-    changes: LibraryAiBindings,
-    language?: string,
+    changes: UpdateLibraryAiBindings,
 ): Promise<{ indexingStarted: boolean }> {
+    const { language, redescribe } = changes;
     const { backfills, languageChanged, describeModelId } = await db.transaction(async (tx) => {
         const [current] = await tx
             .select({ ai_bindings: Library.ai_bindings, ai_language: Library.ai_language })
@@ -115,8 +117,11 @@ export async function saveLibraryBindings(
         // A backfill is already a full library enrichment, so it also re-describes after a language
         // change. Descriptions in the old language are stale: re-describe the library (search
         // documents and text vectors follow automatically).
-        if (backfills.length > 0) await startBackfill(library, backfills);
-        else if (languageChanged && describeModelId) await queueLibraryAiEnrichment(library.id, library.owner_id);
+        if (backfills.length > 0) {
+            await startBackfill(library, backfills, { redescribe });
+        } else if (describeModelId && (languageChanged || redescribe)) {
+            await queueLibraryAiEnrichment(library.id, library.owner_id, { redescribe });
+        }
         return { indexingStarted: true };
     } catch (error) {
         console.error(`[AI BINDINGS] Saved bindings of library ${library.id} but could not start indexing:`, error);

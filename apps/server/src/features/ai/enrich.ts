@@ -33,6 +33,12 @@ type EnrichmentPost = Omit<
 
 type StoredAiMetadata = typeof AssetAiMetadata.$inferSelect;
 
+/** How a library-wide enrichment run treats existing descriptions. */
+export interface EnrichmentOptions {
+    /** Describe again every item whose stored description another model wrote. */
+    redescribe?: boolean;
+}
+
 const emptyImageMetadata: ImageAiMetadata = {
     caption: "",
     tags: [],
@@ -56,6 +62,19 @@ export function selectStoredMetadata<
     if (current) return current;
     const timeOf = (row: T) => (row.update_time ?? row.create_time).epochMilliseconds;
     return results.sort((a, b) => timeOf(b) - timeOf(a))[0] ?? null;
+}
+
+/**
+ * Whether the stored description of the current pipeline still stands: it was made from the same
+ * image and, when `requiredModel` is given, by that model. A model switch alone keeps old descriptions.
+ */
+export function canReuseDescription(
+    stored: Pick<StoredAiMetadata, "input_hash" | "model"> | undefined,
+    sourceHash: string | null,
+    requiredModel?: string,
+): boolean {
+    if (!stored || !sourceHash || stored.input_hash !== sourceHash) return false;
+    return requiredModel === undefined || stored.model === requiredModel;
 }
 
 function toImageAiMetadata(row: StoredAiMetadata): ImageAiMetadata {
@@ -90,7 +109,11 @@ export const AiEnrichmentService = {
      * description lands, the document and its text vectors follow. Embeddings are queued for every
      * space the library writes (active and building) and computed in batches by the embedding worker.
      */
-    async enrichMediaItem(media: typeof Media.$inferSelect, post: EnrichmentPost, abortSignal?: AbortSignal): Promise<void> {
+    async enrichMediaItem(
+        media: typeof Media.$inferSelect,
+        post: EnrichmentPost,
+        { abortSignal, redescribe }: EnrichmentOptions & { abortSignal?: AbortSignal } = {},
+    ): Promise<void> {
         const aiService = await AiService.forLibrary(media.library_id);
         const describeProvider = aiService?.describeProvider ?? null;
         const metadataPipelineId = aiService?.metadataPipelineId ?? null;
@@ -116,7 +139,7 @@ export const AiEnrichmentService = {
                 ),
             );
         const currentMetadata = storedMetadata.find((row) => row.metadata_pipeline_id === metadataPipelineId);
-        const canReuseMetadata = Boolean(sourceHash && currentMetadata?.input_hash === sourceHash);
+        const canReuseMetadata = canReuseDescription(currentMetadata, sourceHash, redescribe ? describeProvider?.modelName : undefined);
         const shouldRunDescription = Boolean(describeProvider && sourceFile && !canReuseMetadata);
 
         let described: ImageAiMetadata | null = null;

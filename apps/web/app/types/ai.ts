@@ -114,6 +114,8 @@ export interface AiErrorView {
 
 export interface AiDescribeStatus {
     completed: number;
+    /** Completed descriptions that another model than the current one wrote. */
+    otherModel: number;
     pending: number;
     failed: number;
     lastError: AiErrorView | null;

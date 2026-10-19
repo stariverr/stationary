@@ -514,7 +514,7 @@ aiRouter.post(
         const access = await loadOwnedLibrary(c, library_id);
         if (access.denied) return access.denied;
 
-        const { language, ...bindings } = c.req.valid("json");
+        const data = c.req.valid("json");
         const current = await getLibraryBindings(library_id);
         const roleCategories: Array<[AiBindingRole, AiModelCategory]> = [
             ["describe", "generation"],
@@ -524,7 +524,7 @@ aiRouter.post(
         ];
 
         for (const [role, category] of roleCategories) {
-            const binding = bindings[role];
+            const binding = data[role];
             if (!binding) continue;
             try {
                 const resolved = await resolveBindingConfig(binding, category, access.library.owner_id, role);
@@ -543,11 +543,11 @@ aiRouter.post(
             }
         }
 
-        const { indexingStarted } = await saveLibraryBindings(access.library, bindings, language);
+        const { indexingStarted } = await saveLibraryBindings(access.library, data);
         return c.json(
             success(
                 Code.SUCCESS,
-                { ...(await getLibraryBindings(library_id)), language: language ?? access.library.ai_language, indexingStarted },
+                { ...(await getLibraryBindings(library_id)), language: data.language ?? access.library.ai_language, indexingStarted },
                 "AI bindings updated successfully",
             ),
         );
@@ -573,6 +573,19 @@ aiRouter.post("/status/:library_id/retry-failed", requireAuth, validate("param",
     const backfills = await restartStalledBackfills(access.library);
     // Failed descriptions: re-process the library, which reuses stored results and retries only what is missing.
     const describeFailed = ((await getLibraryDescribeStatus(library_id))?.failed ?? 0) > 0;
-    if (describeFailed && backfills === 0) await queueLibraryAiEnrichment(library_id, access.library.owner_id);
+    if (describeFailed && backfills === 0) await queueLibraryAiEnrichment(library_id, access.library.owner_id, { redescribe: false });
     return c.json(success(Code.SUCCESS, { requeued, backfills, describeRequeued: describeFailed }));
+});
+
+// Replaces the descriptions that other models wrote with the library's current describe model.
+aiRouter.post("/status/:library_id/redescribe", requireAuth, validate("param", LibraryParamSchema), async (c) => {
+    const { library_id } = c.req.valid("param");
+    const access = await loadOwnedLibrary(c, library_id);
+    if (access.denied) return access.denied;
+
+    if (!(await getLibraryDescribeStatus(library_id))) {
+        return c.json(error(Code.INVALID_PARAMETER, "No usable describe model is bound to this library"), 400);
+    }
+    await queueLibraryAiEnrichment(library_id, access.library.owner_id, { redescribe: true });
+    return c.json(success(Code.SUCCESS, null, "Re-describing started"));
 });

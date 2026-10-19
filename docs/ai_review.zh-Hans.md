@@ -115,6 +115,13 @@
 
 **改造方向**：换描述模型时，和换语言一样弹确认框，让用户选"只用于新内容"还是"重新描述全部"。
 
+**已修复（2026-10-18）**：
+- 描述流水线 ID 去掉了模型，只由 prompt 版本和语言组成（`image-metadata:v2:zh-Hans`），模型记在 `asset_ai_metadata.model` 列。以前 ID 带着模型，换模型后任何一次全库任务（补建向量、重试失败）都会悄悄把整库重新描述一遍，"只用于新内容"做不到。现在换模型不会让旧描述失效。已有数据要手动执行一次 SQL，把旧 ID 去掉模型前缀；不执行的话，状态会显示"已描述 0"，而且每个媒体下次被处理时都会重新描述一次。
+- 保存绑定时，描述模型变了且库里有媒体，就弹确认框："仅用于新内容"或"重新描述全部"。请求体新增 `redescribe`；换语言仍然全部重新描述，不受它影响。
+- "全部重新描述"的入口：`POST /api/ai/status/:library_id/redescribe`，设置页在"N 条由其他模型生成"后面放了"用当前模型重新描述"。任务把 `input_snapshot.redescribe` 传给 `enrichMediaItem`：只重做由其他模型写的描述，已是当前模型的跳过，所以任务中断或重试都不会重复花钱。
+- 状态里的 `describe.otherModel` 是已完成描述中由其他模型生成的数量，用来决定是否显示入口。
+- 首次绑定描述模型时，同样可以选"重新描述全部"，把已有媒体都描述一遍。
+
 ### 2.3 描述模型必须支持 json_schema（决定不改）
 
 `supportsAiBindingRole("describe")` 要求 `structuredOutput`。DeepSeek 和很多国产兼容端点只支持 `json_object`，因此根本不能绑定。
@@ -210,7 +217,7 @@ rerank 只挂在 openai-compatible 适配器上，走 Cohere 风格的 `/rerank`
 - 生成后再截断：caption、scene、OCR 有长度上限；tags、objects、colors、styles 去重并限制条数。限制没有写进 JSON schema，因为严格结构化输出模式不接受字符串长度关键字。超长的输出会被截断，描述本身不会失败。
 - prompt 和 schema 没有改，因此 `IMAGE_METADATA_PIPELINE_VERSION` 不变，已有描述不会被重新生成。
 
-**仍待处理**：prompt 带上标题和描述作为上下文。这会改变描述的输入，需要提升流水线版本，复用判断（目前只比较图片 hash）也得把文本算进去。建议和 2.2"重新描述全部"一起做。
+**仍待处理**：prompt 带上标题和描述作为上下文。这会改变描述的输入，需要提升流水线版本，复用判断（目前只比较图片 hash）也得把文本算进去。2.2 的"重新描述全部"已经做完，不再等它。
 ### 4.3 没有用量和费用记录
 
 不记 token 用量，也没有预算或上限。整库重新描述的成本，用户只看到一个确认框。
@@ -231,7 +238,7 @@ rerank 只挂在 openai-compatible 适配器上，走 Cohere 风格的 `/rerank`
 - **新内容自动建索引**：最大的缺口，见 async 文档第 5 节。
 - **以图搜图 / 相似图片**：图片向量已经有了，却没有相应接口。
 - **近重复检测**：基于同一批向量即可实现。
-- **图片 embedding 供应商**：已支持 Gemini、DashScope，以及自托管的 llama.cpp（`llama-cpp` 适配器）和 vLLM（`vllm` 适配器），模型限定为 qwen3-vl-embedding 和 embeddinggemma-2。各家请求格式不统一，因此一种线协议对应一个适配器：SGLang 与 Jina 共用 `input:[{text},{image}]`，Voyage（`inputs[].content[]`）和 Cohere（顶层 `images`）各是一种，暂不支持。图片目前只以 base64 data URI 发送；按图片选择预签名 URL 传输尚未实现（原图满足模型格式和尺寸限制时发 URL，否则发 base64）。
+- **图片 embedding 供应商**：已支持 Gemini、DashScope，以及自托管的 llama.cpp（`llama-cpp` 适配器）和 vLLM（`vllm` 适配器），模型限定为 qwen3-vl-embedding 和 embeddinggemma-2。各家请求格式不统一，因此一种线协议对应一个适配器：SGLang 与 Jina 共用 `input:[{text},{image}]`，Voyage（`inputs[].content[]`）和 Cohere（顶层 `images`）各是一种，暂不支持。图片目前只以 base64 data URI 发送；按图片选择预签名 URL 传输尚未实现（原图满足模型格式和尺寸限制时发 URL，否则发 base64）。2026-10-18 评估后暂缓：描述和向量的来源优先选封面，而封面一律是服务器生成的 AVIF；自托管的两个模型（qwen3-vl-embedding、embeddinggemma-2）只收 JPEG 和 PNG，所以只有“没有封面、原图恰好是 JPEG/PNG 且不超过 1536 px / 4 MB、且已记录宽高”时才会走 URL，实际几乎不触发。要让它有用，得先让封面多生成一份 JPEG，或让自托管模型接受 AVIF。
 - **常用供应商模板**：Anthropic 原生、OpenRouter、Azure OpenAI、Ollama。
 - **视频只用封面一帧**：没有关键帧、字幕或语音转写。
 - **搜索能力**：只能搜 Media，不能搜 Post；没有按日期、作者、标签过滤。
