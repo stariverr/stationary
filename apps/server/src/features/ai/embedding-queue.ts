@@ -15,7 +15,7 @@ import {
 import { db, type Transaction } from "@/global/db";
 import { kv } from "@/global/kv";
 import { retryDelaySeconds } from "@/infra/jobs/policy";
-import { AiProviderError, AiThrottledError, classifyAiError, getSafeAiErrorMessage } from "./errors";
+import { AiProviderError, AiThrottledError, classifyAiError, getFailureCategory, getSafeAiErrorMessage } from "./errors";
 import { loadAiEmbeddingImage } from "./image-source";
 import { AiService } from "./service";
 import type { AiErrorView, EmbeddingBindingRole, EmbeddingResult, TextEmbeddingProvider, VisualEmbeddingProvider } from "./types";
@@ -284,25 +284,39 @@ export async function storeEmbeddingResults(rows: EmbeddingRow[], results: Embed
 }
 
 /**
- * Returns rows of a failed request to the queue: throttling only delays them, other errors
- * count an attempt, and non-retryable errors or exhausted attempts mark them FAILED.
+ * Returns rows of a failed request to the queue: throttling and cancellation only release them,
+ * other errors count an attempt, and non-retryable errors or exhausted attempts mark them FAILED.
+ * A non-retryable error that one bad input may have caused fails no row of a multi-row batch:
+ * each row is retried on its own, which singles out the input at fault.
  */
 export async function rescheduleFailedRows(rows: EmbeddingRow[], error: unknown) {
     const classification = classifyAiError(error);
     const message = getSafeAiErrorMessage(error);
     const ids = rows.map((row) => row.id);
 
-    if (error instanceof AiThrottledError) {
-        // Nothing was sent: release the rows without counting an attempt.
+    if (error instanceof AiThrottledError || classification.kind === "CANCELLED") {
+        // Nothing was sent, or the worker is shutting down: release the rows without counting an attempt.
+        const delaySeconds = error instanceof AiThrottledError ? Math.ceil(error.retryAfterMs / 1000) : 0;
         await db
             .update(AssetEmbedding)
-            .set({ available_at: sql`now() + (${Math.ceil(error.retryAfterMs / 1000)} * interval '1 second')` })
+            .set({ available_at: sql`now() + (${delaySeconds} * interval '1 second')` })
             .where(inArray(AssetEmbedding.id, ids));
         return;
     }
 
+    const category = getFailureCategory(classification.kind);
+    const isolate = rows.length > 1 && !classification.retryable && (category === "input" || category === "unknown");
+
     for (const row of rows) {
         const attempts = row.attempt_count + 1;
+        if (isolate) {
+            // Rows that already failed once are claimed alone (see processNextEmbeddingBatch).
+            await db
+                .update(AssetEmbedding)
+                .set({ attempt_count: attempts, available_at: sql`now()`, update_time: sql`now()` })
+                .where(and(eq(AssetEmbedding.id, row.id), eq(AssetEmbedding.embedding_status, EmbeddingStatus.PENDING)));
+            continue;
+        }
         const giveUp = !classification.retryable || attempts >= MAX_EMBEDDING_ATTEMPTS;
         const delaySeconds = Math.max(retryDelaySeconds(attempts), Math.ceil((classification.retryAfterMs ?? 0) / 1000));
         await db

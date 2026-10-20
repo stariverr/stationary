@@ -1,8 +1,15 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import {
+    AssetAiMetadata,
     AssetSearchDocument,
     EntityType,
+    File as DbFile,
+    ProcessingStatus,
+    SyncStatus,
+    Track,
+    TrackPurpose,
+    TrackType,
     AiModel,
     AiProvider,
     AssetEmbedding,
@@ -20,6 +27,9 @@ import {
 import { db } from "@/global/db";
 import { kv } from "@/global/kv";
 import { secretBox } from "@/global/secrets";
+import { s3, S3ObjectTooLargeError } from "@/global/s3";
+import { Quality } from "@/lib/types";
+import { AiEnrichmentService } from "@/features/ai/enrich";
 import { enqueueEmbeddings, processNextEmbeddingBatch, retryFailedEmbeddings } from "@/features/ai/embedding-queue";
 import { clearModelBindings, getLibraryBindings, getRolesUsingModel, saveLibraryBindings } from "@/features/ai/bindings";
 import { getLibraryEmbeddingStatus, promoteBuiltSpaces, syncEmbeddingSpace } from "@/features/ai/embedding-spaces";
@@ -62,7 +72,8 @@ function fakeVector(text: string, dimension: number): number[] {
 }
 
 const requests: Array<{ contents: Array<{ text?: string }>; dimension: number }> = [];
-let failNextRequest = false;
+/** Requests with a text containing this are rejected with a 400, like a provider refusing a bad input. */
+let rejectedText: string | null = null;
 const originalFetch = globalThis.fetch;
 
 function fakeDashScope() {
@@ -73,8 +84,7 @@ function fakeDashScope() {
         const body = (await request.json()) as { input: { contents: Array<{ text?: string }> }; parameters?: { dimension?: number } };
         const dimension = body.parameters?.dimension ?? 1024;
         requests.push({ contents: body.input.contents, dimension });
-        if (failNextRequest) {
-            failNextRequest = false;
+        if (rejectedText !== null && body.input.contents.some((content) => content.text?.includes(rejectedText!))) {
             return new Response(JSON.stringify({ message: "bad input" }), { status: 400, headers: { "content-type": "application/json" } });
         }
         const embeddings = body.input.contents.map((content, index) => ({
@@ -300,10 +310,15 @@ describe("AI embedding queue (PostgreSQL + Redis)", () => {
         const spaceId = "qwen3-vl-embedding:768:plain";
         await queueDocuments(spaceId, 768, " v2");
 
-        failNextRequest = true;
-        await processNextEmbeddingBatch();
+        // The batch is rejected without saying which input is at fault, so no row fails yet: each is retried alone.
+        rejectedText = " v2";
+        expect(await processNextEmbeddingBatch()).toHaveLength(3);
+        const isolated = (await rowsIn(spaceId)).filter((row) => row.content_hash.endsWith(" v2"));
+        expect(isolated.every((row) => row.embedding_status === EmbeddingStatus.PENDING && row.attempt_count === 1)).toBe(true);
+        for (let index = 0; index < 3; index++) expect(await processNextEmbeddingBatch()).toHaveLength(1);
+        rejectedText = null;
         const failed = (await rowsIn(spaceId)).filter((row) => row.content_hash.endsWith(" v2"));
-        expect(failed.every((row) => row.embedding_status === EmbeddingStatus.FAILED && row.attempt_count === 1)).toBe(true);
+        expect(failed.every((row) => row.embedding_status === EmbeddingStatus.FAILED && row.attempt_count === 2)).toBe(true);
         // The previous vectors keep serving search while the new input is unresolved.
         expect((await rowsIn(spaceId)).filter((row) => row.embedding_status === EmbeddingStatus.READY)).toHaveLength(3);
         // Settings show the provider's error next to the failed count.
@@ -636,5 +651,119 @@ describe("Multilingual keyword search (PostgreSQL)", () => {
         expect(await find("straße")).toEqual([ids.strasse]);
         expect(await find("iphone15")).toEqual([ids.phone]);
         expect(await find("100％")).toEqual([ids.percent]);
+    });
+});
+
+describe("AI enrichment (PostgreSQL + Redis)", () => {
+    const enrichOwnerId = crypto.randomUUID();
+    const enrichLibraryId = crypto.randomUUID();
+    const mediaId = crypto.randomUUID();
+    const fileId = crypto.randomUUID();
+    let enrichProviderId = "";
+
+    beforeAll(async () => {
+        if (process.env.RUN_AI_DB_TESTS !== "1") return;
+        const [provider] = await db
+            .insert(AiProvider)
+            .values({
+                owner_id: enrichOwnerId,
+                template_id: "custom-openai-compatible",
+                name: "Fake vision model",
+                base_url: "https://vision.test/v1",
+            })
+            .returning();
+        enrichProviderId = provider!.id;
+        const [model] = await db
+            .insert(AiModel)
+            .values({
+                provider_id: enrichProviderId,
+                name: "fake-vision",
+                display_name: "Fake Vision",
+                category: "generation",
+                capabilities: {
+                    contextWindow: 32_000,
+                    inputModalities: ["text", "image"],
+                    imageFormats: ["image/jpeg"],
+                    structuredOutput: true,
+                },
+            })
+            .returning();
+        await db.insert(Library).values({
+            id: enrichLibraryId,
+            name: "AI enrichment test",
+            description: "",
+            owner_id: enrichOwnerId,
+            ai_bindings: { describe: { modelId: model!.id } },
+        });
+        await db.insert(Media).values({
+            id: mediaId,
+            library_id: enrichLibraryId,
+            eid: `ai-enrich-${mediaId}`,
+            title: "harbour at dusk",
+            description: "",
+            type: MediaType.IMAGE,
+            sort_order: 0,
+        });
+        await db.insert(DbFile).values({
+            id: fileId,
+            hash: "huge-image",
+            size: 80 * 1024 * 1024,
+            mime_type: "image/jpeg",
+            path: `ai-enrich/${fileId}.jpg`,
+            bucket: "test",
+        });
+        await db.insert(Track).values({
+            media_id: mediaId,
+            file_id: fileId,
+            type: TrackType.IMAGE,
+            purpose: TrackPurpose.CONTENT,
+            quality: Quality.HIGH,
+            sync_status: SyncStatus.COMPLETED,
+            variant_key: "original",
+            is_primary: true,
+        });
+    });
+
+    afterAll(async () => {
+        if (process.env.RUN_AI_DB_TESTS !== "1") return;
+        await db.delete(AssetAiMetadata).where(eq(AssetAiMetadata.library_id, enrichLibraryId));
+        await db.delete(AssetSearchDocument).where(eq(AssetSearchDocument.library_id, enrichLibraryId));
+        await db.delete(Track).where(eq(Track.media_id, mediaId));
+        await db.delete(DbFile).where(eq(DbFile.id, fileId));
+        await db.delete(Media).where(eq(Media.id, mediaId));
+        await db.delete(Library).where(eq(Library.id, enrichLibraryId));
+        await db.delete(AiModel).where(eq(AiModel.provider_id, enrichProviderId));
+        await db.delete(AiProvider).where(eq(AiProvider.id, enrichProviderId));
+    });
+
+    databaseTest("indexes an item whose image cannot be read and records why it was not described", async () => {
+        const read = spyOn(s3, "read").mockRejectedValue(new S3ObjectTooLargeError(80 * 1024 * 1024, 50 * 1024 * 1024));
+        try {
+            const [media] = await db.select().from(Media).where(eq(Media.id, mediaId));
+            const post = {
+                id: null,
+                eid: media!.eid,
+                source: media!.source,
+                title: "",
+                description: "",
+                author_name: "",
+                author_external_id: null,
+                url: "",
+                published_time: null,
+            };
+            await expect(AiEnrichmentService.enrichMediaItem(media!, post)).rejects.toThrow("byte limit");
+        } finally {
+            read.mockRestore();
+        }
+
+        // Keyword search still finds it, and AI settings count it as an item that cannot be processed.
+        const [document] = await db.select().from(AssetSearchDocument).where(eq(AssetSearchDocument.entity_id, mediaId));
+        expect(document?.content).toContain("harbour at dusk");
+        const [metadata] = await db.select().from(AssetAiMetadata).where(eq(AssetAiMetadata.entity_id, mediaId));
+        expect(metadata).toMatchObject({
+            processing_status: ProcessingStatus.FAILED,
+            error_kind: "INVALID_REQUEST",
+            input_hash: null,
+        });
     });
 });

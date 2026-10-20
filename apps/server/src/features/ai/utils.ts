@@ -94,3 +94,12 @@ export function imageBase64(image: EmbedImageParams): string {
     if (!("imageBuffer" in image)) throw new Error("This provider does not download images from URLs; send the image bytes.");
     return Buffer.from(image.imageBuffer).toString("base64");
 }
+
+/**
+ * `signal` bounded by a timeout. AI SDK calls have no timeout of their own; when this one fires they
+ * reject with a TimeoutError, which `classifyAiError` treats as a retryable TIMEOUT.
+ */
+export function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
