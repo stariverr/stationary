@@ -14,9 +14,13 @@ import { db } from "@/global/db";
 import { s3, S3ObjectTooLargeError } from "@/global/s3";
 import { Quality } from "@/lib/types";
 import { AiProviderError } from "./errors";
+import { supportsImageFormat, withinImageLimits } from "./image-format";
+import type { EmbedImageParams, VisualEmbeddingProvider } from "./types";
 
 const SOURCE_READ_TIMEOUT_MS = 60_000;
 const SOURCE_MAX_BYTES = 50 * 1024 * 1024;
+/** Lifetime of a source URL handed to a model server; it also covers waiting for a rate-limit slot. */
+const SOURCE_URL_TTL_SECONDS = 60 * 60;
 
 type ImageSourceRow = {
     track: Pick<
@@ -148,4 +152,29 @@ export async function readAiSourceImage(
         }
         throw error;
     }
+}
+
+/**
+ * Loads a source image for an embedding model. A model server that downloads images itself gets a
+ * presigned URL when the stored file is already in a format the model accepts and within the size
+ * limits, so this server neither reads nor converts it. Anything else is read as bytes, which
+ * `AiService.embedImages` converts as needed.
+ */
+export async function loadAiEmbeddingImage(
+    file: Pick<typeof DbFile.$inferSelect, "id" | "path" | "bucket" | "mime_type" | "size">,
+    dimensions: { width: number; height: number } | undefined,
+    provider: VisualEmbeddingProvider,
+    signal?: AbortSignal,
+): Promise<EmbedImageParams> {
+    if (
+        provider.fetchesImageUrls &&
+        supportsImageFormat(file.mime_type, provider.capabilities.imageFormats) &&
+        dimensions &&
+        file.size !== null &&
+        withinImageLimits(dimensions.width, dimensions.height, file.size)
+    ) {
+        const url = await s3.getPresignedUrl(file.path, { bucket: file.bucket, expiresInSeconds: SOURCE_URL_TTL_SECONDS });
+        return { url, mimeType: file.mime_type };
+    }
+    return { imageBuffer: await readAiSourceImage(file, signal), mimeType: file.mime_type };
 }

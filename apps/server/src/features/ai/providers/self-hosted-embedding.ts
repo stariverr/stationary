@@ -1,15 +1,16 @@
 import type { EmbeddingModelCapabilities } from "../model-schema";
 import type { EmbedImageParams, EmbedTextParams, EmbeddingResult, ResolvedModelConfig, VisualEmbeddingProvider } from "../types";
 import { AiProviderError } from "../errors";
-import { computeEmbeddingSpaceId, formatEmbeddingText, shortenMrlVector, toEmbeddingResult } from "../utils";
+import { computeEmbeddingSpaceId, formatEmbeddingText, imageBase64, shortenMrlVector, toEmbeddingResult } from "../utils";
 import { postJson } from "./http";
 
 interface EmbeddingsResponse {
     data?: Array<{ index?: number; embedding: unknown }>;
 }
 
-export function toDataUri(image: EmbedImageParams): string {
-    return `data:${image.mimeType};base64,${Buffer.from(image.imageBuffer).toString("base64")}`;
+/** The `image_url.url` of an image: its own URL, which the server downloads, or its bytes as a data URI. */
+function imageUrl(image: EmbedImageParams): string {
+    return "url" in image ? image.url : `data:${image.mimeType};base64,${imageBase64(image)}`;
 }
 
 /**
@@ -25,6 +26,7 @@ export abstract class SelfHostedEmbeddingProvider implements VisualEmbeddingProv
     readonly capabilities: EmbeddingModelCapabilities;
     readonly spaceId: string;
     readonly textBatchSize = 32;
+    readonly fetchesImageUrls = true;
     abstract readonly imageBatchSize: number;
     private readonly apiKey: string;
     private readonly baseUrl: string;
@@ -77,7 +79,7 @@ export class LlamaCppEmbeddingProvider extends SelfHostedEmbeddingProvider {
     readonly imageBatchSize = 4;
 
     protected imageRequestFields(images: EmbedImageParams[]) {
-        return { input: images.map((image) => ({ content: [{ type: "image_url", image_url: { url: toDataUri(image) } }] })) };
+        return { input: images.map((image) => ({ content: [{ type: "image_url", image_url: { url: imageUrl(image) } }] })) };
     }
 }
 
@@ -89,6 +91,6 @@ export class VllmEmbeddingProvider extends SelfHostedEmbeddingProvider {
     readonly imageBatchSize = 1;
 
     protected imageRequestFields(images: EmbedImageParams[]) {
-        return { messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: toDataUri(images[0]!) } }] }] };
+        return { messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: imageUrl(images[0]!) } }] }] };
     }
 }

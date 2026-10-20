@@ -17,6 +17,11 @@ export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
  */
 const ENCODE_TARGETS = ["image/jpeg", "image/webp", "image/png"] as const;
 
+/** True when an image needs no shrinking before it is sent to a model. */
+export function withinImageLimits(width: number, height: number, bytes: number): boolean {
+    return Math.max(width, height) <= MAX_IMAGE_EDGE && bytes <= MAX_IMAGE_BYTES;
+}
+
 export function supportsImageFormat(mimeType: string, formats?: readonly ImageFormat[]): boolean {
     return (formats ?? DEFAULT_IMAGE_FORMATS).includes(mimeType.split(";", 1)[0]!.trim().toLowerCase() as ImageFormat);
 }
@@ -41,7 +46,7 @@ export async function prepareImageForModel(
     } catch {
         // Undecodable here; an accepted format can still be sent as-is.
     }
-    const fits = size !== null && Math.max(size.width, size.height) <= MAX_IMAGE_EDGE && image.byteLength <= MAX_IMAGE_BYTES;
+    const fits = size !== null && withinImageLimits(size.width, size.height, image.byteLength);
     if (accepted && (fits || size === null)) {
         return { image, mimeType: normalizedType };
     }
