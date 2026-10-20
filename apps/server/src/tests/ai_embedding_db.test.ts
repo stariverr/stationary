@@ -24,6 +24,7 @@ import { enqueueEmbeddings, processNextEmbeddingBatch, retryFailedEmbeddings } f
 import { clearModelBindings, getLibraryBindings, getRolesUsingModel, saveLibraryBindings } from "@/features/ai/bindings";
 import { getLibraryEmbeddingStatus, promoteBuiltSpaces, syncEmbeddingSpace } from "@/features/ai/embedding-spaces";
 import { getLibraryAiStatus } from "@/features/ai/status";
+import { coverageFilter, getCoverageTargets, getLibraryCoverage, type CoverageFilter } from "@/features/ai/coverage";
 import { batchDeleteMedia } from "@/features/media/lifecycle";
 import { createRedisRateLimitStore } from "@/features/ai/rate-limit";
 import { HybridSearchService } from "@/features/ai/search";
@@ -90,7 +91,8 @@ let rerankCalls = 0;
 let rerankFails = false;
 async function fakeRerank(request: Request): Promise<Response> {
     rerankCalls += 1;
-    if (rerankFails) return new Response(JSON.stringify({ message: "unavailable" }), { status: 503, headers: { "content-type": "application/json" } });
+    if (rerankFails)
+        return new Response(JSON.stringify({ message: "unavailable" }), { status: 503, headers: { "content-type": "application/json" } });
     const body = (await request.json()) as { documents: string[] };
     const results = body.documents.map((document, index) => ({ index, relevance_score: document.includes("dog") ? 0.9 : 0.1 }));
     return new Response(JSON.stringify({ results }), { status: 200, headers: { "content-type": "application/json" } });
@@ -160,8 +162,20 @@ describe("AI embedding queue (PostgreSQL + Redis)", () => {
         const [a, b] = await db
             .insert(AiModel)
             .values([
-                { provider_id: otherProviderId, name: "qwen3-vl-embedding", display_name: "Qwen3-VL Embedding", category: "embedding", capabilities: capabilities(1024) },
-                { provider_id: providerId, name: "qwen3-vl-embedding", display_name: "Qwen3-VL Embedding", category: "embedding", capabilities: capabilities(768) },
+                {
+                    provider_id: otherProviderId,
+                    name: "qwen3-vl-embedding",
+                    display_name: "Qwen3-VL Embedding",
+                    category: "embedding",
+                    capabilities: capabilities(1024),
+                },
+                {
+                    provider_id: providerId,
+                    name: "qwen3-vl-embedding",
+                    display_name: "Qwen3-VL Embedding",
+                    category: "embedding",
+                    capabilities: capabilities(768),
+                },
             ])
             .returning();
         modelA = a!.id;
@@ -227,8 +241,12 @@ describe("AI embedding queue (PostgreSQL + Redis)", () => {
         // The replaced space is retired, not dropped: its vectors stay for switching back.
         const remaining = await spaces();
         expect(remaining).toHaveLength(2);
-        expect(remaining.find((space) => space.status === LibraryEmbeddingSpaceStatus.ACTIVE)?.space_id).toBe("qwen3-vl-embedding:768:plain");
-        expect(remaining.find((space) => space.status === LibraryEmbeddingSpaceStatus.RETIRED)?.space_id).toBe("qwen3-vl-embedding:1024:plain");
+        expect(remaining.find((space) => space.status === LibraryEmbeddingSpaceStatus.ACTIVE)?.space_id).toBe(
+            "qwen3-vl-embedding:768:plain",
+        );
+        expect(remaining.find((space) => space.status === LibraryEmbeddingSpaceStatus.RETIRED)?.space_id).toBe(
+            "qwen3-vl-embedding:1024:plain",
+        );
         expect(await rowsIn("qwen3-vl-embedding:1024:plain")).toHaveLength(3);
         expect((await AiService.forLibrary(libraryId))!.textEmbedding.active?.spaceId).toBe("qwen3-vl-embedding:768:plain");
     });
@@ -258,10 +276,14 @@ describe("AI embedding queue (PostgreSQL + Redis)", () => {
             .set({ embedding_status: EmbeddingStatus.FAILED })
             .where(and(eq(AssetEmbedding.library_id, libraryId), eq(AssetEmbedding.embedding_space_id, "qwen3-vl-embedding:768:plain")));
         expect(await promoteBuiltSpaces()).toBe(0);
-        const blocked = (await getLibraryEmbeddingStatus(libraryId)).spaces.find((space) => space.status === LibraryEmbeddingSpaceStatus.BUILDING);
+        const blocked = (await getLibraryEmbeddingStatus(libraryId)).spaces.find(
+            (space) => space.status === LibraryEmbeddingSpaceStatus.BUILDING,
+        );
         expect(blocked).toMatchObject({ spaceId: "qwen3-vl-embedding:768:plain", blocked: "too_many_failures" });
         // The active space and its vectors are untouched.
-        expect((await rowsIn("qwen3-vl-embedding:1024:plain")).filter((row) => row.embedding_status === EmbeddingStatus.READY)).toHaveLength(3);
+        expect(
+            (await rowsIn("qwen3-vl-embedding:1024:plain")).filter((row) => row.embedding_status === EmbeddingStatus.READY),
+        ).toHaveLength(3);
 
         // Once the vectors are back, the space is promoted.
         await db
@@ -290,6 +312,47 @@ describe("AI embedding queue (PostgreSQL + Redis)", () => {
         expect(space?.failed).toBe(3);
         expect(space?.lastError?.message).toContain("bad input");
         expect(status.issues).toEqual([]);
+        // A rejected input is a problem of the item; the items stay covered by their previous vectors.
+        expect(failed.every((row) => row.error_kind === "INVALID_REQUEST")).toBe(true);
+        expect(status.coverage).toMatchObject({ eligible: 3, covered: 3, unprocessable: 0, failed: 0, missing: 0 });
+
+        // Without a ready vector, the rejected item cannot be processed, while one failed for a passing reason waits for a retry.
+        const readyIds = (
+            await db
+                .select({ id: AssetEmbedding.id })
+                .from(AssetEmbedding)
+                .where(
+                    and(
+                        inArray(AssetEmbedding.entity_id, [mediaIds.cat, mediaIds.dog]),
+                        eq(AssetEmbedding.embedding_space_id, spaceId),
+                        eq(AssetEmbedding.embedding_status, EmbeddingStatus.READY),
+                    ),
+                )
+        ).map((row) => row.id);
+        await db.update(AssetEmbedding).set({ embedding_status: EmbeddingStatus.STALE }).where(inArray(AssetEmbedding.id, readyIds));
+        await db
+            .update(AssetEmbedding)
+            .set({ error_kind: "TRANSIENT" })
+            .where(and(eq(AssetEmbedding.entity_id, mediaIds.cat), eq(AssetEmbedding.embedding_status, EmbeddingStatus.FAILED)));
+        const targets = getCoverageTargets(await AiService.forLibrary(libraryId))!;
+        expect(await getLibraryCoverage(libraryId, targets)).toMatchObject({
+            eligible: 3,
+            covered: 1,
+            unprocessable: 1,
+            failed: 1,
+            missing: 0,
+            lastFailure: { category: "unavailable" },
+        });
+        const listed = async (filter: CoverageFilter) =>
+            (
+                await db
+                    .select({ id: Media.id })
+                    .from(Media)
+                    .where(and(eq(Media.library_id, libraryId), coverageFilter(targets, filter)))
+            ).map((row) => row.id);
+        expect(await listed("incomplete")).toEqual([mediaIds.cat]);
+        expect(await listed("unprocessable")).toEqual([mediaIds.dog]);
+        await db.update(AssetEmbedding).set({ embedding_status: EmbeddingStatus.READY }).where(inArray(AssetEmbedding.id, readyIds));
 
         expect(await retryFailedEmbeddings(libraryId)).toBe(3);
         await createRedisRateLimitStore(kv).coolDown(providerId, 5_000);
@@ -362,7 +425,10 @@ describe("AI embedding queue (PostgreSQL + Redis)", () => {
 
         // Saving again starts the backfill of a space whose earlier start failed.
         const imageSpace = () => spaces().then((rows) => rows.find((space) => space.role === "imageEmbedding")!);
-        await db.update(LibraryEmbeddingSpace).set({ backfill_task_id: null }).where(eq(LibraryEmbeddingSpace.id, (await imageSpace()).id));
+        await db
+            .update(LibraryEmbeddingSpace)
+            .set({ backfill_task_id: null })
+            .where(eq(LibraryEmbeddingSpace.id, (await imageSpace()).id));
         expect(await saveLibraryBindings(library, { imageEmbedding: { modelId: modelA } })).toEqual({ indexingStarted: true });
         expect((await imageSpace()).backfill_task_id).not.toBeNull();
 
@@ -394,7 +460,13 @@ describe("AI search reranking (PostgreSQL + Redis)", () => {
         rerankProviderId = provider!.id;
         const [model] = await db
             .insert(AiModel)
-            .values({ provider_id: rerankProviderId, name: "fake-reranker", display_name: "Fake Reranker", category: "rerank", capabilities: { maxInputTokens: 512 } })
+            .values({
+                provider_id: rerankProviderId,
+                name: "fake-reranker",
+                display_name: "Fake Reranker",
+                category: "rerank",
+                capabilities: { maxInputTokens: 512 },
+            })
             .returning();
         await db.insert(Library).values({
             id: rerankLibraryId,
@@ -472,7 +544,9 @@ describe("AI search reranking (PostgreSQL + Redis)", () => {
 
     databaseTest("matches keyword queries term by term, in any order", async () => {
         const find = async (keyword: string) =>
-            (await HybridSearchService.keywordSearch(keyword, rerankLibraryId, 10, { library_id: rerankLibraryId, keyword })).map((item) => item.id);
+            (await HybridSearchService.keywordSearch(keyword, rerankLibraryId, 10, { library_id: rerankLibraryId, keyword })).map(
+                (item) => item.id,
+            );
 
         // "dog" is in the title, "Media Title: a" only in the content: each term may match either.
         expect(await find("dog a")).toEqual([media.dog]);
@@ -505,7 +579,9 @@ describe("Multilingual keyword search (PostgreSQL)", () => {
     };
     const ids = Object.fromEntries(Object.keys(docs).map((key) => [key, crypto.randomUUID()])) as Record<keyof typeof docs, string>;
     const find = async (keyword: string) =>
-        (await HybridSearchService.keywordSearch(keyword, keywordLibraryId, 20, { library_id: keywordLibraryId, keyword })).map((item) => item.id);
+        (await HybridSearchService.keywordSearch(keyword, keywordLibraryId, 20, { library_id: keywordLibraryId, keyword })).map(
+            (item) => item.id,
+        );
 
     beforeAll(async () => {
         if (process.env.RUN_AI_DB_TESTS !== "1") return;

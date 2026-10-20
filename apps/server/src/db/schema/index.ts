@@ -845,6 +845,8 @@ export const AssetAiMetadata = pgTable(
         input_hash: text("input_hash"),
         processing_status: ProcessingStatusEnum("processing_status").default(ProcessingStatus.PENDING).notNull(),
         last_error: text("last_error"),
+        /** Classified kind of `last_error` (see AiErrorKind in features/ai/errors.ts). */
+        error_kind: text("error_kind"),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),
@@ -852,7 +854,7 @@ export const AssetAiMetadata = pgTable(
     },
     (table) => [
         uniqueIndex("ai_metadata_entity_unique").on(table.entity_type, table.entity_id),
-        // Covers the library status counts, so they read only the index.
+        // Serves the library status counts.
         index("ai_metadata_library_status_idx").on(
             table.library_id,
             table.processing_status,
@@ -894,6 +896,8 @@ export const AssetEmbedding = pgTable(
             .notNull(),
         attempt_count: integer("attempt_count").default(0).notNull(),
         last_error: text("last_error"),
+        /** Classified kind of `last_error` (see AiErrorKind in features/ai/errors.ts). */
+        error_kind: text("error_kind"),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),

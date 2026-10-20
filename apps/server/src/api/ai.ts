@@ -7,7 +7,9 @@ import { retryFailedEmbeddings } from "@/features/ai/embedding-queue";
 import { queueLibraryAiEnrichment } from "@/features/ai/queue-enrichment";
 import { clearModelBindings, getLibraryBindings, getRolesUsingModel, saveLibraryBindings } from "@/features/ai/bindings";
 import { restartStalledBackfills } from "@/features/ai/embedding-spaces";
-import { getLibraryAiStatus, getLibraryDescribeStatus } from "@/features/ai/status";
+import { getLibraryAiStatus } from "@/features/ai/status";
+import { getLibraryAiProgress } from "@/features/ai/coverage";
+import { AiService } from "@/features/ai/service";
 import { classifyAiError, getSafeAiErrorMessage } from "@/features/ai/errors";
 import { UpdateLibraryAiBindingsSchema } from "@/features/ai/schema";
 import {
@@ -554,7 +556,7 @@ aiRouter.post(
     },
 );
 
-// AI health of a library: embedding spaces, description progress, latest errors and unusable bindings.
+// AI health of a library: what search covers, running work, per-role details and unusable bindings.
 aiRouter.get("/status/:library_id", requireAuth, validate("param", LibraryParamSchema), async (c) => {
     const { library_id } = c.req.valid("param");
     const access = await loadOwnedLibrary(c, library_id);
@@ -563,28 +565,47 @@ aiRouter.get("/status/:library_id", requireAuth, validate("param", LibraryParamS
     return c.json(success(Code.SUCCESS, await getLibraryAiStatus(library_id)));
 });
 
-aiRouter.post("/status/:library_id/retry-failed", requireAuth, validate("param", LibraryParamSchema), async (c) => {
+// Progress of running AI work only; cheap enough to poll while it runs.
+aiRouter.get("/status/:library_id/progress", requireAuth, validate("param", LibraryParamSchema), async (c) => {
     const { library_id } = c.req.valid("param");
     const access = await loadOwnedLibrary(c, library_id);
     if (access.denied) return access.denied;
 
-    // Failed vectors go back to the queue; a space held back for low coverage also gets a fresh backfill.
-    const requeued = await retryFailedEmbeddings(library_id);
-    const backfills = await restartStalledBackfills(access.library);
-    // Failed descriptions: re-process the library, which reuses stored results and retries only what is missing.
-    const describeFailed = ((await getLibraryDescribeStatus(library_id))?.failed ?? 0) > 0;
-    if (describeFailed && backfills === 0) await queueLibraryAiEnrichment(library_id, access.library.owner_id, { redescribe: false });
-    return c.json(success(Code.SUCCESS, { requeued, backfills, describeRequeued: describeFailed }));
+    return c.json(success(Code.SUCCESS, await getLibraryAiProgress(library_id)));
 });
 
-// Replaces the descriptions that other models wrote with the library's current describe model.
+/**
+ * Processes whatever AI search does not cover yet: failed vectors go back to the queue, and a
+ * library-wide run fills in missing work and retries failed descriptions. The run reuses stored
+ * results, so only missing work reaches a provider. A space held back for low coverage gets the
+ * run as its backfill.
+ */
+aiRouter.post("/status/:library_id/process", requireAuth, validate("param", LibraryParamSchema), async (c) => {
+    const { library_id } = c.req.valid("param");
+    const access = await loadOwnedLibrary(c, library_id);
+    if (access.denied) return access.denied;
+
+    if ((await getLibraryAiProgress(library_id)).task) {
+        return c.json(error(Code.ALREADY_EXISTS, "This library is already being processed"), 409);
+    }
+    await retryFailedEmbeddings(library_id);
+    if ((await restartStalledBackfills(access.library)) === 0) {
+        await queueLibraryAiEnrichment(library_id, access.library.owner_id, { redescribe: false });
+    }
+    return c.json(success(Code.SUCCESS, null, "Processing started"));
+});
+
+// Replaces the descriptions that other models or older prompt versions wrote with the current describe model.
 aiRouter.post("/status/:library_id/redescribe", requireAuth, validate("param", LibraryParamSchema), async (c) => {
     const { library_id } = c.req.valid("param");
     const access = await loadOwnedLibrary(c, library_id);
     if (access.denied) return access.denied;
 
-    if (!(await getLibraryDescribeStatus(library_id))) {
+    if (!(await AiService.forLibrary(library_id))?.describeTarget) {
         return c.json(error(Code.INVALID_PARAMETER, "No usable describe model is bound to this library"), 400);
+    }
+    if ((await getLibraryAiProgress(library_id)).task) {
+        return c.json(error(Code.ALREADY_EXISTS, "This library is already being processed"), 409);
     }
     await queueLibraryAiEnrichment(library_id, access.library.owner_id, { redescribe: true });
     return c.json(success(Code.SUCCESS, null, "Re-describing started"));

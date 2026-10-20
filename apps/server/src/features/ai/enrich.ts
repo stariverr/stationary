@@ -17,7 +17,7 @@ import { eq, and, sql, inArray, or, ne } from "drizzle-orm";
 import { enqueueEmbeddings, notifyEmbeddingQueue } from "./embedding-queue";
 import { AiService } from "./service";
 import { readAiSourceImage, resolveAiImageSource } from "./image-source";
-import { classifyAiError, getSafeAiErrorMessage } from "./errors";
+import { classifyAiError, getSafeAiErrorMessage, type AiErrorKind } from "./errors";
 import { computeSha256 } from "./utils";
 import type { DescribeTarget, ImageAiMetadata } from "./types";
 
@@ -35,7 +35,7 @@ type StoredAiMetadata = typeof AssetAiMetadata.$inferSelect;
 
 /** How a library-wide enrichment run treats existing descriptions. */
 export interface EnrichmentOptions {
-    /** Describe again every item whose stored description another model wrote. */
+    /** Describe again every item whose stored description another model or an older prompt version wrote. */
     redescribe?: boolean;
 }
 
@@ -50,9 +50,9 @@ const emptyImageMetadata: ImageAiMetadata = {
 };
 
 /**
- * Whether the stored description still stands: it was made from the same image with the current
- * prompt version and language. A model switch alone keeps it, unless `redescribe` asks for
- * descriptions of other models to be replaced.
+ * Whether the stored description still stands: it was made from the same image in the current
+ * language. A description of another model or an older prompt version is still usable, so it is
+ * kept unless `redescribe` asks for everything to be brought up to the current model and version.
  */
 export function canReuseDescription(
     stored: Pick<StoredAiMetadata, "input_hash" | "model" | "prompt_version" | "language"> | undefined,
@@ -61,8 +61,8 @@ export function canReuseDescription(
     { redescribe }: EnrichmentOptions = {},
 ): boolean {
     if (!stored || !sourceHash || stored.input_hash !== sourceHash) return false;
-    if (stored.prompt_version !== target.promptVersion || stored.language !== target.language) return false;
-    return !redescribe || stored.model === target.model;
+    if (stored.language !== target.language) return false;
+    return !redescribe || (stored.model === target.model && stored.prompt_version === target.promptVersion);
 }
 
 function toImageAiMetadata(row: StoredAiMetadata): ImageAiMetadata {
@@ -88,7 +88,7 @@ export const AiEnrichmentService = {
      * available cover or image content.
      *
      * Each artifact is keyed by its own input so unrelated edits never redo expensive work:
-     * - image metadata: prompt version, language (and model when re-describing) + source image hash
+     * - image metadata: language (and model and prompt version when re-describing) + source image hash
      * - image embedding: embedding space + source image hash
      * - search document / text embedding: the document text (and the embedding space)
      *
@@ -228,6 +228,7 @@ export const AiEnrichmentService = {
                         .set({
                             processing_status: ProcessingStatus.FAILED,
                             last_error: "No usable image source is available for AI description",
+                            error_kind: "NO_SOURCE" satisfies AiErrorKind,
                             update_time: sql`now()`,
                         })
                         .where(metadataKey);
@@ -244,6 +245,7 @@ export const AiEnrichmentService = {
                         input_hash: sourceHash,
                         processing_status: ProcessingStatus.COMPLETED,
                         last_error: null,
+                        error_kind: null,
                     };
                     await tx
                         .insert(AssetAiMetadata)
@@ -257,9 +259,11 @@ export const AiEnrichmentService = {
                 } else if (describeError) {
                     // Retryable errors stay PENDING for the task's next attempt; the error shows in the library's AI settings.
                     // A stored description is kept, and so is what it was generated with.
+                    const classification = classifyAiError(describeError);
                     const failure = {
-                        processing_status: classifyAiError(describeError).retryable ? ProcessingStatus.PENDING : ProcessingStatus.FAILED,
+                        processing_status: classification.retryable ? ProcessingStatus.PENDING : ProcessingStatus.FAILED,
                         last_error: getSafeAiErrorMessage(describeError),
+                        error_kind: classification.kind,
                     };
                     await tx
                         .insert(AssetAiMetadata)
@@ -274,7 +278,7 @@ export const AiEnrichmentService = {
                 } else if (canReuseMetadata) {
                     await tx
                         .update(AssetAiMetadata)
-                        .set({ processing_status: ProcessingStatus.COMPLETED, last_error: null, update_time: sql`now()` })
+                        .set({ processing_status: ProcessingStatus.COMPLETED, last_error: null, error_kind: null, update_time: sql`now()` })
                         .where(and(metadataKey, ne(AssetAiMetadata.processing_status, ProcessingStatus.COMPLETED)));
                 }
             }

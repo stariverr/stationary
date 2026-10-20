@@ -167,14 +167,16 @@ describe("reusing a stored description", () => {
         expect(canReuseDescription(stored, null, target)).toBe(false);
     });
 
-    it("describes again for another prompt version or language", () => {
-        expect(canReuseDescription({ ...stored, prompt_version: "v1" }, "h", target)).toBe(false);
+    it("keeps a description of an older prompt version, but not one in another language", () => {
+        expect(canReuseDescription({ ...stored, prompt_version: "v1" }, "h", target)).toBe(true);
         expect(canReuseDescription({ ...stored, language: "en-US" }, "h", target)).toBe(false);
     });
 
-    it("replaces descriptions of other models when re-describing", () => {
+    it("replaces descriptions of other models or older prompt versions when re-describing", () => {
+        const current = { ...stored, model: "new-model" };
         expect(canReuseDescription(stored, "h", target, { redescribe: true })).toBe(false);
-        expect(canReuseDescription({ ...stored, model: "new-model" }, "h", target, { redescribe: true })).toBe(true);
+        expect(canReuseDescription({ ...current, prompt_version: "v1" }, "h", target, { redescribe: true })).toBe(false);
+        expect(canReuseDescription(current, "h", target, { redescribe: true })).toBe(true);
     });
 });
 

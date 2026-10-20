@@ -123,7 +123,7 @@ MVP 会在 `apps/server/src/db/schema/index.ts` 中引入以下逻辑表。
   - 失败的向量不超过已完成的 5%；
   - READY 向量数不少于 ACTIVE 空间的 95%。
 
-  不满足时空间停在 BUILDING，`/api/ai/status` 返回 `blocked`（`too_many_failures` / `low_coverage`）。设置页的"重试失败项"会把失败的向量重新排队，覆盖不足时还会重新发起回填。
+  不满足时空间停在 BUILDING，`/api/ai/status` 返回 `blocked`（`too_many_failures` / `low_coverage`）。设置页的"继续处理"（`POST /api/ai/status/:library_id/process`）会把失败的向量重新排队，并发起一次库级处理；覆盖不足的空间以这次处理作为回填。
 - `status = RETIRED`：被替换下来的旧 ACTIVE 空间，向量保留 7 天，既不检索也不写入。期间重新选择它的模型，会直接把它恢复为 BUILDING，只补齐这段时间的变化，不需要重新计算全部向量。过期后由 embedding worker 删除。每个角色最多一个 RETIRED。
 - `model_id`：提供该空间向量的模型；同一空间换供应商只更新这里，不重建。
 - `backfill_task_id`：把整个媒体库重新处理一遍的 AI 任务（按页发现媒体）。
@@ -164,11 +164,9 @@ MVP 会在 `apps/server/src/db/schema/index.ts` 中引入以下逻辑表。
 - OCR text
 - model、prompt 版本、语言
 - processing status
-- last error
+- last error 及其分类（`error_kind`）
 
-每个媒体只有一行。`model`、`prompt_version`、`language` 记录它的描述是用什么生成的（还没有结果的行记录的是将要用什么生成）。prompt 版本较旧或语言不同的描述，会在下一次处理时重新生成；状态统计会把它计入总数，但不算作已描述。
-
-`model` 列记录是哪个模型写的描述。因此更换描述模型时，已有描述保留，只有新增或变更的内容用新模型；用户选择"重新描述全部"时，才会跑一次带 `redescribe` 的全库任务，把由其他模型写的描述重新生成。
+每个媒体只有一行。`model`、`prompt_version`、`language` 记录它的描述是用什么生成的（还没有结果的行记录的是将要用什么生成）。语言不同的描述会在下一次处理时重新生成。由其他模型或较旧 prompt 版本生成的描述仍然可用，所以保留：更换描述模型或提升 `IMAGE_METADATA_PROMPT_VERSION`，只影响新增或变更的内容。设置页显示有多少描述可以更新、为什么（其他模型生成，或新版 prompt 改进了什么），点"更新描述"会跑一次带 `redescribe` 的全库任务，把不是当前模型和当前 prompt 版本生成的描述重新生成。
 
 唯一约束：
 
@@ -176,7 +174,13 @@ MVP 会在 `apps/server/src/db/schema/index.ts` 中引入以下逻辑表。
 (entity_type, entity_id)
 ```
 
-重新描述时，旧结果会一直保留，直到新结果把它替换。这样在更换语言、重新描述整个库期间，描述依然可以被搜索到。媒体库状态的计数走 `(library_id, processing_status, prompt_version, language, model, entity_id)` 索引，只读索引即可完成。
+重新描述时，旧结果会一直保留，直到新结果把它替换。这样在更换语言、重新描述整个库期间，描述依然可以被搜索到。描述状态的计数走 `(library_id, processing_status, prompt_version, language, model, entity_id)` 索引。
+
+### 4.3.1 媒体库覆盖率
+
+设置页按媒体而不是按流水线汇总 AI 搜索的状态（`features/ai/coverage.ts`）。一个媒体在搜索读取的空间里，所有适用的产物都就绪才算覆盖：文本向量（媒体没有文本时不需要），有图片的媒体还需要库语言的描述和图片向量。未覆盖的媒体按失败原因分开：失败属于媒体本身（`error_kind` 为 `INVALID_REQUEST`、`UNSUPPORTED` 或 `NO_SOURCE`）的算"无法处理"，重试也不会变；服务商一侧的失败（密钥、额度、可用性、模型）算"失败"；其余算"未处理"。只有"失败"和"未处理"会让"继续处理"按钮出现，坏图片不会让按钮一直留着。最近一次服务商一侧的失败按类别显示建议，原始错误可展开查看。媒体列表接受 `ai_coverage=incomplete|unprocessable`，列出这些媒体。
+
+覆盖率要读库里的每个媒体，所以只在打开设置页和运行中的工作结束时计算。工作运行期间，设置页轮询 `GET /api/ai/status/:library_id/progress`，它只读运行中库级任务的单元计数和排队中的向量数。
 
 ### 4.4 `asset_embedding`
 

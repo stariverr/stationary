@@ -4,7 +4,11 @@ import * as v from "valibot";
 import type { DescribeImageRequestOptions, ImageAiMetadata } from "./types";
 import { AiProviderError } from "./errors";
 
-/** Bump whenever the prompt or schema changes; stored metadata of older versions is regenerated. */
+/**
+ * Bump whenever the prompt or schema changes. Descriptions of older versions stay in use; the
+ * library AI settings offer to update them and say what the new version improves, from the web
+ * locale key `settings.ai_config.describe_update_reason_<version>`; add one with each bump.
+ */
 export const IMAGE_METADATA_PROMPT_VERSION = "v2";
 
 /** English name of a BCP 47 language tag, e.g. "zh-Hans" → "Chinese, Simplified". */
