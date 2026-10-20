@@ -109,6 +109,7 @@ export async function queueAiEnrichment(input: QueueAiInput, auth: QueueAiAuth) 
                     language: target.language,
                     processing_status: ProcessingStatus.PENDING,
                     last_error: null,
+                    error_kind: null,
                 })
                 .onConflictDoUpdate({
                     // An existing row keeps its description, and what it was generated with, until it is replaced.
@@ -116,6 +117,7 @@ export async function queueAiEnrichment(input: QueueAiInput, auth: QueueAiAuth) 
                     set: {
                         processing_status: ProcessingStatus.PENDING,
                         last_error: null,
+                        error_kind: null,
                         update_time: sql`now()`,
                     },
                 });

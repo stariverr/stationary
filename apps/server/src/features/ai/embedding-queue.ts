@@ -125,6 +125,7 @@ export async function enqueueEmbeddings(tx: Transaction, requests: EmbeddingRequ
             available_at: sql`now()`,
             attempt_count: 0,
             last_error: null,
+            error_kind: null,
             update_time: sql`now()`,
         };
         if (existing) {
@@ -258,6 +259,7 @@ export async function storeEmbeddingResults(rows: EmbeddingRow[], results: Embed
                     input_text: null,
                     input_title: null,
                     last_error: null,
+                    error_kind: null,
                     update_time: sql`now()`,
                 })
                 .where(and(eq(AssetEmbedding.id, row.id), eq(AssetEmbedding.embedding_status, EmbeddingStatus.PENDING)))
@@ -294,6 +296,7 @@ export async function rescheduleFailedRows(rows: EmbeddingRow[], error: unknown)
             .set({
                 attempt_count: attempts,
                 last_error: message,
+                error_kind: classification.kind,
                 update_time: sql`now()`,
                 ...(giveUp
                     ? { embedding_status: EmbeddingStatus.FAILED }

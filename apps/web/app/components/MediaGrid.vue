@@ -40,8 +40,9 @@ const {
     sortBy,
     sortOrder,
     mediaType,
+    aiCoverage,
 } = storeToRefs(store);
-const { refetchMedia, selectMedia } = store;
+const { refetchMedia, selectMedia, clearAiCoverage } = store;
 const { t } = useI18n();
 const { toggleSidebar, isSidebarCollapsed, isCreateMediaOpen } = useAppLayout();
 const libraryStore = useLibraryStore();
@@ -535,6 +536,18 @@ onMounted(() => {
                     <NuxtLink to="/settings/ai" class="font-semibold underline underline-offset-2 hover:text-amber-900">
                         {{ $t("search.degraded_settings") }}
                     </NuxtLink>
+                </div>
+
+                <!-- Filter set from the library AI settings -->
+                <div
+                    v-if="aiCoverage"
+                    role="status"
+                    class="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-zinc-200 bg-white px-3.5 py-2 text-xs text-zinc-700"
+                >
+                    <span>{{ $t(`media.ai_coverage_filter.${aiCoverage}`) }}</span>
+                    <button type="button" class="font-semibold underline underline-offset-2 hover:text-zinc-900" @click="clearAiCoverage">
+                        {{ $t("media.ai_coverage_filter.clear") }}
+                    </button>
                 </div>
 
                 <!-- Skeletons when loading -->

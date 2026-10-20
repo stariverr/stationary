@@ -115,15 +115,34 @@ export interface AiErrorView {
 }
 
 export interface AiDescribeStatus {
-    /** Media the description pipeline has taken up. */
-    total: number;
-    /** Described with the current prompt version and language. */
-    completed: number;
-    /** Completed descriptions that another model than the current one wrote. */
-    otherModel: number;
+    /** Prompt version descriptions are written with now. */
+    promptVersion: string;
+    /** Items with a description in the library's language. */
+    described: number;
+    /** Described items another model or an older prompt version wrote; still usable. */
+    updatable: number;
+    /** Of `updatable`, those written with an older prompt version. */
+    olderVersion: number;
     pending: number;
     failed: number;
-    lastError: AiErrorView | null;
+}
+
+/** What a stored failure means for the user; "input" failures belong to the item and do not go away on retry. */
+export type AiFailureCategory = "input" | "auth" | "quota" | "unavailable" | "model" | "unknown";
+
+/** How much of a library AI search covers, per media item (server: features/ai/coverage.ts). */
+export interface AiCoverage {
+    eligible: number;
+    covered: number;
+    unprocessable: number;
+    failed: number;
+    missing: number;
+    lastFailure: (AiErrorView & { category: AiFailureCategory }) | null;
+}
+
+export interface AiProgress {
+    task: { done: number; total: number } | null;
+    queuedVectors: number;
 }
 
 /** A bound model the server cannot use; its role is left out until the binding is fixed. */
@@ -135,6 +154,9 @@ export interface AiConfigIssue {
 }
 
 export interface AiLibraryStatus {
+    /** Null when no AI role is usable. */
+    coverage: AiCoverage | null;
+    progress: AiProgress;
     spaces: AiEmbeddingSpaceStatus[];
     /** Null when no usable description model is bound. */
     describe: AiDescribeStatus | null;

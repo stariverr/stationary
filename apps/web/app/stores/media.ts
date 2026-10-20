@@ -116,6 +116,15 @@ export const useMediaStore = defineStore("media", () => {
     const page = ref(parseInt(route.query.page as string) || 1);
     const count = ref(parseInt(route.query.count as string) || 20);
     const useAiSearch = ref(true);
+    /** Set from the library AI settings: only items AI search does not cover yet, or cannot cover. */
+    const aiCoverage = computed(() => {
+        const value = route.query.ai_coverage;
+        return value === "incomplete" || value === "unprocessable" ? value : undefined;
+    });
+    const clearAiCoverage = () => {
+        const { ai_coverage: _, ...query } = route.query;
+        router.push({ query });
+    };
 
     const selectedMediaId = ref<string | null>(null);
 
@@ -135,7 +144,7 @@ export const useMediaStore = defineStore("media", () => {
     });
 
     // Reset page to 1 when search filters change
-    watch([source, displayMode, useAiSearch, sortBy, sortOrder, mediaType], () => {
+    watch([source, displayMode, useAiSearch, sortBy, sortOrder, mediaType, aiCoverage], () => {
         page.value = 1;
     });
 
@@ -349,6 +358,7 @@ export const useMediaStore = defineStore("media", () => {
                 display_mode: displayMode.value,
                 library_id: libraryStore.activeLibraryId,
                 ai: useAiSearch.value,
+                aiCoverage: aiCoverage.value,
             },
         ]),
         enabled: isListEnabled,
@@ -357,7 +367,7 @@ export const useMediaStore = defineStore("media", () => {
             const hasKeyword = !!searchKeyword.value?.trim();
             const isAi = useAiSearch.value;
             console.log("[DEBUG STORE] queryFn called. hasKeyword:", hasKeyword, "isAi:", isAi, "useAiSearch:", useAiSearch.value);
-            if (hasKeyword && isAi) {
+            if (hasKeyword && isAi && !aiCoverage.value) {
                 console.log("[DEBUG STORE] Fetching from /search");
                 const response = await useApi<{
                     success: boolean;
@@ -438,6 +448,7 @@ export const useMediaStore = defineStore("media", () => {
                         type: mediaType.value,
                         display_mode: displayMode.value,
                         library_id: libraryStore.activeLibraryId,
+                        ai_coverage: aiCoverage.value,
                     },
                 });
                 if (response && response.success && response.data) {
@@ -534,6 +545,8 @@ export const useMediaStore = defineStore("media", () => {
         page,
         count,
         useAiSearch,
+        aiCoverage,
+        clearAiCoverage,
         medias,
         total,
         searchDegraded,

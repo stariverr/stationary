@@ -21,7 +21,7 @@ import {
     TrackStreamLayout,
 } from "@/db/schema";
 import { s3 } from "@/global/s3";
-import { and, eq, ilike, SQL, count, asc, desc, or, isNull, inArray } from "drizzle-orm";
+import { and, eq, ilike, SQL, sql, count, asc, desc, or, isNull, inArray } from "drizzle-orm";
 
 import { Quality } from "@/lib/types";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
@@ -39,6 +39,8 @@ import { AddTracksFromDraftSchema } from "@/features/media/schema";
 import { AddTracksFromDraftError, addTracksFromDraft } from "@/features/media/add-tracks-from-draft";
 import { deleteMedia, restoreMedia, trashMedia } from "@/features/media/lifecycle";
 import { getMediaAiView, summarizeAiStatus } from "@/features/ai/media-view";
+import { coverageFilter, getCoverageTargets } from "@/features/ai/coverage";
+import { AiService } from "@/features/ai/service";
 import { assertMediaAccess, MediaAccessError } from "@/features/media/access";
 import { replaceMediaTags } from "@/features/media/tags";
 import { updateMediaInfo } from "@/features/media/update-info";
@@ -75,6 +77,8 @@ export const MediaListRequestBodySchema = v.object({
     display_mode: v.optional(v.picklist(["flat", "stacked"]), "flat"),
     library_id: v.optional(v.pipe(v.string(), v.uuid())),
     has_no_post: v.optional(v.string()),
+    /** With `library_id`: only items AI search does not cover yet, or cannot cover (see features/ai/coverage.ts). */
+    ai_coverage: v.optional(v.picklist(["incomplete", "unprocessable"])),
 });
 
 // Media List - Cover-only media hydration (zero content track queries)
@@ -86,7 +90,7 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
         pageSize = 100;
     }
     const offset = (page - 1) * pageSize;
-    const { keyword, source, sort_by, sort_order, type, display_mode, library_id, has_no_post } = query;
+    const { keyword, source, sort_by, sort_order, type, display_mode, library_id, has_no_post, ai_coverage } = query;
 
     const where: SQL[] = [];
 
@@ -104,6 +108,11 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
     }
     if (library_id) {
         where.push(eq(Media.library_id, library_id));
+    }
+    if (ai_coverage) {
+        if (!library_id) return c.json(error(Code.INVALID_PARAMETER, "ai_coverage requires library_id"), 400);
+        const targets = getCoverageTargets(await AiService.forLibrary(library_id));
+        where.push(targets ? coverageFilter(targets, ai_coverage) : sql`false`);
     }
 
     where.push(eq(Media.delete_status, DeleteStatus.ACTIVE));

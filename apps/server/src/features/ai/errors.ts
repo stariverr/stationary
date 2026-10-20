@@ -60,6 +60,37 @@ export interface AiErrorClassification {
     retryAfterMs?: number;
 }
 
+/** Stored kind of a failed AI request; NO_SOURCE: the media has no image to process. */
+export type AiErrorKind = AiErrorClassification["kind"] | "NO_SOURCE";
+
+/**
+ * What a stored failure means for the user. "input" failures belong to the item itself (unreadable
+ * or unsupported image, no image at all) and do not go away on retry; the others are about the
+ * provider or its configuration and do once that is fixed.
+ */
+export type AiFailureCategory = "input" | "auth" | "quota" | "unavailable" | "model" | "unknown";
+
+const FAILURE_CATEGORY: Record<AiErrorKind, AiFailureCategory> = {
+    INVALID_REQUEST: "input",
+    UNSUPPORTED: "input",
+    NO_SOURCE: "input",
+    AUTHENTICATION: "auth",
+    RATE_LIMITED: "quota",
+    THROTTLED: "quota",
+    TRANSIENT: "unavailable",
+    TIMEOUT: "unavailable",
+    NOT_FOUND: "model",
+    CONFIGURATION: "model",
+    CANCELLED: "unknown",
+    UNKNOWN: "unknown",
+};
+
+export const INPUT_ERROR_KINDS = (Object.keys(FAILURE_CATEGORY) as AiErrorKind[]).filter((kind) => FAILURE_CATEGORY[kind] === "input");
+
+export function getFailureCategory(kind: string | null): AiFailureCategory {
+    return FAILURE_CATEGORY[kind as AiErrorKind] ?? "unknown";
+}
+
 /** Parses a Retry-After header value (seconds or HTTP date) into milliseconds. */
 export function parseRetryAfterHeader(value: string | null | undefined, now = Date.now()): number | undefined {
     if (!value) return undefined;
@@ -91,7 +122,7 @@ function getNumericStatus(error: unknown): number | undefined {
  */
 function getErrorChain(error: unknown): unknown[] {
     const chain: unknown[] = [];
-    for (let current = error; current !== undefined && current !== null && chain.length < 5; ) {
+    for (let current = error; current !== undefined && current !== null && chain.length < 5;) {
         chain.push(current);
         if (!(current instanceof Error)) break;
         current = current.cause ?? (current as { lastError?: unknown }).lastError;
