@@ -10,7 +10,7 @@ import type {
     VisualEmbeddingProvider,
 } from "../types";
 import { AiProviderError } from "../errors";
-import { toEmbeddingResult } from "../utils";
+import { imageBase64, toEmbeddingResult } from "../utils";
 import { guardedFetch } from "./egress";
 import { postJson } from "./http";
 import { SdkTextEmbeddingProvider } from "./sdk-embedding";
@@ -78,6 +78,7 @@ export class GeminiTextEmbeddingProvider extends SdkTextEmbeddingProvider {
 export class GeminiVisualEmbeddingProvider extends GeminiTextEmbeddingProvider implements VisualEmbeddingProvider {
     /** Keeps inline image payloads well below the request size limit. */
     readonly imageBatchSize = 6;
+    readonly fetchesImageUrls = false;
     private readonly apiKey: string;
     private readonly baseUrl: string;
 
@@ -95,7 +96,7 @@ export class GeminiVisualEmbeddingProvider extends GeminiTextEmbeddingProvider i
                 requests: params.map((image) => ({
                     model,
                     content: {
-                        parts: [{ inlineData: { mimeType: image.mimeType, data: Buffer.from(image.imageBuffer).toString("base64") } }],
+                        parts: [{ inlineData: { mimeType: image.mimeType, data: imageBase64(image) } }],
                     },
                     ...(this.capabilities.mrl ? { outputDimensionality: this.capabilities.dimension } : {}),
                 })),

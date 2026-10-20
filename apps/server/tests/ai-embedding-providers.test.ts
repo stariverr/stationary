@@ -135,6 +135,15 @@ describe("Gemini image embedding adapter", () => {
         });
     });
 
+    it("does not take image URLs", async () => {
+        const requests = mockFetch({ embeddings: [{ values: vector(1024) }] });
+        const provider = new GeminiVisualEmbeddingProvider(config({ adapter: "gemini", modelName: "gemini-embedding-2" }));
+
+        expect(provider.fetchesImageUrls).toBe(false);
+        await expect(provider.embedImages([{ url: "https://s3.local/a.jpg", mimeType: "image/jpeg" }])).rejects.toThrow();
+        expect(requests).toHaveLength(0);
+    });
+
     it("rejects a response that does not match the batch", async () => {
         mockFetch({ embeddings: [{ values: vector(1024) }] });
         const provider = new GeminiVisualEmbeddingProvider(config({ adapter: "gemini", modelName: "gemini-embedding-2" }));
@@ -194,6 +203,19 @@ describe("self-hosted multimodal embedding adapters", () => {
         expect(requests[0]?.headers.get("authorization")).toBeNull();
         const part = { type: "image_url", image_url: { url: "data:image/png;base64,AQID" } };
         expect(requests[0]?.body).toEqual({ model: "embeddinggemma-2", input: [{ content: [part] }, { content: [part] }] });
+    });
+
+    it("pass an image URL through for the server to download", async () => {
+        const requests = mockFetch({ data: [{ index: 0, embedding: vector(1024) }, { index: 1, embedding: vector(1024) }] });
+        const provider = new LlamaCppEmbeddingProvider(selfHosted());
+
+        await provider.embedImages([{ url: "https://s3.local/cover.avif?sig", mimeType: "image/avif" }, image]);
+
+        expect(provider.fetchesImageUrls).toBe(true);
+        expect(requests[0]?.body.input).toEqual([
+            { content: [{ type: "image_url", image_url: { url: "https://s3.local/cover.avif?sig" } }] },
+            { content: [{ type: "image_url", image_url: { url: "data:image/png;base64,AQID" } }] },
+        ]);
     });
 
     it("vLLM sends one chat-style conversation per image", async () => {

@@ -130,8 +130,10 @@ export class AiService {
         images: EmbedImageParams[],
         abortSignal?: AbortSignal,
     ): Promise<EmbeddingResult[]> {
+        // Prepare images for
         const prepared = await Promise.all(
             images.map(async (image) => {
+                if (!("imageBuffer" in image)) return image;
                 const converted = await prepareImageForModel(image.imageBuffer, image.mimeType, provider.capabilities.imageFormats);
                 return { imageBuffer: converted.image, mimeType: converted.mimeType };
             }),

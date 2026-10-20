@@ -1,7 +1,7 @@
 import type { EmbeddingModelCapabilities } from "../model-schema";
 import type { EmbedImageParams, EmbedTextParams, EmbeddingResult, ResolvedModelConfig, VisualEmbeddingProvider } from "../types";
 import { AiProviderError } from "../errors";
-import { computeEmbeddingSpaceId, formatEmbeddingText, toEmbeddingResult } from "../utils";
+import { computeEmbeddingSpaceId, formatEmbeddingText, imageBase64, toEmbeddingResult } from "../utils";
 import { postJson } from "./http";
 
 /** One element of `input.contents`; each element yields its own vector unless fusion is enabled. */
@@ -29,6 +29,7 @@ export class DashScopeMultimodalEmbeddingProvider implements VisualEmbeddingProv
      * so images are sent one per request.
      */
     readonly imageBatchSize = 1;
+    readonly fetchesImageUrls = false;
     private readonly apiKey: string;
     private readonly baseUrl: string;
 
@@ -81,7 +82,7 @@ export class DashScopeMultimodalEmbeddingProvider implements VisualEmbeddingProv
         const results: EmbeddingResult[] = [];
         for (const image of params) {
             const [result] = await this.embed(
-                [{ image: `data:${image.mimeType};base64,${Buffer.from(image.imageBuffer).toString("base64")}` }],
+                [{ image: `data:${image.mimeType};base64,${imageBase64(image)}` }],
                 abortSignal,
             );
             results.push(result!);

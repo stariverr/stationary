@@ -10,12 +10,13 @@ import {
     LibraryEmbeddingSpaceStatus,
     Media,
     ModalityType,
+    Track,
 } from "@/db/schema";
 import { db, type Transaction } from "@/global/db";
 import { kv } from "@/global/kv";
 import { retryDelaySeconds } from "@/infra/jobs/policy";
 import { AiProviderError, AiThrottledError, classifyAiError, getSafeAiErrorMessage } from "./errors";
-import { readAiSourceImage } from "./image-source";
+import { loadAiEmbeddingImage } from "./image-source";
 import { AiService } from "./service";
 import type { AiErrorView, EmbeddingBindingRole, EmbeddingResult, TextEmbeddingProvider, VisualEmbeddingProvider } from "./types";
 
@@ -234,14 +235,27 @@ async function libraryWritesSpace(row: EmbeddingRow): Promise<boolean> {
     return spaces.length > 0;
 }
 
-async function downloadImages(rows: EmbeddingRow[], signal?: AbortSignal) {
+async function loadImages(rows: EmbeddingRow[], provider: VisualEmbeddingProvider, signal?: AbortSignal) {
     const fileIds = rows.flatMap((row) => (row.source_file_id ? [row.source_file_id] : []));
-    const files = fileIds.length > 0 ? await db.select().from(DbFile).where(inArray(DbFile.id, fileIds)) : [];
+    const [files, tracks] =
+        fileIds.length > 0
+            ? await Promise.all([
+                  db.select().from(DbFile).where(inArray(DbFile.id, fileIds)),
+                  db
+                      .select({ fileId: Track.file_id, width: Track.width, height: Track.height })
+                      .from(Track)
+                      .where(and(inArray(Track.file_id, fileIds), isNotNull(Track.width), isNotNull(Track.height))),
+              ])
+            : [[], []];
     return Promise.all(
         rows.map(async (row) => {
             const file = files.find((item) => item.id === row.source_file_id);
-            if (!file) throw new Error(`Source file of embedding ${row.id} no longer exists`);
-            return { imageBuffer: await readAiSourceImage(file, signal), mimeType: file.mime_type };
+            if (!file) {
+                throw new Error(`Source file of embedding ${row.id} no longer exists`);
+            }
+            const track = tracks.find((item) => item.fileId === file.id);
+            const dimensions = track ? { width: track.width!, height: track.height! } : undefined;
+            return loadAiEmbeddingImage(file, dimensions, provider, signal);
         }),
     );
 }
@@ -345,7 +359,7 @@ export async function processNextEmbeddingBatch(signal?: AbortSignal): Promise<E
 
         let results: EmbeddingResult[];
         if (provider.imageProvider) {
-            const images = await downloadImages(rows, signal);
+            const images = await loadImages(rows, provider.imageProvider, signal);
             results = await provider.service.embedImages(provider.imageProvider, images, signal);
         } else {
             const inputs = rows.map((row) => {

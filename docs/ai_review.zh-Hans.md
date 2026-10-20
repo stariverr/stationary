@@ -56,7 +56,7 @@
 - 仅以系统错误码表示的连接失败（`ECONNREFUSED` 等）归为 TRANSIENT。
 ### 1.4 下载源图没有超时和大小上限（已修复）
 
-- `enrich.ts`（描述）和 `embedding-queue.ts` 的 `downloadImages`（图片向量）都用全局 `fetch` 拉预签名 URL。除了任务的 `abortSignal` 没有超时，并且会把整张原图读进内存再转码。
+- `enrich.ts`（描述）和 `embedding-queue.ts` 的 `downloadImages`（图片向量，现为 `loadImages`）都用全局 `fetch` 拉预签名 URL。除了任务的 `abortSignal` 没有超时，并且会把整张原图读进内存再转码。
 - 描述和图片向量会把同一个文件各下载一次（见 async 文档第 1 节"两跳"）。
 
 **改造方向**：改用 S3 客户端读取，加超时和 Content-Length 上限，优先用封面或缩略图作为来源。
@@ -64,7 +64,7 @@
 **已修复（2026-10-15）**：
 - 读取源图的原则：
   - 需要服务器转手的（模型只收图片字节），用 S3 SDK 读取，走配置的 S3 endpoint，可以是内网。
-  - 模型能直接拉图片链接的，才传公网 URL，服务器不经手。现在所有 provider 都只收字节，而且服务器要先转码（例如 HEIC 转 JPEG），所以还没有这条路径。等接入能收 URL 的模型时再加。
+  - 模型能直接拉图片链接的，才传预签名 URL，服务器不经手。目前只有自托管的 llama.cpp 和 vLLM 适配器走这条路径（见第 5 节"图片 embedding 供应商"）。
 - `readAiSourceImage()`（`image-source.ts`）在 `s3.read()` 之上加了 60 秒超时和 50 MB 上限，描述和图片向量都用它。
   - 超时记为 TIMEOUT，会重试。SDK 把所有中断都报成 AbortError，所以由这里区分超时和取消。
   - 超出上限记为 INVALID_REQUEST，不重试。`s3.read()` 先看 Content-Length，超限就不下载正文。
@@ -265,7 +265,7 @@ rerank 只挂在 openai-compatible 适配器上，走 Cohere 风格的 `/rerank`
 - **新内容自动建索引**：最大的缺口，见 async 文档第 5 节。
 - **以图搜图 / 相似图片**：图片向量已经有了，却没有相应接口。
 - **近重复检测**：基于同一批向量即可实现。
-- **图片 embedding 供应商**：已支持 Gemini、DashScope，以及自托管的 llama.cpp（`llama-cpp` 适配器）和 vLLM（`vllm` 适配器），模型限定为 qwen3-vl-embedding 和 embeddinggemma-2。各家请求格式不统一，因此一种线协议对应一个适配器：SGLang 与 Jina 共用 `input:[{text},{image}]`，Voyage（`inputs[].content[]`）和 Cohere（顶层 `images`）各是一种，暂不支持。图片目前只以 base64 data URI 发送；按图片选择预签名 URL 传输尚未实现（原图满足模型格式和尺寸限制时发 URL，否则发 base64）。2026-10-18 评估后暂缓：描述和向量的来源优先选封面，而封面一律是服务器生成的 AVIF；自托管的两个模型（qwen3-vl-embedding、embeddinggemma-2）只收 JPEG 和 PNG，所以只有“没有封面、原图恰好是 JPEG/PNG 且不超过 1536 px / 4 MB、且已记录宽高”时才会走 URL，实际几乎不触发。要让它有用，得先让封面多生成一份 JPEG，或让自托管模型接受 AVIF。
+- **图片 embedding 供应商**：已支持 Gemini、DashScope，以及自托管的 llama.cpp（`llama-cpp` 适配器）和 vLLM（`vllm` 适配器），模型限定为 qwen3-vl-embedding 和 embeddinggemma-2。各家请求格式不统一，因此一种线协议对应一个适配器：SGLang 与 Jina 共用 `input:[{text},{image}]`，Voyage（`inputs[].content[]`）和 Cohere（顶层 `images`）各是一种，暂不支持。图片按张选择传输方式（2026-10-20）：适配器声明 `fetchesImageUrls`，目前只有 llama.cpp 和 vLLM 为真。来源文件的格式在模型声明的 `imageFormats` 里，并且已记录的宽高和文件大小不超过 1536 px / 4 MB 时，发 1 小时有效的预签名 URL，由模型服务器自己下载；否则服务器读取字节、按需转码后发 base64 data URI。封面是不超过 1440 px 的 AVIF，所以模型勾选 `image/avif` 后，有封面的媒体都走 URL。模型服务器要能访问 `S3_ENDPOINT` 签出的地址；llama.cpp 下载 https 需要带 OpenSSL 编译。Gemini 和 DashScope 仍只发字节（DashScope 能收公网 URL，但未接入）。
 - **常用供应商模板**：Anthropic 原生、OpenRouter、Azure OpenAI、Ollama。
 - **视频只用封面一帧**：没有关键帧、字幕或语音转写。
 - **搜索能力**：只能搜 Media，不能搜 Post；没有按日期、作者、标签过滤。

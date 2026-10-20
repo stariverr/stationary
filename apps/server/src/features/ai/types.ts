@@ -43,11 +43,11 @@ export interface EmbedTextParams {
     abortSignal?: AbortSignal;
 }
 
-export interface EmbedImageParams {
-    imageBuffer: Buffer | Uint8Array;
-    mimeType: string;
-    abortSignal?: AbortSignal;
-}
+/**
+ * An image to embed: its bytes, or a URL the model server downloads itself. Only providers with
+ * `fetchesImageUrls` are given URLs.
+ */
+export type EmbedImageParams = { mimeType: string } & ({ imageBuffer: Buffer | Uint8Array } | { url: string });
 
 export interface ResolvedModelConfig {
     providerId: string;
@@ -96,6 +96,8 @@ export interface TextEmbeddingProvider {
 export interface VisualEmbeddingProvider extends TextEmbeddingProvider {
     /** Most images one embedImages request may carry. */
     readonly imageBatchSize: number;
+    /** True when the model server downloads images from a URL, so the source can be sent as one instead of as bytes. */
+    readonly fetchesImageUrls: boolean;
     /** Embeds several images in one provider request; results keep the input order. */
     embedImages(params: EmbedImageParams[], abortSignal?: AbortSignal): Promise<EmbeddingResult[]>;
 }

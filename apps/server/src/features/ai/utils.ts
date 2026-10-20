@@ -1,6 +1,6 @@
 import { AiConfigurationError, AiProviderError } from "./errors";
 import type { EmbeddingModelCapabilities } from "./model-schema";
-import type { EmbedTextParams, EmbeddingResult } from "./types";
+import type { EmbedImageParams, EmbedTextParams, EmbeddingResult } from "./types";
 
 export async function computeSha256(str: string): Promise<string> {
     const buf = new TextEncoder().encode(str);
@@ -87,4 +87,10 @@ export function formatEmbeddingText(params: EmbedTextParams, spec: EmbeddingMode
     };
     const budget = Math.floor(spec.maxInputTokens * INPUT_TOKEN_BUDGET) - estimateTokens(wrap(""));
     return wrap(truncateToTokens(params.text, Math.max(0, budget)));
+}
+
+/** Base64 of an image's bytes, for providers that only take images inline (`fetchesImageUrls` false). */
+export function imageBase64(image: EmbedImageParams): string {
+    if (!("imageBuffer" in image)) throw new Error("This provider does not download images from URLs; send the image bytes.");
+    return Buffer.from(image.imageBuffer).toString("base64");
 }
