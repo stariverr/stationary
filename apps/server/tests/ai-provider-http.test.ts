@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { postJson } from "@/features/ai/providers/http";
-import { AiProviderError } from "@/features/ai/errors";
+import { AiProviderError, classifyAiError } from "@/features/ai/errors";
+import { withTimeout } from "@/features/ai/utils";
 
 describe("AI provider HTTP client", () => {
     it("normalizes status errors and removes credentials from the message", async () => {
@@ -30,6 +31,20 @@ describe("AI provider HTTP client", () => {
             expect(providerError.message).toContain("[REDACTED]");
         } finally {
             globalThis.fetch = originalFetch;
+        }
+    });
+
+    it("tells a call timeout apart from cancellation", async () => {
+        const server = Bun.serve({ port: 0, fetch: () => new Promise<Response>(() => {}) });
+        const url = `http://localhost:${server.port}/v1/embed`;
+        const failure = (signal: AbortSignal) => postJson(url, { json: {}, signal }).then(() => null, (error: unknown) => error);
+        try {
+            expect(classifyAiError(await failure(withTimeout(undefined, 50)))).toMatchObject({ kind: "TIMEOUT", retryable: true });
+            const controller = new AbortController();
+            setTimeout(() => controller.abort(), 50);
+            expect(classifyAiError(await failure(withTimeout(controller.signal, 5_000)))).toMatchObject({ kind: "CANCELLED", retryable: false });
+        } finally {
+            server.stop(true);
         }
     });
 });

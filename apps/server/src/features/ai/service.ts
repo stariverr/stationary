@@ -4,7 +4,7 @@ import { resolveAiConfig } from "./resolver";
 import { kv } from "@/global/kv";
 import { AiConfigurationError } from "./errors";
 import { createPromiseCache } from "./promise-cache";
-import { computeSha256 } from "./utils";
+import { computeSha256, withTimeout } from "./utils";
 import { createProviderLimiter, createRedisRateLimitStore } from "./rate-limit";
 import type {
     DescribeTarget,
@@ -40,6 +40,9 @@ const rerankCache = createPromiseCache<number[]>(10 * 60 * 1000, 200);
  */
 export type AiCallMode = "background" | "interactive";
 const MAX_WAIT_MS: Record<AiCallMode, number> = { background: 0, interactive: 3_000 };
+
+/** Upper bound of the provider calls a search waits on (query vector, rerank); search degrades past it. */
+const SEARCH_CALL_TIMEOUT_MS = 10_000;
 
 export class AiService {
     constructor(
@@ -96,9 +99,10 @@ export class AiService {
         if (!provider) {
             throw new AiConfigurationError(`No active ${role} space is configured for this library.`);
         }
-        return queryEmbeddingCache.getOrCreate(`${provider.spaceId}\n${text}`, () =>
-            this.limited(provider.providerId, () => provider.embedText({ text, purpose: "QUERY", abortSignal }), abortSignal),
-        );
+        return queryEmbeddingCache.getOrCreate(`${provider.spaceId}\n${text}`, () => {
+            const signal = withTimeout(abortSignal, SEARCH_CALL_TIMEOUT_MS);
+            return this.limited(provider.providerId, () => provider.embedText({ text, purpose: "QUERY", abortSignal: signal }), signal);
+        });
     }
 
     get rerankProvider(): RerankProvider | null {
@@ -110,9 +114,10 @@ export class AiService {
         const provider = this.config.rerankProvider;
         if (!provider) throw new AiConfigurationError("No rerank model is configured for this library.");
         const key = `${provider.providerId}\n${provider.modelName}\n${query}\n${await computeSha256(JSON.stringify(documents))}`;
-        return rerankCache.getOrCreate(key, () =>
-            this.limited(provider.providerId, () => provider.rerank(query, documents, abortSignal), abortSignal),
-        );
+        return rerankCache.getOrCreate(key, () => {
+            const signal = withTimeout(abortSignal, SEARCH_CALL_TIMEOUT_MS);
+            return this.limited(provider.providerId, () => provider.rerank(query, documents, signal), signal);
+        });
     }
 
     /** Embeds documents in one provider request; `params.length` must not exceed `provider.textBatchSize`. */

@@ -126,9 +126,10 @@ export const AiEnrichmentService = {
 
         if (aiService && sourceFile && shouldRunDescription) {
             console.log(`[AI ENRICH] Running image analysis for media ${media.id}...`);
-            const imageBuffer = await readAiSourceImage(sourceFile, abortSignal);
-
+            // A source that cannot be read fails the description like a provider error does: the item
+            // is still indexed below, and the failure is recorded on its metadata row.
             try {
+                const imageBuffer = await readAiSourceImage(sourceFile, abortSignal);
                 described = await aiService.describeImage(imageBuffer, sourceFile.mime_type, abortSignal);
             } catch (error) {
                 describeError = error;

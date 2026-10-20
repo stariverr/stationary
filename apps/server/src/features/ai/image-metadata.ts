@@ -3,6 +3,7 @@ import { toJsonSchema } from "@valibot/to-json-schema";
 import * as v from "valibot";
 import type { DescribeImageRequestOptions, ImageAiMetadata } from "./types";
 import { AiProviderError } from "./errors";
+import { withTimeout } from "./utils";
 
 /**
  * Bump whenever the prompt or schema changes. Descriptions of older versions stay in use; the
@@ -91,6 +92,9 @@ function toImageContent(image: Buffer | Uint8Array, mimeType: string = "image/jp
  */
 export const DESCRIBE_MAX_OUTPUT_TOKENS = 4096;
 
+/** Upper bound of one description call, generous enough for light reasoning and long OCR output. */
+const DESCRIBE_TIMEOUT_MS = 120_000;
+
 /**
  * Bounds of stored fields. Applied after generation rather than in the JSON schema, since strict
  * structured output modes reject string length keywords; a runaway model is cut, not failed.
@@ -125,7 +129,7 @@ export async function describeImageWithModel(
     const { output } = await generateText({
         model,
         maxRetries: 0,
-        abortSignal: request.abortSignal,
+        abortSignal: withTimeout(request.abortSignal, DESCRIBE_TIMEOUT_MS),
         output: request.strictJsonSchema === false ? DefaultImageMetadataOutput : StrictImageMetadataOutput,
         maxOutputTokens: Math.min(request.maxOutputTokens ?? DESCRIBE_MAX_OUTPUT_TOKENS, DESCRIBE_MAX_OUTPUT_TOKENS),
         reasoning: request.reasoning,
