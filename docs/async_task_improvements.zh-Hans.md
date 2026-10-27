@@ -211,6 +211,11 @@ job_queue(
 
 - 写结果的事务里，先确认队列行的 `lease_token` 仍是自己的（fencing），租约已经过期的 worker 写不进去。同一 `(流水线, 对象)` 只有一行、一个租约，所以不会出现两个 worker 同时描述同一个媒体（第 5 节的竞态）。
 - 这张表插入和删除都很频繁：索引只保留上面三个，单独调低它的 autovacuum 阈值，领取事务保持很短。
+  `drizzle push` 不管表的存储参数，建表后在每个库手动执行一次：
+
+  ```sql
+  ALTER TABLE job_queue SET (autovacuum_vacuum_scale_factor = 0.01, autovacuum_vacuum_threshold = 200, autovacuum_analyze_scale_factor = 0.02);
+  ```
 
 ### 11.4 流水线和依赖声明
 
@@ -333,6 +338,10 @@ markChanged(tx, aspect, ids)
 每一层做完，产品都能完整跑通：
 
 1. **队列和声明表**：`job_queue`、`markChanged`、scan、巡检；迁移 `download`、`avatar`、`cover`，接入 11.5 的入口；设置页进度和新的"库 × 流水线"视图。COVER_*、POST_PROCESS、AVATAR_COPY 从旧引擎下线，旧引擎只剩 AI_ENRICH。
+   - **已完成（2026-10-27，分支 `refactor/job-queue`）。** 代码在 `apps/server/src/infra/queue/`，三条流水线在 `features/ingest/download-pipeline.ts`、`features/author/avatar-pipeline.ts`、`features/media/cover-pipeline.ts`。与上文的出入：
+     - 队列行被删除前没有"失败行"：超过重试次数时由各流水线的 `recordFailure` 把失败连同当时的输入写到结果行（cover 写 `metadata.error_source_file_id`，avatar 写 `avatar_error_origin`），scan 跳过输入未变的失败；变化或"重试失败"会重新入队。
+     - 防抖、按库轮转、暂停没有做（第 3 层）。
+     - 前端轮询间隔为 5 秒，任务页和设置页都读 `GET /api/jobs/pipelines`。
 2. **AI 迁移**：`ai.describe`、`ai.index`、`ai.text`、`ai.image`，含按空间攒批和限流 defer；空间切换按覆盖率。删除旧引擎、两张任务表和 embedding 队列，旧任务页下线。
 3. **调度增强**：熔断、优先级、库级暂停；需要时加按库轮转。
 4. **operation 层**：第一个操作要做时（11.9）。

@@ -18,10 +18,14 @@ import { JobSweeper } from "@/infra/jobs/sweeper";
 import { initJobHandlers } from "@/infra/jobs/register-handlers";
 import { embeddingWorker } from "@/features/ai/embedding-worker";
 import { startFilePurgeSchedule, stopFilePurgeSchedule } from "@/features/trash/purge-expired-files";
+import { pipelineHandlers } from "@/infra/queue/handlers";
+import { QueueWorker } from "@/infra/queue/worker";
 // 1. Initialize Task Handlers Strategy Registry
 initJobHandlers();
 
-// 2. Start In-Process Task JobRunner & Sweeper
+// 2. Start the reconcile queue worker (downloads, avatars, covers), the AI task runner and its sweeper
+const queueWorker = new QueueWorker(pipelineHandlers);
+queueWorker.start();
 jobRunner.start();
 JobSweeper.start(30000);
 embeddingWorker.start();
@@ -37,7 +41,7 @@ const shutdown = async (signal: string) => {
     try {
         JobSweeper.stop();
         stopFilePurgeSchedule();
-        await Promise.all([jobRunner.drain(15000), embeddingWorker.drain(15000)]);
+        await Promise.all([queueWorker.drain(15000), jobRunner.drain(15000), embeddingWorker.drain(15000)]);
         console.log("[Server] Graceful shutdown completed.");
     } catch (err) {
         console.error("[Server] Error during graceful shutdown:", err);

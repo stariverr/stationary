@@ -16,7 +16,6 @@ import {
     MediaTag,
     TagStatus,
     MediaType,
-    AsyncTaskType,
     TrackStreamLayout,
 } from "@/db/schema";
 import { s3 } from "@/global/s3";
@@ -29,7 +28,8 @@ import { MediaService } from "@/features/media/queries";
 import { TrackService } from "@/features/media/track";
 import { v7 as uuidv7 } from "uuid";
 import { env } from "@/global/env";
-import { JobManager } from "@/infra/jobs/manager";
+import { markCoversStale } from "@/features/media/cover-pipeline";
+import { requeue } from "@/infra/queue/changes";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { FormTimestampSchema, toIsoTimestamp } from "@/lib/utils/time";
 import { getAllowedTrackTypesForFile, getFileExtension, getMimeTypeByExt } from "@/lib/utils/file";
@@ -331,28 +331,12 @@ router.post("/:id/regenerate-cover", requireAuth, validate("param", SingleRegene
         return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
     }
 
-    const qualities = (library.cover_qualities as Quality[]) || [Quality.LOW, Quality.MEDIUM];
-    const configVersion = library.cover_config_version || 1;
-
-    const job = await JobManager.createTask({
-        type: AsyncTaskType.COVER_BATCH,
-        libraryId: media.library_id,
-        ownerId: user.id,
-        inputSnapshot: {
-            source_type: "MANUAL",
-            media_ids: [media.id],
-            qualities,
-        },
-        configVersion,
+    await db.transaction(async (tx) => {
+        await markCoversStale(tx, eq(Media.id, media.id));
+        await requeue(tx, ["cover"], [media.id]);
     });
 
-    return c.json(
-        success(Code.SUCCESS, {
-            mediaId: media.id,
-            jobId: job.id,
-            status: job.status,
-        }),
-    );
+    return c.json(success(Code.SUCCESS, { mediaId: media.id, status: "queued" }));
 });
 
 export const BatchRegenerateCoversSchema = v.pipe(
@@ -415,28 +399,13 @@ router.post("/regenerate-covers", requireAuth, validate("json", BatchRegenerateC
         }
     }
 
-    const qualities = library.cover_qualities || [Quality.LOW, Quality.MEDIUM];
-    const configVersion = library.cover_config_version || 1;
-
-    const job = await JobManager.createTask({
-        type: AsyncTaskType.COVER_BATCH,
-        libraryId: library_id,
-        ownerId: user.id,
-        inputSnapshot: {
-            source_type: "MANUAL",
-            media_ids: mediaList.map((m) => m.id),
-            qualities,
-        },
-        configVersion,
+    const mediaIds = mediaList.map((m) => m.id);
+    await db.transaction(async (tx) => {
+        await markCoversStale(tx, inArray(Media.id, mediaIds));
+        await requeue(tx, ["cover"], mediaIds);
     });
 
-    return c.json(
-        success(Code.SUCCESS, {
-            queued_media_count: mediaList.length,
-            job_id: job.id,
-            status: job.status,
-        }),
-    );
+    return c.json(success(Code.SUCCESS, { queued_media_count: mediaIds.length }));
 });
 
 const GetMpdRequestSchema = v.object({

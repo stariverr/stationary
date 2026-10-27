@@ -1,30 +1,17 @@
 <script setup lang="ts">
 import { toast } from "vue-sonner";
-import { Loader2, RefreshCw, Save, Info, Sparkles } from "@lucide/vue";
+import { Loader2, RefreshCw, RotateCcw, Save, Info, Sparkles } from "@lucide/vue";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import LibraryAiBindings from "@/components/settings/LibraryAiBindings.vue";
 import { useLibraryStore } from "@/stores/library";
 import type { ApiResponse } from "@/types/api";
-
-interface ActiveTask {
-    id: string;
-    type: string;
-    status: string; // DISCOVERING, RUNNING, PAUSED, COMPLETED, CANCELLED, FAILED
-    discovery_complete: boolean;
-    total_units: number;
-    succeeded_units: number;
-    failed_units: number;
-    cancelled_units: number;
-    create_time: string;
-    update_time: string;
-}
+import type { PipelineStatus } from "@/types/pipeline";
 
 interface FetchErrorLike {
     data?: { message?: string };
@@ -42,22 +29,12 @@ const libraryStore = useLibraryStore();
 
 const selectedLibraryId = ref(libraryStore.activeLibraryId || libraryStore.libraries[0]?.id || "");
 
-const activeTask = ref<ActiveTask | null>(null);
+const coverStatus = ref<PipelineStatus | null>(null);
 const isRecovering = ref(false);
+const isRetryingCovers = ref(false);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-const isTaskBusy = computed(() => activeTask.value !== null && ["DISCOVERING", "RUNNING"].includes(activeTask.value.status));
-const isTaskVisible = computed(() => activeTask.value !== null && ["DISCOVERING", "RUNNING", "PAUSED"].includes(activeTask.value.status));
-
-const activeTaskProcessedUnits = computed(() => {
-    if (!activeTask.value) return 0;
-    return activeTask.value.succeeded_units + activeTask.value.failed_units + activeTask.value.cancelled_units;
-});
-
-const activeTaskPercentage = computed(() => {
-    if (!activeTask.value || activeTask.value.total_units <= 0) return 0;
-    return Math.min(100, Math.floor((activeTaskProcessedUnits.value / activeTask.value.total_units) * 100));
-});
+const isCoverBusy = computed(() => coverStatus.value !== null && (coverStatus.value.scanning || coverStatus.value.queued > 0));
 
 const stopPolling = () => {
     if (pollTimer) {
@@ -83,9 +60,11 @@ const isCoverConfigChanged = computed(
 
 const fetchCoverConfig = async (libId: string) => {
     try {
-        const [configRes, activeJobRes] = await Promise.all([
-            useApi<ApiResponse<{ qualities: string[]; config_version: number }>>(`/library/${libId}/cover-config`),
-            useApi<ApiResponse<{ reconcile_status: string; active_task: ActiveTask | null }>>(`/library/${libId}/cover-jobs/active`),
+        const [configRes, statusRes] = await Promise.all([
+            useApi<ApiResponse<{ qualities: string[] }>>(`/library/${libId}/cover-config`),
+            useApi<ApiResponse<{ libraries: { library_id: string; pipelines: PipelineStatus[] }[] }>>("/jobs/pipelines", {
+                query: { library_id: libId },
+            }),
         ]);
 
         if (configRes?.data) {
@@ -94,16 +73,17 @@ const fetchCoverConfig = async (libId: string) => {
             savedCoverQualities.value = [...qualities];
         }
 
-        if (activeJobRes?.data) {
-            activeTask.value = activeJobRes.data.active_task;
-            if (activeJobRes.data.reconcile_status === "IN_PROGRESS" || isTaskBusy.value) {
+        if (statusRes?.data && libId === selectedLibraryId.value) {
+            const library = statusRes.data.libraries.find((item) => item.library_id === libId);
+            coverStatus.value = library?.pipelines.find((item) => item.pipeline === "cover") ?? null;
+            if (isCoverBusy.value) {
                 if (!pollTimer) startPolling(libId);
             } else {
                 stopPolling();
             }
         }
     } catch (e) {
-        console.error("Failed to fetch cover config or active job:", e);
+        console.error("Failed to fetch cover config or status:", e);
     }
 };
 
@@ -111,7 +91,7 @@ watch(
     selectedLibraryId,
     (libId) => {
         stopPolling();
-        activeTask.value = null;
+        coverStatus.value = null;
         if (libId) fetchCoverConfig(libId);
     },
     { immediate: true },
@@ -131,18 +111,15 @@ const saveCoverConfig = async () => {
     if (!libId) return;
     isSavingCoverConfig.value = true;
     try {
-        const res = await useApi<ApiResponse<{ qualities: string[]; is_changed: boolean; active_task: ActiveTask | null }>>(
-            `/library/${libId}/cover-config`,
-            { method: "PUT", body: { qualities: selectedCoverQualities.value } },
-        );
+        const res = await useApi<ApiResponse<{ qualities: string[]; is_changed: boolean }>>(`/library/${libId}/cover-config`, {
+            method: "PUT",
+            body: { qualities: selectedCoverQualities.value },
+        });
         if (res?.success) {
             savedCoverQualities.value = [...selectedCoverQualities.value];
-            if (res.data?.active_task) {
-                activeTask.value = res.data.active_task;
-                toast.success(t("settings.library_config.quality_saved_rebuilding"));
-            } else {
-                toast.success(t("settings.library_config.quality_saved"));
-            }
+            toast.success(
+                res.data?.is_changed ? t("settings.library_config.quality_saved_rebuilding") : t("settings.library_config.quality_saved"),
+            );
             await fetchCoverConfig(libId);
             startPolling(libId);
         }
@@ -159,13 +136,9 @@ const triggerCoverRecovery = async () => {
     if (!libId) return;
     isRecovering.value = true;
     try {
-        const res = await useApi<ApiResponse<{ task_id: string; active_task?: ActiveTask }>>(`/library/${libId}/cover-jobs`, {
-            method: "POST",
-            body: { type: "RECONCILE" },
-        });
+        const res = await useApi<ApiResponse<{ library_id: string }>>(`/library/${libId}/cover-jobs`, { method: "POST", body: {} });
         if (!res?.success) throw new Error(res?.message || "Server error");
         toast.success(t("settings.general.video_cover_recovery_success"));
-        if (res.data?.active_task) activeTask.value = res.data.active_task;
         await fetchCoverConfig(libId);
         startPolling(libId);
     } catch (err) {
@@ -178,16 +151,18 @@ const triggerCoverRecovery = async () => {
     }
 };
 
-const runJobAction = async (action: "pause" | "resume" | "cancel") => {
+const retryFailedCovers = async () => {
     const libId = selectedLibraryId.value;
-    if (!activeTask.value || !libId) return;
+    if (!libId) return;
+    isRetryingCovers.value = true;
     try {
-        await useApi(`/jobs/${activeTask.value.id}/${action}`, { method: "POST" });
-        toast.success(t(`settings.library_config.job_${action}_done`));
+        const res = await useApi<ApiResponse<{ retried: number }>>(`/jobs/pipelines/${libId}/cover/retry-failed`, { method: "POST" });
+        toast.success(t("settings.library_config.cover_retry_done", { count: res?.data?.retried ?? 0 }));
         await fetchCoverConfig(libId);
-        if (action === "resume") startPolling(libId);
     } catch {
-        toast.error(t(`settings.library_config.job_${action}_failed`));
+        toast.error(t("settings.library_config.cover_retry_error"));
+    } finally {
+        isRetryingCovers.value = false;
     }
 };
 </script>
@@ -273,66 +248,40 @@ const runJobAction = async (action: "pause" | "resume" | "cancel") => {
                             variant="outline"
                             size="sm"
                             class="shrink-0"
-                            :disabled="isRecovering || isTaskBusy"
+                            :disabled="isRecovering || isCoverBusy"
                             @click="triggerCoverRecovery"
                         >
-                            <Loader2 v-if="isRecovering || isTaskBusy" class="size-3.5 animate-spin" />
+                            <Loader2 v-if="isRecovering || isCoverBusy" class="size-3.5 animate-spin" />
                             <RefreshCw v-else class="size-3.5" />
                             {{
-                                isRecovering || isTaskBusy
+                                isRecovering || isCoverBusy
                                     ? $t("settings.general.video_cover_recovery_loading")
                                     : $t("settings.general.video_cover_recovery_btn")
                             }}
                         </Button>
                     </div>
 
-                    <div v-if="activeTask && isTaskVisible" class="space-y-2.5 rounded-xl border bg-muted/50 p-3">
-                        <div class="flex items-center justify-between gap-2 text-xs">
-                            <span class="flex items-center gap-1.5 font-semibold">
-                                <Loader2 v-if="isTaskBusy" class="size-3.5 shrink-0 animate-spin" />
-                                {{
-                                    activeTask.status === "DISCOVERING"
-                                        ? $t("settings.library_config.job_discovering")
-                                        : activeTask.status === "PAUSED"
-                                          ? $t("settings.library_config.job_paused")
-                                          : $t("settings.library_config.job_running")
-                                }}
-                            </span>
-                            <div class="flex items-center gap-2">
-                                <span class="font-mono font-bold">
-                                    <span
-                                        v-if="!activeTask.discovery_complete && activeTask.total_units === 0"
-                                        class="font-normal text-muted-foreground"
-                                    >
-                                        {{ $t("settings.library_config.job_counting") }}
-                                    </span>
-                                    <template v-else>
-                                        {{ activeTaskProcessedUnits }} / {{ activeTask.total_units }} ({{ activeTaskPercentage }}%)
-                                        <span v-if="!activeTask.discovery_complete" class="ml-1 font-normal text-muted-foreground"
-                                            >({{ $t("settings.library_config.job_still_counting") }})</span
-                                        >
-                                    </template>
-                                </span>
-                                <Button v-if="isTaskBusy" variant="outline" size="xs" @click="runJobAction('pause')">{{
-                                    $t("settings.library_config.job_pause")
-                                }}</Button>
-                                <Button v-if="activeTask.status === 'PAUSED'" variant="outline" size="xs" @click="runJobAction('resume')">{{
-                                    $t("settings.library_config.job_resume")
-                                }}</Button>
-                                <Button
-                                    variant="outline"
-                                    size="xs"
-                                    class="text-destructive hover:text-destructive"
-                                    @click="runJobAction('cancel')"
-                                >
-                                    {{ $t("settings.library_config.job_cancel") }}
-                                </Button>
-                            </div>
-                        </div>
-                        <Progress
-                            :model-value="activeTaskPercentage"
-                            :class="!activeTask.discovery_complete && activeTask.total_units === 0 ? 'animate-pulse' : undefined"
-                        />
+                    <div
+                        v-if="coverStatus && (isCoverBusy || coverStatus.failed > 0)"
+                        class="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-muted/50 p-3 text-xs"
+                    >
+                        <span v-if="isCoverBusy" class="flex items-center gap-1.5 font-semibold">
+                            <Loader2 class="size-3.5 shrink-0 animate-spin" />
+                            <template v-if="coverStatus.queued === 0">{{ $t("settings.library_config.cover_counting") }}</template>
+                            <span v-else class="tabular-nums">{{
+                                $t("settings.library_config.cover_progress", { queued: coverStatus.queued, running: coverStatus.running })
+                            }}</span>
+                        </span>
+                        <span v-if="coverStatus.failed > 0" class="flex items-center gap-2 text-destructive">
+                            <span class="tabular-nums">{{
+                                $t("settings.library_config.cover_failed", { count: coverStatus.failed })
+                            }}</span>
+                            <Button variant="outline" size="xs" :disabled="isRetryingCovers" @click="retryFailedCovers">
+                                <Loader2 v-if="isRetryingCovers" class="size-3 animate-spin" />
+                                <RotateCcw v-else class="size-3" />
+                                {{ $t("settings.library_config.cover_retry") }}
+                            </Button>
+                        </span>
                     </div>
                 </div>
 

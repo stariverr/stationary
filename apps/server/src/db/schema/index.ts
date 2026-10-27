@@ -15,6 +15,8 @@ import {
     timestamp,
     varchar,
     real,
+    smallint,
+    primaryKey,
 } from "drizzle-orm/pg-core";
 import { v7 as createUuidV7 } from "uuid";
 
@@ -172,6 +174,14 @@ export const Author = pgTable(
         avatar_file_id: uuid("avatar_file_id"),
         /** Avatar Thumb Path */
         avatar_thumb_file_id: uuid("avatar_thumb_file_id"),
+        /** Where the avatar should come from: a remote URL (ingest) or another author's file (move). At most one is set. */
+        avatar_source_url: text("avatar_source_url"),
+        avatar_source_file_id: uuid("avatar_source_file_id"),
+        /** Source that produced avatar_file_id, as written by avatarOrigin(); the avatar is current when it equals the wanted source. */
+        avatar_origin: text("avatar_origin"),
+        /** Last failure of the avatar pipeline and the source it failed on; a different source makes it obsolete. */
+        avatar_error: text("avatar_error"),
+        avatar_error_origin: text("avatar_error_origin"),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),
@@ -203,7 +213,6 @@ export const Library = pgTable("library", {
     }>(),
     /** Cover Qualities: cover qualities for the library */
     cover_qualities: jsonb("cover_qualities").$type<Quality[]>().default([Quality.LOW, Quality.MEDIUM]).notNull(),
-    cover_config_version: integer("cover_config_version").default(1).notNull(),
     create_time: temporal("create_time")
         .default(sql`now()`)
         .notNull(),
@@ -447,6 +456,8 @@ export type Stream = MediaStream;
 
 export interface TrackMetadata {
     source_file_id?: string;
+    /** Generated tracks: the source file `last_error` was recorded for; a scan does not retry the same source. */
+    error_source_file_id?: string;
     /** DASH / fMP4 segment index info */
     segment_base?: {
         initialization?: string;
@@ -1009,53 +1020,21 @@ export const DraftFile = pgTable("draft_file", {
 
 /** High-level master task category/type */
 export enum AsyncTaskType {
-    COVER_RECONCILE = "COVER_RECONCILE",
-    COVER_BATCH = "COVER_BATCH",
-    POST_PROCESS = "POST_PROCESS",
     AI_ENRICH = "AI_ENRICH",
-    AVATAR_COPY = "AVATAR_COPY",
 }
-export const AsyncTaskTypeEnum = pgEnum("async_task_type", [
-    AsyncTaskType.COVER_RECONCILE,
-    AsyncTaskType.COVER_BATCH,
-    AsyncTaskType.POST_PROCESS,
-    AsyncTaskType.AI_ENRICH,
-    AsyncTaskType.AVATAR_COPY,
-]);
+export const AsyncTaskTypeEnum = pgEnum("async_task_type", [AsyncTaskType.AI_ENRICH]);
 
 /** Entity subject type for task units */
 export enum AsyncSubjectType {
     MEDIA = "MEDIA",
-    POST = "POST",
-    FILE = "FILE",
-    AUTHOR = "AUTHOR",
 }
-export const AsyncSubjectTypeEnum = pgEnum("async_subject_type", [
-    AsyncSubjectType.MEDIA,
-    AsyncSubjectType.POST,
-    AsyncSubjectType.FILE,
-    AsyncSubjectType.AUTHOR,
-]);
+export const AsyncSubjectTypeEnum = pgEnum("async_subject_type", [AsyncSubjectType.MEDIA]);
 
 /** Physical category/kind of task execution unit */
 export enum AsyncTaskUnitKind {
-    COVER_DERIVATIVE = "COVER_DERIVATIVE",
-    VIDEO_TRANSCODE = "VIDEO_TRANSCODE",
-    AI_TAGGING = "AI_TAGGING",
-    MEDIA_DOWNLOAD = "MEDIA_DOWNLOAD",
-    AVATAR_DOWNLOAD = "AVATAR_DOWNLOAD",
     AI_ENRICHMENT = "AI_ENRICHMENT",
-    AVATAR_COPY = "AVATAR_COPY",
 }
-export const AsyncTaskUnitKindEnum = pgEnum("async_task_unit_kind", [
-    AsyncTaskUnitKind.COVER_DERIVATIVE,
-    AsyncTaskUnitKind.VIDEO_TRANSCODE,
-    AsyncTaskUnitKind.AI_TAGGING,
-    AsyncTaskUnitKind.MEDIA_DOWNLOAD,
-    AsyncTaskUnitKind.AVATAR_DOWNLOAD,
-    AsyncTaskUnitKind.AI_ENRICHMENT,
-    AsyncTaskUnitKind.AVATAR_COPY,
-]);
+export const AsyncTaskUnitKindEnum = pgEnum("async_task_unit_kind", [AsyncTaskUnitKind.AI_ENRICHMENT]);
 
 /** Status of master async task */
 export enum AsyncTaskStatus {
@@ -1108,10 +1087,6 @@ export enum AsyncOutcomeCode {
     LEASE_EXPIRED_EXHAUSTED = "LEASE_EXPIRED_EXHAUSTED",
     LOCKED_CONCURRENT_EXECUTION = "LOCKED_CONCURRENT_EXECUTION",
     UNHANDLED_EXCEPTION = "UNHANDLED_EXCEPTION",
-    SOURCE_CHANGED = "SOURCE_CHANGED",
-    MEDIA_NOT_FOUND = "MEDIA_NOT_FOUND",
-    INVALID_INPUT = "INVALID_INPUT",
-    RENDER_FAILED = "RENDER_FAILED",
 }
 
 /**
@@ -1216,7 +1191,7 @@ export const AsyncTaskUnit = pgTable(
         spec_hash: text("spec_hash").default("").notNull(),
         /** Execution status */
         status: AsyncTaskUnitStatusEnum("status").default(AsyncTaskUnitStatus.PENDING).notNull(),
-        /** Detailed outcome code (e.g. EXECUTED, SKIPPED, RENDER_FAILED) */
+        /** Detailed outcome code (e.g. EXECUTED, SKIPPED) */
         outcome_code: text("outcome_code"),
         /** Timestamp after which unit becomes eligible for dispatch/pickup */
         available_at: temporal("available_at")
@@ -1261,3 +1236,33 @@ export const AsyncTaskUnit = pgTable(
 );
 
 // ==== Cover & Derivative Async Task Tables: END ====
+
+/**
+ * Reconcile queue (docs/async_task_improvements.zh-Hans.md §11.3). A row only says "this subject may be out of
+ * date for this pipeline"; the pipeline reads current state and does the difference. One row and one lease per
+ * (pipeline, subject), so a subject is never reconciled twice at once.
+ */
+export const JobQueue = pgTable(
+    "job_queue",
+    {
+        pipeline: text("pipeline").notNull(),
+        subject_id: text("subject_id").notNull(),
+        library_id: uuid("library_id").notNull(),
+        priority: smallint("priority").default(0).notNull(),
+        available_at: temporal("available_at")
+            .default(sql`now()`)
+            .notNull(),
+        /** Enqueued again while leased: run once more after the current run finishes. */
+        dirty: boolean("dirty").default(false).notNull(),
+        /** Library scans only: the last subject id paged through. */
+        cursor: text("cursor"),
+        lease_token: uuid("lease_token"),
+        lease_expires_at: temporal("lease_expires_at"),
+        attempts: integer("attempts").default(0).notNull(),
+    },
+    (table) => [
+        primaryKey({ columns: [table.pipeline, table.subject_id] }),
+        index("job_queue_claim_idx").on(table.priority.desc(), table.available_at),
+        index("job_queue_library_pipeline_idx").on(table.library_id, table.pipeline),
+    ],
+);

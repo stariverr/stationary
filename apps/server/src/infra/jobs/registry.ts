@@ -8,7 +8,7 @@ export const HandlerRegistry = {
     /**
      * Register a TaskHandler strategy for a specific AsyncTaskType.
      *
-     * @param type The unique task type string (e.g. COVER_BATCH, COVER_RECONCILE, POST_PROCESS)
+     * @param type The unique task type string (e.g. AI_ENRICH)
      * @param handler The strategy implementation conforming to TaskHandler interface
      */
     register(type: AsyncTaskType, handler: TaskHandler): void {

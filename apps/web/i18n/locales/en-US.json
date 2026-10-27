@@ -198,23 +198,15 @@
             "badge_sharp": "Sharp",
             "quality_save": "Save",
             "quality_saved": "Cover quality saved",
-            "quality_saved_rebuilding": "Cover quality updated; covers for the whole library are being regenerated in the background",
+            "quality_saved_rebuilding": "Cover quality updated; the library's covers are being updated in the background",
             "quality_save_failed": "Failed to save cover quality",
             "quality_changed_notice": "Quality changed. Saving rescans the whole library and updates its covers.",
-            "job_discovering": "Scanning library media…",
-            "job_paused": "Cover generation paused",
-            "job_running": "Generating covers in the background…",
-            "job_counting": "Counting…",
-            "job_still_counting": "still scanning",
-            "job_pause": "Pause",
-            "job_resume": "Resume",
-            "job_cancel": "Cancel",
-            "job_pause_done": "Pause requested",
-            "job_resume_done": "Processing resumed",
-            "job_cancel_done": "Cancellation requested",
-            "job_pause_failed": "Failed to pause",
-            "job_resume_failed": "Failed to resume",
-            "job_cancel_failed": "Failed to cancel"
+            "cover_counting": "Checking library media…",
+            "cover_progress": "{queued} covers left · {running} rendering",
+            "cover_failed": "{count} covers failed",
+            "cover_retry": "Retry",
+            "cover_retry_done": "Queued {count} covers to retry",
+            "cover_retry_error": "Failed to retry covers"
         },
         "ai_config": {
             "coverage_empty": "This library has no media yet",
@@ -1103,11 +1095,7 @@
         "task_types": {
             "all": "All Task Types",
             "ALL": "All Task Types",
-            "COVER_BATCH": "Batch Cover Generation",
-            "COVER_RECONCILE": "Cover Auto Sync",
-            "AI_ENRICH": "AI Smart Analysis",
-            "POST_PROCESS": "Data Post-Processing",
-            "AVATAR_COPY": "Avatar Backup Sync"
+            "AI_ENRICH": "AI Smart Analysis"
         },
         "table": {
             "id": "Task ID",
@@ -1164,6 +1152,29 @@
         "pagination": {
             "showing": "Showing {current} of {total}",
             "page": "Page {page} of {pages}"
+        },
+        "pipelines": {
+            "title": "Library pipelines",
+            "desc": "Downloads, avatars and covers are kept up to date per library. Counts update every few seconds.",
+            "loading": "Loading…",
+            "empty": "No libraries yet.",
+            "library": "Library",
+            "pipeline": "Pipeline",
+            "queued": "Queued",
+            "running": "Running",
+            "retrying": "Retrying",
+            "failed": "Failed",
+            "scanning": "scanning",
+            "names": {
+                "download": "Downloads",
+                "avatar": "Avatars",
+                "cover": "Covers"
+            },
+            "show_failures": "Show",
+            "retry_failed": "Retry failed",
+            "retry_done": "Queued {count} items to retry",
+            "retry_error": "Failed to retry",
+            "failures_error": "Failed to load failures"
         }
     },
     "trash": {

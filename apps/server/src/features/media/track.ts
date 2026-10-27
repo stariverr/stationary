@@ -22,6 +22,13 @@ import { Result } from "better-result";
 import { MediaCompositionError, NotFoundError } from "@/lib/errors";
 import { getErrorMessage } from "@/lib/utils/error";
 import { assertMediaComposition, syncMediaAndPostStatus } from "./composition";
+import { markChanged, requeue } from "@/infra/queue/changes";
+import { Aspect } from "@/infra/queue/pipelines";
+
+/** Content tracks are what covers are rendered from. */
+async function markContentChanged(tx: Transaction, mediaId: string, purpose: TrackPurpose) {
+    if (purpose === TrackPurpose.CONTENT) await markChanged(tx, Aspect.MEDIA_CONTENT, [mediaId]);
+}
 
 export interface FileData {
     path: string;
@@ -400,6 +407,7 @@ export const TrackService = {
         // 4. Recompute aggregate status after the Track write. Batch importers can defer
         // the strict check until all tracks in the composition have been written.
         await syncMediaAndPostStatus(mediaId, tx, now);
+        await markContentChanged(tx, mediaId, trackInfo.purpose);
         if (!options.deferCompositionCheck) {
             await assertMediaComposition(mediaId, tx);
         }
@@ -485,6 +493,7 @@ export const TrackService = {
             }
 
             await syncMediaAndPostStatus(mediaId, tx, now);
+            await markContentChanged(tx, mediaId, existingTrack.purpose);
 
             return {
                 track: updatedTrack,
@@ -522,6 +531,7 @@ export const TrackService = {
                                 .where(eq(Track.id, trackId));
 
                             await assertMediaComposition(mediaId, tx);
+                            await markContentChanged(tx, mediaId, trackRecord.purpose);
                             if (trackRecord.file_id) {
                                 await tx
                                     .update(File)
@@ -604,6 +614,9 @@ export const TrackService = {
 
             await syncMediaAndPostStatus(mediaId, tx, now);
             await assertMediaComposition(mediaId, tx);
+            // Order, default, primary and staleness decide which cover is rendered and from what.
+            await markContentChanged(tx, mediaId, trackRecord.purpose);
+            if (trackRecord.purpose === TrackPurpose.COVER) await requeue(tx, ["cover"], [mediaId]);
 
             return updated;
         });

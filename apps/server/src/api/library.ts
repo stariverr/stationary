@@ -4,18 +4,14 @@ import * as v from "valibot";
 import { validate } from "@/lib/validation/validator";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
-import {
-    DeleteStatus,
-    Library,
-    AsyncTask,
-    AsyncTaskType,
-    AsyncTaskStatus,
-} from "@/db/schema";
+import { DeleteStatus, Library, Media } from "@/db/schema";
 import { Quality } from "@/lib/types";
 
-import { and, eq, ilike, SQL, count, sql, desc } from "drizzle-orm";
+import { and, eq, ilike, SQL, count, sql } from "drizzle-orm";
 import { AuthEnv, ownedLibrary, requireAuth } from "@/lib/auth/middleware";
-import { JobManager } from "@/infra/jobs/manager";
+import { markCoversStale } from "@/features/media/cover-pipeline";
+import { markChanged, requestScan } from "@/infra/queue/changes";
+import { Aspect } from "@/infra/queue/pipelines";
 import { LibraryMoveItemsBodySchema } from "@/features/library/schema";
 import { LibraryDeleteError, LibraryMoveError } from "@/features/library/errors";
 import { moveLibraryItems } from "@/features/library/move-items";
@@ -60,9 +56,7 @@ export const LibraryUpdateBodySchema = v.strictObject({
 });
 
 export const LibraryCoverJobsBodySchema = v.object({
-    type: v.optional(v.picklist(["MANUAL", "RECONCILE"]), "RECONCILE"),
-    media_ids: v.optional(v.array(v.pipe(v.string(), v.uuid("Invalid media ID format")))),
-    qualities: v.optional(v.array(v.enum(Quality))),
+    /** Render every generated cover again, not only missing or outdated ones. */
     force: v.optional(v.boolean(), false),
 });
 
@@ -228,70 +222,14 @@ router.post(
         const library = await ownedLibrary(c, user.id, id);
         if (!library) return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
 
-        const sourceType = body.type === "MANUAL" ? "MANUAL" : "RECONCILE";
-        const qualities = body.qualities || (library.cover_qualities as Quality[]) || [Quality.LOW, Quality.MEDIUM];
-
-        const task = await JobManager.createTask({
-            type: sourceType === "MANUAL" ? AsyncTaskType.COVER_BATCH : AsyncTaskType.COVER_RECONCILE,
-            libraryId: library.id,
-            ownerId: user.id,
-            inputSnapshot: {
-                source_type: sourceType,
-                qualities,
-                media_ids: body.media_ids || null,
-                force: body.force ?? false,
-            },
-            configVersion: library.cover_config_version,
+        await db.transaction(async (tx) => {
+            if (body.force) await markCoversStale(tx, eq(Media.library_id, library.id));
+            await requestScan(tx, "cover", [library.id]);
         });
 
-        return c.json(
-            success(Code.SUCCESS, {
-                task_id: task.id,
-                type: task.type,
-                status: task.status,
-                config_version: task.config_version,
-                active_task: task,
-            }),
-            202,
-        );
+        return c.json(success(Code.SUCCESS, { library_id: library.id }), 202);
     },
 );
-
-router.get("/:id/cover-jobs/active", requireAuth, validate("param", LibraryIdParamSchema), async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
-
-    const { id } = c.req.valid("param");
-
-    const library = await ownedLibrary(c, user.id, id);
-    if (!library) return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
-
-    const activeTasks = await db
-        .select()
-        .from(AsyncTask)
-        .where(
-            and(
-                eq(AsyncTask.library_id, id),
-                eq(AsyncTask.type, AsyncTaskType.COVER_RECONCILE),
-                eq(AsyncTask.config_version, library.cover_config_version),
-            ),
-        )
-        .orderBy(desc(AsyncTask.create_time))
-        .limit(1);
-
-    const activeTask = activeTasks[0];
-
-    const isRunning = activeTask && (activeTask.status === AsyncTaskStatus.DISCOVERING || activeTask.status === AsyncTaskStatus.RUNNING);
-    const reconcileStatus = isRunning ? "IN_PROGRESS" : "IDLE";
-
-    return c.json(
-        success(Code.SUCCESS, {
-            library_id: library.id,
-            reconcile_status: reconcileStatus,
-            active_task: activeTask || null,
-        }),
-    );
-});
 
 router.get("/:id/cover-config", requireAuth, validate("param", LibraryIdParamSchema), async (c) => {
     const user = c.get("user");
@@ -309,7 +247,6 @@ router.get("/:id/cover-config", requireAuth, validate("param", LibraryIdParamSch
         success(Code.SUCCESS, {
             library_id: library.id,
             qualities,
-            config_version: library.cover_config_version,
         }),
     );
 });
@@ -337,43 +274,17 @@ router.put(
             oldQualities.every((quality) => body.qualities.includes(quality));
         const isChanged = !isSame;
 
-        let newVersion = library.cover_config_version;
-        let createdTask: typeof AsyncTask.$inferSelect | null = null;
-
         if (isChanged) {
-            newVersion += 1;
-            const now = Temporal.Now.instant();
-
-            await db
-                .update(Library)
-                .set({
-                    cover_qualities: body.qualities,
-                    cover_config_version: newVersion,
-                    update_time: now,
-                })
-                .where(eq(Library.id, id));
-
-            createdTask = await JobManager.createTask({
-                type: AsyncTaskType.COVER_RECONCILE,
-                libraryId: id,
-                ownerId: user.id,
-                inputSnapshot: {
-                    source_type: "RECONCILE",
-                    qualities: body.qualities,
-                },
-                configVersion: newVersion,
+            await db.transaction(async (tx) => {
+                await tx
+                    .update(Library)
+                    .set({ cover_qualities: body.qualities, update_time: Temporal.Now.instant() })
+                    .where(eq(Library.id, id));
+                await markChanged(tx, Aspect.LIBRARY_COVER_CONFIG, [id]);
             });
         }
 
-        return c.json(
-            success(Code.SUCCESS, {
-                library_id: id,
-                qualities: body.qualities,
-                config_version: newVersion,
-                is_changed: isChanged,
-                active_task: createdTask || null,
-            }),
-        );
+        return c.json(success(Code.SUCCESS, { library_id: id, qualities: body.qualities, is_changed: isChanged }));
     },
 );
 

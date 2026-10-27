@@ -3,14 +3,13 @@ import { AsyncTaskStatus, AsyncTaskType } from "@/db/schema";
 import { getTaskHandler } from "@/infra/jobs/registry";
 import {
     MAX_LOCK_CONTENTION_DELAY_SECONDS,
-    MAX_RETRY_DELAY_SECONDS,
     MIN_LOCK_CONTENTION_DELAY_SECONDS,
     lockContentionDelaySeconds,
     requirePositiveInteger,
-    retryDelaySeconds,
     taskStatusAfterDiscovery,
     terminalTaskStatus,
 } from "@/infra/jobs/policy";
+import { MAX_RETRY_DELAY_SECONDS, retryDelaySeconds } from "@/infra/queue/policy";
 import { createIdempotencyKey } from "@/lib/utils/hash";
 import { LockAcquisitionError, isLockAcquisitionError } from "@/lib/utils/lock";
 import { initJobHandlers } from "@/infra/jobs/register-handlers";

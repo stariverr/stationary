@@ -1,4 +1,4 @@
-import { db } from "@/global/db";
+import { db, type Transaction } from "@/global/db";
 import {
     Media,
     Track,
@@ -8,10 +8,9 @@ import {
     TrackType,
     TrackPurpose,
     MediaType,
-    AsyncOutcomeCode,
     type TrackMetadata,
 } from "@/db/schema";
-import { and, eq, sql, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { renderCoverFrame } from "@/lib/utils/cover_renderer";
 import { RECIPE_VERSION } from "@/lib/utils/cover_profiles";
 import { uploadToS3 } from "@/lib/utils/media";
@@ -30,22 +29,22 @@ export interface GenerateCoverParams {
     media: typeof Media.$inferSelect;
     quality: Quality;
     source: ResolvedCoverSource;
-    sourceTrackId?: string;
-    sourceFileId?: string;
+    signal?: AbortSignal;
+    /** Runs first in the transaction that stores the cover (the queue's fence goes here). */
+    beforePersist?: (tx: Transaction) => Promise<void>;
 }
 
-export interface GenerateCoverResult {
-    success: boolean;
-    skipped?: boolean;
-    outcomeCode: string;
-    fileId?: string;
-    error?: string;
-    retryable?: boolean;
+/** FFmpeg could not render the source; retrying the same source will not help. */
+export class CoverRenderError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "CoverRenderError";
+    }
 }
 
-type CoverPersistenceOutcome =
-    | { status: "persisted"; fileId: string }
-    | { status: "skipped"; outcomeCode: AsyncOutcomeCode; error: string };
+export const coverVariantKey = (quality: Quality) => `cover:${quality.toLowerCase()}:recipe:${RECIPE_VERSION}`;
+
+export const coverPriority = (quality: Quality) => (quality === Quality.LOW ? 10 : quality === Quality.MEDIUM ? 20 : 30);
 
 export const UNSUPPORTED_COVER_EXTENSIONS = new Set(["vvic", "jxl"]);
 
@@ -93,69 +92,37 @@ export function rankCoverCandidateTrack<T extends { track: typeof Track.$inferSe
     return 0;
 }
 
+/**
+ * Picks the content track a cover is rendered from, among completed CONTENT tracks with an active file:
+ * renderable formats first (vvic/jxl last), then IMAGE before VIDEO, primary, default, and lower priority.
+ */
+export function pickCoverSource(
+    rows: { track: typeof Track.$inferSelect; file: typeof DbFile.$inferSelect | null }[],
+): ResolvedCoverSource | null {
+    const candidates = rows.flatMap(({ track, file }) =>
+        track.purpose === TrackPurpose.CONTENT &&
+        track.delete_status === DeleteStatus.ACTIVE &&
+        track.sync_status === SyncStatus.COMPLETED &&
+        file?.delete_status === DeleteStatus.ACTIVE &&
+        track.file_id === file.id
+            ? [{ track, file }]
+            : [],
+    );
+    if (candidates.length === 0) return null;
+    candidates.sort(rankCoverCandidateTrack);
+    const best = candidates[0]!;
+    return { track: best.track, fileId: best.file.id, filePath: best.file.path, fileBucket: best.file.bucket };
+}
+
 export const CoverService = {
     /**
-     * Resolve valid source track & file for cover generation.
-     * Priority:
-     * 1. Purpose must be CONTENT and delete_status ACTIVE
-     * 2. Supported / renderable media extensions (prefer standard formats over vvic/jxl)
-     * 3. TrackType priority: IMAGE -> VIDEO
-     * 4. is_primary (true before false)
-     * 5. is_default (true before false)
-     * 6. priority score (lower priority number first)
-     */
-    async resolveSourceTrack(media: typeof Media.$inferSelect): Promise<ResolvedCoverSource | null> {
-        const rows = await db
-            .select({
-                track: Track,
-                file: DbFile,
-            })
-            .from(Track)
-            .innerJoin(DbFile, eq(Track.file_id, DbFile.id))
-            .where(
-                and(
-                    eq(Track.media_id, media.id),
-                    eq(Track.purpose, TrackPurpose.CONTENT),
-                    eq(Track.delete_status, DeleteStatus.ACTIVE),
-                    eq(Track.sync_status, SyncStatus.COMPLETED),
-                    eq(DbFile.delete_status, DeleteStatus.ACTIVE),
-                ),
-            );
-
-        if (!rows.length) {
-            return null;
-        }
-
-        rows.sort(rankCoverCandidateTrack);
-
-        const candidate = rows[0]!;
-        return {
-            track: candidate.track,
-            fileId: candidate.file.id,
-            filePath: candidate.file.path,
-            fileBucket: candidate.file.bucket,
-        };
-    },
-
-    /**
-     * Generate, render, and persist cover image for a media item.
-     * 1. Presign internal S3 source file URL
-     * 2. Render target frame with FFmpeg
-     * 3. Upload generated AVIF to S3 (overwrites existing S3 file if key matches)
-     * 4. Upsert DbFile & Track records in database:
-     *    - If an active cover Track with matching variant_key exists, updates file_id & metadata.
-     *    - If missing or inactive, inserts/upserts Track. Note: onConflictDoUpdate requires
-     *      targetWhere: sql`delete_status = 'ACTIVE'` to match partial unique index.
-     *    - Non-targeted cover tracks (e.g. HIGH when only LOW+MEDIUM are generated) remain intact.
-     * 5. Clean up superseded old cover files safely
+     * Renders one cover quality from `source`, uploads it, and points the quality's cover track at it. Superseded
+     * cover files are marked deleted; cover tracks of other qualities are left alone.
      *
-     * Recycled (trash) media and media without an active source track are skipped instead of
-     * failing the unit, since cover persistence only applies to active library media.
+     * Returns false without storing anything when the media was recycled or deleted, or the source track no longer
+     * holds the source file, meanwhile. Throws CoverRenderError when FFmpeg fails on the source.
      */
-    async generateCover(params: GenerateCoverParams): Promise<GenerateCoverResult> {
-        const { media, quality, source } = params;
-        const sourceTrackId = params.sourceTrackId || source.track.id;
-
+    async generateCover({ media, quality, source, signal, beforePersist }: GenerateCoverParams): Promise<boolean> {
         const sourceUrlForFFmpeg = await s3.getPresignedUrl(source.filePath, {
             bucket: source.fileBucket,
             expiresInSeconds: 900,
@@ -166,39 +133,29 @@ export const CoverService = {
         let renderResult;
         try {
             renderResult = await renderCoverFrame(sourceUrlForFFmpeg, renderMediaType, quality);
-        } catch (err: any) {
-            const errorMsg = String(err?.message || err);
-            console.error(`[CoverService] Cover render failed for media ${media.id}:`, errorMsg);
-            return {
-                success: false,
-                retryable: false,
-                outcomeCode: "RENDER_FAILED",
-                error: errorMsg,
-            };
+        } catch (err) {
+            throw new CoverRenderError(err instanceof Error ? err.message : String(err));
         }
+        signal?.throwIfAborted();
 
-        const shard = media.id.slice(-2);
         const qualityLower = quality.toLowerCase();
-        const sourceFileId = params.sourceFileId || source.fileId;
+        const sourceFileId = source.fileId;
+        const sourceTrackId = source.track.id;
         const s3Key = media.post_id
             ? `v2/p/${media.post_id.slice(-2)}/${media.post_id}/media_${media.id}/cover/${qualityLower}/v${RECIPE_VERSION}-${sourceFileId}.avif`
-            : `v2/m/${shard}/${media.id}/cover/${qualityLower}/v${RECIPE_VERSION}-${sourceFileId}.avif`;
+            : `v2/m/${media.id.slice(-2)}/${media.id}/cover/${qualityLower}/v${RECIPE_VERSION}-${sourceFileId}.avif`;
 
-        await uploadToS3(s3Key, renderResult.buffer, "image/avif", env.S3_BUCKET, renderResult.size);
+        await uploadToS3(s3Key, renderResult.buffer, "image/avif", env.S3_BUCKET, renderResult.size, signal);
+        signal?.throwIfAborted();
 
-        const persistence = await db.transaction(async (tx): Promise<CoverPersistenceOutcome> => {
+        return db.transaction(async (tx) => {
+            await beforePersist?.(tx);
             const [activeMedia] = await tx
                 .select({ id: Media.id })
                 .from(Media)
                 .where(and(eq(Media.id, media.id), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
                 .limit(1);
-            if (!activeMedia) {
-                return {
-                    status: "skipped",
-                    outcomeCode: AsyncOutcomeCode.MEDIA_NOT_FOUND,
-                    error: "Media was recycled or deleted before cover persistence",
-                };
-            }
+            if (!activeMedia) return false;
 
             const [activeSourceTrack] = await tx
                 .select({ id: Track.id })
@@ -213,15 +170,9 @@ export const CoverService = {
                     ),
                 )
                 .limit(1);
-            if (!activeSourceTrack) {
-                return {
-                    status: "skipped",
-                    outcomeCode: AsyncOutcomeCode.SOURCE_CHANGED,
-                    error: "Cover source track is no longer available",
-                };
-            }
+            if (!activeSourceTrack) return false;
 
-            const fileResults = await tx
+            const [file] = await tx
                 .insert(DbFile)
                 .values({
                     path: s3Key,
@@ -242,8 +193,8 @@ export const CoverService = {
                 })
                 .returning({ id: DbFile.id });
 
-            const createdFileId = fileResults[0].id;
-            const variantKey = `cover:${qualityLower}:recipe:${RECIPE_VERSION}`;
+            const createdFileId = file!.id;
+            const variantKey = coverVariantKey(quality);
             const metadata: TrackMetadata = {
                 source_file_id: sourceFileId,
                 recipe_version: RECIPE_VERSION,
@@ -251,101 +202,56 @@ export const CoverService = {
                 generated_width: renderResult.width,
                 generated_height: renderResult.height,
             };
-
-            const existingTracks = await tx
-                .select()
-                .from(Track)
-                .where(and(eq(Track.media_id, media.id), eq(Track.delete_status, DeleteStatus.ACTIVE)))
-                .for("update");
-            const existingCoverTrack = existingTracks.find((t) => t.purpose === TrackPurpose.COVER && t.variant_key === variantKey);
-
-            const completedNow = Temporal.Now.instant();
-            let oldFileIdToDelete: string | null = null;
-
-            if (existingCoverTrack) {
-                if (existingCoverTrack.file_id && existingCoverTrack.file_id !== createdFileId) {
-                    oldFileIdToDelete = existingCoverTrack.file_id;
-                }
-                await tx
-                    .update(Track)
-                    .set({
-                        file_id: createdFileId,
-                        sync_status: SyncStatus.COMPLETED,
-                        last_error: null,
-                        metadata,
-                        width: renderResult.width,
-                        height: renderResult.height,
-                        is_generated: true,
-                        is_original: false,
-                        is_stale: false,
-                        source_track_id: sourceTrackId,
-                        update_time: completedNow,
-                    })
-                    .where(eq(Track.id, existingCoverTrack.id));
-            } else {
-                await tx
-                    .insert(Track)
-                    .values({
-                        media_id: media.id,
-                        file_id: createdFileId,
-                        type: TrackType.IMAGE,
-                        purpose: TrackPurpose.COVER,
-                        quality: quality,
-                        priority: quality === Quality.LOW ? 10 : quality === Quality.MEDIUM ? 20 : 30,
-                        sync_status: SyncStatus.COMPLETED,
-                        last_error: null,
-                        metadata,
-                        width: renderResult.width,
-                        height: renderResult.height,
-                        variant_key: variantKey,
-                        is_generated: true,
-                        is_original: false,
-                        is_stale: false,
-                        source_track_id: sourceTrackId,
-                        create_time: completedNow,
-                        update_time: completedNow,
-                    })
-                    .onConflictDoUpdate({
-                        target: [Track.media_id, Track.type, Track.purpose, Track.variant_key],
-                        targetWhere: sql`delete_status = 'ACTIVE'`,
-                        set: {
-                            file_id: createdFileId,
-                            sync_status: SyncStatus.COMPLETED,
-                            last_error: null,
-                            metadata,
-                            width: renderResult.width,
-                            height: renderResult.height,
-                            is_generated: true,
-                            is_original: false,
-                            is_stale: false,
-                            source_track_id: sourceTrackId,
-                            update_time: completedNow,
-                            delete_status: DeleteStatus.ACTIVE,
-                            delete_time: null,
-                        },
-                    });
-            }
-
-            if (oldFileIdToDelete) {
-                await tx
-                    .update(DbFile)
-                    .set({ delete_status: DeleteStatus.DELETED, delete_time: completedNow })
-                    .where(and(eq(DbFile.id, oldFileIdToDelete), eq(DbFile.delete_status, DeleteStatus.ACTIVE)));
-            }
-
-            return { status: "persisted", fileId: createdFileId };
-        });
-
-        if (persistence.status === "skipped") {
-            return {
-                success: false,
-                skipped: true,
-                retryable: false,
-                outcomeCode: persistence.outcomeCode,
-                error: persistence.error,
+            const now = Temporal.Now.instant();
+            const coverFields = {
+                file_id: createdFileId,
+                sync_status: SyncStatus.COMPLETED,
+                last_error: null,
+                metadata,
+                width: renderResult.width,
+                height: renderResult.height,
+                is_generated: true,
+                is_original: false,
+                is_stale: false,
+                source_track_id: sourceTrackId,
+                update_time: now,
             };
-        }
 
-        return { success: true, outcomeCode: "SUCCESS", fileId: persistence.fileId };
+            const [existing] = await tx
+                .select({ id: Track.id, file_id: Track.file_id })
+                .from(Track)
+                .where(
+                    and(
+                        eq(Track.media_id, media.id),
+                        eq(Track.type, TrackType.IMAGE),
+                        eq(Track.purpose, TrackPurpose.COVER),
+                        eq(Track.variant_key, variantKey),
+                        eq(Track.delete_status, DeleteStatus.ACTIVE),
+                    ),
+                )
+                .for("update");
+
+            if (existing) {
+                await tx.update(Track).set(coverFields).where(eq(Track.id, existing.id));
+                if (existing.file_id && existing.file_id !== createdFileId) {
+                    await tx
+                        .update(DbFile)
+                        .set({ delete_status: DeleteStatus.DELETED, delete_time: now })
+                        .where(and(eq(DbFile.id, existing.file_id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)));
+                }
+            } else {
+                await tx.insert(Track).values({
+                    ...coverFields,
+                    media_id: media.id,
+                    type: TrackType.IMAGE,
+                    purpose: TrackPurpose.COVER,
+                    quality,
+                    priority: coverPriority(quality),
+                    variant_key: variantKey,
+                    create_time: now,
+                });
+            }
+            return true;
+        });
     },
 };

@@ -2,7 +2,7 @@ import { and, asc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { AsyncOutcomeCode, AsyncTask, AsyncTaskStatus, AsyncTaskUnit, AsyncTaskUnitStatus } from "@/db/schema";
 import { db } from "@/global/db";
 import { getErrorMessage } from "@/lib/utils/error";
-import { retryDelaySeconds } from "@/infra/jobs/policy";
+import { retryDelaySeconds } from "@/infra/queue/policy";
 import { discoverTaskBatch, notifyJobsAvailable, reconcileTask, triggerTaskDiscoveryWorkflow } from "@/infra/jobs/store";
 
 let sweeperInterval: ReturnType<typeof setInterval> | null = null;

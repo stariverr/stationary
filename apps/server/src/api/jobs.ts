@@ -1,11 +1,15 @@
 import { Hono } from "hono";
 import { db } from "@/global/db";
-import { AsyncTask, AsyncTaskStatus, AsyncTaskType, AsyncTaskUnit, AsyncTaskUnitStatus } from "@/db/schema";
-import { eq, and, desc, count, sql } from "drizzle-orm";
+import { AsyncTask, AsyncTaskStatus, AsyncTaskType, AsyncTaskUnit, AsyncTaskUnitStatus, DeleteStatus, Library } from "@/db/schema";
+import { eq, and, asc, desc, count, sql } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
+import * as v from "valibot";
+import { validate } from "@/lib/validation/validator";
 import { JobManager } from "@/infra/jobs/manager";
+import { parseQueueName } from "@/infra/queue/pipelines";
+import { listFailures, pipelineStatus, retryFailures } from "@/infra/queue/status";
 
 export const jobsApp = new Hono<AuthEnv>();
 
@@ -24,6 +28,96 @@ async function checkTaskAccess(userId: string, task: typeof AsyncTask.$inferSele
 // -----------------------------------------------------------------------------
 // STATIC ROUTES FIRST (Must be placed before /:id to prevent route hijacking)
 // -----------------------------------------------------------------------------
+
+async function ownedLibraries(userId: string, libraryId?: string) {
+    const conditions = [eq(Library.owner_id, userId), eq(Library.delete_status, DeleteStatus.ACTIVE)];
+    if (libraryId) conditions.push(eq(Library.id, libraryId));
+    return db
+        .select({ id: Library.id, name: Library.name })
+        .from(Library)
+        .where(and(...conditions))
+        .orderBy(asc(Library.name));
+}
+
+/** Resolves `:library_id/:pipeline` to an owned library and a known (non-scan) pipeline. */
+async function resolvePipelineParams(userId: string, libraryId: string, pipelineParam: string) {
+    const name = parseQueueName(pipelineParam);
+    if (!name || name.scan) return null;
+    const [library] = await ownedLibraries(userId, libraryId);
+    return library ? { library, pipeline: name.pipeline } : null;
+}
+
+const PipelinesQuerySchema = v.object({
+    library_id: v.optional(v.pipe(v.string(), v.uuid("Invalid library ID format"))),
+});
+
+const PipelineParamSchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid("Invalid library ID format")),
+    pipeline: v.string(),
+});
+
+const FailuresQuerySchema = v.object({
+    limit: v.optional(v.pipe(v.string(), v.toNumber(), v.integer(), v.minValue(1), v.maxValue(200)), "50"),
+});
+
+// GET /api/jobs/pipelines - Per library and pipeline: queued, running, retrying and failed subjects
+jobsApp.get("/pipelines", requireAuth, validate("query", PipelinesQuerySchema), async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+
+    const libraries = await ownedLibraries(user.id, c.req.valid("query").library_id);
+    const status = await pipelineStatus(libraries.map((library) => library.id));
+    return c.json(
+        success(Code.SUCCESS, {
+            libraries: libraries.map((library) => ({
+                library_id: library.id,
+                name: library.name,
+                pipelines: status.get(library.id) ?? [],
+            })),
+        }),
+    );
+});
+
+// GET /api/jobs/pipelines/:library_id/:pipeline/failures - Subjects whose failure still applies
+jobsApp.get(
+    "/pipelines/:library_id/:pipeline/failures",
+    requireAuth,
+    validate("param", PipelineParamSchema),
+    validate("query", FailuresQuerySchema),
+    async (c) => {
+        const user = c.get("user");
+        if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+
+        const params = c.req.valid("param");
+        const target = await resolvePipelineParams(user.id, params.library_id, params.pipeline);
+        if (!target) return c.json(error(Code.NOT_FOUND, "Library or pipeline not found"), 404);
+
+        const failures = await listFailures(target.library.id, target.pipeline, Number(c.req.valid("query").limit));
+        return c.json(
+            success(Code.SUCCESS, {
+                items: failures.map((failure) => ({
+                    subject_id: failure.subjectId,
+                    label: failure.label,
+                    error: failure.error,
+                    time: failure.time?.toString() ?? null,
+                })),
+            }),
+        );
+    },
+);
+
+// POST /api/jobs/pipelines/:library_id/:pipeline/retry-failed - Queue every current failure again
+jobsApp.post("/pipelines/:library_id/:pipeline/retry-failed", requireAuth, validate("param", PipelineParamSchema), async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+
+    const params = c.req.valid("param");
+    const target = await resolvePipelineParams(user.id, params.library_id, params.pipeline);
+    if (!target) return c.json(error(Code.NOT_FOUND, "Library or pipeline not found"), 404);
+
+    const retried = await retryFailures(target.library.id, target.pipeline);
+    return c.json(success(Code.SUCCESS, { retried }));
+});
 
 // GET /api/jobs/list - Paginated master tasks list
 jobsApp.get("/list", requireAuth, async (c) => {
