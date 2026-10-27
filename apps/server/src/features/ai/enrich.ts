@@ -112,7 +112,7 @@ export const AiEnrichmentService = {
             ? [aiService.imageEmbedding.active, aiService.imageEmbedding.building].filter((provider) => provider !== null)
             : [];
 
-        const imageSource = describeProvider || imageSpaces.length > 0 ? await resolveAiImageSource(media.id, media.library_id) : null;
+        const imageSource = describeProvider || imageSpaces.length > 0 ? await resolveAiImageSource(media.id) : null;
         const sourceFile = imageSource?.file;
         const sourceHash = sourceFile ? sourceFile.hash || `file:${sourceFile.id}` : null;
 

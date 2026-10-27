@@ -15,11 +15,11 @@ import {
     UNIT_LEASE_SECONDS,
     lockContentionDelaySeconds,
     requirePositiveInteger,
-    retryDelaySeconds,
     throttledDelaySeconds,
     taskStatusAfterDiscovery,
     terminalTaskStatus,
 } from "@/infra/jobs/policy";
+import { retryDelaySeconds } from "@/infra/queue/policy";
 import { TaskRetryReason, type CreateTaskParams, type DiscoveredUnitSpec, type TaskResult } from "@/infra/jobs/types";
 
 type TaskRow = typeof AsyncTask.$inferSelect;
@@ -700,7 +700,12 @@ export async function settleTaskUnit(unit: TaskUnitRow, leaseToken: string, resu
 
             await tx
                 .update(AsyncTask)
-                .set({ last_error: waitingForDependency ? result.error ?? "Waiting for dependency" : "Subtask waiting on concurrent execution lock", update_time: now })
+                .set({
+                    last_error: waitingForDependency
+                        ? (result.error ?? "Waiting for dependency")
+                        : "Subtask waiting on concurrent execution lock",
+                    update_time: now,
+                })
                 .where(eq(AsyncTask.id, task.id));
             return "retrying";
         }

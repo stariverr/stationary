@@ -18,7 +18,6 @@ import {
     X,
     Inbox,
     Sparkles,
-    Image as ImageIcon,
     Play,
     Pause,
     XCircle,
@@ -45,6 +44,7 @@ import { useApi } from "@/composables/useApi";
 import { useLibraryStore } from "@/stores/library";
 import { formatTemporalDateTime, formatTemporalRelative, formatTemporalDuration } from "@/utils/temporal";
 import JobDetailView, { type MasterTaskItem } from "@/components/JobDetailView.vue";
+import PipelineStatusSection from "@/components/jobs/PipelineStatusSection.vue";
 
 const { toggleSidebar, isSidebarCollapsed } = useAppLayout();
 const libraryStore = useLibraryStore();
@@ -102,7 +102,7 @@ const copiedId = ref<string | null>(null);
 
 let timer: NodeJS.Timeout | null = null;
 
-const taskTypeOptions = ["ALL", "COVER_BATCH", "COVER_RECONCILE", "AI_ENRICH", "POST_PROCESS", "AVATAR_COPY"];
+const taskTypeOptions = ["ALL", "AI_ENRICH"];
 
 function formatTaskType(type: string): string {
     if (!type || type.toUpperCase() === "ALL") {
@@ -115,15 +115,8 @@ function formatTaskType(type: string): string {
 
 function getTaskTypeIcon(type: string) {
     switch (type) {
-        case "COVER_BATCH":
-        case "COVER_RECONCILE":
-            return ImageIcon;
         case "AI_ENRICH":
             return Sparkles;
-        case "POST_PROCESS":
-            return FileText;
-        case "AVATAR_COPY":
-            return Layers;
         default:
             return Terminal;
     }
@@ -705,6 +698,8 @@ onUnmounted(() => {
 
                 <!-- Main Scrollable Dashboard Content (Structured shadcn Layout) -->
                 <main class="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 min-h-0 space-y-6">
+                    <PipelineStatusSection />
+
                     <div class="max-w-6xl mx-auto space-y-6">
                         <!-- 1. Top Section: 4 High-Density shadcn KPI Metric Cards -->
                         <div class="grid gap-4 grid-cols-2 lg:grid-cols-4">

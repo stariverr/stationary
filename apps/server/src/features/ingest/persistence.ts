@@ -1,6 +1,9 @@
 import { type Transaction } from "@/global/db";
 import { Post, Media, Track, Author, File, DeleteStatus, SyncStatus, TrackPurpose, TagSource, TrackType } from "@/db/schema";
 import { eq, and, ne, inArray } from "drizzle-orm";
+import { avatarOrigin } from "@/features/author/avatar-pipeline";
+import { markChanged } from "@/infra/queue/changes";
+import { Aspect } from "@/infra/queue/pipelines";
 
 import { normalizeExternalId, assertUniqueExternalIds } from "@/lib/utils/media-identity";
 import { validateMediaComposition } from "@/lib/validation/media-composition";
@@ -160,6 +163,7 @@ export async function saveIngestMetadata(postData: PostItemData, targetLibraryId
 
     // 1. Author logic
     let authorId: string | null = null;
+    const avatarUrl = postData.author.avatar_file_url || null;
     if (postData.author.external_id && postData.platform) {
         try {
             const results = await tx
@@ -171,6 +175,7 @@ export async function saveIngestMetadata(postData: PostItemData, targetLibraryId
                     signature: postData.author.signature ?? "",
                     nickname: postData.author.name,
                     platform: postData.platform,
+                    avatar_source_url: avatarUrl,
                 })
                 .onConflictDoUpdate({
                     target: [Author.library_id, Author.platform, Author.eid],
@@ -180,12 +185,18 @@ export async function saveIngestMetadata(postData: PostItemData, targetLibraryId
                         signature: postData.author.signature ?? undefined,
                         delete_status: DeleteStatus.ACTIVE,
                         delete_time: null,
+                        // A fresh avatar URL from the platform replaces any other wanted source.
+                        ...(avatarUrl ? { avatar_source_url: avatarUrl, avatar_source_file_id: null } : {}),
                     },
                 })
                 .returning();
             const author = results[0];
             if (author) {
                 authorId = author.id;
+                const origin = avatarOrigin(author);
+                if (origin && origin !== author.avatar_origin && origin !== author.avatar_error_origin) {
+                    await markChanged(tx, Aspect.AUTHOR_AVATAR_SOURCE, [author.id]);
+                }
             }
         } catch (e) {
             console.error(
@@ -462,15 +473,6 @@ export async function saveIngestMetadata(postData: PostItemData, targetLibraryId
             if (await syncPreparedTrack(tx, mediaId, track, existing)) {
                 hasPendingTasks = true;
             }
-        }
-    }
-
-    if (authorId && postData.author.avatar_file_url) {
-        const author = await tx.query.Author.findFirst({
-            where: { id: authorId },
-        });
-        if (author && !author.avatar_file_id) {
-            hasPendingTasks = true;
         }
     }
 

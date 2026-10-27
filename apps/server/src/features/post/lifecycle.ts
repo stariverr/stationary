@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull, isNotNull } from "drizzle-orm";
 import { db } from "@/global/db";
 import { DeleteStatus, File, Media, MediaTag, Post, PostTag, Track } from "@/db/schema";
 import { deleteMediaAiData } from "@/features/ai/cleanup";
+import { markRestored } from "@/features/media/restored";
 
 export async function trashPost(postId: string) {
     const recycleTime = Temporal.Now.instant();
@@ -86,6 +87,10 @@ export async function batchRestorePost(postIds: string[]): Promise<{
                     and(inArray(Media.post_id, validPostIds), eq(Media.delete_status, DeleteStatus.ACTIVE), isNotNull(Media.recycle_time)),
                 )
                 .returning({ id: Media.id });
+            await markRestored(
+                tx,
+                restoredMedias.map((media) => media.id),
+            );
 
             return {
                 postUpdated: restoredPosts.length,

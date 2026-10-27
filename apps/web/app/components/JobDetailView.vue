@@ -13,10 +13,7 @@ import {
     Check,
     MoreHorizontal,
     Terminal,
-    FileText,
-    Layers,
     Sparkles,
-    Image as ImageIcon,
     Clock,
     Inbox,
     Code,
@@ -140,15 +137,8 @@ function formatTaskType(type: string): string {
 
 function getTaskTypeIcon(type: string) {
     switch (type) {
-        case "COVER_BATCH":
-        case "COVER_RECONCILE":
-            return ImageIcon;
         case "AI_ENRICH":
             return Sparkles;
-        case "POST_PROCESS":
-            return FileText;
-        case "AVATAR_COPY":
-            return Layers;
         default:
             return Terminal;
     }

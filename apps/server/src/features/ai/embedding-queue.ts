@@ -14,7 +14,7 @@ import {
 } from "@/db/schema";
 import { db, type Transaction } from "@/global/db";
 import { kv } from "@/global/kv";
-import { retryDelaySeconds } from "@/infra/jobs/policy";
+import { retryDelaySeconds } from "@/infra/queue/policy";
 import { AiProviderError, AiThrottledError, classifyAiError, getFailureCategory, getSafeAiErrorMessage } from "./errors";
 import { loadAiEmbeddingImage } from "./image-source";
 import { AiService } from "./service";

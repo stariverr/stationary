@@ -1,11 +1,11 @@
 import { AsyncTaskStatus, type AsyncTask } from "@/db/schema";
+import { MAX_RETRY_DELAY_SECONDS } from "@/infra/queue/policy";
 
 export const DEFAULT_TASK_CONCURRENCY = 5;
 export const DEFAULT_UNIT_MAX_ATTEMPTS = 5;
 export const UNIT_LEASE_SECONDS = 60;
 export const DISCOVERY_LEASE_SECONDS = 120;
 export const HEARTBEAT_INTERVAL_MS = 20_000;
-export const MAX_RETRY_DELAY_SECONDS = 300;
 export const MIN_LOCK_CONTENTION_DELAY_SECONDS = 30;
 export const MAX_LOCK_CONTENTION_DELAY_SECONDS = 60;
 export const JOB_WAKE_CHANNEL = "jobs:wake_channel";
@@ -30,13 +30,6 @@ export function terminalTaskStatus(progress: TaskProgress): AsyncTaskStatus.COMP
     if (processed < progress.total_units) return null;
 
     return progress.failed_units > 0 ? AsyncTaskStatus.FAILED : AsyncTaskStatus.COMPLETED;
-}
-
-export function retryDelaySeconds(attemptCount: number, random = Math.random): number {
-    const normalizedAttempt = Math.max(1, Math.trunc(attemptCount));
-    const exponentialDelay = Math.min(MAX_RETRY_DELAY_SECONDS, 5 * 2 ** (normalizedAttempt - 1));
-    const jitterMultiplier = 0.75 + Math.min(1, Math.max(0, random())) * 0.5;
-    return Math.min(MAX_RETRY_DELAY_SECONDS, Math.max(1, Math.round(exponentialDelay * jitterMultiplier)));
 }
 
 /** Spreads throttled units over the wait window so they do not all reclaim capacity at once. */

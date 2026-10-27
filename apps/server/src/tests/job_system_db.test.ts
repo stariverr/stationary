@@ -31,21 +31,21 @@ describe("Job engine PostgreSQL integration", () => {
                 const pendingInput = { sourceAuthorId: firstSubjectId, targetAuthorId: crypto.randomUUID() };
                 const firstTask = await enqueueTaskWithUnits(
                     {
-                        type: AsyncTaskType.COVER_BATCH,
+                        type: AsyncTaskType.AI_ENRICH,
                         inputSnapshot: { source_type: "MANUAL" },
                         idempotencyKey,
                     },
                     [
                         {
                             unitKey: "already-complete",
-                            kind: AsyncTaskUnitKind.COVER_DERIVATIVE,
+                            kind: AsyncTaskUnitKind.AI_ENRICHMENT,
                             subjectType: AsyncSubjectType.MEDIA,
                             subjectId: firstSubjectId,
                             isAlreadyCompleted: true,
                         },
                         {
                             unitKey: "pending",
-                            kind: AsyncTaskUnitKind.COVER_DERIVATIVE,
+                            kind: AsyncTaskUnitKind.AI_ENRICHMENT,
                             subjectType: AsyncSubjectType.MEDIA,
                             subjectId: pendingSubjectId,
                             inputSnapshot: pendingInput,
@@ -57,21 +57,21 @@ describe("Job engine PostgreSQL integration", () => {
 
                 const duplicate = await enqueueTaskWithUnits(
                     {
-                        type: AsyncTaskType.COVER_BATCH,
+                        type: AsyncTaskType.AI_ENRICH,
                         inputSnapshot: { source_type: "MANUAL" },
                         idempotencyKey,
                     },
                     [
                         {
                             unitKey: "already-complete",
-                            kind: AsyncTaskUnitKind.COVER_DERIVATIVE,
+                            kind: AsyncTaskUnitKind.AI_ENRICHMENT,
                             subjectType: AsyncSubjectType.MEDIA,
                             subjectId: firstSubjectId,
                             isAlreadyCompleted: true,
                         },
                         {
                             unitKey: "pending",
-                            kind: AsyncTaskUnitKind.COVER_DERIVATIVE,
+                            kind: AsyncTaskUnitKind.AI_ENRICHMENT,
                             subjectType: AsyncSubjectType.MEDIA,
                             subjectId: pendingSubjectId,
                             inputSnapshot: pendingInput,
@@ -104,14 +104,14 @@ describe("Job engine PostgreSQL integration", () => {
         initJobHandlers();
         const task = await enqueueTaskWithUnits(
             {
-                type: AsyncTaskType.POST_PROCESS,
-                inputSnapshot: { post_id: crypto.randomUUID() },
+                type: AsyncTaskType.AI_ENRICH,
+                inputSnapshot: { source_type: "MANUAL" },
                 idempotencyKey: `job-lock-test:${crypto.randomUUID()}`,
             },
             [
                 {
                     unitKey: "media:locked",
-                    kind: AsyncTaskUnitKind.MEDIA_DOWNLOAD,
+                    kind: AsyncTaskUnitKind.AI_ENRICHMENT,
                     subjectType: AsyncSubjectType.MEDIA,
                     subjectId: crypto.randomUUID(),
                 },

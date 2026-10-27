@@ -166,23 +166,15 @@
             "badge_sharp": "高畫質",
             "quality_save": "儲存",
             "quality_saved": "封面清晰度已儲存",
-            "quality_saved_rebuilding": "清晰度已更新，已在背景為全庫重新產生封面",
+            "quality_saved_rebuilding": "封面規格已更新，媒體庫的封面正在背景更新",
             "quality_save_failed": "儲存封面清晰度失敗",
             "quality_changed_notice": "清晰度已變更。儲存後會重新掃描全庫並更新封面。",
-            "job_discovering": "正在檢索全庫媒體…",
-            "job_paused": "封面產生已暫停",
-            "job_running": "正在背景產生封面…",
-            "job_counting": "正在統計…",
-            "job_still_counting": "仍在檢索",
-            "job_pause": "暫停",
-            "job_resume": "繼續",
-            "job_cancel": "取消",
-            "job_pause_done": "已要求暫停",
-            "job_resume_done": "已繼續處理",
-            "job_cancel_done": "已要求取消",
-            "job_pause_failed": "暫停失敗",
-            "job_resume_failed": "繼續失敗",
-            "job_cancel_failed": "取消失敗"
+            "cover_counting": "正在統計…",
+            "cover_progress": "剩餘 {queued} 個封面 · {running} 個產生中",
+            "cover_failed": "{count} 個封面產生失敗",
+            "cover_retry": "重試",
+            "cover_retry_done": "已將 {count} 個封面加入重試",
+            "cover_retry_error": "重試封面失敗"
         },
         "ai_config": {
             "coverage_empty": "媒體庫中還沒有媒體",
@@ -958,6 +950,31 @@
             "media_item_title": "媒體 {index}",
             "thumb_alt": "縮圖",
             "media_alt": "媒體素材"
+        }
+    },
+    "jobs": {
+        "pipelines": {
+            "title": "媒體庫流水線",
+            "desc": "按媒體庫持續維護下載、頭像與封面，數量每隔幾秒更新。",
+            "loading": "載入中…",
+            "empty": "還沒有媒體庫。",
+            "library": "媒體庫",
+            "pipeline": "流水線",
+            "queued": "排隊",
+            "running": "處理中",
+            "retrying": "等待重試",
+            "failed": "失敗",
+            "scanning": "掃描中",
+            "names": {
+                "download": "下載",
+                "avatar": "頭像",
+                "cover": "封面"
+            },
+            "show_failures": "查看",
+            "retry_failed": "重試失敗項",
+            "retry_done": "已將 {count} 項加入重試",
+            "retry_error": "重試失敗",
+            "failures_error": "載入失敗清單出錯"
         }
     }
 }

@@ -1,16 +1,7 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
-import {
-    AsyncTask,
-    AsyncTaskStatus,
-    AsyncTaskType,
-    DeleteStatus,
-    File as DbFile,
-    SyncStatus,
-    Track,
-    TrackPurpose,
-    TrackType,
-} from "@/db/schema";
+import { and, eq, inArray } from "drizzle-orm";
+import { DeleteStatus, File as DbFile, SyncStatus, Track, TrackPurpose, TrackType } from "@/db/schema";
 import { db } from "@/global/db";
+import { isQueued } from "@/infra/queue/store";
 import { s3, S3ObjectTooLargeError } from "@/global/s3";
 import { Quality } from "@/lib/types";
 import { AiProviderError } from "./errors";
@@ -89,21 +80,10 @@ export function selectAiImageSource<T extends ImageSourceRow>(rows: T[]): T | nu
     return images[0] ?? null;
 }
 
-export async function resolveAiImageSource(mediaId: string, libraryId: string) {
-    // Check before loading tracks: a targeted task that finishes while tracks are
+export async function resolveAiImageSource(mediaId: string) {
+    // Check before loading tracks: a cover run that finishes while tracks are
     // being read must still prevent an original-image fallback from racing its cover.
-    const pendingCoverTask = await db
-        .select({ id: AsyncTask.id })
-        .from(AsyncTask)
-        .where(
-            and(
-                eq(AsyncTask.library_id, libraryId),
-                eq(AsyncTask.type, AsyncTaskType.COVER_BATCH),
-                inArray(AsyncTask.status, [AsyncTaskStatus.DISCOVERING, AsyncTaskStatus.RUNNING]),
-                sql`${AsyncTask.input_snapshot}->'media_ids' @> ${JSON.stringify([mediaId])}::jsonb`,
-            ),
-        )
-        .limit(1);
+    const coverPending = await isQueued("cover", mediaId);
 
     const rows = await db
         .select({ track: Track, file: DbFile })
@@ -120,9 +100,9 @@ export async function resolveAiImageSource(mediaId: string, libraryId: string) {
 
     const source = selectAiImageSource(rows);
     if (source?.track.purpose === TrackPurpose.COVER) return source;
-    // Ingestion schedules this task after downloading content. If it is still
-    // generating a cover, do not enrich from the original image yet.
-    if (pendingCoverTask.length > 0) throw new CoverNotReadyError(mediaId);
+    // Downloads queue the cover once content is in place. While it is still
+    // pending, do not enrich from the original image yet.
+    if (coverPending) throw new CoverNotReadyError(mediaId);
 
     return source;
 }
@@ -148,7 +128,10 @@ export async function readAiSourceImage(
             throw new AiProviderError("TIMEOUT", `Reading source file ${file.id} timed out after ${SOURCE_READ_TIMEOUT_MS / 1000}s`);
         }
         if (error instanceof S3ObjectTooLargeError) {
-            throw new AiProviderError("INVALID_REQUEST", `Source file ${file.id} is ${error.size} bytes, over the ${error.maxBytes} byte limit`);
+            throw new AiProviderError(
+                "INVALID_REQUEST",
+                `Source file ${file.id} is ${error.size} bytes, over the ${error.maxBytes} byte limit`,
+            );
         }
         throw error;
     }

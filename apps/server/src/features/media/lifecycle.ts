@@ -2,6 +2,7 @@ import { and, count, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/global/db";
 import { DeleteStatus, File, Media, MediaTag, Post, Track } from "@/db/schema";
 import { deleteMediaAiData } from "@/features/ai/cleanup";
+import { markRestored } from "@/features/media/restored";
 
 export async function trashMedia(mediaId: string) {
     const recycleTime = Temporal.Now.instant();
@@ -75,11 +76,18 @@ export async function batchRestoreMedia(mediaIds: string[]): Promise<{ mediaUpda
         const chunk = uniqueIds.slice(i, i + CHUNK_SIZE);
         const now = Temporal.Now.instant();
 
-        const updated = await db
-            .update(Media)
-            .set({ recycle_time: null, update_time: now })
-            .where(and(inArray(Media.id, chunk), eq(Media.delete_status, DeleteStatus.ACTIVE), isNotNull(Media.recycle_time)))
-            .returning({ id: Media.id });
+        const updated = await db.transaction(async (tx) => {
+            const restored = await tx
+                .update(Media)
+                .set({ recycle_time: null, update_time: now })
+                .where(and(inArray(Media.id, chunk), eq(Media.delete_status, DeleteStatus.ACTIVE), isNotNull(Media.recycle_time)))
+                .returning({ id: Media.id });
+            await markRestored(
+                tx,
+                restored.map((media) => media.id),
+            );
+            return restored;
+        });
 
         totalMediaUpdated += updated.length;
     }

@@ -1,16 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { db, type Transaction } from "@/global/db";
-import {
-    DeleteStatus,
-    File as DbFile,
-    Media,
-    MediaType,
-    Post,
-    SyncStatus,
-    Track,
-    TrackPurpose,
-    TrackType,
-} from "@/db/schema";
+import { DeleteStatus, File as DbFile, Media, MediaType, Post, SyncStatus, Track, TrackPurpose, TrackType } from "@/db/schema";
 import { validateMediaComposition } from "@/lib/validation/media-composition";
 
 const requiredContentTypes = (mediaType: MediaType): TrackType[] => {
@@ -148,4 +138,28 @@ export async function syncMediaAndPostStatus(mediaId: string, tx: Transaction, n
     }
 
     return true;
+}
+
+/** Derives a post's sync status from its active media: failed if any failed, completed once all completed. */
+export async function refreshPostSyncStatus(tx: Transaction, postId: string, now = Temporal.Now.instant()) {
+    const medias = await tx
+        .select({ id: Media.id, sync_status: Media.sync_status, last_error: Media.last_error })
+        .from(Media)
+        .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)));
+
+    const failed = medias.find((media) => media.sync_status === SyncStatus.FAILED);
+    const status = failed
+        ? SyncStatus.FAILED
+        : medias.every((media) => media.sync_status === SyncStatus.COMPLETED)
+          ? SyncStatus.COMPLETED
+          : SyncStatus.IN_PROGRESS;
+
+    await tx
+        .update(Post)
+        .set({
+            sync_status: status,
+            last_error: failed ? `Media item ${failed.id} failed to process: ${failed.last_error ?? "unknown error"}` : null,
+            update_time: now,
+        })
+        .where(and(eq(Post.id, postId), eq(Post.delete_status, DeleteStatus.ACTIVE)));
 }

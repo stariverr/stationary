@@ -198,23 +198,15 @@
             "badge_sharp": "高清",
             "quality_save": "保存",
             "quality_saved": "封面清晰度已保存",
-            "quality_saved_rebuilding": "清晰度已更新，已在后台为全库重新生成封面",
+            "quality_saved_rebuilding": "封面规格已更新，媒体库的封面正在后台更新",
             "quality_save_failed": "保存封面清晰度失败",
             "quality_changed_notice": "清晰度已改动。保存后会重新扫描全库并更新封面。",
-            "job_discovering": "正在检索全库媒体…",
-            "job_paused": "封面生成已暂停",
-            "job_running": "正在后台生成封面…",
-            "job_counting": "正在统计…",
-            "job_still_counting": "仍在检索",
-            "job_pause": "暂停",
-            "job_resume": "继续",
-            "job_cancel": "取消",
-            "job_pause_done": "已请求暂停",
-            "job_resume_done": "已继续处理",
-            "job_cancel_done": "已请求取消",
-            "job_pause_failed": "暂停失败",
-            "job_resume_failed": "继续失败",
-            "job_cancel_failed": "取消失败"
+            "cover_counting": "正在统计…",
+            "cover_progress": "剩余 {queued} 个封面 · {running} 个生成中",
+            "cover_failed": "{count} 个封面生成失败",
+            "cover_retry": "重试",
+            "cover_retry_done": "已将 {count} 个封面加入重试",
+            "cover_retry_error": "重试封面失败"
         },
         "ai_config": {
             "coverage_empty": "媒体库中还没有媒体",
@@ -1103,11 +1095,7 @@
         "task_types": {
             "all": "全部任务类型",
             "ALL": "全部任务类型",
-            "COVER_BATCH": "封面批量生成",
-            "COVER_RECONCILE": "封面自动补全",
-            "AI_ENRICH": "AI 智能分析",
-            "POST_PROCESS": "数据整理同步",
-            "AVATAR_COPY": "头像备份同步"
+            "AI_ENRICH": "AI 智能分析"
         },
         "table": {
             "id": "任务 ID",
@@ -1164,6 +1152,29 @@
         "pagination": {
             "showing": "显示 {current} 条，共 {total} 条",
             "page": "第 {page} 页，共 {pages} 页"
+        },
+        "pipelines": {
+            "title": "媒体库流水线",
+            "desc": "按媒体库持续维护下载、头像和封面，数量每隔几秒刷新。",
+            "loading": "加载中…",
+            "empty": "还没有媒体库。",
+            "library": "媒体库",
+            "pipeline": "流水线",
+            "queued": "排队",
+            "running": "处理中",
+            "retrying": "等待重试",
+            "failed": "失败",
+            "scanning": "扫描中",
+            "names": {
+                "download": "下载",
+                "avatar": "头像",
+                "cover": "封面"
+            },
+            "show_failures": "查看",
+            "retry_failed": "重试失败项",
+            "retry_done": "已将 {count} 项加入重试",
+            "retry_error": "重试失败",
+            "failures_error": "加载失败列表出错"
         }
     },
     "trash": {

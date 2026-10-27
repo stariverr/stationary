@@ -1,19 +1,9 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
-import {
-    AsyncSubjectType,
-    AsyncTaskType,
-    AsyncTaskUnitKind,
-    Author,
-    DeleteStatus,
-    Library,
-    Media,
-    MediaTag,
-    Post,
-    PostTag,
-    Tag,
-} from "@/db/schema";
+import { Author, DeleteStatus, Library, Media, MediaTag, Post, PostTag, Tag } from "@/db/schema";
 import { db } from "@/global/db";
-import { JobManager } from "@/infra/jobs/manager";
+import { markChanged } from "@/infra/queue/changes";
+import { Aspect } from "@/infra/queue/pipelines";
+import { relocate } from "@/infra/queue/store";
 import { LibraryMoveError } from "./errors";
 import type { LibraryMoveItemsInput } from "./schema";
 
@@ -98,7 +88,7 @@ export async function moveLibraryItems(input: LibraryMoveItemsInput, auth: Libra
                 : [];
 
         const authorMap = new Map<string, string>();
-        const avatarCopyJobs: Array<{ sourceAuthorId: string; targetAuthorId: string }> = [];
+        const newAuthorIds: string[] = [];
 
         if (sourceAuthors.length > 0) {
             const targetAuthors = await tx
@@ -107,7 +97,9 @@ export async function moveLibraryItems(input: LibraryMoveItemsInput, auth: Libra
                 .where(and(eq(Author.library_id, input.target_library_id), eq(Author.delete_status, DeleteStatus.ACTIVE)));
 
             for (const sourceAuthor of sourceAuthors) {
-                const matched = targetAuthors.find((targetAuthor) => targetAuthor.platform === sourceAuthor.platform && targetAuthor.eid === sourceAuthor.eid);
+                const matched = targetAuthors.find(
+                    (targetAuthor) => targetAuthor.platform === sourceAuthor.platform && targetAuthor.eid === sourceAuthor.eid,
+                );
                 if (matched) {
                     authorMap.set(sourceAuthor.id, matched.id);
                     continue;
@@ -124,17 +116,16 @@ export async function moveLibraryItems(input: LibraryMoveItemsInput, auth: Libra
                     platform: sourceAuthor.platform,
                     avatar_file_id: null,
                     avatar_thumb_file_id: null,
+                    // The avatar pipeline copies the source author's file so each author owns its own; an avatar
+                    // that was never downloaded is fetched from its URL instead.
+                    avatar_source_file_id: sourceAuthor.avatar_file_id,
+                    avatar_source_url: sourceAuthor.avatar_file_id ? null : sourceAuthor.avatar_source_url,
                     delete_status: DeleteStatus.ACTIVE,
                 });
                 authorMap.set(sourceAuthor.id, newAuthorId);
-
-                if (sourceAuthor.avatar_file_id || sourceAuthor.avatar_thumb_file_id) {
-                    avatarCopyJobs.push({
-                        sourceAuthorId: sourceAuthor.id,
-                        targetAuthorId: newAuthorId,
-                    });
-                }
+                newAuthorIds.push(newAuthorId);
             }
+            await markChanged(tx, Aspect.AUTHOR_AVATAR_SOURCE, newAuthorIds);
         }
 
         const postTags =
@@ -231,6 +222,7 @@ export async function moveLibraryItems(input: LibraryMoveItemsInput, auth: Libra
         let posts = 0;
         let media = 0;
         let postMedia = 0;
+        const movedMediaIds: string[] = [];
 
         if (input.post_ids.length > 0) {
             for (const post of selectedPosts) {
@@ -250,6 +242,7 @@ export async function moveLibraryItems(input: LibraryMoveItemsInput, auth: Libra
                 .where(inArray(Media.post_id, input.post_ids))
                 .returning({ id: Media.id });
             postMedia = updatedPostMedia.length;
+            movedMediaIds.push(...updatedPostMedia.map((row) => row.id));
         }
 
         if (input.media_ids.length > 0) {
@@ -259,6 +252,7 @@ export async function moveLibraryItems(input: LibraryMoveItemsInput, auth: Libra
                 .where(and(inArray(Media.id, input.media_ids), isNull(Media.post_id)))
                 .returning({ id: Media.id });
             media = updatedMedia.length;
+            movedMediaIds.push(...updatedMedia.map((row) => row.id));
         }
 
         if (postTags.length > 0) {
@@ -287,30 +281,12 @@ export async function moveLibraryItems(input: LibraryMoveItemsInput, auth: Libra
             }
         }
 
-        return { posts, media, post_media: postMedia, avatarCopyJobs };
+        // Queued work follows its subjects into the target library, which may render covers differently.
+        await relocate(tx, movedMediaIds, input.target_library_id);
+        await markChanged(tx, Aspect.MEDIA_LIBRARY, movedMediaIds);
+
+        return { posts, media, post_media: postMedia };
     });
-
-    if (moved.avatarCopyJobs.length > 0) {
-        const uniqueAvatarCopyJobs = Array.from(
-            new Map(moved.avatarCopyJobs.map((job) => [`${job.sourceAuthorId}:${job.targetAuthorId}`, job])).values(),
-        );
-        const unitSpecs = uniqueAvatarCopyJobs.map((job) => ({
-            unitKey: `avatar_copy:${job.sourceAuthorId}:${job.targetAuthorId}`,
-            kind: AsyncTaskUnitKind.AVATAR_COPY,
-            subjectType: AsyncSubjectType.AUTHOR,
-            subjectId: job.targetAuthorId,
-            inputSnapshot: { sourceAuthorId: job.sourceAuthorId, targetAuthorId: job.targetAuthorId },
-        }));
-
-        await JobManager.enqueueTaskWithUnits(
-            {
-                type: AsyncTaskType.AVATAR_COPY,
-                ownerId: auth.ownerId,
-                inputSnapshot: { count: uniqueAvatarCopyJobs.length },
-            },
-            unitSpecs,
-        );
-    }
 
     return {
         posts: moved.posts,

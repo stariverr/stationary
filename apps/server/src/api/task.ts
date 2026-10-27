@@ -6,11 +6,7 @@ import { Code } from "@/lib/code";
 import { error, success } from "@/lib/response";
 import { AuthEnv, ownedLibrary, requireAuth, requireCronSecret } from "@/lib/auth/middleware";
 import { db } from "@/global/db";
-import {
-    File as DbFile,
-    DraftFile,
-    DraftFileStatus,
-} from "@/db/schema";
+import { File as DbFile, DraftFile, DraftFileStatus } from "@/db/schema";
 import { eq, and, lt } from "drizzle-orm";
 
 import { JobSweeper } from "@/infra/jobs/sweeper";
@@ -61,19 +57,15 @@ taskApp.post("/create", requireAuth, validate("json", CreateTaskSchema), async (
             await IngestPipeline.processPostIngest({
                 postData,
                 targetLibraryId: payload.library_id,
-                ownerId: user.id,
             }),
         );
     }
-
-    const createdTaskIds = results.flatMap((result) => (result.taskId ? [result.taskId] : []));
 
     return c.json(
         success(Code.SUCCESS, {
             message: "Tasks received and metadata processed",
             count: payload.posts.length,
             processedCount: results.filter((result) => !result.skipped).length,
-            task_ids: createdTaskIds,
         }),
     );
 });
