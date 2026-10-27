@@ -1,4 +1,4 @@
-import { and, eq, not, isNull } from "drizzle-orm";
+import { and, eq, ne, isNull } from "drizzle-orm";
 import { db, Transaction } from "@/global/db";
 import {
     DeleteStatus,
@@ -152,7 +152,7 @@ async function unsetOtherDefaults(
         eq(Track.delete_status, DeleteStatus.ACTIVE),
     ];
     if (excludeTrackId) {
-        unsetFilters.push(not(eq(Track.id, excludeTrackId)));
+        unsetFilters.push(ne(Track.id, excludeTrackId));
     }
     await tx
         .update(Track)
@@ -163,7 +163,7 @@ async function unsetOtherDefaults(
 async function unsetOtherPrimaries(tx: Transaction, mediaId: string, now: Temporal.Instant, excludeTrackId?: string) {
     const unsetFilters = [eq(Track.media_id, mediaId), eq(Track.delete_status, DeleteStatus.ACTIVE)];
     if (excludeTrackId) {
-        unsetFilters.push(not(eq(Track.id, excludeTrackId)));
+        unsetFilters.push(ne(Track.id, excludeTrackId));
     }
     await tx
         .update(Track)

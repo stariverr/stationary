@@ -1,6 +1,6 @@
 import { type Transaction } from "@/global/db";
 import { Post, Media, Track, Author, File, DeleteStatus, SyncStatus, TrackPurpose, TagSource, TrackType } from "@/db/schema";
-import { eq, and, not, inArray } from "drizzle-orm";
+import { eq, and, ne, inArray } from "drizzle-orm";
 
 import { normalizeExternalId, assertUniqueExternalIds } from "@/lib/utils/media-identity";
 import { validateMediaComposition } from "@/lib/validation/media-composition";
@@ -439,7 +439,7 @@ export async function saveIngestMetadata(postData: PostItemData, targetLibraryId
                 eq(Track.delete_status, DeleteStatus.ACTIVE),
             ];
             if (group.defaultKey) {
-                unsetCondition.push(not(eq(Track.variant_key, group.defaultKey)));
+                unsetCondition.push(ne(Track.variant_key, group.defaultKey));
             }
 
             await tx
