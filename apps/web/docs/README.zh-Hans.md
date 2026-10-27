@@ -18,7 +18,6 @@ bun run dev
 ### 2. 生产环境构建与预览
 - **打包编译**：`bun run build`
 - **本地预览打包文件**：`bun run preview`
-- **部署到 Cloudflare**：`bun run deploy`（基于 Wrangler 驱动进行发布）
 
 ---
 

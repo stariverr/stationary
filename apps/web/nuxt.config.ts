@@ -72,13 +72,6 @@ export default defineNuxtConfig({
             turnstileSiteKey: process.env.NUXT_PUBLIC_TURNSTILE_SITE_KEY || "1x00000000000000000000AA",
         },
     },
-    nitro: {
-        preset: process.env.NITRO_PRESET || "cloudflare-module",
-        // // TODO: temporarily add this to fix the build error: Nitro's global replace plugin naively replaces 'typeof window' inside unhead's iife.mjs string literals, which corrupts the output syntax and crashes Rollup.
-        // replace: {
-        //     "typeof window": "typeof window",
-        // },
-    },
     shadcn: {
         prefix: "",
         componentDir: "@/components/ui",

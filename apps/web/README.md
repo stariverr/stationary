@@ -18,7 +18,6 @@ The server runs by default at `http://localhost:4000`.
 ### 2. Production Build & Preview
 - **Build Bundle**: `bun run build`
 - **Preview Production Bundle Locally**: `bun run preview`
-- **Deploy to Cloudflare**: `bun run deploy` (uses Wrangler under the hood)
 
 ---
 
