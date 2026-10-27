@@ -98,8 +98,6 @@ export const auth: ReturnType<typeof betterAuth<any>> = betterAuth({
     },
     rateLimit: {
         customStorage: {
-            get: async (key) => null,
-            set: async (key, value, update) => {},
             consume: async (key, rule) => {
                 const res = await kv.consumeFixedWindow(`auth:rate-limit:${key}`, rule.max, rule.window);
                 return {
