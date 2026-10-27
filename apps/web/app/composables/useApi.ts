@@ -1,5 +1,7 @@
-type ApiFetchOptions = NonNullable<Parameters<typeof $fetch>[1]>;
+import type { AnyServerRouteMethod, TypedFetchOptions } from "#app";
+
+type ApiFetchOptions = TypedFetchOptions<string, AnyServerRouteMethod>;
 
 export const useApi = <T>(request: string, opts?: ApiFetchOptions) => {
-    return useNuxtApp().$api<T>(request, opts);
+    return useNuxtApp().$api<T, string, AnyServerRouteMethod>(request, opts);
 };
