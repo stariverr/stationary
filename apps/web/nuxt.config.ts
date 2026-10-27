@@ -13,7 +13,12 @@ export default defineNuxtConfig({
     future: {
         compatibilityVersion: 5,
     },
-    compatibilityDate: "2026-09-13",
+    experimental: {
+        // compatibilityVersion 5 drops Nitro's built-in auto-imports, but @nuxtjs/i18n's server runtime
+        // still imports useRuntimeConfig from "#imports".
+        nitroAutoImports: true,
+    },
+    compatibilityDate: "2026-10-27",
     ssr: true,
     vue: {
         compilerOptions: {
