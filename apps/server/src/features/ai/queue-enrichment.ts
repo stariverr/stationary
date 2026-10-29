@@ -79,7 +79,8 @@ export async function queueAiEnrichment(input: QueueAiInput, auth: LibraryAuth) 
         targetByLibrary.set(libraryId, (await AiService.forLibrary(libraryId))?.describeTarget ?? null);
     }
 
-    const masterTask = await db.transaction(async (tx) => {
+    // One task per library, so the jobs page of each library lists its own work.
+    const taskIds = await db.transaction(async (tx) => {
         for (const media of mediaList) {
             const target = targetByLibrary.get(media.library_id);
             if (!target) continue;
@@ -109,27 +110,34 @@ export async function queueAiEnrichment(input: QueueAiInput, auth: LibraryAuth) 
                 });
         }
 
-        return JobManager.enqueueTaskWithUnits(
-            {
-                type: AsyncTaskType.AI_ENRICH,
-                ownerId: auth.ownerId,
-                inputSnapshot: { media_ids: mediaIds },
-            },
-            mediaIds.map((mediaId) => ({
-                unitKey: `ai:${mediaId}`,
-                kind: AsyncTaskUnitKind.AI_ENRICHMENT,
-                subjectType: AsyncSubjectType.MEDIA,
-                subjectId: mediaId,
-                inputSnapshot: { media_id: mediaId },
-            })),
-            tx,
-        );
+        const ids: string[] = [];
+        for (const libraryId of libraryIds) {
+            const libraryMediaIds = mediaList.filter((media) => media.library_id === libraryId).map((media) => media.id);
+            const task = await JobManager.enqueueTaskWithUnits(
+                {
+                    type: AsyncTaskType.AI_ENRICH,
+                    libraryId,
+                    ownerId: auth.ownerId,
+                    inputSnapshot: { media_ids: libraryMediaIds },
+                },
+                libraryMediaIds.map((mediaId) => ({
+                    unitKey: `ai:${mediaId}`,
+                    kind: AsyncTaskUnitKind.AI_ENRICHMENT,
+                    subjectType: AsyncSubjectType.MEDIA,
+                    subjectId: mediaId,
+                    inputSnapshot: { media_id: mediaId },
+                })),
+                tx,
+            );
+            ids.push(task.id);
+        }
+        return ids;
     });
 
     jobRunner.wake();
 
     return {
         count: mediaIds.length,
-        taskId: masterTask.id,
+        taskIds,
     };
 }

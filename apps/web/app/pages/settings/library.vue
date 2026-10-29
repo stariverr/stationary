@@ -62,7 +62,7 @@ const fetchCoverConfig = async (libId: string) => {
     try {
         const [configRes, statusRes] = await Promise.all([
             useApi<ApiResponse<{ qualities: string[] }>>(`/library/${libId}/cover-config`),
-            useApi<ApiResponse<{ libraries: { library_id: string; pipelines: PipelineStatus[] }[] }>>("/jobs/pipelines", {
+            useApi<ApiResponse<{ pipelines: PipelineStatus[] }>>("/jobs/pipelines", {
                 query: { library_id: libId },
             }),
         ]);
@@ -74,8 +74,7 @@ const fetchCoverConfig = async (libId: string) => {
         }
 
         if (statusRes?.data && libId === selectedLibraryId.value) {
-            const library = statusRes.data.libraries.find((item) => item.library_id === libId);
-            coverStatus.value = library?.pipelines.find((item) => item.pipeline === "cover") ?? null;
+            coverStatus.value = statusRes.data.pipelines.find((item) => item.pipeline === "cover") ?? null;
             if (isCoverBusy.value) {
                 if (!pollTimer) startPolling(libId);
             } else {

@@ -45,12 +45,15 @@ import { useLibraryStore } from "@/stores/library";
 import { formatTemporalDateTime, formatTemporalRelative, formatTemporalDuration } from "@/utils/temporal";
 import JobDetailView, { type MasterTaskItem } from "@/components/JobDetailView.vue";
 import PipelineStatusSection from "@/components/jobs/PipelineStatusSection.vue";
+import { useLibraryStore } from "@/stores/library";
 
 const { toggleSidebar, isSidebarCollapsed } = useAppLayout();
 const libraryStore = useLibraryStore();
 const { t, locale } = useI18n();
 const route = useRoute();
 const router = useRouter();
+const libraryStore = useLibraryStore();
+const libraryId = computed(() => libraryStore.activeLibrary?.id ?? null);
 
 interface QueueStats {
     tasks: {
@@ -198,9 +201,10 @@ function toggleSelectTask(id: string, e?: Event) {
 }
 
 async function fetchStats(isSilent = false) {
+    if (!libraryId.value) return;
     if (!isSilent) statsLoading.value = true;
     try {
-        const res: any = await useApi("/jobs/stats");
+        const res: any = await useApi("/jobs/stats", { query: { library_id: libraryId.value } });
         if (isApiSuccess(res) && res.data) {
             stats.value = res.data;
         }
@@ -212,9 +216,11 @@ async function fetchStats(isSilent = false) {
 }
 
 async function fetchTasks(isSilent = false) {
+    if (!libraryId.value) return;
     if (!isSilent) tasksLoading.value = true;
     try {
         const queryParams: Record<string, any> = {
+            library_id: libraryId.value,
             page: page.value,
             limit: limit.value,
             status: statusFilter.value === "ALL" ? undefined : statusFilter.value,
@@ -346,12 +352,12 @@ async function handleBulkRetry() {
     if (selectedTaskIds.value.length === 0) return;
     isBulkLoading.value = true;
     try {
-        const res: any = await useApi("/jobs/batch-retry", {
+        const res: any = await useApi("/jobs/units/batch-retry", {
             method: "POST",
             body: { task_ids: selectedTaskIds.value },
         });
         if (isApiSuccess(res)) {
-            toast.success(`已批量重试 ${res.data?.count || 0} 项任务`);
+            toast.success(`已批量重试 ${res.data?.retried_count || 0} 项任务`);
             selectedTaskIds.value = [];
             await refreshAll();
         }
@@ -544,6 +550,14 @@ watch(selectedTaskType, () => {
     fetchTasks();
 });
 
+watch(libraryId, () => {
+    page.value = 1;
+    selectedTaskIds.value = [];
+    tasks.value = [];
+    if (activeTask.value) closeTaskDetail();
+    refreshAll();
+});
+
 function handleKeydown(event: KeyboardEvent) {
     if (event.key === "Escape") {
         if (activeTask.value) {
@@ -698,7 +712,7 @@ onUnmounted(() => {
 
                 <!-- Main Scrollable Dashboard Content (Structured shadcn Layout) -->
                 <main class="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 min-h-0 space-y-6">
-                    <PipelineStatusSection />
+                    <PipelineStatusSection v-if="libraryId" :library-id="libraryId" />
 
                     <div class="max-w-6xl mx-auto space-y-6">
                         <!-- 1. Top Section: 4 High-Density shadcn KPI Metric Cards -->

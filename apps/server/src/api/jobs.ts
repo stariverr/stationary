@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { db } from "@/global/db";
 import { AsyncTask, AsyncTaskStatus, AsyncTaskType, AsyncTaskUnit, AsyncTaskUnitStatus, DeleteStatus, Library } from "@/db/schema";
-import { eq, and, asc, desc, count, sql } from "drizzle-orm";
+import { eq, and, desc, count, sql, inArray, or } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
@@ -25,30 +25,41 @@ async function checkTaskAccess(userId: string, task: typeof AsyncTask.$inferSele
     return false;
 }
 
+/** The given task ids the user may act on: their own tasks and tasks of libraries they own. */
+async function accessibleTaskIds(userId: string, taskIds: readonly string[]): Promise<string[]> {
+    if (taskIds.length === 0) return [];
+    const rows = await db
+        .select({ id: AsyncTask.id })
+        .from(AsyncTask)
+        .leftJoin(Library, eq(Library.id, AsyncTask.library_id))
+        .where(and(inArray(AsyncTask.id, [...taskIds]), or(eq(AsyncTask.owner_id, userId), eq(Library.owner_id, userId))));
+    return rows.map((row) => row.id);
+}
+
 // -----------------------------------------------------------------------------
 // STATIC ROUTES FIRST (Must be placed before /:id to prevent route hijacking)
 // -----------------------------------------------------------------------------
 
-async function ownedLibraries(userId: string, libraryId?: string) {
-    const conditions = [eq(Library.owner_id, userId), eq(Library.delete_status, DeleteStatus.ACTIVE)];
-    if (libraryId) conditions.push(eq(Library.id, libraryId));
-    return db
-        .select({ id: Library.id, name: Library.name })
+async function ownedLibrary(userId: string, libraryId: string) {
+    const [library] = await db
+        .select({ id: Library.id })
         .from(Library)
-        .where(and(...conditions))
-        .orderBy(asc(Library.name));
+        .where(and(eq(Library.id, libraryId), eq(Library.owner_id, userId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
+        .limit(1);
+    return library ?? null;
 }
 
 /** Resolves `:library_id/:pipeline` to an owned library and a known (non-scan) pipeline. */
 async function resolvePipelineParams(userId: string, libraryId: string, pipelineParam: string) {
     const name = parseQueueName(pipelineParam);
     if (!name || name.scan) return null;
-    const [library] = await ownedLibraries(userId, libraryId);
+    const library = await ownedLibrary(userId, libraryId);
     return library ? { library, pipeline: name.pipeline } : null;
 }
 
-const PipelinesQuerySchema = v.object({
-    library_id: v.optional(v.pipe(v.string(), v.uuid("Invalid library ID format"))),
+/** Every jobs listing is scoped to one library the user owns. */
+const LibraryQuerySchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid("Invalid library ID format")),
 });
 
 const PipelineParamSchema = v.object({
@@ -60,22 +71,16 @@ const FailuresQuerySchema = v.object({
     limit: v.optional(v.pipe(v.string(), v.toNumber(), v.integer(), v.minValue(1), v.maxValue(200)), "50"),
 });
 
-// GET /api/jobs/pipelines - Per library and pipeline: queued, running, retrying and failed subjects
-jobsApp.get("/pipelines", requireAuth, validate("query", PipelinesQuerySchema), async (c) => {
+// GET /api/jobs/pipelines?library_id - Per pipeline of the library: queued, running, retrying and failed subjects
+jobsApp.get("/pipelines", requireAuth, validate("query", LibraryQuerySchema), async (c) => {
     const user = c.get("user");
     if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
 
-    const libraries = await ownedLibraries(user.id, c.req.valid("query").library_id);
-    const status = await pipelineStatus(libraries.map((library) => library.id));
-    return c.json(
-        success(Code.SUCCESS, {
-            libraries: libraries.map((library) => ({
-                library_id: library.id,
-                name: library.name,
-                pipelines: status.get(library.id) ?? [],
-            })),
-        }),
-    );
+    const library = await ownedLibrary(user.id, c.req.valid("query").library_id);
+    if (!library) return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
+
+    const status = await pipelineStatus([library.id]);
+    return c.json(success(Code.SUCCESS, { pipelines: status.get(library.id) ?? [] }));
 });
 
 // GET /api/jobs/pipelines/:library_id/:pipeline/failures - Subjects whose failure still applies
@@ -119,10 +124,13 @@ jobsApp.post("/pipelines/:library_id/:pipeline/retry-failed", requireAuth, valid
     return c.json(success(Code.SUCCESS, { retried }));
 });
 
-// GET /api/jobs/list - Paginated master tasks list
-jobsApp.get("/list", requireAuth, async (c) => {
+// GET /api/jobs/list?library_id - Paginated master tasks of a library
+jobsApp.get("/list", requireAuth, validate("query", LibraryQuerySchema), async (c) => {
     const user = c.get("user");
     if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+
+    const library = await ownedLibrary(user.id, c.req.valid("query").library_id);
+    if (!library) return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
 
     const page = Math.max(1, parseInt(c.req.query("page") || "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(c.req.query("limit") || "20", 10)));
@@ -130,7 +138,7 @@ jobsApp.get("/list", requireAuth, async (c) => {
     const typeFilter = c.req.query("type");
     const offset = (page - 1) * limit;
 
-    const conditions = [];
+    const conditions = [eq(AsyncTask.library_id, library.id)];
     if (
         statusFilter &&
         statusFilter !== "ALL" &&
@@ -148,7 +156,7 @@ jobsApp.get("/list", requireAuth, async (c) => {
         conditions.push(eq(AsyncTask.type, typeFilter as AsyncTaskType));
     }
 
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const whereClause = and(...conditions);
 
     const totalResult = await db.select({ count: count() }).from(AsyncTask).where(whereClause);
 
@@ -191,129 +199,51 @@ jobsApp.get("/list", requireAuth, async (c) => {
     );
 });
 
-// GET /api/jobs/stats - Aggregate queue health metrics & status counts
-jobsApp.get("/stats", requireAuth, async (c) => {
+// GET /api/jobs/stats?library_id - Task and unit counts of a library
+jobsApp.get("/stats", requireAuth, validate("query", LibraryQuerySchema), async (c) => {
     const user = c.get("user");
     if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
 
-    const [tasksSummary] = await db.select({ total: count() }).from(AsyncTask);
-    const [runningTasks] = await db.select({ count: count() }).from(AsyncTask).where(eq(AsyncTask.status, AsyncTaskStatus.RUNNING));
-    const [failedTasks] = await db.select({ count: count() }).from(AsyncTask).where(eq(AsyncTask.status, AsyncTaskStatus.FAILED));
-    const [completedTasks] = await db.select({ count: count() }).from(AsyncTask).where(eq(AsyncTask.status, AsyncTaskStatus.COMPLETED));
+    const library = await ownedLibrary(user.id, c.req.valid("query").library_id);
+    if (!library) return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
 
-    const [unitsSummary] = await db.select({ total: count() }).from(AsyncTaskUnit);
-    const [runningUnits] = await db
-        .select({ count: count() })
+    const inLibrary = eq(AsyncTask.library_id, library.id);
+    const [tasks] = await db
+        .select({
+            total: count(),
+            running: sql<number>`(count(*) FILTER (WHERE ${AsyncTask.status} = ${AsyncTaskStatus.RUNNING}))::int`,
+            failed: sql<number>`(count(*) FILTER (WHERE ${AsyncTask.status} = ${AsyncTaskStatus.FAILED}))::int`,
+            completed: sql<number>`(count(*) FILTER (WHERE ${AsyncTask.status} = ${AsyncTaskStatus.COMPLETED}))::int`,
+        })
+        .from(AsyncTask)
+        .where(inLibrary);
+    const unitCount = (status: AsyncTaskUnitStatus) => sql<number>`(count(*) FILTER (WHERE ${AsyncTaskUnit.status} = ${status}))::int`;
+    const [units] = await db
+        .select({
+            total: count(),
+            running: unitCount(AsyncTaskUnitStatus.RUNNING),
+            pending: unitCount(AsyncTaskUnitStatus.PENDING),
+            succeeded: unitCount(AsyncTaskUnitStatus.SUCCEEDED),
+            failed: unitCount(AsyncTaskUnitStatus.FAILED),
+        })
         .from(AsyncTaskUnit)
-        .where(eq(AsyncTaskUnit.status, AsyncTaskUnitStatus.RUNNING));
-    const [pendingUnits] = await db
-        .select({ count: count() })
-        .from(AsyncTaskUnit)
-        .where(eq(AsyncTaskUnit.status, AsyncTaskUnitStatus.PENDING));
-    const [succeededUnits] = await db
-        .select({ count: count() })
-        .from(AsyncTaskUnit)
-        .where(eq(AsyncTaskUnit.status, AsyncTaskUnitStatus.SUCCEEDED));
-    const [failedUnits] = await db
-        .select({ count: count() })
-        .from(AsyncTaskUnit)
-        .where(eq(AsyncTaskUnit.status, AsyncTaskUnitStatus.FAILED));
+        .innerJoin(AsyncTask, eq(AsyncTask.id, AsyncTaskUnit.task_id))
+        .where(inLibrary);
 
     return c.json(
         success(Code.SUCCESS, {
             tasks: {
-                total: Number(tasksSummary?.total || 0),
-                running: Number(runningTasks?.count || 0),
-                failed: Number(failedTasks?.count || 0),
-                completed: Number(completedTasks?.count || 0),
+                total: Number(tasks?.total ?? 0),
+                running: tasks?.running ?? 0,
+                failed: tasks?.failed ?? 0,
+                completed: tasks?.completed ?? 0,
             },
             units: {
-                total: Number(unitsSummary?.total || 0),
-                running: Number(runningUnits?.count || 0),
-                pending: Number(pendingUnits?.count || 0),
-                succeeded: Number(succeededUnits?.count || 0),
-                failed: Number(failedUnits?.count || 0),
-            },
-        }),
-    );
-});
-
-// GET /api/jobs/units - Global task units list (filterable by status, task_type)
-jobsApp.get("/units", requireAuth, async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
-
-    const page = Math.max(1, parseInt(c.req.query("page") || "1", 10));
-    const limit = Math.min(100, Math.max(1, parseInt(c.req.query("limit") || "50", 10)));
-    const statusFilter = c.req.query("status");
-    const taskTypeFilter = c.req.query("task_type");
-    const offset = (page - 1) * limit;
-
-    const conditions = [];
-    if (
-        statusFilter &&
-        statusFilter !== "ALL" &&
-        statusFilter !== "undefined" &&
-        Object.values(AsyncTaskUnitStatus).includes(statusFilter as AsyncTaskUnitStatus)
-    ) {
-        conditions.push(eq(AsyncTaskUnit.status, statusFilter as AsyncTaskUnitStatus));
-    }
-    if (
-        taskTypeFilter &&
-        taskTypeFilter !== "ALL" &&
-        taskTypeFilter !== "undefined" &&
-        Object.values(AsyncTaskType).includes(taskTypeFilter as AsyncTaskType)
-    ) {
-        conditions.push(eq(AsyncTask.type, taskTypeFilter as AsyncTaskType));
-    }
-
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-
-    const totalResult = await db
-        .select({ count: count() })
-        .from(AsyncTaskUnit)
-        .innerJoin(AsyncTask, eq(AsyncTaskUnit.task_id, AsyncTask.id))
-        .where(whereClause);
-
-    const total = Number(totalResult[0]?.count || 0);
-
-    const items = await db
-        .select({
-            id: AsyncTaskUnit.id,
-            task_id: AsyncTaskUnit.task_id,
-            task_type: AsyncTask.type,
-            unit_key: AsyncTaskUnit.unit_key,
-            kind: AsyncTaskUnit.kind,
-            subject_type: AsyncTaskUnit.subject_type,
-            subject_id: AsyncTaskUnit.subject_id,
-            status: AsyncTaskUnit.status,
-            outcome_code: AsyncTaskUnit.outcome_code,
-            attempt_count: AsyncTaskUnit.attempt_count,
-            max_attempts: AsyncTaskUnit.max_attempts,
-            last_error: AsyncTaskUnit.last_error,
-            input_snapshot: AsyncTask.input_snapshot,
-            create_time: AsyncTaskUnit.create_time,
-            update_time: AsyncTaskUnit.update_time,
-            complete_time: AsyncTaskUnit.complete_time,
-        })
-        .from(AsyncTaskUnit)
-        .innerJoin(AsyncTask, eq(AsyncTaskUnit.task_id, AsyncTask.id))
-        .where(whereClause)
-        .orderBy(desc(AsyncTaskUnit.update_time))
-        .limit(limit)
-        .offset(offset);
-
-    const totalPages = Math.ceil(total / limit);
-
-    return c.json(
-        success(Code.SUCCESS, {
-            items,
-            pagination: {
-                page,
-                limit,
-                total,
-                total_pages: totalPages,
-                has_more: page < totalPages,
+                total: Number(units?.total ?? 0),
+                running: units?.running ?? 0,
+                pending: units?.pending ?? 0,
+                succeeded: units?.succeeded ?? 0,
+                failed: units?.failed ?? 0,
             },
         }),
     );
@@ -324,17 +254,9 @@ jobsApp.post("/units/batch-retry", requireAuth, async (c) => {
     const user = c.get("user");
     if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
 
-    let body: { unit_ids?: string[]; task_ids?: string[] } = {};
-    try {
-        body = await c.req.json();
-    } catch {
-        // Optional body
-    }
-
-    const resetCount = await JobManager.batchRetryFailedUnits({
-        unitIds: body.unit_ids,
-        taskIds: body.task_ids,
-    });
+    const body: { task_ids?: string[] } = await c.req.json().catch(() => ({}));
+    const taskIds = await accessibleTaskIds(user.id, body.task_ids ?? []);
+    const resetCount = await JobManager.batchRetryFailedUnits({ taskIds });
 
     return c.json(success(Code.SUCCESS, { retried_count: resetCount }));
 });
@@ -346,6 +268,11 @@ jobsApp.post("/units/:id/retry", requireAuth, async (c) => {
 
     const id = c.req.param("id");
     if (!id) return c.json(error(Code.INVALID_PARAMETER, "Unit id is required"), 400);
+
+    const [unit] = await db.select({ task_id: AsyncTaskUnit.task_id }).from(AsyncTaskUnit).where(eq(AsyncTaskUnit.id, id)).limit(1);
+    if (!unit || (await accessibleTaskIds(user.id, [unit.task_id])).length === 0) {
+        return c.json(error(Code.NOT_FOUND, "Unit not found"), 404);
+    }
 
     const retried = await JobManager.retrySingleFailedUnit(id);
     if (!retried) {
@@ -361,7 +288,7 @@ jobsApp.post("/batch-pause", requireAuth, async (c) => {
     if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
 
     const body: { task_ids?: string[] } = await c.req.json().catch(() => ({}));
-    const taskIds = body.task_ids || [];
+    const taskIds = await accessibleTaskIds(user.id, body.task_ids ?? []);
     let count = 0;
     for (const taskId of taskIds) {
         if (await JobManager.pauseTask(taskId)) count++;
@@ -375,7 +302,7 @@ jobsApp.post("/batch-resume", requireAuth, async (c) => {
     if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
 
     const body: { task_ids?: string[] } = await c.req.json().catch(() => ({}));
-    const taskIds = body.task_ids || [];
+    const taskIds = await accessibleTaskIds(user.id, body.task_ids ?? []);
     let count = 0;
     for (const taskId of taskIds) {
         if (await JobManager.resumeTask(taskId)) count++;
@@ -389,7 +316,7 @@ jobsApp.post("/batch-cancel", requireAuth, async (c) => {
     if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
 
     const body: { task_ids?: string[] } = await c.req.json().catch(() => ({}));
-    const taskIds = body.task_ids || [];
+    const taskIds = await accessibleTaskIds(user.id, body.task_ids ?? []);
     let count = 0;
     for (const taskId of taskIds) {
         if (await JobManager.cancelTask(taskId)) count++;

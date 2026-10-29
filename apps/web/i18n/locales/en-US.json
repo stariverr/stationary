@@ -1155,10 +1155,8 @@
         },
         "pipelines": {
             "title": "Library pipelines",
-            "desc": "Downloads, avatars and covers are kept up to date per library. Counts update every few seconds.",
+            "desc": "Downloads, avatars and covers of this library are kept up to date. Counts update every few seconds.",
             "loading": "Loading…",
-            "empty": "No libraries yet.",
-            "library": "Library",
             "pipeline": "Pipeline",
             "queued": "Queued",
             "running": "Running",
