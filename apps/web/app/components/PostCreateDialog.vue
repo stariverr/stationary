@@ -51,7 +51,6 @@ const title = ref("");
 const description = ref("");
 const postTagIds = ref<string[]>([]);
 const isSubmitting = ref(false);
-const titleInputRef = ref<HTMLInputElement | null>(null);
 
 const postTagNames = computed(() => {
     return postTagIds.value
@@ -143,11 +142,6 @@ watch(
             editingDraft.value = null;
             searchOrphanQuery.value = "";
             tempSelectedMediaIds.value = [];
-
-            // Autofocus
-            setTimeout(() => {
-                titleInputRef.value?.focus();
-            }, 100);
         } else {
             // Cleanup staged draft files if dialog is cancelled/closed without submitting
             if (!isSubmitting.value) {
@@ -464,7 +458,6 @@ async function handleSubmit() {
                             }}</Label>
                             <Input
                                 id="post-title"
-                                ref="titleInputRef"
                                 v-model="title"
                                 :placeholder="$t('post.title_placeholder', 'Enter post title')"
                                 :disabled="isSubmitting"
