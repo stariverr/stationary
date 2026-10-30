@@ -2,6 +2,12 @@ export const LEASE_SECONDS = 60;
 export const HEARTBEAT_INTERVAL_MS = 20_000;
 export const DEFAULT_MAX_ATTEMPTS = 5;
 export const MAX_RETRY_DELAY_SECONDS = 300;
+/** How long a run may take unless its handler says otherwise. */
+export const DEFAULT_RUN_TIMEOUT_MS = 10 * 60_000;
+/** How long an aborted run gets to return before it counts as stuck and its slot goes to other work. */
+export const STUCK_AFTER_MS = 30_000;
+/** Stuck runs keep their memory and connections and cannot be killed, so past this many only a restart recovers them. */
+export const MAX_STUCK_RUNS = 8;
 /** Subjects per library scan step. */
 export const SCAN_PAGE_SIZE = 200;
 /** How often every library is rescanned to catch changes no writer reported. */
