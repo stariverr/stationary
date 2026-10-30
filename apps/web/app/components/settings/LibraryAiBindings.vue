@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { toast } from "vue-sonner";
-import { CircleCheck, Loader2, Play, Save } from "@lucide/vue";
+import { CircleCheck, Loader2, Pause, Play, Save } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -280,8 +280,10 @@ const commit = async ({ redescribe = false }: { redescribe?: boolean } = {}) => 
         <div v-if="coverage || isProcessing" class="space-y-2 rounded-xl border bg-muted/50 p-3 text-xs">
             <div class="flex min-h-7 flex-wrap items-center justify-between gap-x-3 gap-y-2">
                 <p v-if="isProcessing && progress" class="flex min-w-0 items-center gap-1.5 font-medium">
-                    <Loader2 class="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-                    <span v-if="progress.queued > 0">{{ t("settings.ai_config.progress_queued", { count: progress.queued }) }}</span>
+                    <Pause v-if="progress.paused" class="size-3.5 shrink-0 text-muted-foreground" />
+                    <Loader2 v-else class="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                    <span v-if="progress.paused">{{ t("jobs.pipelines.paused") }}</span>
+                    <span v-else-if="progress.queued > 0">{{ t("settings.ai_config.progress_queued", { count: progress.queued }) }}</span>
                     <span v-else>{{ t("settings.ai_config.progress_scanning") }}</span>
                 </p>
                 <p v-else-if="coverage && coverage.eligible === 0" class="min-w-0 text-muted-foreground">

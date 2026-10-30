@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { and, eq, ne, sql } from "drizzle-orm";
-import { JobQueue, Library } from "@/db/schema";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { jobsApp } from "@/api/jobs";
+import { ExternalApiToken, JobQueue, Library, User } from "@/db/schema";
+import { deleteLibrary } from "@/features/library/delete-library";
+import { ApiTokenService } from "@/features/auth/api-token";
 import { db } from "@/global/db";
 import { markChanged, requeue } from "@/infra/queue/changes";
 import { Aspect, PIPELINE_NAMES, scanQueueName } from "@/infra/queue/pipelines";
@@ -19,6 +22,7 @@ import {
     postpone,
     relocate,
     renew,
+    setLibraryPaused,
     type ClaimedRow,
 } from "@/infra/queue/store";
 import type {
@@ -43,10 +47,17 @@ let libraryId = crypto.randomUUID();
 afterEach(async () => {
     if (process.env.RUN_QUEUE_DB_TESTS !== "1") return;
     await db.delete(JobQueue).where(eq(JobQueue.library_id, libraryId));
+    await db.delete(Library).where(eq(Library.id, libraryId));
     libraryId = crypto.randomUUID();
 });
 
 const subject = () => `test-${crypto.randomUUID()}`;
+
+/** Most tests get by without a library row; pausing needs one. */
+async function pausedLibrary() {
+    await db.insert(Library).values({ id: libraryId, name: "test", description: "", owner_id: crypto.randomUUID() });
+    await setLibraryPaused(libraryId, true);
+}
 
 async function queue(pipeline: string, subjectIds: readonly string[], mode: "change" | "scan" | "absent" = "change") {
     await enqueue(
@@ -90,6 +101,27 @@ describe("job_queue store", () => {
         const [again] = await claimOurs(1);
         expect(await finish(again!)).toBe(true);
         expect(await rowOf("avatar", id)).toBeUndefined();
+    });
+
+    databaseTest("claims the highest priority first, then whatever has waited longest", async () => {
+        const [lower, earlier, later] = [subject(), subject(), subject()];
+        await queue("avatar", [lower, earlier, later]);
+        await db
+            .update(JobQueue)
+            .set({ priority: TEST_PRIORITY - 1, available_at: sql`now() - interval '3 minutes'` })
+            .where(eq(JobQueue.subject_id, lower));
+        await db
+            .update(JobQueue)
+            .set({ available_at: sql`now() - interval '2 minutes'` })
+            .where(eq(JobQueue.subject_id, earlier));
+        await db
+            .update(JobQueue)
+            .set({ available_at: sql`now() - interval '1 minute'` })
+            .where(eq(JobQueue.subject_id, later));
+
+        // One at a time: the rows of a single claim come back in no particular order.
+        const order = [await claimOurs(1), await claimOurs(1), await claimOurs(1)].map(([row]) => row?.subjectId);
+        expect(order).toEqual([earlier, later, lower]);
     });
 
     databaseTest("scan and absent enqueues keep an idle row's retry backoff", async () => {
@@ -192,6 +224,41 @@ describe("job_queue store", () => {
             { pipeline: "cover", libraryId: crypto.randomUUID() },
         ]);
         expect(rows.map((row) => row.pipeline)).toEqual(["cover"]);
+    });
+
+    databaseTest("a paused library's rows stay out of every claim, and enqueues carry on, until it is resumed", async () => {
+        const waiting = subject();
+        const interrupted = subject();
+        const other = subject();
+        await queue("avatar", [waiting, interrupted]);
+        const rows = await claimOurs(2);
+        await defer(
+            rows.find((row) => row.subjectId === waiting)!,
+            0,
+        );
+        await db
+            .update(JobQueue)
+            .set({ lease_expires_at: sql`now() - interval '1 second'` })
+            .where(eq(JobQueue.subject_id, interrupted));
+        await pausedLibrary();
+
+        const added = subject();
+        await queue("avatar", [added]);
+        await queue("avatar", [waiting]);
+        expect(await claim(4)).toEqual([]);
+        expect(await claimBatch("avatar", 4)).toEqual([]);
+
+        // Other libraries are not held up.
+        const otherLibrary = crypto.randomUUID();
+        await enqueue(db, [{ pipeline: "avatar", subjectId: other, libraryId: otherLibrary, priority: TEST_PRIORITY }]);
+        const unaffected = await claim(4);
+        await db.delete(JobQueue).where(eq(JobQueue.library_id, otherLibrary));
+        expect(unaffected.map((row) => row.subjectId)).toEqual([other]);
+
+        await setLibraryPaused(libraryId, false);
+        const resumed = await claimOurs(3);
+        expect(resumed.map((row) => row.subjectId).sort()).toEqual([added, interrupted, waiting].sort());
+        expect(resumed.find((row) => row.subjectId === interrupted)).toMatchObject({ interrupted: true, attempts: 2 });
     });
 
     databaseTest("a row that failed stays batched and a row whose run was interrupted does not", async () => {
@@ -397,6 +464,67 @@ describe("QueueWorker", () => {
         }
         return { reconciled, failures };
     }
+
+    databaseTest("a run in progress finishes after its library is paused, and the next attempt waits for the resume", async () => {
+        const running = subject();
+        const next = subject();
+        const { promise: released, resolve: release } = Promise.withResolvers<void>();
+        const reconciled: string[] = [];
+        let attempts = 0;
+        const handler: SubjectPipelineHandler = {
+            ...idleHandler,
+            async reconcile(ctx) {
+                reconciled.push(ctx.subjectId);
+                if (ctx.subjectId !== running) return { kind: "done" };
+                attempts += 1;
+                if (attempts > 1) return { kind: "done" };
+                await released;
+                await db.transaction((tx) => ctx.fence(tx));
+                return { kind: "retry", error: "try again" };
+            },
+        };
+        await queue("avatar", [running]);
+        worker(everyPipeline(handler), 2).start();
+        await until(() => attempts === 1);
+
+        await pausedLibrary();
+        await queue("avatar", [next]);
+        release();
+        await until(async () => (await rowOf("avatar", running))?.lease_token === null);
+        await db
+            .update(JobQueue)
+            .set({ available_at: sql`now()` })
+            .where(eq(JobQueue.subject_id, running));
+
+        await Bun.sleep(200);
+        expect(reconciled).toEqual([running]);
+        expect((await rowOf("avatar", running))?.attempts).toBe(1);
+
+        await setLibraryPaused(libraryId, false);
+        await until(async () => (await db.$count(JobQueue, eq(JobQueue.library_id, libraryId))) === 0);
+        expect(reconciled.sort()).toEqual([running, running, next].sort());
+    });
+
+    databaseTest("resuming a library wakes a listening worker at once", async () => {
+        const id = subject();
+        let reconciled = false;
+        const handler: SubjectPipelineHandler = {
+            ...idleHandler,
+            async reconcile() {
+                reconciled = true;
+                return { kind: "done" };
+            },
+        };
+        await pausedLibrary();
+        // Nothing but the notification can wake it within the test.
+        worker(everyPipeline(handler), 1, { pollIntervalMs: 60_000, listen: true }).start();
+        await queue("avatar", [id]);
+        await Bun.sleep(300);
+        expect(reconciled).toBe(false);
+
+        await setLibraryPaused(libraryId, false);
+        await until(() => reconciled);
+    });
 
     databaseTest("runs queued subjects to completion and records a rejected input at once", async () => {
         const ok = [subject(), subject()];
@@ -797,5 +925,64 @@ describe("QueueWorker", () => {
         await drained;
 
         expect(await rowOf("avatar", id)).toBeUndefined();
+    });
+});
+
+describe("pausing a library", () => {
+    async function newUser(name: string) {
+        const [user] = await db.insert(User).values({ auth_id: subject(), name }).returning();
+        return user!;
+    }
+
+    databaseTest("the endpoint reaches only the libraries the caller's token may reach, and the status reports it", async () => {
+        const owner = await newUser("owner");
+        const stranger = await newUser("stranger");
+        const sibling = crypto.randomUUID();
+        await db.insert(Library).values([
+            { id: libraryId, name: "test", description: "", owner_id: owner.id },
+            { id: sibling, name: "sibling", description: "", owner_id: owner.id },
+        ]);
+        const token = async (userId: string, scope?: string) => (await ApiTokenService.generateToken(userId, "test", scope)).rawToken;
+        const [ownerToken, strangerToken, scopedToken] = await Promise.all([token(owner.id), token(stranger.id), token(owner.id, sibling)]);
+        const request = (bearer: string, path: string, init: RequestInit = {}) =>
+            jobsApp.request(path, {
+                ...init,
+                headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
+            });
+        const setPaused = (bearer: string, paused: boolean) =>
+            request(bearer, `/pipelines/${libraryId}/paused`, { method: "PUT", body: JSON.stringify({ paused }) });
+        const isPaused = async () => {
+            const [library] = await db.select({ paused: Library.jobs_paused }).from(Library).where(eq(Library.id, libraryId));
+            return library?.paused;
+        };
+
+        try {
+            expect((await setPaused(strangerToken, true)).status).toBe(404);
+            expect((await setPaused(scopedToken, true)).status).toBe(404);
+            expect((await request(scopedToken, `/pipelines?library_id=${libraryId}`)).status).toBe(404);
+            expect(await isPaused()).toBe(false);
+
+            expect((await setPaused(ownerToken, true)).status).toBe(200);
+            expect(await isPaused()).toBe(true);
+            const status = await request(ownerToken, `/pipelines?library_id=${libraryId}`);
+            expect(((await status.json()) as { data: { paused: boolean } }).data.paused).toBe(true);
+
+            expect((await setPaused(ownerToken, false)).status).toBe(200);
+            expect(await isPaused()).toBe(false);
+        } finally {
+            await db.delete(ExternalApiToken).where(inArray(ExternalApiToken.owner_id, [owner.id, stranger.id]));
+            await db.delete(User).where(inArray(User.id, [owner.id, stranger.id]));
+            await db.delete(Library).where(eq(Library.id, sibling));
+        }
+    });
+
+    databaseTest("deleting a paused library lets its rows run out", async () => {
+        const ownerId = crypto.randomUUID();
+        await db.insert(Library).values({ id: libraryId, name: "test", description: "", owner_id: ownerId });
+        await setLibraryPaused(libraryId, true);
+        await queue("avatar", [subject()]);
+
+        await deleteLibrary(libraryId, { ownerId });
+        expect(await claimOurs(1)).toHaveLength(1);
     });
 });

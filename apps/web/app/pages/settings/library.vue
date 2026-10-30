@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { toast } from "vue-sonner";
-import { Loader2, RefreshCw, RotateCcw, Save, Info, Sparkles } from "@lucide/vue";
+import { Loader2, Pause, RefreshCw, RotateCcw, Save, Info, Sparkles } from "@lucide/vue";
 import { Card, CardContent } from "@/components/ui/card";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import LibraryAiBindings from "@/components/settings/LibraryAiBindings.vue";
 import { useLibraryStore } from "@/stores/library";
 import type { ApiResponse } from "@/types/api";
-import type { PipelineStatus } from "@/types/pipeline";
+import type { LibraryPipelines, PipelineStatus } from "@/types/pipeline";
 
 interface FetchErrorLike {
     data?: { message?: string };
@@ -30,6 +30,7 @@ const libraryStore = useLibraryStore();
 const selectedLibraryId = ref(libraryStore.activeLibraryId || libraryStore.libraries[0]?.id || "");
 
 const coverStatus = ref<PipelineStatus | null>(null);
+const libraryPaused = ref(false);
 const isRecovering = ref(false);
 const isRetryingCovers = ref(false);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -62,7 +63,7 @@ const fetchCoverConfig = async (libId: string) => {
     try {
         const [configRes, statusRes] = await Promise.all([
             useApi<ApiResponse<{ qualities: string[] }>>(`/library/${libId}/cover-config`),
-            useApi<ApiResponse<{ pipelines: PipelineStatus[] }>>("/jobs/pipelines", {
+            useApi<ApiResponse<LibraryPipelines>>("/jobs/pipelines", {
                 query: { library_id: libId },
             }),
         ]);
@@ -75,6 +76,7 @@ const fetchCoverConfig = async (libId: string) => {
 
         if (statusRes?.data && libId === selectedLibraryId.value) {
             coverStatus.value = statusRes.data.pipelines.find((item) => item.pipeline === "cover") ?? null;
+            libraryPaused.value = statusRes.data.paused;
             if (isCoverBusy.value) {
                 if (!pollTimer) startPolling(libId);
             } else {
@@ -265,11 +267,13 @@ const retryFailedCovers = async () => {
                         class="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-muted/50 p-3 text-xs"
                     >
                         <span v-if="isCoverBusy" class="flex items-center gap-1.5 font-semibold">
-                            <Loader2 class="size-3.5 shrink-0 animate-spin" />
-                            <template v-if="coverStatus.queued === 0">{{ $t("settings.library_config.cover_counting") }}</template>
-                            <span v-else class="tabular-nums">{{
+                            <Pause v-if="libraryPaused" class="size-3.5 shrink-0" />
+                            <Loader2 v-else class="size-3.5 shrink-0 animate-spin" />
+                            <span v-if="libraryPaused">{{ $t("jobs.pipelines.paused") }}</span>
+                            <span v-if="coverStatus.queued > 0" class="tabular-nums">{{
                                 $t("settings.library_config.cover_progress", { queued: coverStatus.queued, running: coverStatus.running })
                             }}</span>
+                            <template v-else-if="!libraryPaused">{{ $t("settings.library_config.cover_counting") }}</template>
                         </span>
                         <span v-if="coverStatus.failed > 0" class="flex items-center gap-2 text-destructive">
                             <span class="tabular-nums">{{

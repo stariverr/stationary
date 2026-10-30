@@ -116,6 +116,9 @@ watch(windowWidth, (width) => {
 
         <!-- Main Content Area -->
         <div :inert="isSidebarOpen || undefined" class="flex-1 flex flex-col min-w-0 min-h-0 bg-[#f9fafb] relative">
+            <!-- AI Provider Outage Notice -->
+            <GlobalProviderNotice />
+
             <main id="main-content" class="flex-1 flex w-full min-h-0 relative">
                 <!-- Main View Container -->
                 <div class="flex-1 min-w-0 min-h-0 flex flex-col relative">

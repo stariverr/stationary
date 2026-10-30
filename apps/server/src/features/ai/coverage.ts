@@ -8,6 +8,7 @@ import {
     EmbeddingRole,
     EntityType,
     File as DbFile,
+    Library,
     Media,
     SyncStatus,
     Track,
@@ -286,17 +287,23 @@ export interface LibraryAiProgress {
     queued: number;
     /** A library scan of an AI pipeline is under way, so `queued` may still grow. */
     scanning: boolean;
+    /** The library's background work is on hold, so `queued` will not go down until it is resumed. */
+    paused: boolean;
 }
 
 /** Cheap progress of AI work in a library, read from its queue, for polling while it runs. */
 export async function getLibraryAiProgress(libraryId: string): Promise<LibraryAiProgress> {
+    const [rows, [library]] = await Promise.all([
+        countQueue([libraryId]),
+        db.select({ paused: Library.jobs_paused }).from(Library).where(eq(Library.id, libraryId)),
+    ]);
     let queued = 0;
     let scanning = false;
-    for (const row of await countQueue([libraryId])) {
+    for (const row of rows) {
         const name = parseQueueName(row.pipeline);
         if (!name?.pipeline.startsWith("ai.")) continue;
         if (name.scan) scanning = true;
         else queued += row.queued;
     }
-    return { queued, scanning };
+    return { queued, scanning, paused: library?.paused ?? false };
 }

@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { Loader2, RotateCcw, ChevronDown, X } from "@lucide/vue";
+import { Loader2, Pause, Play, RotateCcw, ChevronDown, X } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import type { ApiResponse } from "@/types/api";
-import type { PipelineFailure, PipelineName, PipelineStatus } from "@/types/pipeline";
+import type { LibraryPipelines, PipelineFailure, PipelineName, PipelineStatus } from "@/types/pipeline";
 import { formatTemporalRelative } from "@/utils/temporal";
 
 const props = defineProps<{ libraryId: string }>();
@@ -16,6 +16,8 @@ const LONG_WAIT_SECONDS = 300;
 const { t, locale } = useI18n();
 
 const pipelines = ref<PipelineStatus[]>([]);
+const paused = ref(false);
+const pausing = ref(false);
 const loaded = ref(false);
 const retrying = ref<PipelineName | null>(null);
 const expanded = ref<PipelineName | null>(null);
@@ -29,8 +31,11 @@ let timer: ReturnType<typeof setInterval> | null = null;
 const fetchStatus = async () => {
     const libraryId = props.libraryId;
     try {
-        const res = await useApi<ApiResponse<{ pipelines: PipelineStatus[] }>>("/jobs/pipelines", { query: { library_id: libraryId } });
-        if (res?.data && libraryId === props.libraryId) pipelines.value = res.data.pipelines;
+        const res = await useApi<ApiResponse<LibraryPipelines>>("/jobs/pipelines", { query: { library_id: libraryId } });
+        if (res?.data && libraryId === props.libraryId) {
+            pipelines.value = res.data.pipelines;
+            paused.value = res.data.paused;
+        }
     } catch (err) {
         console.error("Failed to load pipeline status:", err);
     } finally {
@@ -78,10 +83,23 @@ const retryFailed = async (pipeline: PipelineName) => {
     }
 };
 
+const togglePaused = async () => {
+    pausing.value = true;
+    try {
+        await useApi(`/jobs/pipelines/${props.libraryId}/paused`, { method: "PUT", body: { paused: !paused.value } });
+        await fetchStatus();
+    } catch {
+        toast.error(t("jobs.toast.action_failed"));
+    } finally {
+        pausing.value = false;
+    }
+};
+
 watch(
     () => props.libraryId,
     () => {
         pipelines.value = [];
+        paused.value = false;
         expanded.value = null;
         loaded.value = false;
         fetchStatus();
@@ -99,55 +117,71 @@ onUnmounted(() => {
 
 <template>
     <section class="shrink-0 border-b border-zinc-200/80 bg-white text-xs" :aria-label="$t('jobs.pipelines.label')">
-        <div class="px-4 md:px-6 py-2.5 flex flex-wrap items-center gap-x-6 gap-y-2">
-            <span class="font-semibold text-zinc-500">{{ $t("jobs.pipelines.label") }}</span>
+        <div class="px-4 md:px-6 py-2.5 flex items-start gap-4">
+            <div class="flex-1 min-w-0 flex flex-wrap items-center gap-x-6 gap-y-2">
+                <span class="font-semibold text-zinc-500">{{ $t("jobs.pipelines.label") }}</span>
 
-            <template v-if="!loaded">
-                <span v-for="n in 3" :key="n" class="h-3 w-28 rounded bg-zinc-100 animate-pulse motion-reduce:animate-none" />
-            </template>
+                <template v-if="!loaded">
+                    <span v-for="n in 3" :key="n" class="h-3 w-28 rounded bg-zinc-100 animate-pulse motion-reduce:animate-none" />
+                </template>
 
-            <template v-else>
-                <div v-for="status in pipelines" :key="status.pipeline" class="flex items-center gap-2 min-w-0 tabular-nums">
-                    <span class="font-semibold text-zinc-800">{{ $t(`jobs.pipelines.names.${status.pipeline}`) }}</span>
-                    <span v-if="isIdle(status)" class="text-zinc-500">{{ $t("jobs.pipelines.up_to_date") }}</span>
-                    <span v-if="status.scanning" class="flex items-center gap-1 text-zinc-500">
-                        <Loader2 class="size-3 animate-spin motion-reduce:animate-none" />
-                        {{ $t("jobs.pipelines.scanning") }}
-                    </span>
-                    <template v-for="column in QUIET_COUNTS" :key="column">
-                        <span v-if="status[column] > 0" class="text-zinc-500">
-                            {{ $t(`jobs.pipelines.count_${column}`, { count: status[column] }) }}
+                <template v-else>
+                    <div v-for="status in pipelines" :key="status.pipeline" class="flex items-center gap-2 min-w-0 tabular-nums">
+                        <span class="font-semibold text-zinc-800">{{ $t(`jobs.pipelines.names.${status.pipeline}`) }}</span>
+                        <span v-if="isIdle(status)" class="text-zinc-500">{{ $t("jobs.pipelines.up_to_date") }}</span>
+                        <span v-if="status.scanning" class="flex items-center gap-1 text-zinc-500">
+                            <Loader2 class="size-3 animate-spin motion-reduce:animate-none" />
+                            {{ $t("jobs.pipelines.scanning") }}
                         </span>
-                    </template>
-                    <span v-if="status.blocked_seconds > 0" class="font-medium text-amber-700">
-                        {{ $t("jobs.pipelines.blocked", { minutes: minutes(status.blocked_seconds) }) }}
-                    </span>
-                    <span v-if="status.oldest_seconds >= LONG_WAIT_SECONDS" class="text-zinc-500">
-                        {{ $t("jobs.pipelines.oldest", { minutes: minutes(status.oldest_seconds) }) }}
-                    </span>
-                    <template v-if="status.failed > 0">
-                        <button
-                            class="flex items-center gap-0.5 rounded-sm font-medium text-red-600 hover:text-red-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950"
-                            :aria-expanded="expanded === status.pipeline"
-                            @click="toggleFailures(status.pipeline)"
-                        >
-                            {{ $t("jobs.pipelines.count_failed", { count: status.failed }) }}
-                            <ChevronDown
-                                class="size-3 transition-transform duration-150"
-                                :class="expanded === status.pipeline ? 'rotate-180' : ''"
-                            />
-                        </button>
-                        <button
-                            class="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 cursor-pointer disabled:opacity-50 disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950"
-                            :disabled="retrying === status.pipeline"
-                            @click="retryFailed(status.pipeline)"
-                        >
-                            <RotateCcw class="size-3" :class="{ 'animate-spin': retrying === status.pipeline }" />
-                            {{ $t("jobs.pipelines.retry_failed") }}
-                        </button>
-                    </template>
-                </div>
-            </template>
+                        <template v-for="column in QUIET_COUNTS" :key="column">
+                            <span v-if="status[column] > 0" class="text-zinc-500">
+                                {{ $t(`jobs.pipelines.count_${column}`, { count: status[column] }) }}
+                            </span>
+                        </template>
+                        <span v-if="status.blocked_seconds > 0" class="font-medium text-amber-700">
+                            {{ $t("jobs.pipelines.blocked", { minutes: minutes(status.blocked_seconds) }) }}
+                        </span>
+                        <span v-if="status.oldest_seconds >= LONG_WAIT_SECONDS" class="text-zinc-500">
+                            {{ $t("jobs.pipelines.oldest", { minutes: minutes(status.oldest_seconds) }) }}
+                        </span>
+                        <template v-if="status.failed > 0">
+                            <button
+                                class="flex items-center gap-0.5 rounded-sm font-medium text-red-600 hover:text-red-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950"
+                                :aria-expanded="expanded === status.pipeline"
+                                @click="toggleFailures(status.pipeline)"
+                            >
+                                {{ $t("jobs.pipelines.count_failed", { count: status.failed }) }}
+                                <ChevronDown
+                                    class="size-3 transition-transform duration-150"
+                                    :class="expanded === status.pipeline ? 'rotate-180' : ''"
+                                />
+                            </button>
+                            <button
+                                class="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 cursor-pointer disabled:opacity-50 disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950"
+                                :disabled="retrying === status.pipeline"
+                                @click="retryFailed(status.pipeline)"
+                            >
+                                <RotateCcw class="size-3" :class="{ 'animate-spin': retrying === status.pipeline }" />
+                                {{ $t("jobs.pipelines.retry_failed") }}
+                            </button>
+                        </template>
+                    </div>
+                </template>
+            </div>
+
+            <button
+                v-if="loaded"
+                class="shrink-0 flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 cursor-pointer disabled:opacity-50 disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950"
+                :disabled="pausing"
+                @click="togglePaused"
+            >
+                <component :is="paused ? Play : Pause" class="size-3" />
+                {{ paused ? $t("jobs.pipelines.resume") : $t("jobs.pipelines.pause") }}
+            </button>
+        </div>
+
+        <div v-if="paused" role="status" class="px-4 md:px-6 py-2 border-t border-amber-100 bg-amber-50/60 font-medium text-amber-800">
+            {{ $t("jobs.pipelines.paused_notice") }}
         </div>
 
         <div v-if="expanded" class="border-t border-zinc-100 bg-zinc-50/60">

@@ -59,9 +59,10 @@ export async function deleteLibrary(libraryId: string, auth: LibraryDeleteAuth) 
             }
 
             const deleteTime = Temporal.Now.instant();
+            // Nobody can resume a deleted library, and its queued rows still have to run to go away.
             await tx
                 .update(Library)
-                .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
+                .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime, jobs_paused: false })
                 .where(eq(Library.id, libraryId));
 
             if (library.cover_file_id) {

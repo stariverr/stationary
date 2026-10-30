@@ -146,6 +146,8 @@ export interface AiProgress {
     queued: number;
     /** A library scan is under way, so `queued` may still grow. */
     scanning: boolean;
+    /** The library's background work is on hold, so `queued` will not go down until it is resumed. */
+    paused: boolean;
 }
 
 /** A bound model the server cannot use; its role is left out until the binding is fixed. */

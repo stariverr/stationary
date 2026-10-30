@@ -1286,14 +1286,24 @@ const routes: RouteItem[] = [
     {
         path: "/api/jobs/pipelines",
         method: "get",
-        summary: "Queue and failure counts of every pipeline in a library",
+        summary: "Whether a library is paused, and the queue and failure counts of its pipelines",
         tags: ["Jobs"],
         querySchema: v.object({ library_id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
-            properties: { pipelines: { type: "array", items: { type: "object" } } },
+            properties: { paused: { type: "boolean" }, pipelines: { type: "array", items: { type: "object" } } },
         }),
+    },
+    {
+        path: "/api/jobs/pipelines/:library_id/paused",
+        method: "put",
+        summary: "Put the background work of a library on hold, or let it go on",
+        tags: ["Jobs"],
+        paramSchema: v.object({ library_id: v.pipe(v.string(), v.uuid()) }),
+        bodySchema: v.strictObject({ paused: v.boolean() }),
+        requiresAuth: true,
+        responseSchema: makeUnifiedSuccessResponse({ type: "object", properties: { paused: { type: "boolean" } } }),
     },
     {
         path: "/api/jobs/pipelines/:library_id/:pipeline/failures",

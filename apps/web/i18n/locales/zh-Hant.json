@@ -984,11 +984,20 @@
             "oldest": "最久已等 {minutes} 分鐘",
             "failures_title": "最近失敗：{name}",
             "hide_failures": "收合失敗明細",
-            "no_failures": "暫無失敗記錄"
+            "no_failures": "暫無失敗記錄",
+            "pause": "暫停",
+            "resume": "恢復",
+            "paused": "已暫停",
+            "paused_notice": "此庫的背景任務已暫停：執行中的任務會跑完，新任務繼續排隊，恢復後接著處理。"
         },
         "toast": {
             "swept": "已重設卡住的任務",
             "action_failed": "操作沒有完成，請重試。"
+        },
+        "provider_blocked": {
+            "message": "AI 服務商暫不可用，相關任務約 {minutes} 分鐘後自動重試。",
+            "view": "查看任務",
+            "dismiss": "關閉提醒"
         }
     }
 }
