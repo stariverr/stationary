@@ -14,6 +14,12 @@ export const pool = new Pool({
     max: env.DB_POOL_MAX,
     idleTimeoutMillis: env.DB_IDLE_TIMEOUT_MS,
     connectionTimeoutMillis: 10_000,
+    // Whatever hangs in the database would otherwise hold its connection, its locks and its caller forever.
+    statement_timeout: env.DB_STATEMENT_TIMEOUT_MS,
+    lock_timeout: 30_000,
+    idle_in_transaction_session_timeout: 60_000,
+    // Those need a server that answers; this one holds when it or the network does not.
+    query_timeout: env.DB_STATEMENT_TIMEOUT_MS && env.DB_STATEMENT_TIMEOUT_MS + 10_000,
 });
 
 // 1. Prevent idle client disconnect errors from crashing the Bun process

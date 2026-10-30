@@ -25,6 +25,12 @@ const envSchema = v.object({
         v.transform((v) => parseInt(v, 10)),
     ),
 
+    /** Longest a single statement may run (ms); 0 leaves it to the server, for a one-off script that needs longer. */
+    DB_STATEMENT_TIMEOUT_MS: v.pipe(
+        v.optional(v.string(), "120000"),
+        v.transform((v) => parseInt(v, 10)),
+    ),
+
     /** Redis URL */
     REDIS_URL: v.optional(v.string(), "redis://localhost:6379"),
 

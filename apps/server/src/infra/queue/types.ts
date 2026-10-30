@@ -6,7 +6,10 @@ export interface ReconcileContext {
     readonly libraryId: string;
     /** Space row id of a per-space pipeline; null otherwise. */
     readonly space: string | null;
-    /** Aborted when the lease is lost or the worker shuts down. */
+    /**
+     * Aborted when the lease is lost, the run is past its deadline or the worker shuts down. A run that does not return
+     * soon after keeps running with nothing waiting for it, so everything it awaits has to take this signal.
+     */
     readonly signal: AbortSignal;
     /**
      * Call in every transaction that writes results, after those writes and before markChanged. Throws LeaseLostError if
@@ -61,6 +64,8 @@ export interface PipelineFailure {
 
 interface PipelineHandlerBase {
     readonly maxAttempts?: number;
+    /** How long a run may take. Past it the run is aborted and counts as a failed attempt. */
+    readonly timeoutMs?: number;
     recordFailure(tx: Transaction, failure: FailureRecord): Promise<void>;
     /**
      * One page of a library scan, in subject id order after `cursor`. Leaves out subjects rejected on their current

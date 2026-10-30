@@ -8,10 +8,13 @@ import { markChanged, requestScan } from "@/infra/queue/changes";
 import { PIPELINE_NAMES, parseQueueName, queueName, type QueueName } from "@/infra/queue/pipelines";
 import {
     DEFAULT_MAX_ATTEMPTS,
+    DEFAULT_RUN_TIMEOUT_MS,
     HEARTBEAT_INTERVAL_MS,
+    MAX_STUCK_RUNS,
     PATROL_INTERVAL_MS,
     Priority,
     SCAN_PAGE_SIZE,
+    STUCK_AFTER_MS,
     retryDelaySeconds,
 } from "@/infra/queue/policy";
 import {
@@ -39,7 +42,23 @@ export interface QueueWorkerOptions {
     readonly patrolIntervalMs?: number;
     /** LISTEN for enqueue notifications on a dedicated connection; polling alone still works without it. */
     readonly listen?: boolean;
+    readonly stuckAfterMs?: number;
+    readonly maxStuckRuns?: number;
+    /** Called when more runs are stuck than `maxStuckRuns`: the process should restart, the only way to end them. */
+    readonly onTooManyStuckRuns?: () => void;
 }
+
+/** Why a run past its deadline was aborted. Named like the platform's timeouts, so errors are classified the same way. */
+class RunTimeoutError extends Error {
+    override readonly name = "TimeoutError";
+
+    constructor(timeoutMs: number) {
+        super(`The run took longer than ${timeoutMs / 1000} seconds`);
+    }
+}
+
+/** An aborted run did not return in time, so nothing waits for it any longer. */
+class StuckRunError extends Error {}
 
 /** Keeps the leases of a run alive while it is in progress (`rows` may grow) and aborts the run if one is lost. */
 function startHeartbeat(rows: readonly ClaimedRow[], abort: AbortController): () => void {
@@ -68,6 +87,12 @@ function maxAttemptsOf(handler: PipelineHandler, name: QueueName): number {
     return name.scan ? Number.POSITIVE_INFINITY : (handler.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
 }
 
+/** What a run reports once its deadline aborted it says little about its subject: only the deadline counts. */
+function afterDeadline(result: ReconcileResult, signal: AbortSignal): ReconcileResult {
+    const timedOut = signal.reason instanceof RunTimeoutError && result.kind !== "done";
+    return timedOut ? { kind: "retry", error: signal.reason.message } : result;
+}
+
 const queueKey = (queue: QueueInLibrary) => `${queue.pipeline}\u0000${queue.libraryId}`;
 
 export class QueueWorker {
@@ -75,6 +100,9 @@ export class QueueWorker {
     private readonly pollIntervalMs: number;
     private readonly patrolIntervalMs: number;
     private readonly listen: boolean;
+    private readonly stuckAfterMs: number;
+    private readonly maxStuckRuns: number;
+    private readonly onTooManyStuckRuns?: () => void;
     private readonly active = new Set<Promise<void>>();
     private readonly runs = new Set<AbortController>();
     /**
@@ -82,6 +110,7 @@ export class QueueWorker {
      * would only release them again. Purely a saving: another worker, or this one after a restart, finds out with one run.
      */
     private readonly paused = new Map<string, QueueInLibrary & { until: number }>();
+    private stuckRuns = 0;
     private running = false;
     private aborting = false;
     private pumping = false;
@@ -97,6 +126,9 @@ export class QueueWorker {
         this.pollIntervalMs = options.pollIntervalMs ?? 5_000;
         this.patrolIntervalMs = options.patrolIntervalMs ?? PATROL_INTERVAL_MS;
         this.listen = options.listen ?? true;
+        this.stuckAfterMs = options.stuckAfterMs ?? STUCK_AFTER_MS;
+        this.maxStuckRuns = options.maxStuckRuns ?? MAX_STUCK_RUNS;
+        this.onTooManyStuckRuns = options.onTooManyStuckRuns;
     }
 
     start(): void {
@@ -195,18 +227,55 @@ export class QueueWorker {
         return [...this.paused.values()];
     }
 
-    /** Tracks a run's abort signal and keeps its leases alive (`rows` may grow) until `stop` is called. */
-    private watch(rows: readonly ClaimedRow[]): { abort: AbortController; stop: () => void } {
+    /** Tracks a run's abort signal, keeps its leases alive (`rows` may grow) and enforces its deadline until `stop` is called. */
+    private watch(rows: readonly ClaimedRow[], timeoutMs: number): { abort: AbortController; stop: () => void } {
         const abort = new AbortController();
         const stopHeartbeat = startHeartbeat(rows, abort);
+        const deadline = setTimeout(() => abort.abort(new RunTimeoutError(timeoutMs)), timeoutMs);
         this.runs.add(abort);
         return {
             abort,
             stop: () => {
                 stopHeartbeat();
+                clearTimeout(deadline);
                 this.runs.delete(abort);
             },
         };
+    }
+
+    /**
+     * Waits for a run, but not for long once its signal is aborted. A run that ignores the signal throws StuckRunError
+     * here: it can't be killed, but it stops holding a slot. Its lease then expires and the row counts as interrupted,
+     * and the fence keeps out whatever the run still tries to write.
+     */
+    private async supervise<T>(run: Promise<T>, signal: AbortSignal, label: string): Promise<T> {
+        const { promise: stuck, reject } = Promise.withResolvers<never>();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const startClock = () => {
+            timer = setTimeout(() => reject(new StuckRunError()), this.stuckAfterMs);
+        };
+        if (signal.aborted) startClock();
+        else signal.addEventListener("abort", startClock, { once: true });
+        try {
+            return await Promise.race([run, stuck]);
+        } catch (error) {
+            if (error instanceof StuckRunError) this.countStuck(run, label);
+            throw error;
+        } finally {
+            clearTimeout(timer);
+            signal.removeEventListener("abort", startClock);
+        }
+    }
+
+    private countStuck(run: Promise<unknown>, label: string): void {
+        this.stuckRuns += 1;
+        console.error(`[Queue] ${label} ignored its abort signal; freeing its slot (${this.stuckRuns} stuck).`);
+        void run
+            .catch(() => undefined)
+            .finally(() => {
+                this.stuckRuns -= 1;
+            });
+        if (this.stuckRuns > this.maxStuckRuns) this.onTooManyStuckRuns?.();
     }
 
     private async run(row: ClaimedRow): Promise<void> {
@@ -236,17 +305,19 @@ export class QueueWorker {
     }
 
     private async runSubject(handler: SubjectPipelineHandler, row: ClaimedRow, name: QueueName): Promise<void> {
-        const { abort, stop } = this.watch([row]);
+        const { abort, stop } = this.watch([row], handler.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS);
         let result: ReconcileResult;
         try {
-            result = await handler.reconcile({
+            const run = handler.reconcile({
                 subjectId: row.subjectId,
                 libraryId: row.libraryId,
                 space: name.space,
                 signal: abort.signal,
                 fence: (tx) => fence(tx, row),
             });
+            result = await this.supervise(run, abort.signal, `${row.pipeline}/${row.subjectId}`);
         } catch (error) {
+            if (error instanceof StuckRunError) return;
             if (error instanceof LeaseLostError || abort.signal.reason instanceof LeaseLostError) {
                 console.warn(`[Queue] Dropped the result of ${row.pipeline}/${row.subjectId}; its lease was lost.`);
                 return;
@@ -255,13 +326,13 @@ export class QueueWorker {
         } finally {
             stop();
         }
-        await this.settle(handler, row, name, result);
+        await this.settle(handler, row, name, afterDeadline(result, abort.signal));
     }
 
     /** One step of a library scan: queue the subjects of one page that need work, then continue or finish. */
     private async runScan(handler: PipelineHandler, row: ClaimedRow, name: QueueName): Promise<void> {
-        const { abort, stop } = this.watch([row]);
-        try {
+        const { abort, stop } = this.watch([row], DEFAULT_RUN_TIMEOUT_MS);
+        const step = async () => {
             const page = await handler.scanPage(row.libraryId, row.cursor, SCAN_PAGE_SIZE, name.space);
             const pipeline = queueName(name.pipeline, name.space);
             await db.transaction(async (tx) => {
@@ -274,7 +345,11 @@ export class QueueWorker {
                 if (page.nextCursor) await advance(row, page.nextCursor, tx);
                 else await finish(row, tx);
             });
+        };
+        try {
+            await this.supervise(step(), abort.signal, `${row.pipeline}/${row.subjectId}`);
         } catch (error) {
+            if (error instanceof StuckRunError) return;
             if (error instanceof LeaseLostError || abort.signal.reason instanceof LeaseLostError) {
                 console.warn(`[Queue] Dropped a step of ${row.pipeline}/${row.subjectId}; its lease was lost.`);
                 return;
@@ -289,16 +364,16 @@ export class QueueWorker {
     /** Runs a claimed row together with more due rows of its queue, each settled with its own result. */
     private async runBatch(handler: BatchPipelineHandler, head: ClaimedRow, name: QueueName): Promise<void> {
         const rows = [head];
-        const { abort, stop } = this.watch(rows);
+        const { abort, stop } = this.watch(rows, handler.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS);
         let results: Map<string, ReconcileResult>;
         try {
-            results = await handler.reconcileBatch({
+            const run = handler.reconcileBatch({
                 libraryId: head.libraryId,
                 space: name.space,
                 head: head.subjectId,
                 signal: abort.signal,
                 claimMore: async (limit) => {
-                    if (head.interrupted) return [];
+                    if (head.interrupted || abort.signal.aborted) return [];
                     const more = await claimBatch(head.pipeline, limit);
                     rows.push(...more);
                     return more.map((row) => row.subjectId);
@@ -309,7 +384,9 @@ export class QueueWorker {
                     return fence(tx, row);
                 },
             });
+            results = await this.supervise(run, abort.signal, `${head.pipeline} batch of ${head.subjectId}`);
         } catch (error) {
+            if (error instanceof StuckRunError) return;
             if (error instanceof LeaseLostError || abort.signal.reason instanceof LeaseLostError) {
                 console.warn(`[Queue] Dropped the result of a ${head.pipeline} batch of ${rows.length}; a lease was lost.`);
                 return;
@@ -321,7 +398,10 @@ export class QueueWorker {
         }
         // Rows that fail together come back together, so the retry is one request again.
         const retryDelay = retryDelaySeconds(Math.max(...rows.map((row) => row.attempts)));
-        for (const row of rows) await this.settle(handler, row, name, results.get(row.subjectId) ?? { kind: "done" }, retryDelay);
+        for (const row of rows) {
+            const result = afterDeadline(results.get(row.subjectId) ?? { kind: "done" }, abort.signal);
+            await this.settle(handler, row, name, result, retryDelay);
+        }
     }
 
     /** Applies a run's result to its queue row. */

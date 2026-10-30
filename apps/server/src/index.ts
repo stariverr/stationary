@@ -17,16 +17,18 @@ import { startFilePurgeSchedule, stopFilePurgeSchedule } from "@/features/trash/
 import { pipelineHandlers } from "@/infra/queue/handlers";
 import { QueueWorker } from "@/infra/queue/worker";
 // 1. Start the reconcile queue worker, which runs every background pipeline
-const queueWorker = new QueueWorker(pipelineHandlers);
+const queueWorker = new QueueWorker(pipelineHandlers, {
+    onTooManyStuckRuns: () => shutdown("too many stuck runs", 1),
+});
 queueWorker.start();
 startFilePurgeSchedule();
 
 // 2. Graceful Shutdown Handlers
 let isShuttingDown = false;
-const shutdown = async (signal: string) => {
+const shutdown = async (reason: string, exitCode = 0) => {
     if (isShuttingDown) return;
     isShuttingDown = true;
-    console.log(`[Server] Received ${signal}, starting graceful shutdown...`);
+    console.log(`[Server] Shutting down gracefully: ${reason}`);
 
     try {
         stopFilePurgeSchedule();
@@ -35,7 +37,7 @@ const shutdown = async (signal: string) => {
     } catch (err) {
         console.error("[Server] Error during graceful shutdown:", err);
     } finally {
-        process.exit(0);
+        process.exit(exitCode);
     }
 };
 

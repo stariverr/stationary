@@ -29,7 +29,7 @@ import type {
     ReconcileResult,
     SubjectPipelineHandler,
 } from "@/infra/queue/types";
-import { QueueWorker } from "@/infra/queue/worker";
+import { QueueWorker, type QueueWorkerOptions } from "@/infra/queue/worker";
 
 const databaseTest = process.env.RUN_QUEUE_DB_TESTS === "1" ? test : test.skip;
 
@@ -300,6 +300,18 @@ describe("job_queue store", () => {
     });
 });
 
+describe("database connections", () => {
+    databaseTest("every connection carries the limits that keep a hung statement from holding it forever", async () => {
+        const setting = async (name: string) => {
+            const result = await db.execute<{ value: string }>(sql`SELECT current_setting(${name}) AS value`);
+            return result.rows[0]?.value;
+        };
+        expect(await setting("statement_timeout")).toBe("2min");
+        expect(await setting("lock_timeout")).toBe("30s");
+        expect(await setting("idle_in_transaction_session_timeout")).toBe("1min");
+    });
+});
+
 describe("QueueWorker", () => {
     const idleHandler: SubjectPipelineHandler = {
         reconcile: async () => ({ kind: "done" }),
@@ -311,8 +323,8 @@ describe("QueueWorker", () => {
     const everyPipeline = (handler: PipelineHandler) =>
         Object.fromEntries(PIPELINE_NAMES.map((pipeline) => [pipeline, handler])) as PipelineHandlers;
     const workers: QueueWorker[] = [];
-    function worker(handlers: PipelineHandlers, concurrency: number) {
-        const started = new QueueWorker(handlers, { concurrency, pollIntervalMs: 50, patrolIntervalMs: 0, listen: false });
+    function worker(handlers: PipelineHandlers, concurrency: number, options: QueueWorkerOptions = {}) {
+        const started = new QueueWorker(handlers, { concurrency, pollIntervalMs: 50, patrolIntervalMs: 0, listen: false, ...options });
         workers.push(started);
         return started;
     }
@@ -529,8 +541,8 @@ describe("QueueWorker", () => {
     });
 
     /** Handles every queue with `run`, as a batch pipeline. */
-    const batchHandlers = (run: BatchPipelineHandler["reconcileBatch"]) =>
-        everyPipeline({ ...idleHandler, reconcile: undefined, reconcileBatch: run } as unknown as BatchPipelineHandler);
+    const batchHandlers = (run: BatchPipelineHandler["reconcileBatch"], options: Partial<BatchPipelineHandler> = {}) =>
+        everyPipeline({ ...idleHandler, ...options, reconcile: undefined, reconcileBatch: run } as unknown as BatchPipelineHandler);
 
     databaseTest("a row whose run was interrupted runs alone", async () => {
         const interruptedId = subject();
@@ -607,6 +619,158 @@ describe("QueueWorker", () => {
 
         expect(await rowOf("avatar", id)).toMatchObject({ attempts: 0, lease_token: null, dirty: false });
         expect(failures).toEqual([]);
+    });
+
+    databaseTest("a run past its deadline is aborted and its row retried, whatever the run reports", async () => {
+        const id = subject();
+        const failures: FailureRecord[] = [];
+        const running = worker(
+            everyPipeline({
+                ...idleHandler,
+                timeoutMs: 50,
+                // A kill by the abort can look like a bad input: a renderer that exits with an error, say.
+                reconcile: (ctx) =>
+                    new Promise((resolve) =>
+                        ctx.signal.addEventListener("abort", () => resolve({ kind: "rejected", error: "cannot decode" })),
+                    ),
+                recordFailure: async (_tx, failure) => {
+                    failures.push(failure);
+                },
+            }),
+            1,
+        );
+
+        await queue("avatar", [id]);
+        running.start();
+        await until(async () => (await dueInSeconds()).every((seconds) => seconds > 1));
+
+        expect(await rowOf("avatar", id)).toMatchObject({ attempts: 1, lease_token: null });
+        expect(failures).toEqual([]);
+    });
+
+    databaseTest("a batch past its deadline retries its rows and claims no more", async () => {
+        const claimed: string[][] = [];
+        const failures: FailureRecord[] = [];
+        const running = worker(
+            batchHandlers(
+                async (ctx) => {
+                    await new Promise((resolve) => ctx.signal.addEventListener("abort", resolve));
+                    claimed.push(await ctx.claimMore(10));
+                    return new Map([[ctx.head, { kind: "rejected", error: "cannot decode" }]]);
+                },
+                {
+                    timeoutMs: 50,
+                    recordFailure: async (_tx, failure) => {
+                        failures.push(failure);
+                    },
+                },
+            ),
+            1,
+        );
+
+        await queue("avatar", [subject(), subject()]);
+        running.start();
+        await until(async () => (await dueInSeconds()).every((seconds) => seconds > 1));
+
+        expect(claimed).toEqual([[], []]);
+        expect(failures).toEqual([]);
+    });
+
+    databaseTest("a scan that ignores its abort signal does not hold up a shutdown", async () => {
+        let scanning = false;
+        const running = worker(
+            everyPipeline({
+                ...idleHandler,
+                scanPage() {
+                    scanning = true;
+                    return new Promise(() => undefined);
+                },
+            }),
+            1,
+            { stuckAfterMs: 20 },
+        );
+
+        await queue(scanQueueName("avatar"), [libraryId]);
+        running.start();
+        await until(() => scanning);
+
+        const start = performance.now();
+        await running.drain(0, 5_000);
+        expect(performance.now() - start).toBeLessThan(1_000);
+    });
+
+    databaseTest("a run that ignores its abort signal gives up its slot and its lease", async () => {
+        const stuckId = subject();
+        const nextId = subject();
+        const ran: string[] = [];
+        const running = worker(
+            everyPipeline({
+                ...idleHandler,
+                timeoutMs: 50,
+                async reconcile(ctx) {
+                    ran.push(ctx.subjectId);
+                    if (ctx.subjectId === stuckId) await new Promise(() => undefined);
+                    return { kind: "done" };
+                },
+            }),
+            1,
+            { stuckAfterMs: 50 },
+        );
+
+        await queue("avatar", [stuckId]);
+        running.start();
+        await until(() => ran.length === 1);
+        await queue("avatar", [nextId]);
+
+        // The only slot was taken, so this run proves the stuck one no longer holds it.
+        await until(async () => (await rowOf("avatar", nextId)) === undefined);
+        expect(ran).toEqual([stuckId, nextId]);
+
+        // Nothing renews the lease any more, so the row comes back as interrupted once it expires.
+        const row = await rowOf("avatar", stuckId);
+        expect(row).toMatchObject({ attempts: 1 });
+        expect(row?.lease_token).not.toBeNull();
+        await running.drain();
+        await db
+            .update(JobQueue)
+            .set({ lease_expires_at: sql`now() - interval '1 second'` })
+            .where(eq(JobQueue.subject_id, stuckId));
+        const [recovered] = await claimOurs(1);
+        expect(recovered).toMatchObject({ subjectId: stuckId, interrupted: true, attempts: 2 });
+    });
+
+    databaseTest("asks for a restart only while too many runs are stuck", async () => {
+        let restarts = 0;
+        const hung: (() => void)[] = [];
+        const running = worker(
+            everyPipeline({
+                ...idleHandler,
+                timeoutMs: 20,
+                async reconcile() {
+                    await new Promise<void>((resolve) => hung.push(resolve));
+                    return { kind: "done" };
+                },
+            }),
+            2,
+            { stuckAfterMs: 20, maxStuckRuns: 1, onTooManyStuckRuns: () => (restarts += 1) },
+        );
+
+        await queue("avatar", [subject()]);
+        running.start();
+        await until(() => hung.length === 1);
+        await Bun.sleep(150);
+        expect(restarts).toBe(0);
+
+        // It came back after all, so the next stuck run is the only one.
+        hung[0]?.();
+        await queue("avatar", [subject()]);
+        await until(() => hung.length === 2);
+        await Bun.sleep(150);
+        expect(restarts).toBe(0);
+
+        await queue("avatar", [subject()]);
+        await until(() => restarts === 1);
+        for (const release of hung) release();
     });
 
     databaseTest("a run that finishes within the grace period settles normally", async () => {

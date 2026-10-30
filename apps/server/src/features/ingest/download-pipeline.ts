@@ -147,6 +147,9 @@ const failedMedia = (libraryIds: readonly string[]) =>
  * file, the media is complete and its content is reported as changed (which queues the cover).
  */
 export const downloadPipeline: SubjectPipelineHandler = {
+    // A large source takes a long time on a slow link; one that stalls fails the idle read timeout long before this.
+    timeoutMs: 2 * 60 * 60_000,
+
     async reconcile(ctx) {
         const [media] = await db.select().from(Media).where(activeMedia(ctx.subjectId)).limit(1);
         if (!media) return { kind: "done" };
