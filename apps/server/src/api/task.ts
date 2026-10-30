@@ -5,10 +5,9 @@ import { env } from "@/global/env";
 import { IngestPipeline } from "@/features/ingest/pipeline";
 import { Code } from "@/lib/code";
 import { error, success } from "@/lib/response";
-import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
+import { AuthEnv, ownedLibrary, requireAuth } from "@/lib/auth/middleware";
 import { db } from "@/global/db";
 import {
-    Library,
     File as DbFile,
     DeleteStatus,
     DraftFile,
@@ -45,7 +44,6 @@ const taskApp = new Hono<AuthEnv>();
 // Endpoint to create a task
 taskApp.post("/create", requireAuth, validate("json", CreateTaskSchema), async (c) => {
     const user = c.get("user");
-    const apiToken = c.get("apiToken");
 
     if (!user) {
         return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
@@ -53,29 +51,9 @@ taskApp.post("/create", requireAuth, validate("json", CreateTaskSchema), async (
 
     const payload = c.req.valid("json");
 
-    // 1. Verify library exists
-    const libs = await db.select().from(Library).where(eq(Library.id, payload.library_id)).limit(1);
-    const library = libs[0];
+    const library = await ownedLibrary(c, user.id, payload.library_id);
     if (!library) {
-        return c.json(error(Code.NOT_FOUND, "Target library not found"), 404);
-    }
-
-    // 2. Perform library scoping and ownership validation
-    if (apiToken) {
-        // If API token is scoped to a specific library, check that target matches scope
-        if (apiToken.library_id && apiToken.library_id !== payload.library_id) {
-            return c.json(error(Code.UNAUTHORIZED, "API token is not scoped for this library"), 403);
-        }
-
-        // Ensure library belongs to the token owner
-        if (library.owner_id !== user.id) {
-            return c.json(error(Code.UNAUTHORIZED, "You do not have access to this library"), 403);
-        }
-    } else {
-        // Logged-in session user, check ownership
-        if (library.owner_id !== user.id) {
-            return c.json(error(Code.UNAUTHORIZED, "You do not have access to this library"), 403);
-        }
+        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
     }
 
     const results = [];
@@ -239,10 +217,7 @@ taskApp.post("/retry-sync", requireAuth, validate("json", RetrySyncSchema), asyn
         return c.json(success(Code.SUCCESS, result));
     } catch (cause) {
         if (cause instanceof RetrySyncError) {
-            if (cause.kind === "FORBIDDEN") {
-                return c.json(error(Code.FORBIDDEN, cause.message), 403);
-            }
-            return c.json(error(Code.INVALID_PARAMETER, cause.message), 400);
+            return c.json(error(Code.NOT_FOUND, cause.message), 404);
         }
 
         const message = cause instanceof Error ? cause.message : String(cause);
@@ -388,8 +363,8 @@ taskApp.post("/queue-ai", requireAuth, validate("json", QueueAiSchema), async (c
         return c.json(success(Code.SUCCESS, result));
     } catch (cause) {
         if (cause instanceof QueueAiError) {
-            if (cause.kind === "FORBIDDEN") {
-                return c.json(error(Code.UNAUTHORIZED, cause.message), 403);
+            if (cause.kind === "NOT_FOUND") {
+                return c.json(error(Code.NOT_FOUND, cause.message), 404);
             }
             return c.json(error(Code.INVALID_PARAMETER, cause.message), 400);
         }

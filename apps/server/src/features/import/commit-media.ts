@@ -4,11 +4,12 @@ import { db } from "@/global/db";
 import { DraftFileUnavailableError } from "./draft-file";
 import { validateDraftMediaGroups, validateDraftTrackFileTypes } from "@/lib/validation/media-composition";
 import { createMediaFromDraft } from "@/features/media/create-from-draft";
-import { ImportAuth, assertLibraryAccess } from "./access";
+import type { LibraryAuth } from "@/features/library/access";
+import { assertLibraryAccess } from "./access";
 import { ImportError } from "./errors";
 import type { CommitMediaInput } from "./schema";
 
-export async function commitMedia(input: CommitMediaInput, auth: ImportAuth) {
+export async function commitMedia(input: CommitMediaInput, auth: LibraryAuth) {
     await assertLibraryAccess(input.library_id, auth);
 
     const compositionError = validateDraftMediaGroups(input.media_drafts);

@@ -2,7 +2,8 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { MediaTag, PostTag, Tag, TagSource, TagStatus } from "@/db/schema";
 import { db } from "@/global/db";
 import { normalizeTagName } from "@/lib/utils/tag_sanitizer";
-import { assertTagLibraryAccess, type TagAuth } from "./access";
+import type { LibraryAuth } from "@/features/library/access";
+import { assertTagAccess, assertTagLibraryAccess } from "./access";
 import { TagError } from "./errors";
 import type { TagCreateInput, TagListQuery, TagMergeInput, TagUpdateInput } from "./schema";
 
@@ -26,7 +27,7 @@ async function getAliases(tagId: string) {
     return aliases.map((alias) => alias.name);
 }
 
-export async function listTags(input: TagListQuery, auth: TagAuth) {
+export async function listTags(input: TagListQuery, auth: LibraryAuth) {
     await assertTagLibraryAccess(input.library_id, auth);
 
     const conditions = [eq(Tag.library_id, input.library_id)];
@@ -77,7 +78,7 @@ export async function listTags(input: TagListQuery, auth: TagAuth) {
     return Array.from(tagMap.values()).sort((a, b) => a.name.localeCompare(b.name, "zh"));
 }
 
-export async function createTag(input: TagCreateInput, auth: TagAuth) {
+export async function createTag(input: TagCreateInput, auth: LibraryAuth) {
     await assertTagLibraryAccess(input.library_id, auth);
     const normalized = await assertTagNameAvailable(input.library_id, input.name);
 
@@ -100,13 +101,8 @@ export async function createTag(input: TagCreateInput, auth: TagAuth) {
     };
 }
 
-export async function updateTag(input: TagUpdateInput, auth: TagAuth) {
-    const [targetTag] = await db.select().from(Tag).where(eq(Tag.id, input.id)).limit(1);
-    if (!targetTag) {
-        throw new TagError("NOT_FOUND", "Tag not found");
-    }
-
-    await assertTagLibraryAccess(targetTag.library_id, auth);
+export async function updateTag(input: TagUpdateInput, auth: LibraryAuth) {
+    const targetTag = await assertTagAccess(input.id, auth);
 
     let normalizedName: string | undefined;
     if (input.name !== undefined) {
@@ -144,13 +140,8 @@ export async function updateTag(input: TagUpdateInput, auth: TagAuth) {
     };
 }
 
-export async function deleteTag(tagId: string, auth: TagAuth) {
-    const [tag] = await db.select({ library_id: Tag.library_id }).from(Tag).where(eq(Tag.id, tagId)).limit(1);
-    if (!tag) {
-        throw new TagError("NOT_FOUND", "Tag not found");
-    }
-
-    await assertTagLibraryAccess(tag.library_id, auth);
+export async function deleteTag(tagId: string, auth: LibraryAuth) {
+    await assertTagAccess(tagId, auth);
 
     return db.transaction(async (tx) => {
         const deleted = await tx.delete(Tag).where(eq(Tag.id, tagId)).returning({ id: Tag.id });
@@ -169,7 +160,7 @@ export async function deleteTag(tagId: string, auth: TagAuth) {
     });
 }
 
-export async function mergeTags(input: TagMergeInput, auth: TagAuth) {
+export async function mergeTags(input: TagMergeInput, auth: LibraryAuth) {
     if (input.source_tag_id === input.target_tag_id) {
         throw new TagError("INVALID_PARAMETER", "Source and target tag cannot be the same");
     }
@@ -180,14 +171,11 @@ export async function mergeTags(input: TagMergeInput, auth: TagAuth) {
     await db.transaction(async (tx) => {
         const tagIdsToLock = [input.source_tag_id, input.target_tag_id].sort();
         const lockedTags = await tx.select().from(Tag).where(inArray(Tag.id, tagIdsToLock)).for("update");
-        const sourceTag = lockedTags.find((tag) => tag.id === input.source_tag_id);
-        const targetTag = lockedTags.find((tag) => tag.id === input.target_tag_id);
+        const sourceTag = lockedTags.find((tag) => tag.id === input.source_tag_id && tag.library_id === input.library_id);
+        const targetTag = lockedTags.find((tag) => tag.id === input.target_tag_id && tag.library_id === input.library_id);
 
         if (!sourceTag || !targetTag) {
             throw new TagError("NOT_FOUND", "Source or target tag not found");
-        }
-        if (sourceTag.library_id !== input.library_id || targetTag.library_id !== input.library_id) {
-            throw new TagError("INVALID_PARAMETER", "Tags do not belong to the specified library");
         }
         if (sourceTag.canonical_tag_id !== null) {
             throw new TagError("INVALID_PARAMETER", "Source tag is already an alias tag");

@@ -1,13 +1,10 @@
 import { Hono } from "hono";
 import * as v from "valibot";
-import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
+import { AuthEnv, ownedLibrary, requireAuth } from "@/lib/auth/middleware";
 import { validate } from "@/lib/validation/validator";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
 import { TrashService } from "@/features/trash/trash-service";
-import { db } from "@/global/db";
-import { Library, DeleteStatus } from "@/db/schema";
-import { and, eq } from "drizzle-orm";
 
 const router = new Hono<AuthEnv>();
 
@@ -62,20 +59,9 @@ router.get("/list", requireAuth, validate("query", TrashListQuerySchema), async 
 
     const { library_id, type, page, count, keyword, sort_by, sort_order } = c.req.valid("query");
 
-    // Verify library access
-    const [library] = await db
-        .select({ id: Library.id, owner_id: Library.owner_id })
-        .from(Library)
-        .where(and(eq(Library.id, library_id), eq(Library.delete_status, DeleteStatus.ACTIVE)))
-        .limit(1);
-
-    if (!library || library.owner_id !== user.id) {
-        return c.json(error(Code.FORBIDDEN, "Library not found or access denied"), 403);
-    }
-
-    const scopedLibraryId = c.get("apiToken")?.library_id;
-    if (scopedLibraryId && scopedLibraryId !== library_id) {
-        return c.json(error(Code.FORBIDDEN, "API token scope restricted to another library"), 403);
+    const library = await ownedLibrary(c, user.id, library_id);
+    if (!library) {
+        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
     }
 
     const result = await TrashService.listTrashItems({
@@ -109,23 +95,18 @@ router.post("/restore", requireAuth, validate("json", TrashBatchActionSchema), a
 
     const { library_id, post_ids, media_ids } = c.req.valid("json");
 
-    const scopedLibraryId = c.get("apiToken")?.library_id;
-    if (scopedLibraryId && scopedLibraryId !== library_id) {
-        return c.json(error(Code.FORBIDDEN, "API token scope restricted to another library"), 403);
+    const library = await ownedLibrary(c, user.id, library_id);
+    if (!library) {
+        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
     }
 
-    try {
-        const result = await TrashService.batchRestore({
-            libraryId: library_id,
-            ownerId: user.id,
-            postIds: post_ids,
-            mediaIds: media_ids,
-        });
+    const result = await TrashService.batchRestore({
+        library,
+        postIds: post_ids,
+        mediaIds: media_ids,
+    });
 
-        return c.json(success(Code.SUCCESS, result));
-    } catch (e: any) {
-        return c.json(error(Code.FORBIDDEN, e.message || "Failed to restore items"), 403);
-    }
+    return c.json(success(Code.SUCCESS, result));
 });
 
 /**
@@ -139,23 +120,18 @@ router.post("/delete", requireAuth, validate("json", TrashBatchActionSchema), as
 
     const { library_id, post_ids, media_ids } = c.req.valid("json");
 
-    const scopedLibraryId = c.get("apiToken")?.library_id;
-    if (scopedLibraryId && scopedLibraryId !== library_id) {
-        return c.json(error(Code.FORBIDDEN, "API token scope restricted to another library"), 403);
+    const library = await ownedLibrary(c, user.id, library_id);
+    if (!library) {
+        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
     }
 
-    try {
-        const result = await TrashService.batchDelete({
-            libraryId: library_id,
-            ownerId: user.id,
-            postIds: post_ids,
-            mediaIds: media_ids,
-        });
+    const result = await TrashService.batchDelete({
+        libraryId: library_id,
+        postIds: post_ids,
+        mediaIds: media_ids,
+    });
 
-        return c.json(success(Code.SUCCESS, result));
-    } catch (e: any) {
-        return c.json(error(Code.FORBIDDEN, e.message || "Failed to delete items"), 403);
-    }
+    return c.json(success(Code.SUCCESS, result));
 });
 
 /**
@@ -169,21 +145,14 @@ router.post("/empty", requireAuth, validate("json", TrashEmptySchema), async (c)
 
     const { library_id } = c.req.valid("json");
 
-    const scopedLibraryId = c.get("apiToken")?.library_id;
-    if (scopedLibraryId && scopedLibraryId !== library_id) {
-        return c.json(error(Code.FORBIDDEN, "API token scope restricted to another library"), 403);
+    const library = await ownedLibrary(c, user.id, library_id);
+    if (!library) {
+        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
     }
 
-    try {
-        const result = await TrashService.emptyTrash({
-            libraryId: library_id,
-            ownerId: user.id,
-        });
+    const result = await TrashService.emptyTrash(library_id);
 
-        return c.json(success(Code.SUCCESS, result));
-    } catch (e: any) {
-        return c.json(error(Code.FORBIDDEN, e.message || "Failed to empty trash"), 403);
-    }
+    return c.json(success(Code.SUCCESS, result));
 });
 
 export default router;

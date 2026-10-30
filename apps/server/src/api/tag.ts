@@ -26,9 +26,6 @@ function getTagAuth(c: Context<AuthEnv>) {
 
 function handleTagError(c: Context<AuthEnv>, cause: unknown): Response {
     if (cause instanceof TagError) {
-        if (cause.kind === "FORBIDDEN") {
-            return c.json(error(Code.FORBIDDEN, cause.message), 403);
-        }
         if (cause.kind === "NOT_FOUND") {
             return c.json(error(Code.NOT_FOUND, cause.message), 404);
         }

@@ -204,7 +204,7 @@ const MediaListRequestBodySchema = v.object({
     keyword: v.optional(v.string()),
     source: v.optional(v.enum(PostSource)),
     display_mode: v.optional(v.picklist(["flat", "stacked"]), "flat"),
-    library_id: v.optional(v.pipe(v.string(), v.uuid())),
+    library_id: v.pipe(v.string(), v.uuid()),
 });
 
 const MediaUpdateInfoSchema = v.object({

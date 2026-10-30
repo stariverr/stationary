@@ -6,10 +6,10 @@ import {
     AsyncTaskUnitKind,
     DeleteStatus,
     EntityType,
-    Library,
     Media,
     ProcessingStatus,
 } from "@/db/schema";
+import { canReachItems, type LibraryAuth } from "@/features/library/access";
 import { db } from "@/global/db";
 import { JobManager } from "@/infra/jobs/manager";
 import { jobRunner } from "@/infra/jobs/runner";
@@ -35,12 +35,11 @@ export async function queueLibraryAiEnrichment(libraryId: string, ownerId: strin
     return task.id;
 }
 
-export type QueueAiAuth = {
-    ownerId: string;
-    scopedLibraryId?: string | null;
-};
+export async function queueAiEnrichment(input: QueueAiInput, auth: LibraryAuth) {
+    if (!(await canReachItems(input.post_ids ?? [], input.media_ids ?? [], auth))) {
+        throw new QueueAiError("NOT_FOUND", "One or more items were not found");
+    }
 
-export async function queueAiEnrichment(input: QueueAiInput, auth: QueueAiAuth) {
     const targetMediaIds = new Set<string>();
 
     if (input.post_ids?.length) {
@@ -73,19 +72,6 @@ export async function queueAiEnrichment(input: QueueAiInput, auth: QueueAiAuth) 
 
     if (mediaList.length !== mediaIds.length) {
         throw new QueueAiError("INVALID_PARAMETER", "One or more media items were not found or not active");
-    }
-
-    const libraries = await db
-        .select({ id: Library.id, owner_id: Library.owner_id })
-        .from(Library)
-        .where(and(inArray(Library.id, libraryIds), eq(Library.delete_status, DeleteStatus.ACTIVE)));
-
-    if (
-        libraries.length !== libraryIds.length ||
-        libraries.some((library) => library.owner_id !== auth.ownerId) ||
-        (auth.scopedLibraryId !== undefined && libraryIds.some((libraryId) => libraryId !== auth.scopedLibraryId))
-    ) {
-        throw new QueueAiError("FORBIDDEN", "You do not have access to some of the libraries");
     }
 
     const targetByLibrary = new Map<string, DescribeTarget | null>();

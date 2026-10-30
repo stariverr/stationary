@@ -338,7 +338,7 @@ export const useMediaStore = defineStore("media", () => {
         score?: number | null;
     }
 
-    const isListEnabled = computed(() => route.path.startsWith("/media") || route.path === "/");
+    const isListEnabled = computed(() => !!libraryStore.activeLibraryId && (route.path.startsWith("/media") || route.path === "/"));
 
     const {
         data: mediaData,
@@ -378,7 +378,7 @@ export const useMediaStore = defineStore("media", () => {
                         count: count.value,
                         keyword: searchKeyword.value,
                         source: source.value,
-                        library_id: libraryStore.activeLibraryId || undefined,
+                        library_id: libraryStore.activeLibraryId,
                     },
                 });
 

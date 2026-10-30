@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import * as v from "valibot";
 import { and, eq, sql } from "drizzle-orm";
-import { AiModel, AiProvider, DeleteStatus, Library } from "@/db/schema";
+import { AiModel, AiProvider } from "@/db/schema";
 import { getProviderCatalog, matchCatalogModels } from "@/features/ai/catalog";
 import { retryFailedEmbeddings } from "@/features/ai/embedding-queue";
 import { queueLibraryAiEnrichment } from "@/features/ai/queue-enrichment";
@@ -31,7 +31,7 @@ import { secretBox } from "@/global/secrets";
 import { Code } from "@/lib/code";
 import { error, success } from "@/lib/response";
 import { validate } from "@/lib/validation/validator";
-import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
+import { AuthEnv, ownedLibrary, requireAuth } from "@/lib/auth/middleware";
 
 /**
  * AI configuration is split by ownership (docs/ownership_and_teams.md):
@@ -57,19 +57,8 @@ async function loadOwnedLibrary(c: AiContext, libraryId: string) {
     const user = c.get("user");
     if (!user) return { denied: c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401) };
 
-    const rows = await db
-        .select()
-        .from(Library)
-        .where(and(eq(Library.id, libraryId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
-        .limit(1);
-    const library = rows[0];
+    const library = await ownedLibrary(c, user.id, libraryId);
     if (!library) return { denied: c.json(error(Code.NOT_FOUND, "Library not found"), 404) };
-    if (library.owner_id !== user.id) return { denied: c.json(error(Code.FORBIDDEN, "You do not have access to this library"), 403) };
-
-    const scopedLibraryId = c.get("apiToken")?.library_id;
-    if (scopedLibraryId && scopedLibraryId !== libraryId) {
-        return { denied: c.json(error(Code.FORBIDDEN, "API token scope restricted to another library"), 403) };
-    }
     return { library };
 }
 

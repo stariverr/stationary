@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { db } from "@/global/db";
 import * as v from "valibot";
 import { validate } from "@/lib/validation/validator";
@@ -14,7 +14,7 @@ import {
 import { Quality } from "@/lib/types";
 
 import { and, eq, ilike, SQL, count, sql, desc } from "drizzle-orm";
-import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
+import { AuthEnv, ownedLibrary, requireAuth } from "@/lib/auth/middleware";
 import { JobManager } from "@/infra/jobs/manager";
 import { LibraryMoveItemsBodySchema } from "@/features/library/schema";
 import { LibraryDeleteError, LibraryMoveError } from "@/features/library/errors";
@@ -81,18 +81,6 @@ export const LibraryCoverConfigBodySchema = v.object({
         }),
     ),
 });
-
-/** Resolves a library the caller owns and its API token may reach; a miss stays a 404 so it never reveals that the library exists. */
-async function ownedLibrary(c: Context<AuthEnv>, userId: string, libraryId: string) {
-    const scopedLibraryId = c.get("apiToken")?.library_id;
-    if (scopedLibraryId && scopedLibraryId !== libraryId) return null;
-    const [library] = await db
-        .select()
-        .from(Library)
-        .where(and(eq(Library.id, libraryId), eq(Library.owner_id, userId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
-        .limit(1);
-    return library ?? null;
-}
 
 function maskKey(key: string | null | undefined): string | null {
     if (!key) return null;

@@ -1,39 +1,26 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Library, Post, DeleteStatus } from "@/db/schema";
+import { reachableLibraryFilter, type LibraryAuth } from "@/features/library/access";
 import { db } from "@/global/db";
 
-export type PostAccessAuth = {
-    ownerId: string;
-    scopedLibraryId?: string | null;
-};
-
-export type PostAccessErrorKind = "NOT_FOUND" | "FORBIDDEN";
-
 export class PostAccessError extends Error {
-    constructor(
-        public readonly kind: PostAccessErrorKind,
-        message: string,
-    ) {
+    constructor(message: string) {
         super(message);
         this.name = "PostAccessError";
     }
 }
 
-export async function assertPostAccess(postId: string, auth: PostAccessAuth, options: { allowRecycled?: boolean } = {}) {
-    const [post] = await db.select().from(Post).where(eq(Post.id, postId)).limit(1);
+export async function assertPostAccess(postId: string, auth: LibraryAuth, options: { allowRecycled?: boolean } = {}) {
+    const [row] = await db
+        .select({ post: Post })
+        .from(Post)
+        .innerJoin(Library, eq(Library.id, Post.library_id))
+        .where(and(eq(Post.id, postId), reachableLibraryFilter(auth)))
+        .limit(1);
 
-    if (!post || post.delete_status !== DeleteStatus.ACTIVE || (!options.allowRecycled && post.recycle_time !== null)) {
-        throw new PostAccessError("NOT_FOUND", "Post not found or is in recycle bin");
+    if (!row || row.post.delete_status !== DeleteStatus.ACTIVE || (!options.allowRecycled && row.post.recycle_time !== null)) {
+        throw new PostAccessError("Post not found or is in recycle bin");
     }
 
-    const [library] = await db.select().from(Library).where(eq(Library.id, post.library_id)).limit(1);
-    if (!library || library.owner_id !== auth.ownerId) {
-        throw new PostAccessError("FORBIDDEN", "You do not have access to this library");
-    }
-
-    if (auth.scopedLibraryId && auth.scopedLibraryId !== post.library_id) {
-        throw new PostAccessError("FORBIDDEN", "API token scope restricted to another library");
-    }
-
-    return post;
+    return row.post;
 }

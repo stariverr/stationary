@@ -1,4 +1,4 @@
-export type TagErrorKind = "FORBIDDEN" | "NOT_FOUND" | "INVALID_PARAMETER" | "CONFLICT";
+export type TagErrorKind = "NOT_FOUND" | "INVALID_PARAMETER" | "CONFLICT";
 
 export class TagError extends Error {
     constructor(

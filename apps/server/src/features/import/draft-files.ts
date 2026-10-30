@@ -1,14 +1,15 @@
 import crypto from "crypto";
 import { and, desc, eq } from "drizzle-orm";
 import { v7 as uuidv7 } from "uuid";
-import { DraftFile, DraftFileStatus, File as DbFile, DeleteStatus } from "@/db/schema";
+import { DraftFile, DraftFileStatus, File as DbFile, DeleteStatus, Library } from "@/db/schema";
 import { db } from "@/global/db";
 import { env } from "@/global/env";
 import { s3 } from "@/global/s3";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { getFileExtension, getMimeTypeByExt } from "@/lib/utils/file";
 import { deleteDraftFile as deleteDraftFileTx } from "./draft-file";
-import { ImportAuth, assertLibraryAccess } from "./access";
+import { reachableLibraryFilter, type LibraryAuth } from "@/features/library/access";
+import { assertLibraryAccess } from "./access";
 import { ImportError } from "./errors";
 import type { ConfirmDraftInput, PresignDraftInput } from "./schema";
 
@@ -40,7 +41,7 @@ function verifyUploadToken(libraryId: string, path: string, token: string): bool
     }
 }
 
-export async function presignDraftUpload(input: PresignDraftInput, auth: ImportAuth) {
+export async function presignDraftUpload(input: PresignDraftInput, auth: LibraryAuth) {
     await assertLibraryAccess(input.library_id, auth);
 
     const ext = getFileExtension(input.fileName) || "bin";
@@ -94,7 +95,7 @@ export async function presignDraftUpload(input: PresignDraftInput, auth: ImportA
     };
 }
 
-export async function confirmDraftUpload(input: ConfirmDraftInput, auth: ImportAuth) {
+export async function confirmDraftUpload(input: ConfirmDraftInput, auth: LibraryAuth) {
     await assertLibraryAccess(input.library_id, auth);
 
     if (!verifyUploadToken(input.library_id, input.path, input.upload_token)) {
@@ -165,7 +166,7 @@ export async function confirmDraftUpload(input: ConfirmDraftInput, auth: ImportA
     });
 }
 
-export async function listDraftFiles(libraryId: string, auth: ImportAuth) {
+export async function listDraftFiles(libraryId: string, auth: LibraryAuth) {
     await assertLibraryAccess(libraryId, auth);
 
     const list = await db
@@ -192,15 +193,18 @@ export async function listDraftFiles(libraryId: string, auth: ImportAuth) {
     }));
 }
 
-export async function deleteDraftFile(draftFileId: string, auth: ImportAuth) {
-    const [draft] = await db.select().from(DraftFile).where(eq(DraftFile.id, draftFileId)).limit(1);
-    if (!draft) {
+export async function deleteDraftFile(draftFileId: string, auth: LibraryAuth) {
+    const [row] = await db
+        .select({ library_id: DraftFile.library_id })
+        .from(DraftFile)
+        .innerJoin(Library, eq(Library.id, DraftFile.library_id))
+        .where(and(eq(DraftFile.id, draftFileId), reachableLibraryFilter(auth)))
+        .limit(1);
+    if (!row) {
         throw new ImportError("NOT_FOUND", "Draft file not found");
     }
 
-    await assertLibraryAccess(draft.library_id, auth);
-
-    const deleted = await db.transaction((tx) => deleteDraftFileTx(tx, draftFileId, draft.library_id));
+    const deleted = await db.transaction((tx) => deleteDraftFileTx(tx, draftFileId, row.library_id));
     if (!deleted) {
         throw new ImportError("CONFLICT", "Draft file is already consumed or deleted");
     }

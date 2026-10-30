@@ -283,23 +283,12 @@ export class TrashService {
      * Batch restores posts and media from recycle bin.
      */
     static async batchRestore(params: {
-        libraryId: string;
-        ownerId: string;
+        library: typeof Library.$inferSelect;
         postIds?: string[];
         mediaIds?: string[];
     }): Promise<{ restored_posts: number; restored_media: number }> {
-        const { libraryId, ownerId, postIds = [], mediaIds = [] } = params;
-
-        // Verify library ownership
-        const [library] = await db
-            .select({ id: Library.id, cover_qualities: Library.cover_qualities, cover_config_version: Library.cover_config_version })
-            .from(Library)
-            .where(and(eq(Library.id, libraryId), eq(Library.owner_id, ownerId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
-            .limit(1);
-
-        if (!library) {
-            throw new Error("Library not found or access denied");
-        }
+        const { library, postIds = [], mediaIds = [] } = params;
+        const libraryId = library.id;
 
         let restoredPosts = 0;
         let restoredMedia = 0;
@@ -365,7 +354,7 @@ export class TrashService {
 
         await TrashService.enqueueCoverGenerationForRestoredMedia(
             libraryId,
-            ownerId,
+            library.owner_id,
             restoredMediaIds,
             library.cover_qualities,
             library.cover_config_version,
@@ -414,22 +403,10 @@ export class TrashService {
      */
     static async batchDelete(params: {
         libraryId: string;
-        ownerId: string;
         postIds?: string[];
         mediaIds?: string[];
     }): Promise<{ deleted_posts: number; deleted_media: number }> {
-        const { libraryId, ownerId, postIds = [], mediaIds = [] } = params;
-
-        // Verify library ownership
-        const [library] = await db
-            .select({ id: Library.id })
-            .from(Library)
-            .where(and(eq(Library.id, libraryId), eq(Library.owner_id, ownerId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
-            .limit(1);
-
-        if (!library) {
-            throw new Error("Library not found or access denied");
-        }
+        const { libraryId, postIds = [], mediaIds = [] } = params;
 
         let deletedPosts = 0;
         let deletedMedia = 0;
@@ -478,20 +455,7 @@ export class TrashService {
     /**
      * Empties all trashed posts and media in a library permanently.
      */
-    static async emptyTrash(params: { libraryId: string; ownerId: string }): Promise<{ deleted_posts: number; deleted_media: number }> {
-        const { libraryId, ownerId } = params;
-
-        // Verify library ownership
-        const [library] = await db
-            .select({ id: Library.id })
-            .from(Library)
-            .where(and(eq(Library.id, libraryId), eq(Library.owner_id, ownerId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
-            .limit(1);
-
-        if (!library) {
-            throw new Error("Library not found or access denied");
-        }
-
+    static async emptyTrash(libraryId: string): Promise<{ deleted_posts: number; deleted_media: number }> {
         const trashedPosts = await db
             .select({ id: Post.id })
             .from(Post)

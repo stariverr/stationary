@@ -6,6 +6,7 @@ import { eq } from "drizzle-orm";
 import { Code } from "@/lib/code";
 import { error } from "@/lib/response";
 import { ApiTokenService } from "@/features/auth/api-token";
+import { findOwnedLibrary } from "@/features/library/access";
 
 export type AuthEnv = {
     Variables: {
@@ -15,6 +16,11 @@ export type AuthEnv = {
         apiToken: typeof ExternalApiToken.$inferSelect | null;
     };
 };
+
+/** Resolves a library the caller owns and its API token may reach; a miss stays a 404 so it never reveals that the library exists. */
+export function ownedLibrary(c: Context<AuthEnv>, userId: string, libraryId: string) {
+    return findOwnedLibrary(libraryId, { ownerId: userId, scopedLibraryId: c.get("apiToken")?.library_id });
+}
 
 /**
  * Common helper to resolve authentication from either:

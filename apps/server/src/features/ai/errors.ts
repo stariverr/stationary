@@ -1,4 +1,4 @@
-export type QueueAiErrorKind = "FORBIDDEN" | "INVALID_PARAMETER";
+export type QueueAiErrorKind = "NOT_FOUND" | "INVALID_PARAMETER";
 
 export class QueueAiError extends Error {
     constructor(

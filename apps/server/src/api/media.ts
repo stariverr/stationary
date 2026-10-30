@@ -12,7 +12,6 @@ import {
     TrackPurpose,
     AssetAiMetadata,
     EntityType,
-    Library,
     Tag,
     MediaTag,
     TagStatus,
@@ -24,7 +23,7 @@ import { s3 } from "@/global/s3";
 import { and, eq, ilike, SQL, sql, count, asc, desc, or, isNull, inArray } from "drizzle-orm";
 
 import { Quality } from "@/lib/types";
-import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
+import { AuthEnv, ownedLibrary, requireAuth } from "@/lib/auth/middleware";
 import { verifyMediaSignature } from "@/lib/utils/media-signer";
 import { MediaService } from "@/features/media/queries";
 import { TrackService } from "@/features/media/track";
@@ -75,14 +74,19 @@ export const MediaListRequestBodySchema = v.object({
     sort_order: v.optional(v.picklist(["asc", "desc"])),
     type: v.optional(v.enum(MediaType)),
     display_mode: v.optional(v.picklist(["flat", "stacked"]), "flat"),
-    library_id: v.optional(v.pipe(v.string(), v.uuid())),
+    library_id: v.pipe(v.string(), v.uuid()),
     has_no_post: v.optional(v.string()),
-    /** With `library_id`: only items AI search does not cover yet, or cannot cover (see features/ai/coverage.ts). */
+    /** Only items AI search does not cover yet, or cannot cover (see features/ai/coverage.ts). */
     ai_coverage: v.optional(v.picklist(["incomplete", "unprocessable"])),
 });
 
 // Media List - Cover-only media hydration (zero content track queries)
 router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), async (c) => {
+    const user = c.get("user");
+    if (!user) {
+        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+    }
+
     const query = c.req.valid("query");
     const page = query.page ?? 1;
     let pageSize = query.count ?? 20;
@@ -92,7 +96,11 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
     const offset = (page - 1) * pageSize;
     const { keyword, source, sort_by, sort_order, type, display_mode, library_id, has_no_post, ai_coverage } = query;
 
-    const where: SQL[] = [];
+    if (!(await ownedLibrary(c, user.id, library_id))) {
+        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
+    }
+
+    const where: SQL[] = [eq(Media.library_id, library_id)];
 
     if (has_no_post === "true") {
         where.push(isNull(Media.post_id));
@@ -106,11 +114,7 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
     if (type) {
         where.push(eq(Media.type, type));
     }
-    if (library_id) {
-        where.push(eq(Media.library_id, library_id));
-    }
     if (ai_coverage) {
-        if (!library_id) return c.json(error(Code.INVALID_PARAMETER, "ai_coverage requires library_id"), 400);
         const targets = getCoverageTargets(await AiService.forLibrary(library_id));
         where.push(targets ? coverageFilter(targets, ai_coverage) : sql`false`);
     }
@@ -322,14 +326,9 @@ router.post("/:id/regenerate-cover", requireAuth, validate("param", SingleRegene
         return c.json(error(Code.INVALID_PARAMETER, "Media type does not support cover photo generation"), 400);
     }
 
-    const libList = await db
-        .select()
-        .from(Library)
-        .where(and(eq(Library.id, media.library_id), eq(Library.delete_status, DeleteStatus.ACTIVE)))
-        .limit(1);
-    const library = libList[0];
-    if (!library || library.owner_id !== user.id) {
-        return c.json(error(Code.UNAUTHORIZED, "Library not found or access denied"), 403);
+    const library = await ownedLibrary(c, user.id, media.library_id);
+    if (!library) {
+        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
     }
 
     const qualities = (library.cover_qualities as Quality[]) || [Quality.LOW, Quality.MEDIUM];
@@ -383,15 +382,9 @@ router.post("/regenerate-covers", requireAuth, validate("json", BatchRegenerateC
         return c.json(error(Code.INVALID_PARAMETER, "Cannot process more than 100 media or post items at once"), 400);
     }
 
-    // Validate target library
-    const libList = await db
-        .select()
-        .from(Library)
-        .where(and(eq(Library.id, library_id), eq(Library.delete_status, DeleteStatus.ACTIVE)))
-        .limit(1);
-    const library = libList[0];
-    if (!library || library.owner_id !== user.id) {
-        return c.json(error(Code.UNAUTHORIZED, "Library not found or access denied"), 403);
+    const library = await ownedLibrary(c, user.id, library_id);
+    if (!library) {
+        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
     }
 
     const filters: SQL[] = [];
@@ -578,10 +571,7 @@ async function checkMediaOwnership(
     } catch (cause) {
         if (!(cause instanceof MediaAccessError)) throw cause;
 
-        if (cause.kind === "NOT_FOUND") {
-            return { media: null, errorResponse: c.json(error(Code.NOT_FOUND, cause.message), 404) };
-        }
-        return { media: null, errorResponse: c.json(error(Code.FORBIDDEN, cause.message), 403) };
+        return { media: null, errorResponse: c.json(error(Code.NOT_FOUND, cause.message), 404) };
     }
 }
 

@@ -8,6 +8,7 @@
         "test:jobs:db": "RUN_JOB_DB_TESTS=1 bun test src/tests/job_system_db.test.ts",
         "test:ai:db": "RUN_AI_DB_TESTS=1 bun test src/tests/ai_embedding_db.test.ts",
         "test:library:db": "RUN_LIBRARY_DB_TESTS=1 bun test src/tests/library_access_db.test.ts",
+        "test:content:db": "RUN_CONTENT_DB_TESTS=1 bun test src/tests/content_access_db.test.ts",
         "build": "bun build src/index.ts --outdir ./dist --target bun --external @napi-rs/image",
         "deploy": "bunx wrangler deploy",
         "worker:dev": "bunx wrangler dev",

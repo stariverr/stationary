@@ -4158,7 +4158,7 @@
           {
             "name": "library_id",
             "in": "query",
-            "required": false,
+            "required": true,
             "schema": {
               "type": "string",
               "format": "uuid"

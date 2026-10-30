@@ -301,7 +301,7 @@ export const usePostStore = defineStore("posts", () => {
         };
     };
 
-    const isListEnabled = computed(() => route.path.startsWith("/posts"));
+    const isListEnabled = computed(() => !!libraryStore.activeLibraryId && route.path.startsWith("/posts"));
 
     // TanStack Query for Posts List
     const {
@@ -357,7 +357,7 @@ export const usePostStore = defineStore("posts", () => {
     // TanStack Query for Authors List
     const { data: authorsData } = useQuery({
         queryKey: computed(() => ["authors", libraryStore.activeLibraryId, authorSearchKeyword.value, source.value]),
-        enabled: computed(() => !!libraryStore.activeLibraryId && isListEnabled.value),
+        enabled: isListEnabled,
         queryFn: async () => {
             const response = await useApi<{
                 success: boolean;

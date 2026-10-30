@@ -1,22 +1,29 @@
-import { eq } from "drizzle-orm";
-import { Library } from "@/db/schema";
+import { and, eq } from "drizzle-orm";
+import { Library, Tag } from "@/db/schema";
+import { findOwnedLibrary, reachableLibraryFilter, type LibraryAuth } from "@/features/library/access";
 import { db } from "@/global/db";
 import { TagError } from "./errors";
 
-export type TagAuth = {
-    ownerId: string;
-    scopedLibraryId?: string | null;
-};
-
-export async function assertTagLibraryAccess(libraryId: string, auth: TagAuth) {
-    const [library] = await db.select().from(Library).where(eq(Library.id, libraryId)).limit(1);
-    if (!library || library.owner_id !== auth.ownerId) {
-        throw new TagError("FORBIDDEN", "You do not have access to this library");
-    }
-
-    if (auth.scopedLibraryId && auth.scopedLibraryId !== libraryId) {
-        throw new TagError("FORBIDDEN", "API token scope restricted to another library");
+export async function assertTagLibraryAccess(libraryId: string, auth: LibraryAuth) {
+    const library = await findOwnedLibrary(libraryId, auth);
+    if (!library) {
+        throw new TagError("NOT_FOUND", "Library not found");
     }
 
     return library;
+}
+
+export async function assertTagAccess(tagId: string, auth: LibraryAuth) {
+    const [row] = await db
+        .select({ tag: Tag })
+        .from(Tag)
+        .innerJoin(Library, eq(Library.id, Tag.library_id))
+        .where(and(eq(Tag.id, tagId), reachableLibraryFilter(auth)))
+        .limit(1);
+
+    if (!row) {
+        throw new TagError("NOT_FOUND", "Tag not found");
+    }
+
+    return row.tag;
 }

@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
+import { AuthEnv, ownedLibrary, requireAuth } from "@/lib/auth/middleware";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
 import * as v from "valibot";
@@ -46,18 +46,20 @@ router.get(
 
         const queryParams = c.req.valid("query");
 
+        const library = await ownedLibrary(c, user.id, queryParams.library_id);
+        if (!library) {
+            return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
+        }
+
         try {
-            const results = await HybridSearchService.search(
-                {
-                    keyword: queryParams.keyword,
-                    library_id: queryParams.library_id,
-                    source: queryParams.source,
-                    media_type: queryParams.media_type,
-                    page: queryParams.page,
-                    count: queryParams.count,
-                },
-                user.id,
-            );
+            const results = await HybridSearchService.search({
+                keyword: queryParams.keyword,
+                library_id: queryParams.library_id,
+                source: queryParams.source,
+                media_type: queryParams.media_type,
+                page: queryParams.page,
+                count: queryParams.count,
+            });
 
             return c.json(success(Code.SUCCESS, results));
         } catch (err: any) {

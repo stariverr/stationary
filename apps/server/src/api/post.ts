@@ -3,7 +3,7 @@ import { db } from "@/global/db";
 import * as v from "valibot";
 import { error, success } from "@/lib/response";
 import { Code } from "@/lib/code";
-import { requireAuth } from "@/lib/auth/middleware";
+import { AuthEnv, ownedLibrary, requireAuth } from "@/lib/auth/middleware";
 import { Media, Post, File as DbFile, DeleteStatus, PostSource, Author, MediaType, PostTag, Tag, TagStatus } from "@/db/schema";
 import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lte, exists, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -17,7 +17,7 @@ import { MediaService, type PreviewItem } from "@/features/media/queries";
 import { CreatePostSchema } from "@/features/post/schema";
 import { CreatePostError, createPost } from "@/features/post/create-post";
 
-const router = new Hono();
+const router = new Hono<AuthEnv>();
 const activePostFilter = and(eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time));
 const activeMediaFilter = and(eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time));
 
@@ -55,6 +55,11 @@ export const PostListRequestBodySchema = v.object({
 
 // Post List - Cover-only media hydration (no primary content track queries)
 router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), async (c) => {
+    const user = c.get("user");
+    if (!user) {
+        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+    }
+
     const query = c.req.valid("query");
     const page = query.page ?? 1;
     let pageSize = query.count ?? 20;
@@ -66,6 +71,10 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
     const { keyword, source, sort_by, sort_order, author_ids: authorIdsStr, media_type: mediaType, tag_ids: tagIdsStr, library_id } = query;
     const sortBy = sort_by ?? "published_time";
     const sortOrder = sort_order ?? "desc";
+
+    if (!(await ownedLibrary(c, user.id, library_id))) {
+        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
+    }
 
     const where: SQL[] = [eq(Post.library_id, library_id)];
 
@@ -252,7 +261,16 @@ const PostAuthorsQuerySchema = v.object({
 });
 
 router.get("/authors", requireAuth, validate("query", PostAuthorsQuerySchema), async (c) => {
+    const user = c.get("user");
+    if (!user) {
+        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+    }
+
     const { library_id, keyword, author_ids, platform } = c.req.valid("query");
+
+    if (!(await ownedLibrary(c, user.id, library_id))) {
+        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
+    }
 
     const whereClause: SQL[] = [
         eq(Author.library_id, library_id),
@@ -553,7 +571,7 @@ router.post("/delete/:id", requireAuth, async (c) => {
 });
 
 async function checkPostAccess(
-    c: Context,
+    c: Context<AuthEnv>,
     postId: string,
     allowRecycled = false,
 ): Promise<{ post: typeof Post.$inferSelect; errorResponse: null } | { post: null; errorResponse: any }> {
@@ -578,10 +596,7 @@ async function checkPostAccess(
     } catch (cause) {
         if (!(cause instanceof PostAccessError)) throw cause;
 
-        if (cause.kind === "NOT_FOUND") {
-            return { post: null, errorResponse: c.json(error(Code.NOT_FOUND, cause.message), 404) };
-        }
-        return { post: null, errorResponse: c.json(error(Code.FORBIDDEN, cause.message), 403) };
+        return { post: null, errorResponse: c.json(error(Code.NOT_FOUND, cause.message), 404) };
     }
 }
 
@@ -687,13 +702,13 @@ router.post("/create", requireAuth, validate("json", CreatePostSchema), async (c
     }
 
     try {
-        const result = await createPost(body, user.id);
+        const result = await createPost(body, { ownerId: user.id, scopedLibraryId: c.get("apiToken")?.library_id });
         return c.json(success(Code.SUCCESS, { post_id: result.postId }));
     } catch (e) {
         if (!(e instanceof CreatePostError)) throw e;
 
-        if (e.kind === "FORBIDDEN") {
-            return c.json(error(Code.FORBIDDEN, e.message), 403);
+        if (e.kind === "NOT_FOUND") {
+            return c.json(error(Code.NOT_FOUND, e.message), 404);
         }
         if (e.kind === "CONFLICT") {
             return c.json(error(Code.ALREADY_EXISTS, e.message), 409);

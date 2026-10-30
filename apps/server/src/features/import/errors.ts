@@ -1,4 +1,4 @@
-export type ImportErrorKind = "FORBIDDEN" | "NOT_FOUND" | "INVALID_PARAMETER" | "CONFLICT";
+export type ImportErrorKind = "NOT_FOUND" | "INVALID_PARAMETER" | "CONFLICT";
 
 export class ImportError extends Error {
     constructor(

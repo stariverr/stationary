@@ -526,12 +526,12 @@ describe("AI search reranking (PostgreSQL + Redis)", () => {
     });
 
     databaseTest("reorders fused results by reranker score and reuses it across pages", async () => {
-        const first = await HybridSearchService.search({ library_id: rerankLibraryId, keyword: "a ", count: 2, page: 1 }, rerankOwnerId);
+        const first = await HybridSearchService.search({ library_id: rerankLibraryId, keyword: "a ", count: 2, page: 1 });
         expect(first.total).toBe(3);
         expect(first.list[0]?.id).toBe(media.dog);
         expect(first.list[0]?.matched_details?.rerank?.score).toBe(0.9);
 
-        const second = await HybridSearchService.search({ library_id: rerankLibraryId, keyword: "a ", count: 2, page: 2 }, rerankOwnerId);
+        const second = await HybridSearchService.search({ library_id: rerankLibraryId, keyword: "a ", count: 2, page: 2 });
         expect(second.list).toHaveLength(1);
         expect(rerankCalls).toBe(1);
         expect(first.degraded).toEqual([]);
@@ -540,7 +540,7 @@ describe("AI search reranking (PostgreSQL + Redis)", () => {
     databaseTest("reports a failing reranker and an unusable model as degraded channels", async () => {
         rerankFails = true;
         try {
-            const result = await HybridSearchService.search({ library_id: rerankLibraryId, keyword: "dog" }, rerankOwnerId);
+            const result = await HybridSearchService.search({ library_id: rerankLibraryId, keyword: "dog" });
             expect(result.list.map((item) => item.id)).toEqual([media.dog]);
             expect(result.degraded).toEqual([{ channel: "rerank", reason: "TRANSIENT" }]);
         } finally {
@@ -552,7 +552,7 @@ describe("AI search reranking (PostgreSQL + Redis)", () => {
             .update(Library)
             .set({ ai_bindings: { rerank: { modelId: crypto.randomUUID() } } })
             .where(eq(Library.id, rerankLibraryId));
-        const unresolved = await HybridSearchService.search({ library_id: rerankLibraryId, keyword: "cat" }, rerankOwnerId);
+        const unresolved = await HybridSearchService.search({ library_id: rerankLibraryId, keyword: "cat" });
         expect(unresolved.list.map((item) => item.id)).toEqual([media.cat]);
         expect(unresolved.degraded).toEqual([{ channel: "rerank", reason: "CONFIGURATION" }]);
     });

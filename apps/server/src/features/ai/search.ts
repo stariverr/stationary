@@ -1,6 +1,5 @@
 import { db } from "@/global/db";
 import {
-    Library,
     Media,
     Track,
     File,
@@ -159,29 +158,15 @@ function wholeWordPattern(text: string): SQL {
 }
 
 export const HybridSearchService = {
-    /** Whether `userId` may search `libraryId`: the library must be active and owned by the user. */
-    async canSearchLibrary(userId: string, libraryId: string): Promise<boolean> {
-        const rows = await db
-            .select({ id: Library.id })
-            .from(Library)
-            .where(and(eq(Library.id, libraryId), eq(Library.owner_id, userId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
-            .limit(1);
-        return rows.length > 0;
-    },
-
     /**
-     * Executes the hybrid search pipeline
+     * Executes the hybrid search pipeline. The caller must have checked access to the library.
      */
-    async search(params: SearchParams, userId: string): Promise<SearchResponse> {
+    async search(params: SearchParams): Promise<SearchResponse> {
         const page = params.page ?? 1;
         const count = params.count ?? 20;
         const limit = 100; // Get top 100 candidates from each channel for high recall before rank fusion
 
-        // 1. Enforce pre-filtering security bounds on the library
         const libraryId = params.library_id;
-        if (!(await this.canSearchLibrary(userId, libraryId))) {
-            return { list: [], hasMore: false, total: 0, degraded: [] };
-        }
 
         const hasQuery = Boolean(params.keyword.trim().length);
         const queryString = params.keyword;

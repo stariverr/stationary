@@ -5,12 +5,12 @@ import {
     DraftFile,
     DraftFileStatus,
     File as DbFile,
-    Library,
     Media,
     Post,
     PostSource,
     SyncStatus,
 } from "@/db/schema";
+import { findOwnedLibrary, type LibraryAuth } from "@/features/library/access";
 import { db } from "@/global/db";
 import { replacePostTagsTx } from "./post-service";
 import { DraftFileUnavailableError } from "@/features/import/draft-file";
@@ -21,7 +21,7 @@ import {
 } from "@/lib/validation/media-composition";
 import type { CreatePostInput } from "./schema";
 
-export type CreatePostErrorKind = "FORBIDDEN" | "INVALID_PARAMETER" | "CONFLICT";
+export type CreatePostErrorKind = "NOT_FOUND" | "INVALID_PARAMETER" | "CONFLICT";
 
 export class CreatePostError extends Error {
     constructor(
@@ -33,10 +33,10 @@ export class CreatePostError extends Error {
     }
 }
 
-export async function createPost(input: CreatePostInput, ownerId: string): Promise<{ postId: string }> {
-    const [library] = await db.select().from(Library).where(eq(Library.id, input.library_id)).limit(1);
-    if (!library || library.owner_id !== ownerId) {
-        throw new CreatePostError("FORBIDDEN", "You do not have access to this library");
+export async function createPost(input: CreatePostInput, auth: LibraryAuth): Promise<{ postId: string }> {
+    const library = await findOwnedLibrary(input.library_id, auth);
+    if (!library) {
+        throw new CreatePostError("NOT_FOUND", "Library not found");
     }
 
     const mediaIds = input.media_items?.filter((item) => item.kind === "existing").map((item) => item.media_id) ?? [];
