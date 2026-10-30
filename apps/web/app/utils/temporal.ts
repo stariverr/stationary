@@ -27,58 +27,46 @@ export function formatTemporalDateTime(
     }
 }
 
+const RELATIVE_UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["day", 86400],
+    ["hour", 3600],
+    ["minute", 60],
+    ["second", 1],
+];
+
 /**
- * Format an ISO timestamp into a humanized relative time description (e.g., "5 秒前", "10 分钟前", "2 小时前")
- * using Temporal API.
+ * Format an ISO timestamp as a localized relative time ("5 minutes ago"). Older than 30 days falls back to a date.
  */
-export function formatTemporalRelative(isoString: string | null | undefined, locale = "zh-CN"): string {
+export function formatTemporalRelative(isoString: string | null | undefined, locale: string): string {
     if (!isoString) return "-";
     try {
         const instant = Temporal.Instant.from(isoString);
-        const now = Temporal.Now.instant();
-        const diffSeconds = Math.round(Number(now.since(instant, { largestUnit: "second" }).total({ unit: "second" })));
-
-        if (diffSeconds < 0) return "刚刚";
-        if (diffSeconds < 5) return "刚刚";
-        if (diffSeconds < 60) return `${diffSeconds} 秒前`;
-        const diffMinutes = Math.floor(diffSeconds / 60);
-        if (diffMinutes < 60) return `${diffMinutes} 分钟前`;
-        const diffHours = Math.floor(diffMinutes / 60);
-        if (diffHours < 24) return `${diffHours} 小时前`;
-        const diffDays = Math.floor(diffHours / 24);
-        if (diffDays < 30) return `${diffDays} 天前`;
-
-        return formatTemporalDateTime(isoString, locale, {
-            month: "2-digit",
-            day: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-        });
+        const diffSeconds = Math.max(0, Math.round(Temporal.Now.instant().since(instant).total({ unit: "second" })));
+        if (diffSeconds >= 30 * 86400) {
+            return formatTemporalDateTime(isoString, locale, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+        }
+        const [unit, size] = RELATIVE_UNITS.find(([, size]) => diffSeconds >= size) ?? ["second", 1];
+        return new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(-Math.floor(diffSeconds / size), unit);
     } catch {
         return isoString;
     }
 }
 
 /**
- * Format the duration between two timestamps (or between start and now) using Temporal API.
+ * Format the localized duration between two timestamps (or between start and now), e.g. "1h 5m".
  */
-export function formatTemporalDuration(startIso: string | null | undefined, endIso?: string | null | undefined): string {
+export function formatTemporalDuration(startIso: string | null | undefined, endIso: string | null | undefined, locale: string): string {
     if (!startIso) return "-";
     try {
         const start = Temporal.Instant.from(startIso);
         const end = endIso ? Temporal.Instant.from(endIso) : Temporal.Now.instant();
-        const diffSeconds = Math.max(0, Math.round(Number(end.since(start, { largestUnit: "second" }).total({ unit: "second" }))));
-
-        if (diffSeconds < 1) return "< 1 秒";
-        if (diffSeconds < 60) return `${diffSeconds} 秒`;
-        const minutes = Math.floor(diffSeconds / 60);
-        const remainingSeconds = diffSeconds % 60;
-        if (minutes < 60) {
-            return remainingSeconds > 0 ? `${minutes} 分 ${remainingSeconds} 秒` : `${minutes} 分钟`;
-        }
-        const hours = Math.floor(minutes / 60);
-        const remMinutes = minutes % 60;
-        return `${hours} 小时 ${remMinutes} 分`;
+        const totalSeconds = Math.max(0, Math.round(end.since(start).total({ unit: "second" })));
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = hours > 0 ? 0 : totalSeconds % 60;
+        return Temporal.Duration.from({ hours, minutes, seconds }).toLocaleString(locale, {
+            style: "narrow",
+        });
     } catch {
         return "-";
     }
