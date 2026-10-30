@@ -1055,14 +1055,10 @@
         }
     },
     "jobs": {
-        "title": "后台任务中心",
-        "subtitle": "查看系统后台任务进度、处理明细与一键修复",
         "nav_title": "后台任务",
         "tabs": {
-            "tasks": "后台任务队列",
-            "units": "任务处理明细",
-            "all": "全部状态",
-            "failed": "异常/需关注",
+            "all": "全部",
+            "failed": "失败",
             "running": "处理中",
             "pending": "等待处理",
             "succeeded": "处理成功",
@@ -1071,108 +1067,128 @@
             "completed": "已完成",
             "cancelled": "已取消"
         },
-        "metrics": {
-            "active_tasks": "处理中的主任务",
-            "failed_tasks": "需关注的失败主任务",
-            "completed_tasks": "已完成的主任务",
-            "total_tasks": "主任务总量",
-            "active_units": "等待/处理中的子项",
-            "succeeded_units": "已成功处理",
-            "failed_units": "处理异常的子项"
-        },
         "actions": {
-            "auto_refresh_on": "自动刷新开 (5s)",
-            "auto_refresh_off": "自动刷新关",
-            "refresh": "刷新",
-            "sweep": "一键修复卡住的任务",
-            "retry_selected": "重试选中的 {count} 项",
-            "retry": "重试",
+            "sweep": "修复卡住的任务",
+            "pause": "暂停",
+            "resume": "继续",
+            "cancel": "取消任务",
+            "sweep_hint": "重置工作进程已失去响应的任务"
+        },
+        "task_types": {
+            "AI_ENRICH": "AI 智能分析"
+        },
+        "inspector": {
+            "title": "任务详情",
+            "close": "关闭",
+            "more": "更多操作",
+            "copy_input": "复制输入 JSON",
+            "input_copied": "已复制输入 JSON",
+            "processed": "已处理 {done} / {total} 个条目",
+            "legend_succeeded": "{count} 成功",
+            "legend_failed": "{count} 失败",
+            "legend_cancelled": "{count} 已取消",
+            "legend_remaining": "剩余 {count}",
+            "last_error": "最近错误",
+            "copy_error": "复制错误",
+            "error_copied": "已复制错误信息",
+            "created_at": "创建于",
+            "updated_at": "更新于",
+            "completed_at": "结束于",
+            "task_id": "任务 ID",
+            "items": "条目",
+            "unit_filter_label": "按状态筛选条目",
+            "unit_pages": "条目分页",
+            "retry_failed": "重试 {count} 个失败",
+            "retry_unit": "重试",
+            "unit_retried": "已将该条目重新排队",
+            "attempts": "第 {attempt} / {max} 次尝试",
+            "show_more": "展开",
+            "show_less": "收起",
+            "no_units": "暂无条目",
+            "no_units_desc": "任务处理范围内的条目会陆续出现在这里。",
+            "no_units_filtered": "没有该状态的条目",
+            "units_failed": "条目加载失败，将自动重试。"
+        },
+        "bulk": {
+            "selected": "已选 {count} 项",
+            "retry_failed": "重试失败项",
             "pause": "暂停",
             "resume": "继续",
             "cancel": "取消",
-            "view_details": "查看明细"
-        },
-        "task_types": {
-            "all": "全部任务类型",
-            "ALL": "全部任务类型",
-            "AI_ENRICH": "AI 智能分析"
-        },
-        "table": {
-            "id": "任务 ID",
-            "type": "任务类型",
-            "status": "当前状态",
-            "progress": "处理进度",
-            "breakdown": "执行统计",
-            "updated_at": "最后更新时间",
-            "actions": "操作",
-            "unit_id": "子项 ID",
-            "attempts": "重试次数",
-            "error": "错误信息"
-        },
-        "modal": {
-            "title": "任务处理明细与错误记录",
-            "last_error": "最近一次错误日志",
-            "input_snapshot": "任务参数快照",
-            "re_enqueue": "重新放入队列重试",
-            "close": "关闭"
-        },
-        "inspector": {
-            "title": "任务明细",
-            "units_tab": "执行子项",
-            "overview_tab": "任务信息与快照",
-            "duration": "执行耗时",
-            "created_at": "创建时间",
-            "updated_at": "最后更新",
-            "completed_at": "完成时间",
-            "scope": "作用范围",
-            "no_error": "无异常错误",
-            "error_occurred": "异常错误日志",
-            "retry_all_failed": "重试失败子项",
-            "copy_json": "复制参数快照",
-            "no_units": "暂无子任务数据",
-            "no_units_filtered": "当前筛选下没有子任务",
-            "view_all_units": "查看全部子项",
-            "retry_unit": "重试",
-            "attempt": "尝试 {attempt}/{max}",
-            "close": "关闭详情",
-            "refresh": "刷新详情"
-        },
-        "bulk": {
-            "selected": "已选中 {count} 项任务",
-            "retry_failed": "批量重试失败",
-            "pause": "批量暂停",
-            "resume": "批量恢复",
-            "cancel": "批量忽略",
-            "clear": "取消选择"
+            "clear": "清除选择"
         },
         "empty": {
-            "no_tasks": "暂无匹配的后台任务",
-            "no_units": "所有后台任务处理正常，暂无异常项"
+            "no_tasks": "还没有 AI 分析任务",
+            "no_tasks_desc": "对这个媒体库运行 AI 分析后，任务会显示在这里。",
+            "no_match": "没有符合筛选条件的任务",
+            "no_match_desc": "换个状态或搜索词试试。",
+            "reset": "清除筛选"
         },
         "pagination": {
-            "showing": "显示 {current} 条，共 {total} 条",
-            "page": "第 {page} 页，共 {pages} 页"
+            "label": "任务分页",
+            "range": "第 {from}–{to} 项，共 {total} 项",
+            "prev": "上一页",
+            "next": "下一页"
         },
         "pipelines": {
-            "title": "媒体库流水线",
-            "desc": "持续维护当前媒体库的下载、头像和封面，数量每隔几秒刷新。",
-            "loading": "加载中…",
-            "pipeline": "流水线",
-            "queued": "排队",
-            "running": "处理中",
-            "retrying": "等待重试",
-            "failed": "失败",
             "scanning": "扫描中",
             "names": {
                 "download": "下载",
                 "avatar": "头像",
                 "cover": "封面"
             },
-            "show_failures": "查看",
-            "retry_failed": "重试失败项",
+            "retry_failed": "重试",
             "retry_done": "已将 {count} 项加入重试",
             "retry_error": "重试失败",
-            "failures_error": "加载失败列表出错"
+            "failures_error": "加载失败列表出错",
+            "label": "管线",
+            "up_to_date": "已是最新",
+            "count_queued": "{count} 排队中",
+            "count_running": "{count} 运行中",
+            "count_retrying": "{count} 等待重试",
+            "count_failed": "{count} 失败",
+            "failures_title": "最近失败：{name}",
+            "hide_failures": "收起失败明细",
+            "no_failures": "暂无失败记录"
+        },
+        "tasks": {
+            "filter_label": "按状态筛选",
+            "select_all": "全选本页任务",
+            "select_task": "选择任务 {id}",
+            "scope_media": "{count} 个媒体",
+            "scope_library": "整个媒体库",
+            "duration": "用时 {duration}",
+            "copy_id": "复制任务 ID",
+            "id_copied": "已复制任务 ID",
+            "progress": "{done} / {total} 项",
+            "failed_units": "{count} 项失败",
+            "retry_failed": "重试失败项",
+            "more": "更多操作",
+            "col_status": "状态",
+            "col_task": "任务",
+            "col_progress": "进度",
+            "col_created": "创建时间"
+        },
+        "toast": {
+            "retried": "已将 {count} 项失败项重新排队",
+            "paused": "任务已暂停",
+            "resumed": "任务已继续",
+            "cancelled": "任务已取消",
+            "bulk_paused": "已暂停 {count} 个任务",
+            "bulk_resumed": "已继续 {count} 个任务",
+            "bulk_cancelled": "已取消 {count} 个任务",
+            "swept": "已重置卡住的任务",
+            "action_failed": "操作没有完成，请重试。",
+            "load_failed": "任务加载失败，请刷新重试。",
+            "detail_failed": "任务加载失败",
+            "not_found": "任务不存在或已被删除。"
+        },
+        "cancel_dialog": {
+            "title_one": "取消此任务？",
+            "title_many": "取消 {count} 个任务？",
+            "desc": "仍在等待或运行中的条目会停止并标记为已取消，已完成分析的条目保留结果。此操作无法撤销。",
+            "confirm": "确认取消",
+            "keep": "继续运行"
         }
     },
     "trash": {

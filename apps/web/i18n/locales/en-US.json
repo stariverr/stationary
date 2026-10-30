@@ -1055,14 +1055,10 @@
         }
     },
     "jobs": {
-        "title": "Background Task Center",
-        "subtitle": "Track task execution progress, view details, and repair stuck items",
         "nav_title": "Background Tasks",
         "tabs": {
-            "tasks": "Background Tasks Queue",
-            "units": "Task Execution Details",
-            "all": "All Statuses",
-            "failed": "Failed / Attention",
+            "all": "All",
+            "failed": "Failed",
             "running": "Processing",
             "pending": "Pending",
             "succeeded": "Succeeded",
@@ -1071,108 +1067,128 @@
             "completed": "Completed",
             "cancelled": "Cancelled"
         },
-        "metrics": {
-            "active_tasks": "Running Master Tasks",
-            "failed_tasks": "Failed Master Tasks",
-            "completed_tasks": "Completed Master Tasks",
-            "total_tasks": "Total Master Tasks",
-            "active_units": "Pending & Processing Items",
-            "succeeded_units": "Successfully Processed",
-            "failed_units": "Failed Items"
-        },
         "actions": {
-            "auto_refresh_on": "Auto-Refresh ON (5s)",
-            "auto_refresh_off": "Auto-Refresh OFF",
-            "refresh": "Refresh",
-            "sweep": "Fix Stuck Tasks",
-            "retry_selected": "Retry Selected ({count})",
-            "retry": "Retry",
+            "sweep": "Fix stuck tasks",
+            "pause": "Pause",
+            "resume": "Resume",
+            "cancel": "Cancel task",
+            "sweep_hint": "Reset tasks whose worker stopped responding"
+        },
+        "task_types": {
+            "AI_ENRICH": "AI Smart Analysis"
+        },
+        "inspector": {
+            "title": "Task details",
+            "close": "Close",
+            "more": "More actions",
+            "copy_input": "Copy input JSON",
+            "input_copied": "Input JSON copied",
+            "processed": "{done} of {total} items processed",
+            "legend_succeeded": "{count} succeeded",
+            "legend_failed": "{count} failed",
+            "legend_cancelled": "{count} cancelled",
+            "legend_remaining": "{count} left",
+            "last_error": "Last error",
+            "copy_error": "Copy error",
+            "error_copied": "Error copied",
+            "created_at": "Created",
+            "updated_at": "Updated",
+            "completed_at": "Finished",
+            "task_id": "Task ID",
+            "items": "Items",
+            "unit_filter_label": "Filter items by status",
+            "unit_pages": "Item pages",
+            "retry_failed": "Retry {count} failed",
+            "retry_unit": "Retry",
+            "unit_retried": "Item queued for retry",
+            "attempts": "Attempt {attempt} of {max}",
+            "show_more": "Show more",
+            "show_less": "Show less",
+            "no_units": "No items yet",
+            "no_units_desc": "Items appear here as the task works through its scope.",
+            "no_units_filtered": "No items with this status",
+            "units_failed": "Couldn't load items. Retrying automatically."
+        },
+        "bulk": {
+            "selected": "{count} selected",
+            "retry_failed": "Retry failed",
             "pause": "Pause",
             "resume": "Resume",
             "cancel": "Cancel",
-            "view_details": "View Details"
-        },
-        "task_types": {
-            "all": "All Task Types",
-            "ALL": "All Task Types",
-            "AI_ENRICH": "AI Smart Analysis"
-        },
-        "table": {
-            "id": "Task ID",
-            "type": "Task Type",
-            "status": "Status",
-            "progress": "Progress",
-            "breakdown": "Units Summary",
-            "updated_at": "Last Updated",
-            "actions": "Actions",
-            "unit_id": "Unit ID",
-            "attempts": "Attempts",
-            "error": "Error Message"
-        },
-        "modal": {
-            "title": "Task Execution Details & Error Trace",
-            "last_error": "Last Error Log",
-            "input_snapshot": "Task Parameters",
-            "re_enqueue": "Re-enqueue for Retry",
-            "close": "Close"
-        },
-        "inspector": {
-            "title": "Task Details",
-            "units_tab": "Sub-tasks",
-            "overview_tab": "Overview & Params",
-            "duration": "Duration",
-            "created_at": "Created At",
-            "updated_at": "Last Updated",
-            "completed_at": "Completed At",
-            "scope": "Scope",
-            "no_error": "No errors reported",
-            "error_occurred": "Error Log",
-            "retry_all_failed": "Retry Failed Units",
-            "copy_json": "Copy Snapshot JSON",
-            "no_units": "No sub-task units found",
-            "no_units_filtered": "No sub-tasks match this filter",
-            "view_all_units": "View All Units",
-            "retry_unit": "Retry",
-            "attempt": "Attempt {attempt}/{max}",
-            "close": "Close Inspector",
-            "refresh": "Refresh Details"
-        },
-        "bulk": {
-            "selected": "Selected {count} tasks",
-            "retry_failed": "Batch Retry Failed",
-            "pause": "Batch Pause",
-            "resume": "Batch Resume",
-            "cancel": "Batch Ignore",
-            "clear": "Clear Selection"
+            "clear": "Clear selection"
         },
         "empty": {
-            "no_tasks": "No background tasks found matching criteria",
-            "no_units": "All background tasks are running smoothly"
+            "no_tasks": "No AI analysis tasks yet",
+            "no_tasks_desc": "Tasks appear here when you run AI analysis on this library.",
+            "no_match": "No tasks match these filters",
+            "no_match_desc": "Try another status or search term.",
+            "reset": "Clear filters"
         },
         "pagination": {
-            "showing": "Showing {current} of {total}",
-            "page": "Page {page} of {pages}"
+            "label": "Task pages",
+            "range": "{from}–{to} of {total}",
+            "prev": "Previous page",
+            "next": "Next page"
         },
         "pipelines": {
-            "title": "Library pipelines",
-            "desc": "Downloads, avatars and covers of this library are kept up to date. Counts update every few seconds.",
-            "loading": "Loading…",
-            "pipeline": "Pipeline",
-            "queued": "Queued",
-            "running": "Running",
-            "retrying": "Retrying",
-            "failed": "Failed",
             "scanning": "scanning",
             "names": {
                 "download": "Downloads",
                 "avatar": "Avatars",
                 "cover": "Covers"
             },
-            "show_failures": "Show",
-            "retry_failed": "Retry failed",
+            "retry_failed": "Retry",
             "retry_done": "Queued {count} items to retry",
             "retry_error": "Failed to retry",
-            "failures_error": "Failed to load failures"
+            "failures_error": "Failed to load failures",
+            "label": "Pipelines",
+            "up_to_date": "Up to date",
+            "count_queued": "{count} queued",
+            "count_running": "{count} running",
+            "count_retrying": "{count} retrying",
+            "count_failed": "{count} failed",
+            "failures_title": "Recent failures: {name}",
+            "hide_failures": "Hide failures",
+            "no_failures": "No failures recorded"
+        },
+        "tasks": {
+            "filter_label": "Filter by status",
+            "select_all": "Select all tasks on this page",
+            "select_task": "Select task {id}",
+            "scope_media": "{count} media",
+            "scope_library": "Whole library",
+            "duration": "took {duration}",
+            "copy_id": "Copy task ID",
+            "id_copied": "Task ID copied",
+            "progress": "{done} / {total} items",
+            "failed_units": "{count} failed",
+            "retry_failed": "Retry failed",
+            "more": "More actions",
+            "col_status": "Status",
+            "col_task": "Task",
+            "col_progress": "Progress",
+            "col_created": "Created"
+        },
+        "toast": {
+            "retried": "Queued {count} failed items for retry",
+            "paused": "Task paused",
+            "resumed": "Task resumed",
+            "cancelled": "Task cancelled",
+            "bulk_paused": "Paused {count} tasks",
+            "bulk_resumed": "Resumed {count} tasks",
+            "bulk_cancelled": "Cancelled {count} tasks",
+            "swept": "Stuck tasks were reset",
+            "action_failed": "Couldn't complete the action. Try again.",
+            "load_failed": "Couldn't load tasks. Refresh to try again.",
+            "detail_failed": "Couldn't load the task",
+            "not_found": "The task doesn't exist or was deleted."
+        },
+        "cancel_dialog": {
+            "title_one": "Cancel this task?",
+            "title_many": "Cancel {count} tasks?",
+            "desc": "Items that are still waiting or running stop and are marked cancelled. Items already analysed keep their results. This can't be undone.",
+            "confirm": "Yes, cancel",
+            "keep": "Keep running"
         }
     },
     "trash": {

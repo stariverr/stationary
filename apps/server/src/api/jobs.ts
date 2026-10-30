@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { db } from "@/global/db";
-import { AsyncTask, AsyncTaskStatus, AsyncTaskType, AsyncTaskUnit, AsyncTaskUnitStatus, DeleteStatus, Library } from "@/db/schema";
+import { AsyncTask, AsyncTaskStatus, AsyncTaskUnit, AsyncTaskUnitStatus, DeleteStatus, Library } from "@/db/schema";
 import { eq, and, desc, count, sql, inArray, or } from "drizzle-orm";
 import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
 import { success, error } from "@/lib/response";
@@ -135,25 +135,11 @@ jobsApp.get("/list", requireAuth, validate("query", LibraryQuerySchema), async (
     const page = Math.max(1, parseInt(c.req.query("page") || "1", 10));
     const limit = Math.min(100, Math.max(1, parseInt(c.req.query("limit") || "20", 10)));
     const statusFilter = c.req.query("status");
-    const typeFilter = c.req.query("type");
     const offset = (page - 1) * limit;
 
     const conditions = [eq(AsyncTask.library_id, library.id)];
-    if (
-        statusFilter &&
-        statusFilter !== "ALL" &&
-        statusFilter !== "undefined" &&
-        Object.values(AsyncTaskStatus).includes(statusFilter as AsyncTaskStatus)
-    ) {
+    if (statusFilter && Object.values(AsyncTaskStatus).includes(statusFilter as AsyncTaskStatus)) {
         conditions.push(eq(AsyncTask.status, statusFilter as AsyncTaskStatus));
-    }
-    if (
-        typeFilter &&
-        typeFilter !== "ALL" &&
-        typeFilter !== "undefined" &&
-        Object.values(AsyncTaskType).includes(typeFilter as AsyncTaskType)
-    ) {
-        conditions.push(eq(AsyncTask.type, typeFilter as AsyncTaskType));
     }
 
     const whereClause = and(...conditions);
@@ -199,7 +185,7 @@ jobsApp.get("/list", requireAuth, validate("query", LibraryQuerySchema), async (
     );
 });
 
-// GET /api/jobs/stats?library_id - Task and unit counts of a library
+// GET /api/jobs/stats?library_id - Master task counts of a library, by status
 jobsApp.get("/stats", requireAuth, validate("query", LibraryQuerySchema), async (c) => {
     const user = c.get("user");
     if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
@@ -207,46 +193,17 @@ jobsApp.get("/stats", requireAuth, validate("query", LibraryQuerySchema), async 
     const library = await ownedLibrary(user.id, c.req.valid("query").library_id);
     if (!library) return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
 
-    const inLibrary = eq(AsyncTask.library_id, library.id);
-    const [tasks] = await db
-        .select({
-            total: count(),
-            running: sql<number>`(count(*) FILTER (WHERE ${AsyncTask.status} = ${AsyncTaskStatus.RUNNING}))::int`,
-            failed: sql<number>`(count(*) FILTER (WHERE ${AsyncTask.status} = ${AsyncTaskStatus.FAILED}))::int`,
-            completed: sql<number>`(count(*) FILTER (WHERE ${AsyncTask.status} = ${AsyncTaskStatus.COMPLETED}))::int`,
-        })
+    const rows = await db
+        .select({ status: AsyncTask.status, count: count() })
         .from(AsyncTask)
-        .where(inLibrary);
-    const unitCount = (status: AsyncTaskUnitStatus) => sql<number>`(count(*) FILTER (WHERE ${AsyncTaskUnit.status} = ${status}))::int`;
-    const [units] = await db
-        .select({
-            total: count(),
-            running: unitCount(AsyncTaskUnitStatus.RUNNING),
-            pending: unitCount(AsyncTaskUnitStatus.PENDING),
-            succeeded: unitCount(AsyncTaskUnitStatus.SUCCEEDED),
-            failed: unitCount(AsyncTaskUnitStatus.FAILED),
-        })
-        .from(AsyncTaskUnit)
-        .innerJoin(AsyncTask, eq(AsyncTask.id, AsyncTaskUnit.task_id))
-        .where(inLibrary);
+        .where(eq(AsyncTask.library_id, library.id))
+        .groupBy(AsyncTask.status);
 
-    return c.json(
-        success(Code.SUCCESS, {
-            tasks: {
-                total: Number(tasks?.total ?? 0),
-                running: tasks?.running ?? 0,
-                failed: tasks?.failed ?? 0,
-                completed: tasks?.completed ?? 0,
-            },
-            units: {
-                total: Number(units?.total ?? 0),
-                running: units?.running ?? 0,
-                pending: units?.pending ?? 0,
-                succeeded: units?.succeeded ?? 0,
-                failed: units?.failed ?? 0,
-            },
-        }),
-    );
+    const statuses = Object.fromEntries(Object.values(AsyncTaskStatus).map((status) => [status, 0])) as Record<AsyncTaskStatus, number>;
+    for (const row of rows) statuses[row.status] = Number(row.count);
+    const total = rows.reduce((sum, row) => sum + Number(row.count), 0);
+
+    return c.json(success(Code.SUCCESS, { total, statuses }));
 });
 
 // POST /api/jobs/units/batch-retry - Bulk units re-enqueue
