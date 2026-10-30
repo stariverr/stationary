@@ -66,7 +66,7 @@ When database foreign keys are disabled, the application layer must enforce refe
 To prevent accidental data loss and guarantee file consistency, the deletion flow is split into two phases:
 - **Move to Recycle Bin (Soft Delete)**: The initial delete of a `Post` or `Media` marks the record as deleted by setting `delete_status = DeleteStatus.DELETED` and setting `delete_time`. Associated `Track` and owned `File` rows are updated to `DELETED` in the same transaction; physical S3 objects are handled later by the purge worker.
 - **Purge Recycle Bin (Hard Delete / Purge via Cron)**:
-  1. A scheduled cron job `/purge-expired-files` runs every day to fetch `File` records that have been in the `DELETED` status for more than 30 days.
+  1. A scheduled cron job calls `POST /api/task/purge-expired-files` with `Authorization: Bearer <CRON_SECRET>` every day to fetch `File` records that have been in the `DELETED` status for more than 30 days.
   2. For each expired `File`, the background worker deletes the S3 object and then removes the corresponding database row. The File is not reused by another business record.
   3. This soft-deletion state machine guarantees S3 and DB consistency for the owning business record.
 

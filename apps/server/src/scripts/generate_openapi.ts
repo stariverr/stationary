@@ -1226,7 +1226,7 @@ const routes: RouteItem[] = [
         method: "post",
         summary: "Clean up deleted but expired files",
         tags: ["Task"],
-        requiresAuth: false,
+        requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
     {

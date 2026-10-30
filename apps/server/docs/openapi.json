@@ -3047,7 +3047,6 @@
                                   "status": {
                                     "enum": [
                                       "PENDING",
-                                      "IN_PROGRESS",
                                       "COMPLETED",
                                       "FAILED"
                                     ],
@@ -4988,7 +4987,6 @@
                             "status": {
                               "enum": [
                                 "PENDING",
-                                "IN_PROGRESS",
                                 "COMPLETED",
                                 "FAILED"
                               ],
@@ -7703,8 +7701,36 @@
                 }
               }
             }
+          },
+          "401": {
+            "description": "Unauthorized / Not logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 40101
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    }
+                  }
+                }
+              }
+            }
           }
-        }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ]
       }
     },
     "/api/task/scan-missing-covers": {

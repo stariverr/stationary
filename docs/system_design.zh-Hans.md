@@ -66,7 +66,7 @@ erDiagram
 为提供数据可恢复性并保证物理资产的一致性，删除流程分为两阶段：
 - **进入回收站（软删除）**：`Post` 或 `Media` 的首次删除操作被定义为“软删除”。在表中将 `delete_status` 设置为 `DeleteStatus.DELETED`，并标记删除时间。对应的 Track 和其所属 File 会在同一事务中进入删除状态，S3 对象仍由后续 purge 任务处理。
 - **清空回收站 (异步硬删除/Purge via Cron)**：
-  1. 系统后台配置了一个定时任务 `/purge-expired-files`（例如每日运行）。
+  1. 系统后台配置了一个定时任务（例如每日运行），携带 `Authorization: Bearer <CRON_SECRET>` 调用 `POST /api/task/purge-expired-files`。
   2. 该任务检索已被标记为 `DELETED` 且超过 30 天的 `File` 记录。
   3. 针对每个已过期的 `File`，先删除 S3 物理对象，再删除对应的数据库记录。File 不会被其他业务记录复用。
   4. 这种软删除状态机确保 S3 物理资源与所属业务记录保持一致。

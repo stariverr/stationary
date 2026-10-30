@@ -5,7 +5,7 @@ import { env } from "@/global/env";
 import { IngestPipeline } from "@/features/ingest/pipeline";
 import { Code } from "@/lib/code";
 import { error, success } from "@/lib/response";
-import { AuthEnv, ownedLibrary, requireAuth } from "@/lib/auth/middleware";
+import { AuthEnv, ownedLibrary, requireAuth, requireCronSecret } from "@/lib/auth/middleware";
 import { db } from "@/global/db";
 import {
     File as DbFile,
@@ -80,7 +80,7 @@ taskApp.post("/create", requireAuth, validate("json", CreateTaskSchema), async (
 });
 
 // Cron endpoint to purge expired soft-deleted files
-taskApp.post("/purge-expired-files", async (c) => {
+taskApp.post("/purge-expired-files", requireCronSecret, async (c) => {
     const thirtyDaysAgo = Temporal.Now.instant().subtract({ hours: 30 * 24 });
     const BATCH_SIZE = 500;
 

@@ -154,6 +154,7 @@ kubectl create secret generic stationary-secrets -n stationary \
   --from-literal=REDIS_URL="redis://..." \
   --from-literal=AUTH_SECRET="..." \
   --from-literal=SECRETS_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
+  --from-literal=CRON_SECRET="$(openssl rand -hex 32)" \
   --from-literal=RESEND_API_KEY="..." \
   --from-literal=RESEND_EMAIL_SENDER="..." \
   --from-literal=S3_ENDPOINT="..." \

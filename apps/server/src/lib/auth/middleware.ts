@@ -1,6 +1,9 @@
 import { Context, Next } from "hono";
+import { bearerAuth } from "hono/bearer-auth";
+import { timingSafeEqual } from "hono/utils/buffer";
 import { auth } from "./index";
 import { db } from "@/global/db";
+import { env } from "@/global/env";
 import { User, ExternalApiToken } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { Code } from "@/lib/code";
@@ -98,3 +101,16 @@ export const requireAuth = async (c: Context<AuthEnv>, next: Next) => {
     c.set("apiToken", apiToken);
     return next();
 };
+
+const cronAuthFailure = { message: error(Code.UNAUTHORIZED, "Unauthorized") };
+
+/**
+ * Guards routes called by a scheduler rather than a user (Authorization: Bearer <CRON_SECRET>).
+ * Every request is refused while CRON_SECRET is unset, in all environments.
+ */
+export const requireCronSecret = bearerAuth({
+    verifyToken: (token) => !!env.CRON_SECRET && timingSafeEqual(env.CRON_SECRET, token),
+    noAuthenticationHeader: cronAuthFailure,
+    invalidAuthenticationHeader: cronAuthFailure,
+    invalidToken: cronAuthFailure,
+});
