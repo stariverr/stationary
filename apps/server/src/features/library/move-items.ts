@@ -29,19 +29,13 @@ export const getAttachedMediaIds = (media: Pick<typeof Media.$inferSelect, "id" 
 
 export async function moveLibraryItems(input: LibraryMoveItemsInput, auth: LibraryMoveAuth) {
     const [targetLibrary] = await db
-        .select({ id: Library.id, owner_id: Library.owner_id })
+        .select({ id: Library.id })
         .from(Library)
-        .where(and(eq(Library.id, input.target_library_id), eq(Library.delete_status, DeleteStatus.ACTIVE)))
+        .where(and(eq(Library.id, input.target_library_id), eq(Library.owner_id, auth.ownerId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
         .limit(1);
 
-    if (!targetLibrary) {
+    if (!targetLibrary || (auth.scopedLibraryId && auth.scopedLibraryId !== input.target_library_id)) {
         throw new LibraryMoveError("NOT_FOUND", "Target library not found");
-    }
-    if (targetLibrary.owner_id !== auth.ownerId) {
-        throw new LibraryMoveError("FORBIDDEN", "You do not have access to the target library");
-    }
-    if (auth.scopedLibraryId && auth.scopedLibraryId !== input.target_library_id) {
-        throw new LibraryMoveError("FORBIDDEN", "API token scope restricted to another library");
     }
 
     const moved = await db.transaction(async (tx) => {
@@ -75,11 +69,18 @@ export async function moveLibraryItems(input: LibraryMoveItemsInput, auth: Libra
         ]);
         if (sourceLibraryIds.length > 0) {
             const sourceLibraries = await tx
-                .select({ owner_id: Library.owner_id })
+                .select({ id: Library.id })
                 .from(Library)
-                .where(and(inArray(Library.id, sourceLibraryIds), eq(Library.delete_status, DeleteStatus.ACTIVE)));
-            if (sourceLibraries.length !== sourceLibraryIds.length || sourceLibraries.some((library) => library.owner_id !== auth.ownerId)) {
-                throw new LibraryMoveError("FORBIDDEN", "You do not have access to all source libraries");
+                .where(
+                    and(
+                        inArray(Library.id, sourceLibraryIds),
+                        eq(Library.owner_id, auth.ownerId),
+                        eq(Library.delete_status, DeleteStatus.ACTIVE),
+                    ),
+                );
+            const outOfScope = auth.scopedLibraryId && sourceLibraryIds.some((libraryId) => libraryId !== auth.scopedLibraryId);
+            if (sourceLibraries.length !== sourceLibraryIds.length || outOfScope) {
+                throw new LibraryMoveError("NOT_FOUND", "One or more items were not found");
             }
         }
 

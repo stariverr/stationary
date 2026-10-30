@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { db } from "@/global/db";
 import * as v from "valibot";
 import { validate } from "@/lib/validation/validator";
@@ -82,6 +82,18 @@ export const LibraryCoverConfigBodySchema = v.object({
     ),
 });
 
+/** Resolves a library the caller owns and its API token may reach; a miss stays a 404 so it never reveals that the library exists. */
+async function ownedLibrary(c: Context<AuthEnv>, userId: string, libraryId: string) {
+    const scopedLibraryId = c.get("apiToken")?.library_id;
+    if (scopedLibraryId && scopedLibraryId !== libraryId) return null;
+    const [library] = await db
+        .select()
+        .from(Library)
+        .where(and(eq(Library.id, libraryId), eq(Library.owner_id, userId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
+        .limit(1);
+    return library ?? null;
+}
+
 function maskKey(key: string | null | undefined): string | null {
     if (!key) return null;
     if (key.length <= 8) return "********";
@@ -89,13 +101,20 @@ function maskKey(key: string | null | undefined): string | null {
 }
 
 router.get("/list", requireAuth, validate("query", LibraryListQuerySchema), async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+
     const query = c.req.valid("query");
     const page = query.page ?? 1;
     const pageSize = query.count ?? 20;
     const offset = (page - 1) * pageSize;
     const { keyword } = query;
 
-    const where: SQL[] = [eq(Library.delete_status, DeleteStatus.ACTIVE)];
+    const where: SQL[] = [eq(Library.owner_id, user.id), eq(Library.delete_status, DeleteStatus.ACTIVE)];
+    const scopedLibraryId = c.get("apiToken")?.library_id;
+    if (scopedLibraryId) {
+        where.push(eq(Library.id, scopedLibraryId));
+    }
     if (keyword) {
         where.push(ilike(Library.name, `%${keyword}%`));
     }
@@ -126,6 +145,9 @@ router.post("/create", requireAuth, validate("json", LibraryCreateBodySchema), a
     if (!user) {
         return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
     }
+    if (c.get("apiToken")?.library_id) {
+        return c.json(error(Code.FORBIDDEN, "Library-scoped API tokens cannot create libraries"), 403);
+    }
 
     const newLib = await db
         .insert(Library)
@@ -140,11 +162,14 @@ router.post("/create", requireAuth, validate("json", LibraryCreateBodySchema), a
 });
 
 router.post("/update", requireAuth, validate("json", LibraryUpdateBodySchema), async (c) => {
-    const body = c.req.valid("json");
-    const { id, ...updateData } = body;
-    const updated = await db.update(Library).set(updateData).where(eq(Library.id, id)).returning();
+    const user = c.get("user");
+    if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
 
-    if (updated.length === 0) return c.json(error(Code.NOT_FOUND, "Library not found"));
+    const { id, ...updateData } = c.req.valid("json");
+    const library = await ownedLibrary(c, user.id, id);
+    if (!library) return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
+
+    const updated = await db.update(Library).set(updateData).where(eq(Library.id, id)).returning();
     return c.json(success(Code.SUCCESS, updated[0]));
 });
 
@@ -165,9 +190,6 @@ router.post("/delete/:id", requireAuth, validate("param", LibraryIdParamSchema),
         if (cause instanceof LibraryDeleteError) {
             if (cause.kind === "NOT_FOUND") {
                 return c.json(error(Code.NOT_FOUND, cause.message), 404);
-            }
-            if (cause.kind === "FORBIDDEN") {
-                return c.json(error(Code.FORBIDDEN, cause.message), 403);
             }
             if (cause.kind === "NOT_EMPTY") {
                 return c.json(error(Code.LIBRARY_NOT_EMPTY, "Please empty posts and media in this library before deleting it."), 400);
@@ -195,9 +217,6 @@ router.post("/move-items", requireAuth, validate("json", LibraryMoveItemsBodySch
             if (cause.kind === "NOT_FOUND") {
                 return c.json(error(Code.NOT_FOUND, cause.message), 404);
             }
-            if (cause.kind === "FORBIDDEN") {
-                return c.json(error(Code.FORBIDDEN, cause.message), 403);
-            }
             return c.json(error(Code.INVALID_PARAMETER, cause.message), 400);
         }
 
@@ -218,11 +237,8 @@ router.post(
         const { id } = c.req.valid("param");
         const body = c.req.valid("json");
 
-        const library = await db.query.Library.findFirst({
-            where: { id },
-        });
+        const library = await ownedLibrary(c, user.id, id);
         if (!library) return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
-        if (library.owner_id !== user.id) return c.json(error(Code.UNAUTHORIZED, "Unauthorized access to library"), 403);
 
         const sourceType = body.type === "MANUAL" ? "MANUAL" : "RECONCILE";
         const qualities = body.qualities || (library.cover_qualities as Quality[]) || [Quality.LOW, Quality.MEDIUM];
@@ -259,11 +275,8 @@ router.get("/:id/cover-jobs/active", requireAuth, validate("param", LibraryIdPar
 
     const { id } = c.req.valid("param");
 
-    const library = await db.query.Library.findFirst({
-        where: { id: id },
-    });
+    const library = await ownedLibrary(c, user.id, id);
     if (!library) return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
-    if (library.owner_id !== user.id) return c.json(error(Code.UNAUTHORIZED, "Unauthorized access to library"), 403);
 
     const activeTasks = await db
         .select()
@@ -298,11 +311,8 @@ router.get("/:id/cover-config", requireAuth, validate("param", LibraryIdParamSch
 
     const { id } = c.req.valid("param");
 
-    const library = await db.query.Library.findFirst({
-        where: { id: id },
-    });
+    const library = await ownedLibrary(c, user.id, id);
     if (!library) return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
-    if (library.owner_id !== user.id) return c.json(error(Code.UNAUTHORIZED, "Unauthorized access to library"), 403);
 
     const rawQualities = library.cover_qualities;
     const qualities = Array.isArray(rawQualities) ? rawQualities : [Quality.LOW, Quality.MEDIUM];
@@ -328,11 +338,8 @@ router.put(
         const { id } = c.req.valid("param");
         const body = c.req.valid("json");
 
-        const library = await db.query.Library.findFirst({
-            where: { id },
-        });
+        const library = await ownedLibrary(c, user.id, id);
         if (!library) return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
-        if (library.owner_id !== user.id) return c.json(error(Code.UNAUTHORIZED, "Unauthorized access to library"), 403);
 
         // Check whether the new qualities are different from the old ones
         const oldQualities = (library.cover_qualities as Quality[]) || [];

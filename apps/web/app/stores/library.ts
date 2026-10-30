@@ -41,15 +41,13 @@ export const useLibraryStore = defineStore("library", () => {
 
     const libraries = computed(() => librariesData.value || []);
 
-    // Set default library on client if none selected
+    // Once loaded, fall back to the first library if the stored selection is empty or no longer accessible
     if (import.meta.client) {
         watch(
-            libraries,
+            librariesData,
             (newLibraries) => {
-                const firstLibrary = newLibraries[0];
-                if (firstLibrary && !activeLibraryId.value) {
-                    activeLibraryId.value = firstLibrary.id;
-                }
+                if (!newLibraries || newLibraries.some((l) => l.id === activeLibraryId.value)) return;
+                activeLibraryId.value = newLibraries[0]?.id ?? null;
             },
             { immediate: true },
         );

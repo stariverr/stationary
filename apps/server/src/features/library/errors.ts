@@ -1,4 +1,4 @@
-export type LibraryMoveErrorKind = "FORBIDDEN" | "NOT_FOUND" | "INVALID_PARAMETER";
+export type LibraryMoveErrorKind = "NOT_FOUND" | "INVALID_PARAMETER";
 
 export class LibraryMoveError extends Error {
     constructor(
@@ -10,7 +10,7 @@ export class LibraryMoveError extends Error {
     }
 }
 
-export type LibraryDeleteErrorKind = "FORBIDDEN" | "NOT_FOUND" | "NOT_EMPTY" | "INTERNAL";
+export type LibraryDeleteErrorKind = "NOT_FOUND" | "NOT_EMPTY" | "INTERNAL";
 
 export class LibraryDeleteError extends Error {
     constructor(

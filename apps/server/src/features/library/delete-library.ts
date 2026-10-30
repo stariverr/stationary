@@ -45,19 +45,13 @@ export async function deleteLibrary(libraryId: string, auth: LibraryDeleteAuth) 
     try {
         return await db.transaction(async (tx) => {
             const [library] = await tx
-                .select({ id: Library.id, owner_id: Library.owner_id, cover_file_id: Library.cover_file_id })
+                .select({ id: Library.id, cover_file_id: Library.cover_file_id })
                 .from(Library)
-                .where(and(eq(Library.id, libraryId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
+                .where(and(eq(Library.id, libraryId), eq(Library.owner_id, auth.ownerId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
                 .limit(1);
 
-            if (!library) {
+            if (!library || (auth.scopedLibraryId && auth.scopedLibraryId !== libraryId)) {
                 throw new LibraryDeleteError("NOT_FOUND", "Library not found");
-            }
-            if (library.owner_id !== auth.ownerId) {
-                throw new LibraryDeleteError("FORBIDDEN", "You do not have access to this library");
-            }
-            if (auth.scopedLibraryId && auth.scopedLibraryId !== libraryId) {
-                throw new LibraryDeleteError("FORBIDDEN", "API token scope restricted to another library");
             }
 
             if (await hasLibraryContent(libraryId, tx)) {
