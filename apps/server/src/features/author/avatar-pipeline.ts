@@ -3,8 +3,8 @@ import { Author, DeleteStatus, File } from "@/db/schema";
 import { db } from "@/global/db";
 import { env } from "@/global/env";
 import { s3 } from "@/global/s3";
-import type { PipelineHandler } from "@/infra/queue/types";
-import { downloadStream, getBodyLength, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
+import type { SubjectPipelineHandler } from "@/infra/queue/types";
+import { DownloadStatusError, downloadStream, getBodyLength, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
 
 type AvatarSource = Pick<typeof Author.$inferSelect, "avatar_source_url" | "avatar_source_file_id">;
 
@@ -26,7 +26,7 @@ const failedAuthors = (libraryIds: readonly string[]) =>
         inArray(Author.library_id, [...libraryIds]),
         eq(Author.delete_status, DeleteStatus.ACTIVE),
         isNotNull(Author.avatar_error),
-        sql`${Author.avatar_error_origin} = ${wantedOrigin}`,
+        sql`coalesce(${Author.avatar_error_origin}, ${wantedOrigin}) = ${wantedOrigin}`,
     );
 
 const activeAuthor = (authorId: string) => and(eq(Author.id, authorId), eq(Author.delete_status, DeleteStatus.ACTIVE));
@@ -45,7 +45,7 @@ interface StoredAvatar {
  * `avatar`: makes an author's avatar file come from its wanted source. Ingest sets a remote URL, which is downloaded;
  * moving a post to another library sets the source author's file, which is copied so each author owns its file.
  */
-export const avatarPipeline: PipelineHandler = {
+export const avatarPipeline: SubjectPipelineHandler = {
     async reconcile(ctx) {
         const [author] = await db.select().from(Author).where(activeAuthor(ctx.subjectId)).limit(1);
         if (!author) return { kind: "done" };
@@ -59,7 +59,7 @@ export const avatarPipeline: PipelineHandler = {
                 .from(File)
                 .where(and(eq(File.id, author.avatar_source_file_id), eq(File.delete_status, DeleteStatus.ACTIVE)))
                 .limit(1);
-            if (!source) return { kind: "failed", error: "The avatar file to copy no longer exists" };
+            if (!source) return { kind: "rejected", error: "The avatar file to copy no longer exists" };
             const extension = source.extension || "bin";
             const path = avatarPath(author.id, extension);
             await s3.copy(source.path, path, { bucket: source.bucket, signal: ctx.signal });
@@ -72,7 +72,13 @@ export const avatarPipeline: PipelineHandler = {
             };
         } else {
             const url = author.avatar_source_url!;
-            const response = await downloadStream(url, { signal: ctx.signal });
+            let response;
+            try {
+                response = await downloadStream(url, { signal: ctx.signal });
+            } catch (error) {
+                if (error instanceof DownloadStatusError && error.rejected) return { kind: "rejected", error: error.message };
+                throw error;
+            }
             if (!response?.body) throw new Error(`Download of ${url} returned no body`);
             const mimeType = response.headers.get("Content-Type") || "application/octet-stream";
             const size = getBodyLength(response) ?? null;
@@ -125,7 +131,7 @@ export const avatarPipeline: PipelineHandler = {
         return { kind: "done" };
     },
 
-    async recordFailure(tx, authorId, error) {
+    async recordFailure(tx, { subjectId: authorId, error, rejected }) {
         const [author] = await tx
             .select({ avatar_source_url: Author.avatar_source_url, avatar_source_file_id: Author.avatar_source_file_id })
             .from(Author)
@@ -134,7 +140,7 @@ export const avatarPipeline: PipelineHandler = {
         if (!author) return;
         await tx
             .update(Author)
-            .set({ avatar_error: error, avatar_error_origin: avatarOrigin(author), update_time: Temporal.Now.instant() })
+            .set({ avatar_error: error, avatar_error_origin: rejected ? avatarOrigin(author) : null, update_time: Temporal.Now.instant() })
             .where(activeAuthor(authorId));
     },
 

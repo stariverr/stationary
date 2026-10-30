@@ -1,4 +1,5 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
+import type { PgColumn } from "drizzle-orm/pg-core";
 import { JobQueue } from "@/db/schema";
 import { db, type DbClient, type Transaction } from "@/global/db";
 import { LEASE_SECONDS } from "@/infra/queue/policy";
@@ -18,7 +19,7 @@ export interface ClaimedRow {
     readonly subjectId: string;
     readonly libraryId: string;
     readonly leaseToken: string;
-    /** Failed attempts before this one. */
+    /** This run's attempt, starting at 1. Counted at claim, so a run that dies without settling counts too. */
     readonly attempts: number;
     readonly cursor: string | null;
 }
@@ -35,6 +36,11 @@ export class LeaseLostError extends Error {
 
 const leased = sql`(${JobQueue.lease_token} IS NOT NULL AND ${JobQueue.lease_expires_at} > now())`;
 
+/** `column = ANY(ids)` with the ids bound as one array, so a request is not limited to 65,535 bind parameters. */
+export function isAnyOf(column: PgColumn, ids: readonly string[]): SQL {
+    return sql`${column} = ANY(${sql.param([...ids])}::${sql.raw(column.getSQLType())}[])`;
+}
+
 function holds(lease: Lease) {
     return and(eq(JobQueue.pipeline, lease.pipeline), eq(JobQueue.subject_id, lease.subjectId), eq(JobQueue.lease_token, lease.leaseToken));
 }
@@ -49,7 +55,24 @@ function holds(lease: Lease) {
  */
 export type EnqueueMode = "change" | "scan" | "absent";
 
-/** The NOTIFY is transactional, so workers wake only once the caller's transaction commits. */
+const ON_CONFLICT: Record<EnqueueMode, SQL> = {
+    absent: sql`DO NOTHING`,
+    scan: sql`DO UPDATE SET
+        priority = greatest(job_queue.priority, excluded.priority),
+        dirty = job_queue.dirty OR ${leased}`,
+    change: sql`DO UPDATE SET
+        library_id = excluded.library_id,
+        priority = greatest(job_queue.priority, excluded.priority),
+        dirty = job_queue.dirty OR ${leased},
+        available_at = CASE WHEN ${leased} THEN job_queue.available_at ELSE now() END,
+        attempts = CASE WHEN ${leased} THEN job_queue.attempts ELSE 0 END,
+        cursor = CASE WHEN ${leased} THEN job_queue.cursor ELSE NULL END`,
+};
+
+/**
+ * The rows are bound as one array per column, so their number is not limited by the protocol's bind parameters.
+ * The NOTIFY is transactional, so workers wake only once the caller's transaction commits.
+ */
 export async function enqueue(client: DbClient, rows: readonly EnqueueRow[], mode: EnqueueMode = "change"): Promise<void> {
     const unique = new Map<string, EnqueueRow>();
     for (const row of rows) {
@@ -60,56 +83,45 @@ export async function enqueue(client: DbClient, rows: readonly EnqueueRow[], mod
     if (unique.size === 0) return;
 
     // Sorted so concurrent enqueues lock rows in the same order.
-    const values = [...unique.values()]
-        .sort((a, b) => a.pipeline.localeCompare(b.pipeline) || a.subjectId.localeCompare(b.subjectId))
-        .map((row) => ({ pipeline: row.pipeline, subject_id: row.subjectId, library_id: row.libraryId, priority: row.priority }));
+    const sorted = [...unique.values()].sort((a, b) => a.pipeline.localeCompare(b.pipeline) || a.subjectId.localeCompare(b.subjectId));
 
-    const insert = client.insert(JobQueue).values(values);
-    if (mode === "absent") {
-        await insert.onConflictDoNothing();
-    } else if (mode === "scan") {
-        await insert.onConflictDoUpdate({
-            target: [JobQueue.pipeline, JobQueue.subject_id],
-            set: {
-                priority: sql`greatest(${JobQueue.priority}, excluded.priority)`,
-                dirty: sql`${JobQueue.dirty} OR ${leased}`,
-            },
-        });
-    } else {
-        await insert.onConflictDoUpdate({
-            target: [JobQueue.pipeline, JobQueue.subject_id],
-            set: {
-                library_id: sql`excluded.library_id`,
-                priority: sql`greatest(${JobQueue.priority}, excluded.priority)`,
-                dirty: sql`${JobQueue.dirty} OR ${leased}`,
-                available_at: sql`CASE WHEN ${leased} THEN ${JobQueue.available_at} ELSE now() END`,
-                attempts: sql`CASE WHEN ${leased} THEN ${JobQueue.attempts} ELSE 0 END`,
-                cursor: sql`CASE WHEN ${leased} THEN ${JobQueue.cursor} ELSE NULL END`,
-            },
-        });
-    }
+    await client.execute(sql`
+        INSERT INTO job_queue (pipeline, subject_id, library_id, priority)
+        SELECT * FROM unnest(
+            ${sql.param(sorted.map((row) => row.pipeline))}::text[],
+            ${sql.param(sorted.map((row) => row.subjectId))}::text[],
+            ${sql.param(sorted.map((row) => row.libraryId))}::uuid[],
+            ${sql.param(sorted.map((row) => row.priority))}::smallint[]
+        )
+        ON CONFLICT (pipeline, subject_id) ${ON_CONFLICT[mode]}
+    `);
     await client.execute(sql`SELECT pg_notify(${QUEUE_CHANNEL}, '')`);
 }
 
-/** Leases up to `limit` due rows, highest priority first. Expired leases are reclaimed here; there is no sweeper. */
-export async function claim(limit: number): Promise<ClaimedRow[]> {
-    const result = await db.execute<{
-        pipeline: string;
-        subject_id: string;
-        library_id: string;
-        lease_token: string;
-        attempts: number;
-        cursor: string | null;
-    }>(sql`
+type ClaimedRecord = {
+    pipeline: string;
+    subject_id: string;
+    library_id: string;
+    lease_token: string;
+    attempts: number;
+    cursor: string | null;
+};
+
+async function claimWhere(filter: SQL, limit: number): Promise<ClaimedRow[]> {
+    if (limit <= 0) return [];
+    const result = await db.execute<ClaimedRecord>(sql`
         WITH picked AS (
             SELECT pipeline, subject_id FROM job_queue
-            WHERE available_at <= now() AND (lease_token IS NULL OR lease_expires_at < now())
+            WHERE available_at <= now() AND (lease_token IS NULL OR lease_expires_at < now()) AND ${filter}
             ORDER BY priority DESC, available_at
             LIMIT ${limit}
             FOR NO KEY UPDATE SKIP LOCKED
         )
         UPDATE job_queue q
-        SET lease_token = gen_random_uuid(), lease_expires_at = now() + make_interval(secs => ${LEASE_SECONDS})
+        SET
+            lease_token = gen_random_uuid(),
+            lease_expires_at = now() + make_interval(secs => ${LEASE_SECONDS}),
+            attempts = q.attempts + 1
         FROM picked
         WHERE q.pipeline = picked.pipeline AND q.subject_id = picked.subject_id
         RETURNING q.pipeline, q.subject_id, q.library_id, q.lease_token, q.attempts, q.cursor
@@ -122,6 +134,19 @@ export async function claim(limit: number): Promise<ClaimedRow[]> {
         attempts: row.attempts,
         cursor: row.cursor,
     }));
+}
+
+/** Leases up to `limit` due rows, highest priority first. Expired leases are reclaimed here; there is no sweeper. */
+export function claim(limit: number): Promise<ClaimedRow[]> {
+    return claimWhere(sql`true`, limit);
+}
+
+/**
+ * Leases up to `limit` more due rows of one queue to batch with a row already claimed. Only rows that have not been
+ * attempted yet: a row that failed or was interrupted is run on its own, so one bad input cannot keep failing a batch.
+ */
+export function claimBatch(pipeline: string, limit: number): Promise<ClaimedRow[]> {
+    return claimWhere(sql`pipeline = ${pipeline} AND attempts = 0`, limit);
 }
 
 export async function renew(lease: Lease, seconds = LEASE_SECONDS): Promise<boolean> {
@@ -172,7 +197,25 @@ export async function defer(lease: Lease, delaySeconds: number): Promise<boolean
         .set({
             lease_token: null,
             lease_expires_at: null,
-            attempts: sql`${JobQueue.attempts} + 1`,
+            available_at: sql`now() + make_interval(secs => ${delaySeconds})`,
+        })
+        .where(holds(lease))
+        .returning({ pipeline: JobQueue.pipeline });
+    return rows.length > 0;
+}
+
+/**
+ * The run could not start yet (a provider at its rate limit): release the row to run after `delaySeconds` and take
+ * its attempt back. A row marked dirty meanwhile reruns now.
+ */
+export async function postpone(lease: Lease, delaySeconds: number): Promise<boolean> {
+    if (await rerun(db, lease)) return true;
+    const rows = await db
+        .update(JobQueue)
+        .set({
+            lease_token: null,
+            lease_expires_at: null,
+            attempts: sql`${JobQueue.attempts} - 1`,
             available_at: sql`now() + make_interval(secs => ${delaySeconds})`,
         })
         .where(holds(lease))
@@ -215,10 +258,22 @@ export async function advance(lease: Lease, cursor: string, client: DbClient = d
 /** Moves the queued rows of subjects that moved to another library, so they count towards it. */
 export async function relocate(client: DbClient, subjectIds: readonly string[], libraryId: string): Promise<void> {
     if (subjectIds.length === 0) return;
-    await client
-        .update(JobQueue)
-        .set({ library_id: libraryId })
-        .where(inArray(JobQueue.subject_id, [...subjectIds]));
+    await client.update(JobQueue).set({ library_id: libraryId }).where(isAnyOf(JobQueue.subject_id, subjectIds));
+}
+
+/** Deletes every row of the given queues, e.g. those of an embedding space that was dropped. */
+export async function deleteQueues(client: DbClient, names: readonly string[]): Promise<void> {
+    if (names.length === 0) return;
+    await client.delete(JobQueue).where(inArray(JobQueue.pipeline, [...names]));
+}
+
+/** Rows of the given queues in a library, scans included; zero once they have settled every subject. */
+export async function countRows(libraryId: string, names: readonly string[]): Promise<number> {
+    const [row] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(JobQueue)
+        .where(and(eq(JobQueue.library_id, libraryId), inArray(JobQueue.pipeline, [...names])));
+    return row?.count ?? 0;
 }
 
 export interface QueueCounts {
@@ -229,7 +284,7 @@ export interface QueueCounts {
     readonly retrying: number;
 }
 
-/** Per library and queue name: rows waiting, rows with a live lease, and rows that already failed at least once. */
+/** Per library and queue name: all rows, rows with a live lease, and rows waiting for another attempt. */
 export async function countQueue(libraryIds: readonly string[]): Promise<QueueCounts[]> {
     if (libraryIds.length === 0) return [];
     const rows = await db
@@ -238,7 +293,7 @@ export async function countQueue(libraryIds: readonly string[]): Promise<QueueCo
             pipeline: JobQueue.pipeline,
             queued: sql<number>`count(*)::int`,
             running: sql<number>`(count(*) FILTER (WHERE ${leased}))::int`,
-            retrying: sql<number>`(count(*) FILTER (WHERE ${JobQueue.attempts} > 0))::int`,
+            retrying: sql<number>`(count(*) FILTER (WHERE ${JobQueue.attempts} > 0 AND NOT ${leased}))::int`,
         })
         .from(JobQueue)
         .where(inArray(JobQueue.library_id, [...libraryIds]))

@@ -3,15 +3,14 @@ import * as v from "valibot";
 import { and, eq, sql } from "drizzle-orm";
 import { AiModel, AiProvider } from "@/db/schema";
 import { getProviderCatalog, matchCatalogModels } from "@/features/ai/catalog";
-import { retryFailedEmbeddings } from "@/features/ai/embedding-queue";
-import { queueLibraryAiEnrichment } from "@/features/ai/queue-enrichment";
+import { processLibraryAi, queueMediaAi } from "@/features/ai/actions";
 import { clearModelBindings, getLibraryBindings, getRolesUsingModel, saveLibraryBindings } from "@/features/ai/bindings";
-import { restartStalledBackfills } from "@/features/ai/embedding-spaces";
+import { requestRedescribe } from "@/features/ai/describe-pipeline";
 import { getLibraryAiStatus } from "@/features/ai/status";
 import { getLibraryAiProgress } from "@/features/ai/coverage";
-import { AiService } from "@/features/ai/service";
-import { classifyAiError, getSafeAiErrorMessage } from "@/features/ai/errors";
-import { UpdateLibraryAiBindingsSchema } from "@/features/ai/schema";
+import { AiService, resetProviderLimits } from "@/features/ai/service";
+import { classifyAiError, getSafeAiErrorMessage, QueueAiError } from "@/features/ai/errors";
+import { QueueAiSchema, UpdateLibraryAiBindingsSchema } from "@/features/ai/schema";
 import {
     AiModelCategorySchema,
     parseModelCapabilities,
@@ -220,6 +219,7 @@ aiRouter.put("/providers/:id", requireAuth, validate("param", IdParamSchema), va
         })
         .where(eq(AiProvider.id, id))
         .returning();
+    if (body.template_id || body.base_url || body.api_key !== undefined) await resetProviderLimits(id);
 
     return c.json(success(Code.SUCCESS, toProviderResponse(updated)));
 });
@@ -534,11 +534,11 @@ aiRouter.post(
             }
         }
 
-        const { indexingStarted } = await saveLibraryBindings(access.library, data);
+        await saveLibraryBindings(access.library, data);
         return c.json(
             success(
                 Code.SUCCESS,
-                { ...(await getLibraryBindings(library_id)), language: data.language ?? access.library.ai_language, indexingStarted },
+                { ...(await getLibraryBindings(library_id)), language: data.language ?? access.library.ai_language },
                 "AI bindings updated successfully",
             ),
         );
@@ -563,24 +563,13 @@ aiRouter.get("/status/:library_id/progress", requireAuth, validate("param", Libr
     return c.json(success(Code.SUCCESS, await getLibraryAiProgress(library_id)));
 });
 
-/**
- * Processes whatever AI search does not cover yet: failed vectors go back to the queue, and a
- * library-wide run fills in missing work and retries failed descriptions. The run reuses stored
- * results, so only missing work reaches a provider. A space held back for low coverage gets the
- * run as its backfill.
- */
+// Processes whatever AI search does not cover yet; stored results are reused, so only missing work reaches a provider.
 aiRouter.post("/status/:library_id/process", requireAuth, validate("param", LibraryParamSchema), async (c) => {
     const { library_id } = c.req.valid("param");
     const access = await loadOwnedLibrary(c, library_id);
     if (access.denied) return access.denied;
 
-    if ((await getLibraryAiProgress(library_id)).task) {
-        return c.json(error(Code.ALREADY_EXISTS, "This library is already being processed"), 409);
-    }
-    await retryFailedEmbeddings(library_id);
-    if ((await restartStalledBackfills(access.library)) === 0) {
-        await queueLibraryAiEnrichment(library_id, access.library.owner_id, { redescribe: false });
-    }
+    await processLibraryAi(library_id);
     return c.json(success(Code.SUCCESS, null, "Processing started"));
 });
 
@@ -590,12 +579,34 @@ aiRouter.post("/status/:library_id/redescribe", requireAuth, validate("param", L
     const access = await loadOwnedLibrary(c, library_id);
     if (access.denied) return access.denied;
 
-    if (!(await AiService.forLibrary(library_id))?.describeTarget) {
+    const target = (await AiService.forLibrary(library_id))?.describeTarget;
+    if (!target) {
         return c.json(error(Code.INVALID_PARAMETER, "No usable describe model is bound to this library"), 400);
     }
-    if ((await getLibraryAiProgress(library_id)).task) {
-        return c.json(error(Code.ALREADY_EXISTS, "This library is already being processed"), 409);
-    }
-    await queueLibraryAiEnrichment(library_id, access.library.owner_id, { redescribe: true });
+    await db.transaction((tx) => requestRedescribe(tx, library_id, target));
     return c.json(success(Code.SUCCESS, null, "Re-describing started"));
+});
+
+// Queues the given media, and the media of the given posts, for AI processing.
+aiRouter.post("/media/process", requireAuth, validate("json", QueueAiSchema), async (c) => {
+    const user = c.get("user");
+    if (!user) {
+        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+    }
+
+    try {
+        const result = await queueMediaAi(c.req.valid("json"), {
+            ownerId: user.id,
+            scopedLibraryId: c.get("apiToken")?.library_id,
+        });
+        return c.json(success(Code.SUCCESS, result));
+    } catch (cause) {
+        if (cause instanceof QueueAiError) {
+            if (cause.kind === "NOT_FOUND") {
+                return c.json(error(Code.NOT_FOUND, cause.message), 404);
+            }
+            return c.json(error(Code.INVALID_PARAMETER, cause.message), 400);
+        }
+        throw cause;
+    }
 });

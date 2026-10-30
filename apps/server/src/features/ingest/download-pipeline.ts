@@ -5,9 +5,9 @@ import { env } from "@/global/env";
 import { getMediaCompletionError, refreshPostSyncStatus } from "@/features/media/composition";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
-import type { PipelineHandler, ReconcileContext } from "@/infra/queue/types";
+import type { ReconcileContext, ReconcileResult, SubjectPipelineHandler } from "@/infra/queue/types";
 import { getErrorMessage } from "@/lib/utils/error";
-import { downloadStream, getBodyLength, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
+import { DownloadStatusError, downloadStream, getBodyLength, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
 import { extractSegmentBase } from "@/lib/utils/mp4-segment";
 import { deriveTrackFormat } from "@/lib/utils/track-format";
 
@@ -19,7 +19,7 @@ const activeMedia = (mediaId: string) =>
 const activeTrack = (track: Pick<TrackRow, "id" | "media_id">) =>
     and(eq(Track.id, track.id), eq(Track.media_id, track.media_id), eq(Track.delete_status, DeleteStatus.ACTIVE));
 
-/** A track still waiting for its remote source; FAILED tracks are retried only when the media is requeued explicitly. */
+/** A track still waiting for its remote source; FAILED tracks were rejected and run only when the media is requeued. */
 const pendingSourceTrack = (failedToo: boolean): SQL =>
     and(
         eq(Track.delete_status, DeleteStatus.ACTIVE),
@@ -146,7 +146,7 @@ const failedMedia = (libraryIds: readonly string[]) =>
  * `download`: fetches the remote sources of a media's content tracks into storage. Once every required track has a
  * file, the media is complete and its content is reported as changed (which queues the cover).
  */
-export const downloadPipeline: PipelineHandler = {
+export const downloadPipeline: SubjectPipelineHandler = {
     async reconcile(ctx) {
         const [media] = await db.select().from(Media).where(activeMedia(ctx.subjectId)).limit(1);
         if (!media) return { kind: "done" };
@@ -166,23 +166,30 @@ export const downloadPipeline: PipelineHandler = {
             });
         }
 
+        let failure: ReconcileResult | undefined;
         for (const track of tracks) {
             try {
                 await downloadTrack(ctx, media, track);
             } catch (error) {
                 if (ctx.signal.aborted) throw error;
+                const rejected = error instanceof DownloadStatusError && error.rejected;
                 const message = getErrorMessage(error);
                 await db.transaction(async (tx) => {
                     await ctx.fence(tx);
                     await tx
                         .update(Track)
-                        .set({ sync_status: SyncStatus.FAILED, last_error: message, update_time: Temporal.Now.instant() })
+                        .set({
+                            sync_status: rejected ? SyncStatus.FAILED : SyncStatus.PENDING,
+                            last_error: message,
+                            update_time: Temporal.Now.instant(),
+                        })
                         .where(activeTrack(track));
-                    await setMediaFailed(tx, media, message);
                 });
-                throw error;
+                // Any track that may still work keeps the media retrying.
+                if (!failure || !rejected) failure = { kind: rejected ? "rejected" : "retry", error: message };
             }
         }
+        if (failure) return failure;
 
         await db.transaction(async (tx) => {
             await ctx.fence(tx);
@@ -203,7 +210,7 @@ export const downloadPipeline: PipelineHandler = {
         return { kind: "done" };
     },
 
-    async recordFailure(tx, mediaId, error) {
+    async recordFailure(tx, { subjectId: mediaId, error }) {
         const [media] = await tx.select({ id: Media.id, post_id: Media.post_id }).from(Media).where(activeMedia(mediaId)).limit(1);
         if (media) await setMediaFailed(tx, media, error);
     },

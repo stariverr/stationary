@@ -195,6 +195,22 @@ function createResumableStream(
     });
 }
 
+/** A source server answered a download with an error status. */
+export class DownloadStatusError extends Error {
+    constructor(
+        readonly status: number,
+        url: string,
+    ) {
+        super(`Failed to download media from ${url}: ${status}`);
+        this.name = "DownloadStatusError";
+    }
+
+    /** A 4xx says the URL itself is at fault, apart from the statuses that ask to try again later. */
+    get rejected(): boolean {
+        return this.status >= 400 && this.status < 500 && ![408, 425, 429].includes(this.status);
+    }
+}
+
 /**
  * Byte length of the body `fetch` hands back, or undefined when it is unknown.
  * `fetch` decodes any Content-Encoding (gzip, br, ...) while Content-Length keeps the encoded size,
@@ -249,9 +265,7 @@ export async function downloadStream(
         }
 
         if (!initialRes.ok) {
-            const errorMsg = `Failed to download media from ${url}: ${initialRes.status}`;
-            console.error(errorMsg);
-            throw new Error(errorMsg);
+            throw new DownloadStatusError(initialRes.status, url);
         }
 
         if (!initialRes.body) {

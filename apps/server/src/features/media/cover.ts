@@ -34,14 +34,6 @@ export interface GenerateCoverParams {
     beforePersist?: (tx: Transaction) => Promise<void>;
 }
 
-/** FFmpeg could not render the source; retrying the same source will not help. */
-export class CoverRenderError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = "CoverRenderError";
-    }
-}
-
 export const coverVariantKey = (quality: Quality) => `cover:${quality.toLowerCase()}:recipe:${RECIPE_VERSION}`;
 
 export const coverPriority = (quality: Quality) => (quality === Quality.LOW ? 10 : quality === Quality.MEDIUM ? 20 : 30);
@@ -120,7 +112,7 @@ export const CoverService = {
      * cover files are marked deleted; cover tracks of other qualities are left alone.
      *
      * Returns false without storing anything when the media was recycled or deleted, or the source track no longer
-     * holds the source file, meanwhile. Throws CoverRenderError when FFmpeg fails on the source.
+     * holds the source file, meanwhile. Throws UndecodableSourceError when the source cannot be decoded.
      */
     async generateCover({ media, quality, source, signal, beforePersist }: GenerateCoverParams): Promise<boolean> {
         const sourceUrlForFFmpeg = await s3.getPresignedUrl(source.filePath, {
@@ -130,12 +122,7 @@ export const CoverService = {
 
         const renderMediaType = source.track.type === TrackType.VIDEO ? MediaType.VIDEO : MediaType.IMAGE;
 
-        let renderResult;
-        try {
-            renderResult = await renderCoverFrame(sourceUrlForFFmpeg, renderMediaType, quality);
-        } catch (err) {
-            throw new CoverRenderError(err instanceof Error ? err.message : String(err));
-        }
+        const renderResult = await renderCoverFrame(sourceUrlForFFmpeg, renderMediaType, quality);
         signal?.throwIfAborted();
 
         const qualityLower = quality.toLowerCase();

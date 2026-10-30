@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { isSupportedLanguage, languageName, normalizeImageAiMetadata } from "@/features/ai/image-metadata";
 import { parseModelCapabilities, supportsAiBindingRole } from "@/features/ai/model-schema";
 import { adapterSupportsModel } from "@/features/ai/provider-templates";
-import { buildSearchContent, canReuseDescription } from "@/features/ai/enrich";
+import { canReuseDescription } from "@/features/ai/describe-pipeline";
+import { buildSearchContent } from "@/features/ai/search-document";
 import { escapeLikePattern, HybridSearchService, splitSearchTerms } from "@/features/ai/search";
 import { CohereRerankProvider } from "@/features/ai/providers/cohere-rerank";
 import type { ResolvedModelConfig } from "@/features/ai/types";
@@ -155,7 +156,7 @@ describe("reciprocal rank fusion", () => {
 
 describe("reusing a stored description", () => {
     const target = { model: "new-model", promptVersion: "v2", language: "zh-Hans" };
-    const stored = { input_hash: "h", model: "old-model", prompt_version: "v2", language: "zh-Hans" };
+    const stored = { input_hash: "h", language: "zh-Hans", is_stale: false };
 
     it("keeps a description of the same image, whichever model wrote it", () => {
         expect(canReuseDescription(stored, "h", target)).toBe(true);
@@ -167,16 +168,12 @@ describe("reusing a stored description", () => {
         expect(canReuseDescription(stored, null, target)).toBe(false);
     });
 
-    it("keeps a description of an older prompt version, but not one in another language", () => {
-        expect(canReuseDescription({ ...stored, prompt_version: "v1" }, "h", target)).toBe(true);
+    it("describes again in another language", () => {
         expect(canReuseDescription({ ...stored, language: "en-US" }, "h", target)).toBe(false);
     });
 
-    it("replaces descriptions of other models or older prompt versions when re-describing", () => {
-        const current = { ...stored, model: "new-model" };
-        expect(canReuseDescription(stored, "h", target, { redescribe: true })).toBe(false);
-        expect(canReuseDescription({ ...current, prompt_version: "v1" }, "h", target, { redescribe: true })).toBe(false);
-        expect(canReuseDescription(current, "h", target, { redescribe: true })).toBe(true);
+    it("describes again once a re-description marked it stale", () => {
+        expect(canReuseDescription({ ...stored, is_stale: true }, "h", target)).toBe(false);
     });
 });
 

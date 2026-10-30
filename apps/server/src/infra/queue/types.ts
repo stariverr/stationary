@@ -4,8 +4,8 @@ import type { PipelineName } from "@/infra/queue/pipelines";
 export interface ReconcileContext {
     readonly subjectId: string;
     readonly libraryId: string;
-    /** Failed attempts before this run. */
-    readonly attempts: number;
+    /** Space row id of a per-space pipeline; null otherwise. */
+    readonly space: string | null;
     /** Aborted when the lease is lost or the worker shuts down. */
     readonly signal: AbortSignal;
     /** Must be the first statement of every transaction that writes results; throws LeaseLostError if the lease is gone. */
@@ -15,8 +15,26 @@ export interface ReconcileContext {
 export type ReconcileResult =
     /** The subject matches its desired state (or nothing could be done yet). */
     | { readonly kind: "done" }
-    /** Not retryable with the same input; recorded on the result rows at once. */
-    | { readonly kind: "failed"; readonly error: string };
+    /** The input itself cannot be processed: recorded at once with the input, and scans skip it until the input changes. */
+    | { readonly kind: "rejected"; readonly error: string; readonly errorKind?: string }
+    /**
+     * May work later (an outage, an unknown error): retried after a backoff. Once the attempts run out the error is
+     * recorded without the input, so the next patrol's scan queues the subject again. Same as throwing.
+     */
+    | { readonly kind: "retry"; readonly error: string; readonly errorKind?: string }
+    /** Could not start yet (a provider at its rate limit): runs again after `delaySeconds`, without using an attempt. */
+    | { readonly kind: "deferred"; readonly delaySeconds: number };
+
+/** A failure to store on a subject's result rows. */
+export interface FailureRecord {
+    readonly subjectId: string;
+    readonly space: string | null;
+    readonly error: string;
+    /** Classified kind of the error, when the pipeline classifies its errors. */
+    readonly errorKind: string | null;
+    /** The input is at fault: store it with the error, so scans skip the subject until it changes. */
+    readonly rejected: boolean;
+}
 
 export interface ScanPage {
     /** Subjects of this page that need the pipeline; enqueued at backfill priority. */
@@ -34,24 +52,56 @@ export interface PipelineFailure {
     readonly time: Temporal.Instant | null;
 }
 
-/**
- * Implementation of a declared pipeline. `reconcile` reads the current state and does only the difference, so it can
- * run any number of times. A thrown error is retried with backoff until `maxAttempts`, then `recordFailure` stores it
- * on the result rows together with the input it failed on.
- */
-export interface PipelineHandler {
+interface PipelineHandlerBase {
     readonly maxAttempts?: number;
-    reconcile(ctx: ReconcileContext): Promise<ReconcileResult>;
-    recordFailure(tx: Transaction, subjectId: string, error: string): Promise<void>;
+    recordFailure(tx: Transaction, failure: FailureRecord): Promise<void>;
     /**
-     * One page of a library scan, in subject id order after `cursor`. Leaves out subjects whose last failure was on
-     * their current input, so periodic scans do not retry failures forever.
+     * One page of a library scan, in subject id order after `cursor`. Leaves out subjects rejected on their current
+     * input; other recorded failures stay in, so the patrol retries them.
      */
-    scanPage(libraryId: string, cursor: string | null, limit: number): Promise<ScanPage>;
+    scanPage(libraryId: string, cursor: string | null, limit: number, space: string | null): Promise<ScanPage>;
     /** Number of current failures per library id (libraries without failures may be missing). */
     countFailures(libraryIds: readonly string[]): Promise<Map<string, number>>;
     /** Current failures of one library, most recent first; all of them when `limit` is omitted. */
     listFailures(libraryId: string, limit?: number): Promise<PipelineFailure[]>;
+    /** Called after a run or a finished scan of a per-space pipeline, to act on the space once its queue drains. */
+    settled?(libraryId: string, space: string): Promise<void>;
+    /** Periodic upkeep, run with the patrol. */
+    patrol?(): Promise<void>;
 }
+
+/**
+ * Implementation of a declared pipeline that reconciles one subject at a time. `reconcile` reads the current state
+ * and does only the difference, so it can run any number of times. A thrown error is retried with backoff until
+ * `maxAttempts`, then `recordFailure` stores it on the result rows.
+ */
+export interface SubjectPipelineHandler extends PipelineHandlerBase {
+    reconcile(ctx: ReconcileContext): Promise<ReconcileResult>;
+}
+
+export interface BatchContext {
+    readonly libraryId: string;
+    readonly space: string | null;
+    /** The claimed subject the batch starts from. */
+    readonly head: string;
+    readonly signal: AbortSignal;
+    /**
+     * Leases up to `limit` more due subjects of the same queue that have not been attempted yet, without waiting for
+     * any. Returns nothing when this is not the head's first attempt, so a failing subject runs on its own.
+     */
+    readonly claimMore: (limit: number) => Promise<string[]>;
+    /** As ReconcileContext.fence, for one subject of the batch. */
+    readonly fence: (tx: Transaction, subjectId: string) => Promise<void>;
+}
+
+/**
+ * A pipeline that reconciles several subjects with one provider request. Returns a result per subject of the batch;
+ * a thrown error retries all of them.
+ */
+export interface BatchPipelineHandler extends PipelineHandlerBase {
+    reconcileBatch(ctx: BatchContext): Promise<Map<string, ReconcileResult>>;
+}
+
+export type PipelineHandler = SubjectPipelineHandler | BatchPipelineHandler;
 
 export type PipelineHandlers = Record<PipelineName, PipelineHandler>;

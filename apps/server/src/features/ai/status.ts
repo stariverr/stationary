@@ -1,6 +1,8 @@
 import { and, eq, sql } from "drizzle-orm";
-import { AssetAiMetadata, DeleteStatus, EntityType, Media, ProcessingStatus } from "@/db/schema";
+import { AssetAiMetadata, DeleteStatus, EntityType, Media } from "@/db/schema";
 import { db } from "@/global/db";
+import { queueName } from "@/infra/queue/pipelines";
+import { countRows } from "@/infra/queue/store";
 import { getCoverageTargets, getLibraryAiProgress, getLibraryCoverage, type LibraryAiProgress, type LibraryCoverage } from "./coverage";
 import { getLibraryEmbeddingStatus } from "./embedding-spaces";
 import { AiService } from "./service";
@@ -15,7 +17,9 @@ export interface DescribeStatusView {
     updatable: number;
     /** Of `updatable`, those written with an older prompt version. */
     olderVersion: number;
+    /** Items queued for description. */
     pending: number;
+    /** Items whose last description attempt failed. */
     failed: number;
 }
 
@@ -39,20 +43,21 @@ const ofActiveMedia = sql`exists (
 async function getDescribeStatus(libraryId: string, aiService: AiService | null): Promise<DescribeStatusView | null> {
     const target = aiService?.describeTarget;
     if (!target) return null;
-    const isStatus = (status: ProcessingStatus) => sql`${AssetAiMetadata.processing_status} = ${status}`;
     const isDescribed = sql`${AssetAiMetadata.input_hash} is not null and ${AssetAiMetadata.language} = ${target.language}`;
     const isOlderVersion = sql`${AssetAiMetadata.prompt_version} <> ${target.promptVersion}`;
-    const [counts] = await db
-        .select({
-            described: sql<number>`(count(*) filter (where ${isDescribed}))::int`,
-            updatable: sql<number>`(count(*) filter (where ${isDescribed} and (${isOlderVersion} or ${AssetAiMetadata.model} <> ${target.model})))::int`,
-            olderVersion: sql<number>`(count(*) filter (where ${isDescribed} and ${isOlderVersion}))::int`,
-            pending: sql<number>`(count(*) filter (where ${isStatus(ProcessingStatus.PENDING)}))::int`,
-            failed: sql<number>`(count(*) filter (where ${isStatus(ProcessingStatus.FAILED)}))::int`,
-        })
-        .from(AssetAiMetadata)
-        .where(and(eq(AssetAiMetadata.library_id, libraryId), eq(AssetAiMetadata.entity_type, EntityType.MEDIA), ofActiveMedia));
-    return { promptVersion: target.promptVersion, ...counts! };
+    const [[counts], pending] = await Promise.all([
+        db
+            .select({
+                described: sql<number>`(count(*) filter (where ${isDescribed}))::int`,
+                updatable: sql<number>`(count(*) filter (where ${isDescribed} and (${isOlderVersion} or ${AssetAiMetadata.model} <> ${target.model})))::int`,
+                olderVersion: sql<number>`(count(*) filter (where ${isDescribed} and ${isOlderVersion}))::int`,
+                failed: sql<number>`(count(*) filter (where ${AssetAiMetadata.last_error} is not null))::int`,
+            })
+            .from(AssetAiMetadata)
+            .where(and(eq(AssetAiMetadata.library_id, libraryId), eq(AssetAiMetadata.entity_type, EntityType.MEDIA), ofActiveMedia)),
+        countRows(libraryId, [queueName("ai.describe")]),
+    ]);
+    return { promptVersion: target.promptVersion, ...counts!, pending };
 }
 
 export async function getLibraryAiStatus(libraryId: string): Promise<LibraryAiStatus> {
@@ -64,5 +69,11 @@ export async function getLibraryAiStatus(libraryId: string): Promise<LibraryAiSt
         getLibraryAiProgress(libraryId),
         getDescribeStatus(libraryId, aiService),
     ]);
-    return { ...embedding, coverage, progress, describe, issues: aiService?.config.issues ?? [] };
+    return {
+        ...embedding,
+        coverage,
+        progress,
+        describe,
+        issues: aiService?.config.issues ?? [],
+    };
 }

@@ -1,6 +1,7 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { MediaTag, PostTag, Tag, TagSource, TagStatus } from "@/db/schema";
 import { db } from "@/global/db";
+import { markMediaMetaChanged, mediaOfTags } from "@/features/media/meta-changes";
 import { normalizeTagName } from "@/lib/utils/tag_sanitizer";
 import type { LibraryAuth } from "@/features/library/access";
 import { assertTagAccess, assertTagLibraryAccess } from "./access";
@@ -124,12 +125,15 @@ export async function updateTag(input: TagUpdateInput, auth: LibraryAuth) {
     }
 
     const [updated] = await db.transaction(async (tx) => {
+        // Names and status decide which tags search documents list; the color does not.
+        const affected = input.name !== undefined || input.status !== undefined ? await mediaOfTags(tx, [input.id]) : [];
         const result = await tx.update(Tag).set(updateFields).where(eq(Tag.id, input.id)).returning();
 
         if (input.status === TagStatus.IGNORED) {
             await tx.delete(PostTag).where(eq(PostTag.tag_id, input.id));
             await tx.delete(MediaTag).where(eq(MediaTag.tag_id, input.id));
         }
+        await markMediaMetaChanged(tx, affected);
 
         return result;
     });
@@ -144,6 +148,7 @@ export async function deleteTag(tagId: string, auth: LibraryAuth) {
     await assertTagAccess(tagId, auth);
 
     return db.transaction(async (tx) => {
+        const affected = await mediaOfTags(tx, [tagId]);
         const deleted = await tx.delete(Tag).where(eq(Tag.id, tagId)).returning({ id: Tag.id });
         if (deleted.length === 0) {
             return { tagDeleted: 0 };
@@ -151,10 +156,8 @@ export async function deleteTag(tagId: string, auth: LibraryAuth) {
 
         await tx.delete(PostTag).where(eq(PostTag.tag_id, tagId));
         await tx.delete(MediaTag).where(eq(MediaTag.tag_id, tagId));
-        await tx
-            .update(Tag)
-            .set({ canonical_tag_id: null, update_time: Temporal.Now.instant() })
-            .where(eq(Tag.canonical_tag_id, tagId));
+        await tx.update(Tag).set({ canonical_tag_id: null, update_time: Temporal.Now.instant() }).where(eq(Tag.canonical_tag_id, tagId));
+        await markMediaMetaChanged(tx, affected);
 
         return { tagDeleted: 1 };
     });
@@ -183,11 +186,18 @@ export async function mergeTags(input: TagMergeInput, auth: LibraryAuth) {
         if (targetTag.canonical_tag_id !== null) {
             throw new TagError("INVALID_PARAMETER", "Target tag is an alias tag and cannot be a master tag");
         }
+        const affected = await mediaOfTags(tx, [input.source_tag_id, input.target_tag_id]);
 
         if (!input.retain_as_alias) {
-            const targetPostLinks = await tx.select({ post_id: PostTag.post_id }).from(PostTag).where(eq(PostTag.tag_id, input.target_tag_id));
+            const targetPostLinks = await tx
+                .select({ post_id: PostTag.post_id })
+                .from(PostTag)
+                .where(eq(PostTag.tag_id, input.target_tag_id));
             const targetPostIds = targetPostLinks.map((link) => link.post_id);
-            const targetMediaLinks = await tx.select({ media_id: MediaTag.media_id }).from(MediaTag).where(eq(MediaTag.tag_id, input.target_tag_id));
+            const targetMediaLinks = await tx
+                .select({ media_id: MediaTag.media_id })
+                .from(MediaTag)
+                .where(eq(MediaTag.tag_id, input.target_tag_id));
             const targetMediaIds = targetMediaLinks.map((link) => link.media_id);
 
             if (targetPostIds.length > 0) {
@@ -216,5 +226,6 @@ export async function mergeTags(input: TagMergeInput, auth: LibraryAuth) {
         if (!input.retain_as_alias) {
             await tx.delete(Tag).where(eq(Tag.id, input.source_tag_id));
         }
+        await markMediaMetaChanged(tx, affected);
     });
 }

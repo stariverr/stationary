@@ -8,7 +8,6 @@ import {
     AssetAiMetadata,
     DeleteStatus,
     EmbeddingRole,
-    EmbeddingStatus,
     EntityType,
     TrackType,
     TrackPurpose,
@@ -16,7 +15,7 @@ import {
     MediaType,
     searchFold,
 } from "@/db/schema";
-import { and, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { AiService } from "./service";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { toIsoTimestamp } from "@/lib/utils/time";
@@ -475,7 +474,7 @@ export const HybridSearchService = {
             sql`${AssetEmbedding.dimension} = ${dimension}`,
             eq(AssetEmbedding.embedding_space_id, queryEmbedding.spaceId),
             eq(AssetEmbedding.embedding_role, role),
-            eq(AssetEmbedding.embedding_status, EmbeddingStatus.READY),
+            isNotNull(AssetEmbedding.embedding),
             eq(Media.delete_status, DeleteStatus.ACTIVE),
             isNull(Media.recycle_time),
             eq(Media.library_id, libraryId),

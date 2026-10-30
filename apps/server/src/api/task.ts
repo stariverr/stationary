@@ -9,7 +9,6 @@ import { db } from "@/global/db";
 import { File as DbFile, DraftFile, DraftFileStatus } from "@/db/schema";
 import { eq, and, lt } from "drizzle-orm";
 
-import { JobSweeper } from "@/infra/jobs/sweeper";
 import { sweepOrphanTags } from "@/scripts/sweep_orphans";
 import { runMediaTrackIntegrityScan } from "@/audit/media-track";
 import { s3 } from "@/global/s3";
@@ -22,9 +21,6 @@ import {
     type CreateTaskPayload,
     type WorkflowPayload,
 } from "@/features/ingest/schema";
-import { QueueAiError } from "@/features/ai/errors";
-import { QueueAiSchema } from "@/features/ai/schema";
-import { queueAiEnrichment } from "@/features/ai/queue-enrichment";
 import { RetrySyncError } from "@/features/sync/errors";
 import { RetrySyncSchema, SweepStuckLibrarySchema } from "@/features/sync/schema";
 import { retrySync } from "@/features/sync/retry-sync";
@@ -157,7 +153,7 @@ taskApp.post("/retry-sync", requireAuth, validate("json", RetrySyncSchema), asyn
 
 /**
  * User-triggered recovery of one library: marks its Post, Media and Track records stuck in IN_PROGRESS as FAILED.
- * Generic job recovery is not part of this, it spans all libraries and JobSweeper already runs it on an interval.
+ * The reconcile queue recovers its own expired leases.
  */
 taskApp.post("/sweep-stuck-library", requireAuth, validate("json", SweepStuckLibrarySchema), async (c) => {
     const user = c.get("user");
@@ -176,12 +172,8 @@ taskApp.post("/sweep-stuck-library", requireAuth, validate("json", SweepStuckLib
 });
 
 /**
- * Universal endpoint to sweep stuck background processes and jobs.
- *
- * Performs a two-tier cleanup:
- * 1. Entity-level sync timeout sweep: Marks legacy entity records (Post, Media, Track) stuck in IN_PROGRESS as FAILED.
- * 2. Generic async job system sweep (JobSweeper): Reclaims expired task unit leases, dispatches pending units,
- *    reconciles completed tasks, and purges obsolete job records across all registered AsyncTask types automatically.
+ * Sweeps entity records (Post, Media, Track) stuck in IN_PROGRESS past the threshold and marks them FAILED. The
+ * reconcile queue recovers its own expired leases.
  */
 taskApp.post("/sweep-stuck-tasks", requireCronSecret, async (c) => {
     let thresholdMinutes = 30;
@@ -195,17 +187,8 @@ taskApp.post("/sweep-stuck-tasks", requireCronSecret, async (c) => {
     }
 
     try {
-        // Step 1: Sweep legacy entity sync statuses (Post / Media / Track)
         const entityResult = await sweepStuckEntities(thresholdMinutes);
-        // Step 2: Execute full generic sweep across all registered AsyncTask job handlers
-        const jobResult = await JobSweeper.runSweep();
-
-        return c.json(
-            success(Code.SUCCESS, {
-                stuck_entities_swept: entityResult.sweptCount,
-                async_job_sweep: jobResult,
-            }),
-        );
+        return c.json(success(Code.SUCCESS, { stuck_entities_swept: entityResult.sweptCount }));
     } catch (e: any) {
         const errorMsg = e instanceof Error ? e.message : String(e);
         console.error(`[task] Failed to sweep stuck tasks: ${errorMsg}`);
@@ -235,30 +218,6 @@ taskApp.post("/sweep-media-track-integrity", requireCronSecret, async (c) => {
         const errorMsg = e instanceof Error ? e.message : String(e);
         console.error(`[task] Failed to reconcile media/track integrity: ${errorMsg}`);
         return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
-    }
-});
-
-// Endpoint to queue items for AI enrichment
-taskApp.post("/queue-ai", requireAuth, validate("json", QueueAiSchema), async (c) => {
-    const user = c.get("user");
-    if (!user) {
-        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
-    }
-
-    try {
-        const result = await queueAiEnrichment(c.req.valid("json"), {
-            ownerId: user.id,
-            scopedLibraryId: c.get("apiToken")?.library_id,
-        });
-        return c.json(success(Code.SUCCESS, result));
-    } catch (cause) {
-        if (cause instanceof QueueAiError) {
-            if (cause.kind === "NOT_FOUND") {
-                return c.json(error(Code.NOT_FOUND, cause.message), 404);
-            }
-            return c.json(error(Code.INVALID_PARAMETER, cause.message), 400);
-        }
-        throw cause;
     }
 });
 

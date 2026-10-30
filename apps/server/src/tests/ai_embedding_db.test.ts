@@ -5,7 +5,7 @@ import {
     AssetSearchDocument,
     EntityType,
     File as DbFile,
-    ProcessingStatus,
+    JobQueue,
     SyncStatus,
     Track,
     TrackPurpose,
@@ -13,38 +13,35 @@ import {
     AiModel,
     AiProvider,
     AssetEmbedding,
-    AsyncTask,
-    AsyncTaskStatus,
-    EmbeddingRole,
-    EmbeddingStatus,
     Library,
     LibraryEmbeddingSpace,
     LibraryEmbeddingSpaceStatus,
     Media,
     MediaType,
-    ModalityType,
 } from "@/db/schema";
 import { db } from "@/global/db";
 import { kv } from "@/global/kv";
 import { secretBox } from "@/global/secrets";
 import { s3, S3ObjectTooLargeError } from "@/global/s3";
 import { Quality } from "@/lib/types";
-import { AiEnrichmentService } from "@/features/ai/enrich";
-import { enqueueEmbeddings, processNextEmbeddingBatch, retryFailedEmbeddings } from "@/features/ai/embedding-queue";
+import { processLibraryAi } from "@/features/ai/actions";
 import { clearModelBindings, getLibraryBindings, getRolesUsingModel, saveLibraryBindings } from "@/features/ai/bindings";
-import { getLibraryEmbeddingStatus, promoteBuiltSpaces, syncEmbeddingSpace } from "@/features/ai/embedding-spaces";
+import { EMBEDDING_ROLE_FOR } from "@/features/ai/embedding-spaces";
 import { getLibraryAiStatus } from "@/features/ai/status";
-import { coverageFilter, getCoverageTargets, getLibraryCoverage, type CoverageFilter } from "@/features/ai/coverage";
 import { batchDeleteMedia } from "@/features/media/lifecycle";
 import { createRedisRateLimitStore } from "@/features/ai/rate-limit";
 import { HybridSearchService } from "@/features/ai/search";
 import { AiService } from "@/features/ai/service";
-import { initJobHandlers } from "@/infra/jobs/register-handlers";
+import { markChanged } from "@/infra/queue/changes";
+import { pipelineHandlers } from "@/infra/queue/handlers";
+import { Aspect } from "@/infra/queue/pipelines";
+import { QueueWorker } from "@/infra/queue/worker";
 
 /**
- * Exercises the embedding queue, worker batches, vector search and space promotion against a real
- * PostgreSQL with pgvector and Redis. Provider HTTP calls are answered by a fake DashScope.
- * Run with RUN_AI_DB_TESTS=1 and DB_URL / REDIS_URL pointing at disposable instances.
+ * Exercises the AI pipelines on the reconcile queue against a real PostgreSQL with pgvector and Redis: search
+ * documents, batched vectors, vector search and space switching. Provider HTTP calls are answered by a fake
+ * DashScope. Run with RUN_AI_DB_TESTS=1 and DB_URL / REDIS_URL pointing at disposable instances; the queue worker
+ * claims every due row of the database.
  */
 const databaseTest = process.env.RUN_AI_DB_TESTS === "1" ? test : test.skip;
 
@@ -108,23 +105,19 @@ async function fakeRerank(request: Request): Promise<Response> {
     return new Response(JSON.stringify({ results }), { status: 200, headers: { "content-type": "application/json" } });
 }
 
-async function queueDocuments(spaceId: string, dimension: number, suffix = "") {
-    return db.transaction((tx) =>
-        enqueueEmbeddings(
-            tx,
-            Object.entries(mediaIds).map(([animal, mediaId]) => ({
-                libraryId,
-                mediaId,
-                role: EmbeddingRole.AI_CAPTION,
-                modality: ModalityType.TEXT,
-                spaceId,
-                dimension,
-                inputHash: `${animal}${suffix}`,
-                inputText: `Media Title: a ${animal}${suffix}`,
-                inputTitle: animal,
-            })),
-        ),
-    );
+/** Runs the queue worker until a library has no queued work left. */
+async function drain(library: string, timeoutMs = 20_000) {
+    const worker = new QueueWorker(pipelineHandlers, { pollIntervalMs: 50, patrolIntervalMs: 0, listen: false });
+    worker.start();
+    try {
+        const deadline = Date.now() + timeoutMs;
+        while ((await db.$count(JobQueue, eq(JobQueue.library_id, library))) > 0) {
+            if (Date.now() > deadline) throw new Error("The worker did not drain the library in time");
+            await Bun.sleep(50);
+        }
+    } finally {
+        await worker.drain();
+    }
 }
 
 async function rowsIn(spaceId: string) {
@@ -138,10 +131,13 @@ async function spaces() {
     return db.select().from(LibraryEmbeddingSpace).where(eq(LibraryEmbeddingSpace.library_id, libraryId));
 }
 
-describe("AI embedding queue (PostgreSQL + Redis)", () => {
+const statusOf = async (status: LibraryEmbeddingSpaceStatus) => (await spaces()).find((space) => space.status === status)?.space_id;
+
+const library = { id: libraryId, owner_id: ownerId };
+
+describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
     beforeAll(async () => {
         if (process.env.RUN_AI_DB_TESTS !== "1") return;
-        initJobHandlers();
         fakeDashScope();
         await db.insert(Library).values({ id: libraryId, name: "AI test", description: "", owner_id: ownerId });
         await db.insert(Media).values(
@@ -195,233 +191,191 @@ describe("AI embedding queue (PostgreSQL + Redis)", () => {
     afterAll(async () => {
         globalThis.fetch = originalFetch;
         if (process.env.RUN_AI_DB_TESTS !== "1") return;
+        await db.delete(JobQueue).where(eq(JobQueue.library_id, libraryId));
         await db.delete(AssetEmbedding).where(eq(AssetEmbedding.library_id, libraryId));
+        await db.delete(AssetSearchDocument).where(eq(AssetSearchDocument.library_id, libraryId));
         await db.delete(LibraryEmbeddingSpace).where(eq(LibraryEmbeddingSpace.library_id, libraryId));
-        await db.delete(AsyncTask).where(eq(AsyncTask.library_id, libraryId));
         await db.delete(Media).where(inArray(Media.id, Object.values(mediaIds)));
         await db.delete(AiModel).where(inArray(AiModel.provider_id, [providerId, otherProviderId]));
         await db.delete(AiProvider).where(inArray(AiProvider.id, [providerId, otherProviderId]));
         await db.delete(Library).where(eq(Library.id, libraryId));
     });
 
-    databaseTest("embeds queued documents in one batch and searches them through the vector index", async () => {
-        await syncEmbeddingSpace({ id: libraryId, owner_id: ownerId }, "textEmbedding", modelA);
-        const [active] = await spaces();
-        expect(active).toMatchObject({ status: LibraryEmbeddingSpaceStatus.ACTIVE, space_id: "qwen3-vl-embedding:1024:plain" });
+    databaseTest("indexes the library, embeds its documents and searches them through the vector index", async () => {
+        await saveLibraryBindings(library, { textEmbedding: { modelId: modelA } });
+        expect(await statusOf(LibraryEmbeddingSpaceStatus.ACTIVE)).toBe("qwen3-vl-embedding:1024:plain");
 
-        expect(await queueDocuments(active!.space_id, 1024)).toBe(3);
-        const claimed = await processNextEmbeddingBatch();
-        expect(claimed).toHaveLength(3);
-        expect(requests).toHaveLength(1);
-        expect(requests[0]!.contents).toHaveLength(3);
+        await processLibraryAi(libraryId);
+        await drain(libraryId);
+        const documents = await db.select().from(AssetSearchDocument).where(eq(AssetSearchDocument.library_id, libraryId));
+        expect(documents).toHaveLength(3);
+        const rows = await rowsIn("qwen3-vl-embedding:1024:plain");
+        expect(rows).toHaveLength(3);
+        expect(rows.every((row) => row.embedding?.length === 1024 && row.last_error === null)).toBe(true);
+        // Several media share a request whenever they are due together.
+        expect(requests.reduce((sum, request) => sum + request.contents.length, 0)).toBe(3);
 
-        const rows = await rowsIn(active!.space_id);
-        expect(rows.every((row) => row.embedding_status === EmbeddingStatus.READY && row.embedding?.length === 1024)).toBe(true);
-        expect(rows.every((row) => row.input_text === null)).toBe(true);
-
-        // Queuing the same inputs again is a no-op.
-        expect(await queueDocuments(active!.space_id, 1024)).toBe(0);
+        // A scan of an unchanged library finds nothing to do.
+        const requestsBefore = requests.length;
+        await processLibraryAi(libraryId);
+        await drain(libraryId);
+        expect(requests.length).toBe(requestsBefore);
 
         const service = await AiService.forLibrary(libraryId, "interactive");
         const query = await service!.embedQuery("textEmbedding", "cat");
-        const results = await HybridSearchService.vectorSearch(query, EmbeddingRole.AI_CAPTION, 0.5, libraryId, 10, {
+        const results = await HybridSearchService.vectorSearch(query, EMBEDDING_ROLE_FOR.textEmbedding, 0.5, libraryId, 10, {
             library_id: libraryId,
             keyword: "cat",
         });
         expect(results.map((result) => result.id)).toEqual([mediaIds.cat]);
     });
 
-    databaseTest("builds a new space beside the active one and promotes it once the backfill drains", async () => {
-        await syncEmbeddingSpace({ id: libraryId, owner_id: ownerId }, "textEmbedding", modelB);
-        const building = (await spaces()).find((space) => space.status === LibraryEmbeddingSpaceStatus.BUILDING);
-        expect(building?.space_id).toBe("qwen3-vl-embedding:768:plain");
-
+    databaseTest("builds a new space beside the active one and promotes it once its queue drains", async () => {
+        await saveLibraryBindings(library, { textEmbedding: { modelId: modelB } });
+        expect(await statusOf(LibraryEmbeddingSpaceStatus.BUILDING)).toBe("qwen3-vl-embedding:768:plain");
         const service = await AiService.forLibrary(libraryId);
         expect(service!.textEmbedding.active?.spaceId).toBe("qwen3-vl-embedding:1024:plain");
         expect(service!.textEmbedding.building?.spaceId).toBe("qwen3-vl-embedding:768:plain");
 
-        await queueDocuments(building!.space_id, 768);
-        expect(await processNextEmbeddingBatch()).toHaveLength(3);
-
-        // The backfill task has not finished yet, so the old space keeps serving.
-        expect(await promoteBuiltSpaces()).toBe(0);
-        await db.update(AsyncTask).set({ status: AsyncTaskStatus.COMPLETED }).where(eq(AsyncTask.id, building!.backfill_task_id!));
-        expect(await promoteBuiltSpaces()).toBe(1);
-
+        await drain(libraryId);
+        expect(await rowsIn("qwen3-vl-embedding:768:plain")).toHaveLength(3);
         // The replaced space is retired, not dropped: its vectors stay for switching back.
-        const remaining = await spaces();
-        expect(remaining).toHaveLength(2);
-        expect(remaining.find((space) => space.status === LibraryEmbeddingSpaceStatus.ACTIVE)?.space_id).toBe(
-            "qwen3-vl-embedding:768:plain",
-        );
-        expect(remaining.find((space) => space.status === LibraryEmbeddingSpaceStatus.RETIRED)?.space_id).toBe(
-            "qwen3-vl-embedding:1024:plain",
-        );
+        expect(await statusOf(LibraryEmbeddingSpaceStatus.ACTIVE)).toBe("qwen3-vl-embedding:768:plain");
+        expect(await statusOf(LibraryEmbeddingSpaceStatus.RETIRED)).toBe("qwen3-vl-embedding:1024:plain");
         expect(await rowsIn("qwen3-vl-embedding:1024:plain")).toHaveLength(3);
         expect((await AiService.forLibrary(libraryId))!.textEmbedding.active?.spaceId).toBe("qwen3-vl-embedding:768:plain");
     });
 
-    databaseTest("switches back to a retired space without re-embedding and holds back a space that mostly failed", async () => {
-        const completeBackfill = async () => {
-            const building = (await spaces()).find((space) => space.status === LibraryEmbeddingSpaceStatus.BUILDING);
-            await db.update(AsyncTask).set({ status: AsyncTaskStatus.COMPLETED }).where(eq(AsyncTask.id, building!.backfill_task_id!));
-            return building!;
-        };
+    databaseTest("switches back to a retired space without embedding again", async () => {
         const requestsBefore = requests.length;
-
-        // Choosing the previous model again revives its retired space; its vectors are still READY.
-        await syncEmbeddingSpace({ id: libraryId, owner_id: ownerId }, "textEmbedding", modelA);
-        expect((await completeBackfill()).space_id).toBe("qwen3-vl-embedding:1024:plain");
-        expect(await promoteBuiltSpaces()).toBe(1);
+        await saveLibraryBindings(library, { textEmbedding: { modelId: modelA } });
+        await drain(libraryId);
         expect(requests.length).toBe(requestsBefore);
-        expect((await spaces()).find((space) => space.status === LibraryEmbeddingSpaceStatus.ACTIVE)?.space_id).toBe(
-            "qwen3-vl-embedding:1024:plain",
-        );
-
-        // Switch back again, but this time every vector of the new space failed (e.g. a wrong key).
-        await syncEmbeddingSpace({ id: libraryId, owner_id: ownerId }, "textEmbedding", modelB);
-        await completeBackfill();
-        await db
-            .update(AssetEmbedding)
-            .set({ embedding_status: EmbeddingStatus.FAILED })
-            .where(and(eq(AssetEmbedding.library_id, libraryId), eq(AssetEmbedding.embedding_space_id, "qwen3-vl-embedding:768:plain")));
-        expect(await promoteBuiltSpaces()).toBe(0);
-        const blocked = (await getLibraryEmbeddingStatus(libraryId)).spaces.find(
-            (space) => space.status === LibraryEmbeddingSpaceStatus.BUILDING,
-        );
-        expect(blocked).toMatchObject({ spaceId: "qwen3-vl-embedding:768:plain", blocked: "too_many_failures" });
-        // The active space and its vectors are untouched.
-        expect(
-            (await rowsIn("qwen3-vl-embedding:1024:plain")).filter((row) => row.embedding_status === EmbeddingStatus.READY),
-        ).toHaveLength(3);
-
-        // Once the vectors are back, the space is promoted.
-        await db
-            .update(AssetEmbedding)
-            .set({ embedding_status: EmbeddingStatus.READY })
-            .where(and(eq(AssetEmbedding.library_id, libraryId), eq(AssetEmbedding.embedding_space_id, "qwen3-vl-embedding:768:plain")));
-        expect(await promoteBuiltSpaces()).toBe(1);
-        expect((await spaces()).find((space) => space.status === LibraryEmbeddingSpaceStatus.ACTIVE)?.space_id).toBe(
-            "qwen3-vl-embedding:768:plain",
-        );
+        expect(await statusOf(LibraryEmbeddingSpaceStatus.ACTIVE)).toBe("qwen3-vl-embedding:1024:plain");
+        expect(await statusOf(LibraryEmbeddingSpaceStatus.RETIRED)).toBe("qwen3-vl-embedding:768:plain");
     });
 
-    databaseTest("fails rejected inputs, retries them on demand, and defers throttled batches without counting attempts", async () => {
-        const spaceId = "qwen3-vl-embedding:768:plain";
-        await queueDocuments(spaceId, 768, " v2");
+    databaseTest("records a rejected input, keeps the previous vector, and defers throttled work without counting attempts", async () => {
+        const spaceId = "qwen3-vl-embedding:1024:plain";
+        const vectorOf = async (mediaId: string) => (await rowsIn(spaceId)).find((row) => row.entity_id === mediaId)!;
+        const previousHash = (await vectorOf(mediaIds.dog)).content_hash;
 
-        // The batch is rejected without saying which input is at fault, so no row fails yet: each is retried alone.
+        // An edit of the title changes the search document, which queues the media for its vector.
         rejectedText = " v2";
-        expect(await processNextEmbeddingBatch()).toHaveLength(3);
-        const isolated = (await rowsIn(spaceId)).filter((row) => row.content_hash.endsWith(" v2"));
-        expect(isolated.every((row) => row.embedding_status === EmbeddingStatus.PENDING && row.attempt_count === 1)).toBe(true);
-        for (let index = 0; index < 3; index++) expect(await processNextEmbeddingBatch()).toHaveLength(1);
-        rejectedText = null;
-        const failed = (await rowsIn(spaceId)).filter((row) => row.content_hash.endsWith(" v2"));
-        expect(failed.every((row) => row.embedding_status === EmbeddingStatus.FAILED && row.attempt_count === 2)).toBe(true);
-        // The previous vectors keep serving search while the new input is unresolved.
-        expect((await rowsIn(spaceId)).filter((row) => row.embedding_status === EmbeddingStatus.READY)).toHaveLength(3);
-        // Settings show the provider's error next to the failed count.
+        await db.transaction(async (tx) => {
+            await tx.update(Media).set({ title: "dog v2" }).where(eq(Media.id, mediaIds.dog));
+            await markChanged(tx, Aspect.MEDIA_META, [mediaIds.dog]);
+        });
+        await drain(libraryId);
+        const failed = await vectorOf(mediaIds.dog);
+        expect(failed).toMatchObject({ content_hash: previousHash, error_kind: "INVALID_REQUEST" });
+        expect(failed.embedding).not.toBeNull();
+        expect(failed.error_hash).not.toBe(previousHash);
+
+        // Settings show the provider's error next to the failed count, and the item stays covered by its old vector.
         const status = await getLibraryAiStatus(libraryId);
         const space = status.spaces.find((view) => view.spaceId === spaceId && view.status === LibraryEmbeddingSpaceStatus.ACTIVE);
-        expect(space?.failed).toBe(3);
         expect(space?.lastError?.message).toContain("bad input");
-        expect(status.issues).toEqual([]);
-        // A rejected input is a problem of the item; the items stay covered by their previous vectors.
-        expect(failed.every((row) => row.error_kind === "INVALID_REQUEST")).toBe(true);
-        expect(status.coverage).toMatchObject({ eligible: 3, covered: 3, unprocessable: 0, failed: 0, missing: 0 });
+        expect(status.coverage).toMatchObject({ eligible: 3, covered: 3, missing: 0 });
 
-        // Without a ready vector, the rejected item cannot be processed, while one failed for a passing reason waits for a retry.
-        const readyIds = (
-            await db
-                .select({ id: AssetEmbedding.id })
-                .from(AssetEmbedding)
-                .where(
-                    and(
-                        inArray(AssetEmbedding.entity_id, [mediaIds.cat, mediaIds.dog]),
-                        eq(AssetEmbedding.embedding_space_id, spaceId),
-                        eq(AssetEmbedding.embedding_status, EmbeddingStatus.READY),
-                    ),
-                )
-        ).map((row) => row.id);
-        await db.update(AssetEmbedding).set({ embedding_status: EmbeddingStatus.STALE }).where(inArray(AssetEmbedding.id, readyIds));
-        await db
-            .update(AssetEmbedding)
-            .set({ error_kind: "TRANSIENT" })
-            .where(and(eq(AssetEmbedding.entity_id, mediaIds.cat), eq(AssetEmbedding.embedding_status, EmbeddingStatus.FAILED)));
-        const targets = getCoverageTargets(await AiService.forLibrary(libraryId))!;
-        expect(await getLibraryCoverage(libraryId, targets)).toMatchObject({
-            eligible: 3,
-            covered: 1,
-            unprocessable: 1,
-            failed: 1,
-            missing: 0,
-            lastFailure: { category: "unavailable" },
+        // A scan skips the failure while its input is unchanged; processing the library queues it again.
+        const spaceRow = (await spaces()).find((row) => row.space_id === spaceId)!;
+        const scanned = await pipelineHandlers["ai.text"].scanPage(libraryId, null, 100, spaceRow.id);
+        expect(scanned.subjectIds).not.toContain(mediaIds.dog);
+        const requestsBefore = requests.length;
+        rejectedText = null;
+        await processLibraryAi(libraryId);
+        await drain(libraryId);
+        expect(requests.length).toBe(requestsBefore + 1);
+        const retried = await vectorOf(mediaIds.dog);
+        expect(retried).toMatchObject({ last_error: null, error_hash: null });
+        expect(retried.content_hash).not.toBe(previousHash);
+
+        // A failure that is not about the input is recorded too, but the next scan queues it again.
+        const currentHash = retried.content_hash;
+        const dogVector = eq(AssetEmbedding.id, retried.id);
+        await db.update(AssetEmbedding).set({ content_hash: "an older input" }).where(dogVector);
+        await db.transaction((tx) =>
+            pipelineHandlers["ai.text"].recordFailure(tx, {
+                subjectId: mediaIds.dog,
+                space: spaceRow.id,
+                error: "provider is down",
+                errorKind: "TRANSIENT",
+                rejected: false,
+            }),
+        );
+        expect(await vectorOf(mediaIds.dog)).toMatchObject({ last_error: "provider is down", error_hash: null });
+        const rescanned = await pipelineHandlers["ai.text"].scanPage(libraryId, null, 100, spaceRow.id);
+        expect(rescanned.subjectIds).toContain(mediaIds.dog);
+        await db.update(AssetEmbedding).set({ content_hash: currentHash, last_error: null, error_kind: null }).where(dogVector);
+
+        // At the provider's rate limit, the run is postponed without an attempt.
+        await createRedisRateLimitStore(kv).coolDown(otherProviderId, 5_000);
+        await db.transaction(async (tx) => {
+            await tx.update(Media).set({ title: "dog v3" }).where(eq(Media.id, mediaIds.dog));
+            await markChanged(tx, Aspect.MEDIA_META, [mediaIds.dog]);
         });
-        const listed = async (filter: CoverageFilter) =>
-            (
-                await db
-                    .select({ id: Media.id })
-                    .from(Media)
-                    .where(and(eq(Media.library_id, libraryId), coverageFilter(targets, filter)))
-            ).map((row) => row.id);
-        expect(await listed("incomplete")).toEqual([mediaIds.cat]);
-        expect(await listed("unprocessable")).toEqual([mediaIds.dog]);
-        await db.update(AssetEmbedding).set({ embedding_status: EmbeddingStatus.READY }).where(inArray(AssetEmbedding.id, readyIds));
-
-        expect(await retryFailedEmbeddings(libraryId)).toBe(3);
-        await createRedisRateLimitStore(kv).coolDown(providerId, 5_000);
-        const deferred = await processNextEmbeddingBatch();
-        expect(deferred.length).toBeGreaterThan(0);
-        const afterThrottle = (await rowsIn(spaceId)).filter((row) => row.content_hash.endsWith(" v2"));
-        expect(afterThrottle.every((row) => row.embedding_status === EmbeddingStatus.PENDING && row.attempt_count === 0)).toBe(true);
+        const worker = new QueueWorker(pipelineHandlers, { pollIntervalMs: 50, patrolIntervalMs: 0, listen: false });
+        worker.start();
+        try {
+            const deadline = Date.now() + 10_000;
+            let row;
+            do {
+                if (Date.now() > deadline) throw new Error("The throttled row was not postponed in time");
+                await Bun.sleep(50);
+                [row] = await db
+                    .select()
+                    .from(JobQueue)
+                    .where(and(eq(JobQueue.library_id, libraryId), sql`${JobQueue.pipeline} LIKE 'ai.text:%'`));
+            } while (!row || row.lease_token !== null || row.available_at.epochMilliseconds <= Date.now());
+            expect(row.attempts).toBe(0);
+        } finally {
+            await worker.drain();
+        }
+        await db.delete(JobQueue).where(eq(JobQueue.library_id, libraryId));
     });
-    databaseTest("pauses work for recycled media and removes AI data of deleted media", async () => {
-        const spaceId = "qwen3-vl-embedding:768:plain";
+
+    databaseTest("blocks a provider that keeps failing and lets it through again when reset", async () => {
+        const store = createRedisRateLimitStore(kv);
+        const providerId = crypto.randomUUID();
+        const limits = { maxConcurrency: 8, requestsPerMinute: null };
+        const blocked = async () => {
+            const leaseId = crypto.randomUUID();
+            const wait = await store.acquire(providerId, limits, leaseId, 1_000);
+            await store.release(providerId, leaseId);
+            return wait;
+        };
+
+        for (let failure = 0; failure < 4; failure++) await store.reportFailure(providerId);
+        expect(await blocked()).toBe(0);
+        await store.reportSuccess(providerId);
+        for (let failure = 0; failure < 4; failure++) await store.reportFailure(providerId);
+        expect(await blocked()).toBe(0);
+
+        await store.reportFailure(providerId);
+        expect(await blocked()).toBeGreaterThan(20_000);
+
+        await store.reset(providerId);
+        expect(await blocked()).toBe(0);
+        await store.reportFailure(providerId);
+        expect(await blocked()).toBe(0);
+    });
+
+    databaseTest("leaves recycled media out of progress and removes AI data of deleted media", async () => {
+        const spaceId = "qwen3-vl-embedding:1024:plain";
         await db
             .update(Media)
             .set({ recycle_time: sql`now()` })
             .where(eq(Media.id, mediaIds.car));
-        await db.transaction((tx) =>
-            enqueueEmbeddings(tx, [
-                {
-                    libraryId,
-                    mediaId: mediaIds.car,
-                    role: EmbeddingRole.AI_CAPTION,
-                    modality: ModalityType.TEXT,
-                    spaceId,
-                    dimension: 768,
-                    inputHash: "car v3",
-                    inputText: "a red car",
-                },
-            ]),
-        );
-        await db
-            .update(AssetEmbedding)
-            .set({ available_at: sql`now()` })
-            .where(and(eq(AssetEmbedding.library_id, libraryId), eq(AssetEmbedding.embedding_status, EmbeddingStatus.PENDING)));
-
-        // Recycled: not claimed, and invisible to progress counts.
-        const claimed = await processNextEmbeddingBatch();
-        expect(claimed.some((row) => row.entity_id === mediaIds.car)).toBe(false);
-        expect((await getLibraryEmbeddingStatus(libraryId)).spaces.find((space) => space.spaceId === spaceId)?.total).toBe(2);
-
-        // Restored: claimable again.
+        expect((await getLibraryAiStatus(libraryId)).spaces.find((space) => space.spaceId === spaceId)?.ready).toBe(2);
         await db.update(Media).set({ recycle_time: null }).where(eq(Media.id, mediaIds.car));
-        await db
-            .update(AssetEmbedding)
-            .set({ available_at: sql`now()` })
-            .where(and(eq(AssetEmbedding.entity_id, mediaIds.car), eq(AssetEmbedding.embedding_status, EmbeddingStatus.PENDING)));
-        expect((await processNextEmbeddingBatch()).some((row) => row.entity_id === mediaIds.car)).toBe(true);
 
-        // Deleted for good: every AI row of the media is gone.
         await batchDeleteMedia([mediaIds.cat]);
         const leftovers = await db.select({ id: AssetEmbedding.id }).from(AssetEmbedding).where(eq(AssetEmbedding.entity_id, mediaIds.cat));
         expect(leftovers).toHaveLength(0);
     });
 
     databaseTest("saves role bindings atomically and reads embedding roles from their spaces", async () => {
-        const library = { id: libraryId, owner_id: ownerId };
         const before = await getLibraryBindings(libraryId);
 
         // The embedding model does not exist, so nothing else in the request may be applied either.
@@ -435,17 +389,11 @@ describe("AI embedding queue (PostgreSQL + Redis)", () => {
         // The library row holds only the roles that have no space.
         const [row] = await db.select({ ai_bindings: Library.ai_bindings }).from(Library).where(eq(Library.id, libraryId));
         expect(row!.ai_bindings).toEqual({ rerank: { modelId: modelA } });
-        // A RETIRED text space of modelA does not count as use.
-        expect(await getRolesUsingModel(ownerId, modelA)).toEqual(["imageEmbedding", "rerank"]);
-
-        // Saving again starts the backfill of a space whose earlier start failed.
-        const imageSpace = () => spaces().then((rows) => rows.find((space) => space.role === "imageEmbedding")!);
-        await db
-            .update(LibraryEmbeddingSpace)
-            .set({ backfill_task_id: null })
-            .where(eq(LibraryEmbeddingSpace.id, (await imageSpace()).id));
-        expect(await saveLibraryBindings(library, { imageEmbedding: { modelId: modelA } })).toEqual({ indexingStarted: true });
-        expect((await imageSpace()).backfill_task_id).not.toBeNull();
+        // A new space queues a scan that fills it.
+        expect(await db.$count(JobQueue, and(eq(JobQueue.library_id, libraryId), sql`${JobQueue.pipeline} LIKE 'scan:ai.image:%'`))).toBe(
+            1,
+        );
+        await db.delete(JobQueue).where(eq(JobQueue.library_id, libraryId));
 
         // Deleting the model clears every role that used it, spaces included.
         await db.transaction((tx) => clearModelBindings(tx, ownerId, [modelA]));
@@ -654,7 +602,7 @@ describe("Multilingual keyword search (PostgreSQL)", () => {
     });
 });
 
-describe("AI enrichment (PostgreSQL + Redis)", () => {
+describe("AI description (PostgreSQL + Redis)", () => {
     const enrichOwnerId = crypto.randomUUID();
     const enrichLibraryId = crypto.randomUUID();
     const mediaId = crypto.randomUUID();
@@ -690,7 +638,7 @@ describe("AI enrichment (PostgreSQL + Redis)", () => {
             .returning();
         await db.insert(Library).values({
             id: enrichLibraryId,
-            name: "AI enrichment test",
+            name: "AI description test",
             description: "",
             owner_id: enrichOwnerId,
             ai_bindings: { describe: { modelId: model!.id } },
@@ -726,6 +674,7 @@ describe("AI enrichment (PostgreSQL + Redis)", () => {
 
     afterAll(async () => {
         if (process.env.RUN_AI_DB_TESTS !== "1") return;
+        await db.delete(JobQueue).where(eq(JobQueue.library_id, enrichLibraryId));
         await db.delete(AssetAiMetadata).where(eq(AssetAiMetadata.library_id, enrichLibraryId));
         await db.delete(AssetSearchDocument).where(eq(AssetSearchDocument.library_id, enrichLibraryId));
         await db.delete(Track).where(eq(Track.media_id, mediaId));
@@ -739,19 +688,8 @@ describe("AI enrichment (PostgreSQL + Redis)", () => {
     databaseTest("indexes an item whose image cannot be read and records why it was not described", async () => {
         const read = spyOn(s3, "read").mockRejectedValue(new S3ObjectTooLargeError(80 * 1024 * 1024, 50 * 1024 * 1024));
         try {
-            const [media] = await db.select().from(Media).where(eq(Media.id, mediaId));
-            const post = {
-                id: null,
-                eid: media!.eid,
-                source: media!.source,
-                title: "",
-                description: "",
-                author_name: "",
-                author_external_id: null,
-                url: "",
-                published_time: null,
-            };
-            await expect(AiEnrichmentService.enrichMediaItem(media!, post)).rejects.toThrow("byte limit");
+            await processLibraryAi(enrichLibraryId);
+            await drain(enrichLibraryId);
         } finally {
             read.mockRestore();
         }
@@ -760,10 +698,26 @@ describe("AI enrichment (PostgreSQL + Redis)", () => {
         const [document] = await db.select().from(AssetSearchDocument).where(eq(AssetSearchDocument.entity_id, mediaId));
         expect(document?.content).toContain("harbour at dusk");
         const [metadata] = await db.select().from(AssetAiMetadata).where(eq(AssetAiMetadata.entity_id, mediaId));
-        expect(metadata).toMatchObject({
-            processing_status: ProcessingStatus.FAILED,
-            error_kind: "INVALID_REQUEST",
-            input_hash: null,
-        });
+        expect(metadata).toMatchObject({ error_kind: "INVALID_REQUEST", input_hash: null });
+        expect(metadata?.last_error).toContain("byte limit");
+        expect(metadata?.error_input_hash).not.toBeNull();
+
+        // A scan leaves the failure alone while the image is unchanged; processing the library queues it again.
+        expect((await pipelineHandlers["ai.describe"].scanPage(enrichLibraryId, null, 100, null)).subjectIds).toEqual([]);
+
+        // A failure that is not about the image is left for the next scan.
+        await db.transaction((tx) =>
+            pipelineHandlers["ai.describe"].recordFailure(tx, {
+                subjectId: mediaId,
+                space: null,
+                error: "provider is down",
+                errorKind: "TRANSIENT",
+                rejected: false,
+            }),
+        );
+        expect((await pipelineHandlers["ai.describe"].scanPage(enrichLibraryId, null, 100, null)).subjectIds).toEqual([mediaId]);
+
+        await processLibraryAi(enrichLibraryId);
+        expect(await db.$count(JobQueue, and(eq(JobQueue.library_id, enrichLibraryId), eq(JobQueue.pipeline, "ai.describe")))).toBe(1);
     });
 });

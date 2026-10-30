@@ -1,6 +1,6 @@
 import * as v from "valibot";
 import { toJsonSchema } from "@valibot/to-json-schema";
-import { MediaType, PostSource, TrackType, TrackPurpose, TrackStreamLayout, ProcessingStatus } from "@/db/schema";
+import { MediaType, PostSource, TrackType, TrackPurpose, TrackStreamLayout } from "@/db/schema";
 import { Quality } from "@/lib/types";
 
 // FormTimestampSchema helper
@@ -391,7 +391,7 @@ const MediaDetailResponseSchema = v.object({
     ai_error: v.optional(v.nullable(v.string())),
     ai: v.optional(
         v.object({
-            status: v.enum(ProcessingStatus),
+            status: v.picklist(["PENDING", "COMPLETED", "FAILED"]),
             error: v.nullable(v.string()),
             result: v.nullable(
                 v.object({
@@ -1217,10 +1217,10 @@ const routes: RouteItem[] = [
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
     {
-        path: "/api/task/queue-ai",
+        path: "/api/ai/media/process",
         method: "post",
-        summary: "Trigger AI embedding/tagging task",
-        tags: ["Task"],
+        summary: "Queue media, and the media of posts, for AI processing",
+        tags: ["AI"],
         bodySchema: QueueAiSchema,
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
@@ -1282,80 +1282,39 @@ const routes: RouteItem[] = [
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
-    // Background Jobs (AsyncTask / AsyncTaskUnit)
+    // Background pipelines (reconcile queue)
     {
-        path: "/api/jobs/list",
+        path: "/api/jobs/pipelines",
         method: "get",
-        summary: "List background tasks for library or user",
+        summary: "Queue and failure counts of every pipeline in a library",
         tags: ["Jobs"],
+        querySchema: v.object({ library_id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
-            properties: {
-                list: { type: "array", items: { type: "object" } },
-                total: { type: "integer" },
-            },
+            properties: { pipelines: { type: "array", items: { type: "object" } } },
         }),
     },
     {
-        path: "/api/jobs/:id",
+        path: "/api/jobs/pipelines/:library_id/:pipeline/failures",
         method: "get",
-        summary: "Get background task status and details",
+        summary: "List the current failures of a pipeline",
         tags: ["Jobs"],
-        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
-        requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
-    },
-    {
-        path: "/api/jobs/:id/pause",
-        method: "post",
-        summary: "Pause running background task",
-        tags: ["Jobs"],
-        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
-        requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
-    },
-    {
-        path: "/api/jobs/:id/resume",
-        method: "post",
-        summary: "Resume paused background task",
-        tags: ["Jobs"],
-        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
-        requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
-    },
-    {
-        path: "/api/jobs/:id/cancel",
-        method: "post",
-        summary: "Cancel background task",
-        tags: ["Jobs"],
-        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
-        requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
-    },
-    {
-        path: "/api/jobs/:id/retry-failed",
-        method: "post",
-        summary: "Retry failed units of a background task",
-        tags: ["Jobs"],
-        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
-        requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
-    },
-    {
-        path: "/api/jobs/:id/items",
-        method: "get",
-        summary: "List units of a background task",
-        tags: ["Jobs"],
-        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
+        paramSchema: v.object({ library_id: v.pipe(v.string(), v.uuid()), pipeline: v.string() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
-            properties: {
-                list: { type: "array", items: { type: "object" } },
-                total: { type: "integer" },
-            },
+            properties: { items: { type: "array", items: { type: "object" } } },
         }),
+    },
+    {
+        path: "/api/jobs/pipelines/:library_id/:pipeline/retry-failed",
+        method: "post",
+        summary: "Queue every current failure of a pipeline again",
+        tags: ["Jobs"],
+        paramSchema: v.object({ library_id: v.pipe(v.string(), v.uuid()), pipeline: v.string() }),
+        requiresAuth: true,
+        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
     // Better Auth (Standard Endpoints mounted under /api/auth)
     {

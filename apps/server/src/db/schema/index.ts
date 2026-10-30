@@ -700,36 +700,6 @@ export enum EmbeddingRole {
 export const EmbeddingRoleEnum = pgEnum("embedding_role", [EmbeddingRole.AI_CAPTION, EmbeddingRole.IMAGE_PRIMARY]);
 
 /**
- * - `PENDING`: queued for the embedding worker; `embedding` is null until it completes.
- * - `READY`: current vector for its input.
- * - `STALE`: superseded by a newer input in the same space.
- * - `FAILED`: gave up after repeated provider errors; retried on demand.
- */
-export enum EmbeddingStatus {
-    PENDING = "PENDING",
-    READY = "READY",
-    STALE = "STALE",
-    FAILED = "FAILED",
-}
-export const EmbeddingStatusEnum = pgEnum("embedding_status", [
-    EmbeddingStatus.PENDING,
-    EmbeddingStatus.READY,
-    EmbeddingStatus.STALE,
-    EmbeddingStatus.FAILED,
-]);
-
-export enum ProcessingStatus {
-    PENDING = "PENDING",
-    COMPLETED = "COMPLETED",
-    FAILED = "FAILED",
-}
-export const ProcessingStatusEnum = pgEnum("processing_status", [
-    ProcessingStatus.PENDING,
-    ProcessingStatus.COMPLETED,
-    ProcessingStatus.FAILED,
-]);
-
-/**
  * AI Provider: a connection (endpoint + credential) owned by the same principal that owns
  * libraries. A library may only bind models from providers of its own owner; see
  * docs/ownership_and_teams.md.
@@ -854,10 +824,13 @@ export const AssetAiMetadata = pgTable(
         language: text("language").notNull(),
         /** Hash of the source image the stored result was generated from; null until a result exists. */
         input_hash: text("input_hash"),
-        processing_status: ProcessingStatusEnum("processing_status").default(ProcessingStatus.PENDING).notNull(),
+        /** Set by a re-description request: the stored result is regenerated even though its inputs still match. */
+        is_stale: boolean("is_stale").default(false).notNull(),
         last_error: text("last_error"),
         /** Classified kind of `last_error` (see AiErrorKind in features/ai/errors.ts). */
         error_kind: text("error_kind"),
+        /** Hash of the input `last_error` happened on (see describeInputHash); a changed input is tried again. */
+        error_input_hash: text("error_input_hash"),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),
@@ -865,15 +838,8 @@ export const AssetAiMetadata = pgTable(
     },
     (table) => [
         uniqueIndex("ai_metadata_entity_unique").on(table.entity_type, table.entity_id),
-        // Serves the library status counts.
-        index("ai_metadata_library_status_idx").on(
-            table.library_id,
-            table.processing_status,
-            table.prompt_version,
-            table.language,
-            table.model,
-            table.entity_id,
-        ),
+        // Serves the library coverage counts.
+        index("ai_metadata_library_target_idx").on(table.library_id, table.prompt_version, table.language, table.model, table.entity_id),
     ],
 );
 
@@ -887,45 +853,29 @@ export const AssetEmbedding = pgTable(
         library_id: uuid("library_id").notNull(),
         entity_type: EntityTypeEnum("entity_type").notNull(),
         entity_id: uuid("entity_id").notNull(),
-        document_id: uuid("document_id"),
         embedding_space_id: text("embedding_space_id").notNull(),
         embedding_role: EmbeddingRoleEnum("embedding_role").notNull(),
         input_modality: ModalityEnum("input_modality").notNull(),
-        dimension: integer("dimension").notNull(),
-        /** Null while the row is a queued request (PENDING). */
+        /** Null, with `embedding` and `content_hash`, while the row only records a failure. */
+        dimension: integer("dimension"),
         embedding: genericHalfvec("embedding"),
-        /** Hash of this embedding's own input: the source file for images, the embedded text for text roles. */
-        content_hash: text("content_hash").notNull(),
+        /** Hash of the stored vector's input: the source file for images, the search document for text. */
+        content_hash: text("content_hash"),
         source_file_id: uuid("source_file_id"),
-        /** Text roles: the input waiting to be embedded; cleared once the vector is stored. */
-        input_text: text("input_text"),
-        input_title: text("input_title"),
-        embedding_status: EmbeddingStatusEnum("embedding_status").default(EmbeddingStatus.PENDING).notNull(),
-        /** Queue scheduling: a PENDING row is claimable once this has passed; claiming pushes it forward as a lease. */
-        available_at: temporal("available_at")
-            .default(sql`now()`)
-            .notNull(),
-        attempt_count: integer("attempt_count").default(0).notNull(),
         last_error: text("last_error"),
         /** Classified kind of `last_error` (see AiErrorKind in features/ai/errors.ts). */
         error_kind: text("error_kind"),
+        /** Hash of the input `last_error` happened on; a changed input is tried again. */
+        error_hash: text("error_hash"),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),
         update_time: temporal("update_time"),
     },
     (table) => [
-        index("asset_emb_queue_idx")
-            .on(table.available_at)
-            .where(sql`${table.embedding_status} = 'PENDING'`),
-        index("asset_emb_library_space_idx").on(table.library_id, table.embedding_space_id, table.embedding_role, table.embedding_status),
-        uniqueIndex("asset_emb_unique").on(
-            table.entity_type,
-            table.entity_id,
-            table.embedding_space_id,
-            table.embedding_role,
-            table.content_hash,
-        ),
+        // One row per media and space: a new input replaces the vector in place.
+        uniqueIndex("asset_emb_entity_space_unique").on(table.entity_type, table.entity_id, table.embedding_space_id, table.embedding_role),
+        index("asset_emb_library_space_role_idx").on(table.library_id, table.embedding_space_id, table.embedding_role),
         check("asset_emb_dimension_check", sql`vector_dims(${table.embedding}) = ${table.dimension}`),
         // HNSW needs a fixed dimension, so each supported dimension gets its own partial expression index.
         // Queries must cast with the same literal dimension and filter on it; see search.ts.
@@ -971,8 +921,6 @@ export const LibraryEmbeddingSpace = pgTable(
         model_id: uuid("model_id").notNull(),
         space_id: text("space_id").notNull(),
         status: LibraryEmbeddingSpaceStatusEnum("status").notNull(),
-        /** AI enrichment task that re-processes the library into a BUILDING space. */
-        backfill_task_id: uuid("backfill_task_id"),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),
@@ -1015,227 +963,6 @@ export const DraftFile = pgTable("draft_file", {
     expire_time: temporal("expire_time"),
     consume_time: temporal("consume_time"),
 });
-
-// ==== Cover & Derivative Async Task Tables: START ====
-
-/** High-level master task category/type */
-export enum AsyncTaskType {
-    AI_ENRICH = "AI_ENRICH",
-}
-export const AsyncTaskTypeEnum = pgEnum("async_task_type", [AsyncTaskType.AI_ENRICH]);
-
-/** Entity subject type for task units */
-export enum AsyncSubjectType {
-    MEDIA = "MEDIA",
-}
-export const AsyncSubjectTypeEnum = pgEnum("async_subject_type", [AsyncSubjectType.MEDIA]);
-
-/** Physical category/kind of task execution unit */
-export enum AsyncTaskUnitKind {
-    AI_ENRICHMENT = "AI_ENRICHMENT",
-}
-export const AsyncTaskUnitKindEnum = pgEnum("async_task_unit_kind", [AsyncTaskUnitKind.AI_ENRICHMENT]);
-
-/** Status of master async task */
-export enum AsyncTaskStatus {
-    DISCOVERING = "DISCOVERING",
-    RUNNING = "RUNNING",
-    PAUSED = "PAUSED",
-    COMPLETED = "COMPLETED",
-    FAILED = "FAILED",
-    CANCELLED = "CANCELLED",
-}
-export const AsyncTaskStatusEnum = pgEnum("async_task_status", [
-    AsyncTaskStatus.DISCOVERING,
-    AsyncTaskStatus.RUNNING,
-    AsyncTaskStatus.PAUSED,
-    AsyncTaskStatus.COMPLETED,
-    AsyncTaskStatus.FAILED,
-    AsyncTaskStatus.CANCELLED,
-]);
-
-/** Requested control signal for master task lifecycle */
-export enum AsyncTaskControl {
-    NONE = "NONE",
-    PAUSE = "PAUSE",
-    CANCEL = "CANCEL",
-}
-export const AsyncTaskControlEnum = pgEnum("async_task_control", [AsyncTaskControl.NONE, AsyncTaskControl.PAUSE, AsyncTaskControl.CANCEL]);
-
-/** Execution status of individual task unit */
-export enum AsyncTaskUnitStatus {
-    PENDING = "PENDING",
-    RUNNING = "RUNNING",
-    SUCCEEDED = "SUCCEEDED",
-    FAILED = "FAILED",
-    CANCELLED = "CANCELLED",
-}
-export const AsyncTaskUnitStatusEnum = pgEnum("async_task_unit_status", [
-    AsyncTaskUnitStatus.PENDING,
-    AsyncTaskUnitStatus.RUNNING,
-    AsyncTaskUnitStatus.SUCCEEDED,
-    AsyncTaskUnitStatus.FAILED,
-    AsyncTaskUnitStatus.CANCELLED,
-]);
-
-/** Standard outcome codes for task units */
-export enum AsyncOutcomeCode {
-    EXECUTED = "EXECUTED",
-    SKIPPED = "SKIPPED",
-    CANCELLED_BY_USER = "CANCELLED_BY_USER",
-    MAX_ATTEMPTS_EXCEEDED = "MAX_ATTEMPTS_EXCEEDED",
-    LEASE_EXPIRED_EXHAUSTED = "LEASE_EXPIRED_EXHAUSTED",
-    LOCKED_CONCURRENT_EXECUTION = "LOCKED_CONCURRENT_EXECUTION",
-    UNHANDLED_EXCEPTION = "UNHANDLED_EXCEPTION",
-}
-
-/**
- * AsyncTask Table (Master/Parent)
- * Represents a high-level master task (e.g. library-wide cover reconciliation scan or batch re-indexing).
- * Manages item discovery cursors, overall progress metrics, and control signals (Pause/Cancel).
- */
-export const AsyncTask = pgTable(
-    "async_task",
-    {
-        /** Primary key (UUIDv7, time-sortable) */
-        id: uuid("id")
-            .primaryKey()
-            .notNull()
-            .$defaultFn(() => uuidv7.generate()),
-        /** Category or type of the master task */
-        type: AsyncTaskTypeEnum("type").notNull(),
-        /** High-level master task execution status */
-        status: AsyncTaskStatusEnum("status").default(AsyncTaskStatus.DISCOVERING).notNull(),
-        /** Target library ID scoped for this task */
-        library_id: uuid("library_id"),
-        /** User ID of the initiator who triggered this task */
-        owner_id: text("owner_id"),
-        /** Immutable snapshot of input parameters passed upon creation */
-        input_snapshot: jsonb("input_snapshot").$type<Record<string, unknown>>().default({}).notNull(),
-        /** Version of configuration used during generation */
-        config_version: integer("config_version").default(1).notNull(),
-        /** Detailed JSON cursor payload for item discovery state */
-        discovery_cursor: jsonb("discovery_cursor").$type<Record<string, unknown>>(),
-        /** Flag indicating whether discovery phase has finished scanning all candidate items */
-        discovery_complete: boolean("discovery_complete").default(false).notNull(),
-        /** Token for locking the active discovery scanner instance */
-        discovery_lease_token: uuid("discovery_lease_token"),
-        /** Expiration timestamp for the active discovery lease */
-        discovery_lease_expires_at: temporal("discovery_lease_expires_at"),
-        /** Total units discovered/scoped in this task */
-        total_units: integer("total_units").default(0).notNull(),
-        /** Number of task units executed and succeeded */
-        succeeded_units: integer("succeeded_units").default(0).notNull(),
-        /** Number of task units that permanently failed execution */
-        failed_units: integer("failed_units").default(0).notNull(),
-        /** Number of task units cancelled due to master task cancellation */
-        cancelled_units: integer("cancelled_units").default(0).notNull(),
-        /** Maximum allowed in-flight worker executions for this task */
-        max_in_flight: integer("max_in_flight").default(5).notNull(),
-        /** External control signal requested by user or admin (e.g. PAUSE, CANCEL) */
-        control_requested: AsyncTaskControlEnum("control_requested").default(AsyncTaskControl.NONE).notNull(),
-        /** Idempotency key to prevent duplicate master task creation */
-        idempotency_key: text("idempotency_key"),
-        /** Last error message recorded at the master task level */
-        last_error: text("last_error"),
-        /** Timestamp when this task was created */
-        create_time: temporal("create_time")
-            .default(sql`now()`)
-            .notNull(),
-        /** Timestamp when this task record was last updated */
-        update_time: temporal("update_time")
-            .default(sql`now()`)
-            .notNull(),
-        /** Timestamp when this task reached terminal state (COMPLETED/FAILED/CANCELLED) */
-        complete_time: temporal("complete_time"),
-    },
-    (table) => [
-        index("async_task_type_status_idx").on(table.type, table.status),
-        index("async_task_library_status_idx").on(table.library_id, table.status),
-        index("async_task_owner_status_idx").on(table.owner_id, table.status),
-        index("async_task_discovery_recovery_idx").on(table.status, table.discovery_complete, table.discovery_lease_expires_at),
-        index("async_task_terminal_cleanup_idx").on(table.status, table.complete_time),
-        uniqueIndex("async_task_idempotency_unique").on(table.idempotency_key),
-        check("async_task_max_in_flight_positive", sql`${table.max_in_flight} > 0`),
-        check(
-            "async_task_counter_bounds",
-            sql`${table.total_units} >= 0 AND ${table.succeeded_units} >= 0 AND ${table.failed_units} >= 0 AND ${table.cancelled_units} >= 0 AND ${table.succeeded_units} + ${table.failed_units} + ${table.cancelled_units} <= ${table.total_units}`,
-        ),
-    ],
-);
-
-/**
- * AsyncTaskUnit Table (Child/Detail)
- * Represents an individual execution unit scoped to a parent AsyncTask.
- * Also acts as the transactional queue with lease locking and available_at timestamps.
- */
-export const AsyncTaskUnit = pgTable(
-    "async_task_unit",
-    {
-        /** Primary key (UUIDv7, time-sortable) */
-        id: uuid("id")
-            .primaryKey()
-            .notNull()
-            .$defaultFn(() => uuidv7.generate()),
-        /** Foreign key reference to parent AsyncTask */
-        task_id: uuid("task_id").notNull(),
-        /** Category of task unit */
-        kind: AsyncTaskUnitKindEnum("kind").notNull(),
-        /** Subject entity type ('MEDIA', 'POST', 'FILE') */
-        subject_type: AsyncSubjectTypeEnum("subject_type").notNull(),
-        /** Subject entity UUID */
-        subject_id: uuid("subject_id").notNull(),
-        /** Human-readable unit variant key (e.g. 'COVER:LOW', 'H264:1080P') */
-        unit_key: text("unit_key").notNull(),
-        /** Hash of normalized spec configuration parameters for exact specification matching */
-        spec_hash: text("spec_hash").default("").notNull(),
-        /** Execution status */
-        status: AsyncTaskUnitStatusEnum("status").default(AsyncTaskUnitStatus.PENDING).notNull(),
-        /** Detailed outcome code (e.g. EXECUTED, SKIPPED) */
-        outcome_code: text("outcome_code"),
-        /** Timestamp after which unit becomes eligible for dispatch/pickup */
-        available_at: temporal("available_at")
-            .default(sql`now()`)
-            .notNull(),
-        /** Active worker lease token for fencing lock validation */
-        lease_token: uuid("lease_token"),
-        /** Worker lease expiration timestamp */
-        lease_expires_at: temporal("lease_expires_at"),
-        /** Execution attempt counter */
-        attempt_count: integer("attempt_count").default(0).notNull(),
-        /** Maximum allowed execution attempts before marking FAILED */
-        max_attempts: integer("max_attempts").default(5).notNull(),
-        /** Snapshot of execution parameters */
-        input_snapshot: jsonb("input_snapshot")
-            .$type<Record<string, unknown>>()
-            .default(sql`'{}'::jsonb`)
-            .notNull(),
-        /** Output result references and metadata */
-        result_ref: jsonb("result_ref").$type<Record<string, unknown>>(),
-        /** Last execution error message */
-        last_error: text("last_error"),
-        /** Timestamp when unit was created */
-        create_time: temporal("create_time")
-            .default(sql`now()`)
-            .notNull(),
-        /** Timestamp when unit was last updated */
-        update_time: temporal("update_time")
-            .default(sql`now()`)
-            .notNull(),
-        /** Timestamp when unit reached terminal state (SUCCEEDED/FAILED/CANCELLED) */
-        complete_time: temporal("complete_time"),
-    },
-    (table) => [
-        uniqueIndex("async_task_unit_task_unit_key_unique").on(table.task_id, table.unit_key),
-        index("async_task_unit_task_status_idx").on(table.task_id, table.status),
-        index("async_task_unit_status_available_idx").on(table.status, table.available_at),
-        index("async_task_unit_status_lease_idx").on(table.status, table.lease_expires_at),
-        check("async_task_unit_attempt_count_nonnegative", sql`${table.attempt_count} >= 0`),
-        check("async_task_unit_max_attempts_positive", sql`${table.max_attempts} > 0`),
-    ],
-);
-
-// ==== Cover & Derivative Async Task Tables: END ====
 
 /**
  * Reconcile queue (docs/async_task_improvements.zh-Hans.md §11.3). A row only says "this subject may be out of

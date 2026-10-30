@@ -1,18 +1,12 @@
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, sql, type SQL } from "drizzle-orm";
 import { DeleteStatus, File as DbFile, Library, Media, SyncStatus, Track, TrackPurpose, TrackType } from "@/db/schema";
 import { db, type DbClient } from "@/global/db";
-import {
-    CoverRenderError,
-    CoverService,
-    coverPriority,
-    coverVariantKey,
-    pickCoverSource,
-    type ResolvedCoverSource,
-} from "@/features/media/cover";
+import { CoverService, coverPriority, coverVariantKey, pickCoverSource, type ResolvedCoverSource } from "@/features/media/cover";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
-import type { PipelineHandler } from "@/infra/queue/types";
+import type { SubjectPipelineHandler } from "@/infra/queue/types";
 import type { Quality } from "@/lib/types";
+import { UndecodableSourceError } from "@/lib/utils/cover_renderer";
 
 type TrackRow = typeof Track.$inferSelect;
 type CoverTrack = Pick<
@@ -27,15 +21,15 @@ const matchesQuality = (track: CoverTrack, quality: Quality) =>
 /**
  * The cover qualities that need rendering from `sourceFileId`. A quality is current when a matching cover track is
  * completed, not stale, has an active file, and is either supplied by the source (not generated) or was generated
- * from this source file. With `skipFailed`, qualities whose last attempt on this source file failed are left out too,
- * so library scans do not retry them; a change or an explicit requeue still does.
+ * from this source file. With `skipRejected`, qualities rejected on this source file are left out too, so library
+ * scans do not retry them; a change or an explicit requeue still does.
  */
 export function planCover(
     sourceFileId: string,
     tracks: readonly CoverTrack[],
     activeFileIds: ReadonlySet<string>,
     qualities: readonly Quality[],
-    skipFailed: boolean,
+    skipRejected: boolean,
 ): Quality[] {
     return qualities.filter((quality) => {
         const matching = tracks.filter((track) => matchesQuality(track, quality));
@@ -48,7 +42,8 @@ export function planCover(
                 (!track.is_generated || track.metadata.source_file_id === sourceFileId),
         );
         if (current) return false;
-        if (skipFailed && matching.some((track) => track.last_error && track.metadata.error_source_file_id === sourceFileId)) return false;
+        if (skipRejected && matching.some((track) => track.last_error && track.metadata.error_source_file_id === sourceFileId))
+            return false;
         return true;
     });
 }
@@ -121,7 +116,7 @@ const failedCovers = (libraryIds: readonly string[]) =>
  * `cover`: renders the cover qualities the library is configured for from the media's best content track.
  * Qualities outside the library configuration are left alone.
  */
-export const coverPipeline: PipelineHandler = {
+export const coverPipeline: SubjectPipelineHandler = {
     async reconcile(ctx) {
         const [state] = await loadCoverStates(db, [ctx.subjectId]);
         if (!state) return { kind: "done" };
@@ -141,18 +136,19 @@ export const coverPipeline: PipelineHandler = {
                 // The media or its source changed meanwhile; that change queues this media again.
                 if (!stored) return { kind: "done" };
             } catch (error) {
-                if (error instanceof CoverRenderError) return { kind: "failed", error: error.message };
+                if (error instanceof UndecodableSourceError) return { kind: "rejected", error: error.message };
                 throw error;
             }
         }
         return { kind: "done" };
     },
 
-    /** Records the failure on the cover track of every quality still missing, tagged with the source file it failed on. */
-    async recordFailure(tx, mediaId, error) {
+    /** Records the failure on the cover track of every quality still missing, tagged with the source file if that is at fault. */
+    async recordFailure(tx, { subjectId: mediaId, error, rejected }) {
         const [state] = await loadCoverStates(tx, [mediaId]);
         if (!state) return;
         const now = Temporal.Now.instant();
+        const errorSource = { error_source_file_id: rejected ? state.source.fileId : undefined };
         for (const quality of planCover(state.source.fileId, state.tracks, state.activeFileIds, state.qualities, false)) {
             const variantKey = coverVariantKey(quality);
             const existing = state.tracks.find((track) => track.purpose === TrackPurpose.COVER && track.variant_key === variantKey);
@@ -162,7 +158,7 @@ export const coverPipeline: PipelineHandler = {
                     .update(Track)
                     .set({
                         last_error: error,
-                        metadata: { ...existing.metadata, error_source_file_id: state.source.fileId },
+                        metadata: { ...existing.metadata, ...errorSource },
                         update_time: now,
                     })
                     .where(eq(Track.id, existing.id));
@@ -176,7 +172,7 @@ export const coverPipeline: PipelineHandler = {
                 priority: coverPriority(quality),
                 sync_status: SyncStatus.FAILED,
                 last_error: error,
-                metadata: { error_source_file_id: state.source.fileId },
+                metadata: errorSource,
                 variant_key: variantKey,
                 is_generated: true,
                 is_original: false,

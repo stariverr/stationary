@@ -203,9 +203,22 @@ job_queue(
 四个操作，语义与 client-go workqueue 一致：
 
 - **enqueue**：`INSERT … ON CONFLICT DO UPDATE`。行已存在时，可以把 `available_at` 往后推实现防抖，`priority` 取两者中较高的；这一行正在运行时标 `dirty`。
-- **claim**：选出到期、且没有租约或租约已过期的行，`FOR NO KEY UPDATE SKIP LOCKED` 锁住后写上租约。过期租约在这里直接回收，不需要单独的 sweeper。认领时附加的条件见 11.7。
+- **claim**：选出到期、且没有租约或租约已过期的行，`FOR NO KEY UPDATE SKIP LOCKED` 锁住后写上租约，同时 `attempts + 1`。过期租约在这里直接回收，不需要单独的 sweeper。认领时附加的条件见 11.7。
 - **finish**：校验 `lease_token` 后删除这一行。被标了 `dirty` 的，释放租约后立刻重跑。
-- **defer**：失败或被限流时用。设置新的 `available_at`（指数退避加随机抖动），释放租约。被限流不计入 `attempts`。超过最大重试次数时，把失败写到结果行，然后删除队列行。
+- **defer**：失败时用。设置新的 `available_at`（指数退避加随机抖动），释放租约。超过最大重试次数时，把失败写到结果行，然后删除队列行。
+- **postpone**：被限流时用。和 defer 一样释放租约，但把这次认领计入的 `attempts` 退回。
+
+失败分三类，处理方式不同：
+
+| 类别 | 例子 | 处理 |
+|---|---|---|
+| 输入被拒（`rejected`） | provider 返回 400 / 422、下载返回 4xx（408、425、429 除外）、FFmpeg 解不开文件、连续崩溃 | 不重试，失败连同输入写到结果行。scan 跳过，直到输入变化或用户点"重试失败" |
+| 其他失败（`retry`），未知错误也归这类 | 5xx、超时、网络错误、鉴权失败、存储不可用 | 退避重试，次数用完后只记错误、不记输入，下一轮巡检重新入队 |
+| 限流（`deferred`） | provider 打满、熔断中 | 不计次数，等待后再跑 |
+
+判断不准的错误一律按可重试处理，只有确定是输入的问题才拒绝。这样出错的代价只是多试几次，不会有内容被永久跳过。
+
+`attempts` 在认领时计数，所以进程崩溃也算一次尝试。一个对象连续崩溃到超过最大次数时，worker 不再运行它，按"输入被拒"记录。否则毒丸任务会每小时被巡检重新拉起，再把 worker 打挂一轮。
 
 其他约定：
 
@@ -281,7 +294,7 @@ markChanged(tx, aspect, ids)
 | 总数 | 库里有效媒体的数量 |
 | 剩余 | `job_queue` 中该库、该流水线的行数 |
 | 已处理 | 总数 − 剩余（scan 只把需要处理的媒体入队，所以成立） |
-| 正在处理 / 重试中 | 剩余行里租约有效的 / `attempts > 0` 的 |
+| 正在处理 / 重试中 | 剩余行里租约有效的 / `attempts > 0` 且没有有效租约的 |
 
 - 该库的 scan 行还在时，显示"正在统计…"，否则剩余数会偏小。
 - 队列清空后，算一次完整覆盖率（`getLibraryCoverage`），显示最终结果和失败原因。
@@ -293,7 +306,8 @@ markChanged(tx, aspect, ids)
 ### 11.7 限流、熔断、优先级、暂停
 
 - **限流**：provider 打满时，Redis 限流器（`rate-limit.ts`）给出可重试时间，行按这个时间 defer，不计失败。
-- **熔断**：入队时把 `resource_key`（如 `provider:<id>`）写在行上，仅作调度提示，reconcile 运行时仍重新解析配置。遇到 AUTHENTICATION、额度类错误时，给该资源设长冷却并通知用户。认领时排除冷却中的资源，这些行保持排队、不计失败；凭证更新后清除冷却并唤醒。
+- **熔断**：放在 Redis 限流器里，和限流共用冷却键，新增一个连续失败计数。指向 provider 的失败（鉴权、不可用、模型、未知）连续 5 次后封锁 30 秒，之后每次探测失败时长翻倍，最长 1 小时；任一次成功清零。封锁期间，调用方看到的和限流一样，行走 `deferred`，不计次数也不打 provider。输入错误和 429 不计入。provider 的 Key、地址或模板更新时清除封锁。
+- 第 3 层再加认领时按资源排除：入队时把 `resource_key`（如 `provider:<id>`）写在行上，冷却中的资源不认领。这一步只省空转的认领，不影响是否打 provider，也不影响重试次数。通知用户也放到第 3 层。
 - **优先级**：导入和编辑触发的为高，scan 入队的为低，新内容不会被整库回填饿死。多用户部署需要时，再加按库轮转。
 - **暂停**：库上加一个暂停字段，认领时排除。用于停掉大规模回填，又不想改回配置的情况。
 
@@ -339,11 +353,22 @@ markChanged(tx, aspect, ids)
 
 1. **队列和声明表**：`job_queue`、`markChanged`、scan、巡检；迁移 `download`、`avatar`、`cover`，接入 11.5 的入口；设置页进度和新的"库 × 流水线"视图。COVER_*、POST_PROCESS、AVATAR_COPY 从旧引擎下线，旧引擎只剩 AI_ENRICH。
    - **已完成（2026-10-27，分支 `refactor/job-queue`）。** 代码在 `apps/server/src/infra/queue/`，三条流水线在 `features/ingest/download-pipeline.ts`、`features/author/avatar-pipeline.ts`、`features/media/cover-pipeline.ts`。与上文的出入：
-     - 队列行被删除前没有"失败行"：超过重试次数时由各流水线的 `recordFailure` 把失败连同当时的输入写到结果行（cover 写 `metadata.error_source_file_id`，avatar 写 `avatar_error_origin`），scan 跳过输入未变的失败；变化或"重试失败"会重新入队。
+     - 队列行被删除前没有"失败行"：放弃时由各流水线的 `recordFailure` 把失败写到结果行。只有"输入被拒"才同时记下输入（cover 写 `metadata.error_source_file_id`，avatar 写 `avatar_error_origin`），scan 只跳过这一种；其他失败由巡检重试，变化或"重试失败"都会重新入队。
+     - `download` 没有输入字段：被拒的 track 标 FAILED，其他失败退回 PENDING，scan 只找 PENDING / IN_PROGRESS。重试期间媒体保持 IN_PROGRESS，放弃时才标 FAILED。
      - 防抖、按库轮转、暂停没有做（第 3 层）。
      - 前端轮询间隔为 5 秒，任务页和设置页都读 `GET /api/jobs/pipelines`。
 2. **AI 迁移**：`ai.describe`、`ai.index`、`ai.text`、`ai.image`，含按空间攒批和限流 defer；空间切换按覆盖率。删除旧引擎、两张任务表和 embedding 队列，旧任务页下线。
-3. **调度增强**：熔断、优先级、库级暂停；需要时加按库轮转。
+   - **已完成（2026-10-30，分支 `refactor/job-queue`）。** 四条流水线在 `features/ai/describe-pipeline.ts`、`index-pipeline.ts`、`embed-pipeline.ts`（`ai.text` / `ai.image` 共用），库级操作在 `features/ai/actions.ts`。`infra/jobs`、`async_task` / `async_task_unit` 及其枚举、embedding 队列和 worker、`queue-enrichment.ts`、`CoverNotReadyError`、`backfill_task_id` 均已删除；任务页只剩流水线视图。与上文的出入：
+     - 按空间的队列名是 `ai.text:<空间行 id>` / `scan:ai.text:<空间行 id>`。批处理只在队首是第一次尝试时用 `claimBatch` 拿同一队列里已到期、从未尝试过的行，不等待；失败或崩溃过的行单独跑，批里的输入类错误先重试，借此找出出错的那一项。限流返回 `deferred`，`postpone` 退回这次尝试。
+     - `ai.describe` 和 `ai.image` 还声明了 `media.content`：没有生成封面的图片直接用内容图。
+     - 失败写在结果行上：描述写 `asset_ai_metadata.last_error`，向量写 `asset_embedding.last_error`。输入被拒时再写 `error_input_hash`（图片、模型、prompt 版本、语言的哈希）或 `error_hash`。`ai.index` 不调用 provider，失败只打日志，不计入失败数。
+     - `asset_ai_metadata.processing_status` 和 `asset_embedding` 上的队列字段已删除，进度和覆盖率只读队列行和结果行。"重新描述"改为把其他模型 / 旧 prompt 写的描述标记 `is_stale`，再报告 `library.ai_config`。
+     - BUILDING 空间在自己的队列（含 scan）清空后，由该队列每次运行后的 `settled` 和巡检判断是否提升；提升时删除被替换空间的队列。
+     - 11.13 #2 已修：`ai.describe` 删掉别的库留下的描述，`ai.index` 重写文档并删掉别的库留下的向量，新库的空间重新生成。
+     - 标题、描述、标签、post 绑定和标签改名 / 合并 / 删除都在各自事务里报告 `media.meta`（`features/media/meta-changes.ts`）；封面 track 的变化报告 `media.cover`。
+     - 库的"处理"不再返回 409，改为重试已记录的失败并对四条 AI 流水线各请求一次 scan。`/api/task/queue-ai` 改为 `POST /api/ai/media/process`；保存绑定不再返回 `indexingStarted`。`AiService.forLibrary` 没有加缓存。
+     - 文本向量的 `content_hash` 现在是搜索文档的哈希，上线后已有的文本向量会重新生成一次。
+3. **调度增强**：认领时按资源排除和熔断通知、优先级、库级暂停；需要时加按库轮转。熔断本身已在第 2 层做完（11.7）。
 4. **operation 层**：第一个操作要做时（11.9）。
 
 ### 11.13 评审中发现的现有 bug（2026-10-26）

@@ -3,7 +3,7 @@ import { DeleteStatus, File as DbFile, SyncStatus, Track, TrackPurpose, TrackTyp
 import { avatarOrigin } from "@/features/author/avatar-pipeline";
 import { coverVariantKey, pickCoverSource } from "@/features/media/cover";
 import { planCover } from "@/features/media/cover-pipeline";
-import { Aspect, PIPELINES, assertAcyclic, parseQueueName, pipelinesReading, scanQueueName } from "@/infra/queue/pipelines";
+import { Aspect, PIPELINES, assertAcyclic, parseQueueName, pipelinesReading, queueName, scanQueueName } from "@/infra/queue/pipelines";
 import { Quality } from "@/lib/types";
 
 type TrackRow = typeof Track.$inferSelect;
@@ -49,15 +49,23 @@ describe("pipeline declarations", () => {
 
     test("aspects route to the pipelines that read them", () => {
         expect(pipelinesReading(Aspect.MEDIA_SOURCE)).toEqual(["download"]);
-        expect(pipelinesReading(Aspect.MEDIA_CONTENT)).toEqual(["cover"]);
+        expect(pipelinesReading(Aspect.MEDIA_CONTENT)).toEqual(["cover", "ai.describe", "ai.image"]);
         expect(pipelinesReading(Aspect.LIBRARY_COVER_CONFIG)).toEqual(["cover"]);
-        expect(pipelinesReading(Aspect.MEDIA_COVER)).toEqual([]);
+        expect(pipelinesReading(Aspect.MEDIA_COVER)).toEqual(["ai.describe", "ai.image"]);
+        expect(pipelinesReading(Aspect.MEDIA_DESCRIPTION)).toEqual(["ai.index"]);
+        expect(pipelinesReading(Aspect.MEDIA_SEARCH_DOC)).toEqual(["ai.text"]);
+        expect(pipelinesReading(Aspect.LIBRARY_SPACES)).toEqual(["ai.text", "ai.image"]);
     });
 
     test("queue names round-trip", () => {
-        expect(parseQueueName("cover")).toEqual({ pipeline: "cover", scan: false });
-        expect(parseQueueName(scanQueueName("avatar"))).toEqual({ pipeline: "avatar", scan: true });
+        expect(parseQueueName("cover")).toEqual({ pipeline: "cover", scan: false, space: null });
+        expect(parseQueueName(scanQueueName("avatar"))).toEqual({ pipeline: "avatar", scan: true, space: null });
+        expect(parseQueueName(queueName("ai.text", "s1"))).toEqual({ pipeline: "ai.text", scan: false, space: "s1" });
+        expect(parseQueueName(scanQueueName("ai.image", "s2"))).toEqual({ pipeline: "ai.image", scan: true, space: "s2" });
         expect(parseQueueName("scan:unknown")).toBeNull();
+        // A per-space pipeline always names its space, and only those do.
+        expect(parseQueueName("ai.text")).toBeNull();
+        expect(parseQueueName("cover:s1")).toBeNull();
     });
 });
 
@@ -116,13 +124,18 @@ describe("planCover", () => {
         expect(planCover("src", [supplied], new Set(["c1"]), qualities, false)).toEqual([Quality.LOW]);
     });
 
-    test("scans skip a quality that failed on the current source, changes do not", () => {
+    test("scans skip a quality rejected on the current source, changes do not", () => {
         const failed = [
             cover(Quality.LOW, { sync_status: SyncStatus.FAILED, last_error: "bad", metadata: { error_source_file_id: "src" } }),
         ];
         expect(planCover("src", failed, new Set(), [Quality.LOW], true)).toEqual([]);
         expect(planCover("src", failed, new Set(), [Quality.LOW], false)).toEqual([Quality.LOW]);
         expect(planCover("new", failed, new Set(), [Quality.LOW], true)).toEqual([Quality.LOW]);
+    });
+
+    test("scans retry a quality that failed for another reason", () => {
+        const failed = [cover(Quality.LOW, { sync_status: SyncStatus.FAILED, last_error: "storage is down" })];
+        expect(planCover("src", failed, new Set(), [Quality.LOW], true)).toEqual([Quality.LOW]);
     });
 });
 

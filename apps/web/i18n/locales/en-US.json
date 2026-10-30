@@ -222,8 +222,8 @@
             "failure_model": "The model does not exist or is misconfigured. Check the model settings.",
             "failure_unknown": "Something went wrong. Continue processing to retry; if it keeps failing, view the error.",
             "failure_details": "View error",
-            "progress_task": "Processing · {done} / {total}",
-            "progress_vectors": "Updating the index · {count} left",
+            "progress_queued": "Processing · {count} left",
+            "progress_scanning": "Looking for items to process",
             "process_start": "Start processing",
             "process_continue": "Continue processing",
             "process_started": "Processing started",
@@ -345,7 +345,6 @@
             "language_change_confirm": "Re-describe all {count} items in the new language? Every image is sent to the description model again, which takes time and incurs provider costs.",
             "bindings_save": "Save",
             "bindings_saved": "Model selection saved",
-            "bindings_saved_not_indexed": "Saved, but indexing could not be started. Save again to retry.",
             "status_building": "Switching to {model}: {ready}/{total}. Search keeps using the current model until it finishes.",
             "status_blocked_low_coverage": "Not switched yet: the new model covers only {ready} items, fewer than the current one. Use Continue processing above to fill the gap.",
             "status_blocked_failures": "Not switched yet: too many items failed with the new model. Check the model, then retry.",
@@ -1056,86 +1055,22 @@
     },
     "jobs": {
         "nav_title": "Background Tasks",
-        "tabs": {
-            "all": "All",
-            "failed": "Failed",
-            "running": "Processing",
-            "pending": "Pending",
-            "succeeded": "Succeeded",
-            "discovering": "Scanning",
-            "paused": "Paused",
-            "completed": "Completed",
-            "cancelled": "Cancelled"
-        },
         "actions": {
             "sweep": "Fix stuck tasks",
-            "pause": "Pause",
-            "resume": "Resume",
-            "cancel": "Cancel task",
             "sweep_hint": "Reset tasks whose worker stopped responding"
-        },
-        "task_types": {
-            "AI_ENRICH": "AI Smart Analysis"
-        },
-        "inspector": {
-            "title": "Task details",
-            "close": "Close",
-            "more": "More actions",
-            "copy_input": "Copy input JSON",
-            "input_copied": "Input JSON copied",
-            "processed": "{done} of {total} items processed",
-            "legend_succeeded": "{count} succeeded",
-            "legend_failed": "{count} failed",
-            "legend_cancelled": "{count} cancelled",
-            "legend_remaining": "{count} left",
-            "last_error": "Last error",
-            "copy_error": "Copy error",
-            "error_copied": "Error copied",
-            "created_at": "Created",
-            "updated_at": "Updated",
-            "completed_at": "Finished",
-            "task_id": "Task ID",
-            "items": "Items",
-            "unit_filter_label": "Filter items by status",
-            "unit_pages": "Item pages",
-            "retry_failed": "Retry {count} failed",
-            "retry_unit": "Retry",
-            "unit_retried": "Item queued for retry",
-            "attempts": "Attempt {attempt} of {max}",
-            "show_more": "Show more",
-            "show_less": "Show less",
-            "no_units": "No items yet",
-            "no_units_desc": "Items appear here as the task works through its scope.",
-            "no_units_filtered": "No items with this status",
-            "units_failed": "Couldn't load items. Retrying automatically."
-        },
-        "bulk": {
-            "selected": "{count} selected",
-            "retry_failed": "Retry failed",
-            "pause": "Pause",
-            "resume": "Resume",
-            "cancel": "Cancel",
-            "clear": "Clear selection"
-        },
-        "empty": {
-            "no_tasks": "No AI analysis tasks yet",
-            "no_tasks_desc": "Tasks appear here when you run AI analysis on this library.",
-            "no_match": "No tasks match these filters",
-            "no_match_desc": "Try another status or search term.",
-            "reset": "Clear filters"
-        },
-        "pagination": {
-            "label": "Task pages",
-            "range": "{from}–{to} of {total}",
-            "prev": "Previous page",
-            "next": "Next page"
         },
         "pipelines": {
             "scanning": "scanning",
             "names": {
                 "download": "Downloads",
                 "avatar": "Avatars",
-                "cover": "Covers"
+                "cover": "Covers",
+                "ai": {
+                    "describe": "AI descriptions",
+                    "index": "Search index",
+                    "text": "Text vectors",
+                    "image": "Image vectors"
+                }
             },
             "retry_failed": "Retry",
             "retry_done": "Queued {count} items to retry",
@@ -1151,44 +1086,9 @@
             "hide_failures": "Hide failures",
             "no_failures": "No failures recorded"
         },
-        "tasks": {
-            "filter_label": "Filter by status",
-            "select_all": "Select all tasks on this page",
-            "select_task": "Select task {id}",
-            "scope_media": "{count} media",
-            "scope_library": "Whole library",
-            "duration": "took {duration}",
-            "copy_id": "Copy task ID",
-            "id_copied": "Task ID copied",
-            "progress": "{done} / {total} items",
-            "failed_units": "{count} failed",
-            "retry_failed": "Retry failed",
-            "more": "More actions",
-            "col_status": "Status",
-            "col_task": "Task",
-            "col_progress": "Progress",
-            "col_created": "Created"
-        },
         "toast": {
-            "retried": "Queued {count} failed items for retry",
-            "paused": "Task paused",
-            "resumed": "Task resumed",
-            "cancelled": "Task cancelled",
-            "bulk_paused": "Paused {count} tasks",
-            "bulk_resumed": "Resumed {count} tasks",
-            "bulk_cancelled": "Cancelled {count} tasks",
             "swept": "Stuck tasks were reset",
-            "action_failed": "Couldn't complete the action. Try again.",
-            "load_failed": "Couldn't load tasks. Refresh to try again.",
-            "detail_failed": "Couldn't load the task",
-            "not_found": "The task doesn't exist or was deleted."
-        },
-        "cancel_dialog": {
-            "title_one": "Cancel this task?",
-            "title_many": "Cancel {count} tasks?",
-            "desc": "Items that are still waiting or running stop and are marked cancelled. Items already analysed keep their results. This can't be undone.",
-            "confirm": "Yes, cancel",
-            "keep": "Keep running"
+            "action_failed": "Couldn't complete the action. Try again."
         }
     },
     "trash": {

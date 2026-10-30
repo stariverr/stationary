@@ -500,7 +500,7 @@ export const useMediaStore = defineStore("media", () => {
     };
 
     const queueAi = async (mediaIds: string[]): Promise<ApiResponse> => {
-        const response = await useApi<ApiResponse>("/task/queue-ai", {
+        const response = await useApi<ApiResponse>("/ai/media/process", {
             method: "POST",
             body: { media_ids: mediaIds },
         });

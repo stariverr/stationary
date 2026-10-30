@@ -169,7 +169,7 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
             ? await db
                   .select({
                       entity_id: AssetAiMetadata.entity_id,
-                      processing_status: AssetAiMetadata.processing_status,
+                      input_hash: AssetAiMetadata.input_hash,
                       last_error: AssetAiMetadata.last_error,
                   })
                   .from(AssetAiMetadata)

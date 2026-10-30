@@ -91,7 +91,7 @@ const formatError = (error: AiErrorView) =>
 const formatDate = (iso: string) => formatTemporalDateTime(iso, locale.value, { year: "numeric", month: "2-digit", day: "2-digit" });
 
 const coverage = computed(() => status.value?.coverage ?? null);
-const isProcessing = computed(() => Boolean(progress.value && (progress.value.task || progress.value.queuedVectors > 0)));
+const isProcessing = computed(() => Boolean(progress.value && (progress.value.queued > 0 || progress.value.scanning)));
 /** Items AI search does not cover yet and processing can fill in. */
 const incomplete = computed(() => (coverage.value ? coverage.value.missing + coverage.value.failed : 0));
 const updatable = computed(() => status.value?.describe?.updatable ?? 0);
@@ -248,16 +248,11 @@ const commit = async ({ redescribe = false }: { redescribe?: boolean } = {}) => 
             language: language.value,
             redescribe,
         };
-        const res = await useApi<ApiResponse<{ indexingStarted: boolean }>>(`/ai/bindings/${props.libraryId}`, { method: "POST", body });
-        if (res?.data?.indexingStarted === false) {
-            // Saved, but queuing the indexing failed. The form stays unsaved so saving again retries it.
-            toast.warning(t("settings.ai_config.bindings_saved_not_indexed"));
-        } else {
-            savedSelection.value = JSON.stringify(selection.value);
-            savedDescribe.value = selection.value.describe;
-            savedLanguage.value = language.value;
-            toast.success(t("settings.ai_config.bindings_saved"));
-        }
+        await useApi<ApiResponse<unknown>>(`/ai/bindings/${props.libraryId}`, { method: "POST", body });
+        savedSelection.value = JSON.stringify(selection.value);
+        savedDescribe.value = selection.value.describe;
+        savedLanguage.value = language.value;
+        toast.success(t("settings.ai_config.bindings_saved"));
         await loadStatus();
     } catch (err) {
         console.error("Failed to save library AI bindings", err);
@@ -286,8 +281,8 @@ const commit = async ({ redescribe = false }: { redescribe?: boolean } = {}) => 
             <div class="flex min-h-7 flex-wrap items-center justify-between gap-x-3 gap-y-2">
                 <p v-if="isProcessing && progress" class="flex min-w-0 items-center gap-1.5 font-medium">
                     <Loader2 class="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-                    <span v-if="progress.task">{{ t("settings.ai_config.progress_task", progress.task) }}</span>
-                    <span v-else>{{ t("settings.ai_config.progress_vectors", { count: progress.queuedVectors }) }}</span>
+                    <span v-if="progress.queued > 0">{{ t("settings.ai_config.progress_queued", { count: progress.queued }) }}</span>
+                    <span v-else>{{ t("settings.ai_config.progress_scanning") }}</span>
                 </p>
                 <p v-else-if="coverage && coverage.eligible === 0" class="min-w-0 text-muted-foreground">
                     {{ t("settings.ai_config.coverage_empty") }}

@@ -13,17 +13,35 @@ export const Aspect = {
     MEDIA_LIBRARY: "media.library",
     /** Generated cover tracks of a media changed. */
     MEDIA_COVER: "media.cover",
+    /** Title, description or tags of a media, of its post, or of a tag group it carries. */
+    MEDIA_META: "media.meta",
+    /** The stored AI description of a media. */
+    MEDIA_DESCRIPTION: "media.description",
+    /** The search document of a media. */
+    MEDIA_SEARCH_DOC: "media.search_doc",
     /** Where an author's avatar should come from. */
     AUTHOR_AVATAR_SOURCE: "author.avatar_source",
     /** Cover qualities of a library. */
     LIBRARY_COVER_CONFIG: "library.cover_config",
+    /** Description model, language or prompt of a library, or a request to re-describe. */
+    LIBRARY_AI_CONFIG: "library.ai_config",
+    /** Embedding spaces a library writes (ACTIVE and BUILDING). */
+    LIBRARY_SPACES: "library.spaces",
 } as const;
 export type Aspect = (typeof Aspect)[keyof typeof Aspect];
 
 export type SubjectKind = "media" | "author";
 
+/** Embedding role whose spaces a per-space pipeline writes. */
+export type SpaceRole = "textEmbedding" | "imageEmbedding";
+
 export interface PipelineDeclaration {
     readonly subject: SubjectKind;
+    /**
+     * Runs once per embedding space of this role that the library writes (ACTIVE and BUILDING). Each space has its
+     * own queue, named `<pipeline>:<space row id>`, so a space is filled and counted on its own.
+     */
+    readonly perSpace?: SpaceRole;
     /** Subject-level aspects enqueue the subject; library-level aspects (`library.*`) enqueue a scan of the library. */
     readonly inputs: readonly Aspect[];
     readonly outputs: readonly Aspect[];
@@ -37,23 +55,68 @@ export const PIPELINES = {
         inputs: [Aspect.MEDIA_CONTENT, Aspect.MEDIA_LIBRARY, Aspect.LIBRARY_COVER_CONFIG],
         outputs: [Aspect.MEDIA_COVER],
     },
+    "ai.describe": {
+        subject: "media",
+        // Content too: an image without generated covers is described from its content.
+        inputs: [Aspect.MEDIA_CONTENT, Aspect.MEDIA_COVER, Aspect.MEDIA_LIBRARY, Aspect.LIBRARY_AI_CONFIG],
+        outputs: [Aspect.MEDIA_DESCRIPTION],
+    },
+    "ai.index": {
+        subject: "media",
+        inputs: [Aspect.MEDIA_DESCRIPTION, Aspect.MEDIA_META, Aspect.MEDIA_LIBRARY],
+        outputs: [Aspect.MEDIA_SEARCH_DOC],
+    },
+    "ai.text": {
+        subject: "media",
+        perSpace: "textEmbedding",
+        inputs: [Aspect.MEDIA_SEARCH_DOC, Aspect.MEDIA_LIBRARY, Aspect.LIBRARY_SPACES],
+        outputs: [],
+    },
+    "ai.image": {
+        subject: "media",
+        perSpace: "imageEmbedding",
+        inputs: [Aspect.MEDIA_CONTENT, Aspect.MEDIA_COVER, Aspect.MEDIA_LIBRARY, Aspect.LIBRARY_SPACES],
+        outputs: [],
+    },
 } as const satisfies Record<string, PipelineDeclaration>;
 
 export type PipelineName = keyof typeof PIPELINES;
 export const PIPELINE_NAMES = Object.keys(PIPELINES) as PipelineName[];
 
-const SCAN_PREFIX = "scan:";
-
-/** Queue name of the library scan of a pipeline; its subject is the library id. */
-export function scanQueueName(pipeline: PipelineName): string {
-    return `${SCAN_PREFIX}${pipeline}`;
+export function spaceRoleOf(pipeline: PipelineName): SpaceRole | null {
+    const declaration: PipelineDeclaration = PIPELINES[pipeline];
+    return declaration.perSpace ?? null;
 }
 
-/** Splits a queue row's pipeline column into the pipeline it serves and whether it is that pipeline's library scan. */
-export function parseQueueName(name: string): { pipeline: PipelineName; scan: boolean } | null {
+const SCAN_PREFIX = "scan:";
+
+/** Queue name of a pipeline's subject rows; per-space pipelines name the space row. */
+export function queueName(pipeline: PipelineName, space: string | null = null): string {
+    return space ? `${pipeline}:${space}` : pipeline;
+}
+
+/** Queue name of the library scan of a pipeline (in one space); its subject is the library id. */
+export function scanQueueName(pipeline: PipelineName, space: string | null = null): string {
+    return `${SCAN_PREFIX}${queueName(pipeline, space)}`;
+}
+
+export interface QueueName {
+    readonly pipeline: PipelineName;
+    readonly scan: boolean;
+    /** Space row id of a per-space pipeline. */
+    readonly space: string | null;
+}
+
+/** Splits a queue row's pipeline column into the pipeline it serves, its space, and whether it is a library scan. */
+export function parseQueueName(name: string): QueueName | null {
     const scan = name.startsWith(SCAN_PREFIX);
-    const pipeline = scan ? name.slice(SCAN_PREFIX.length) : name;
-    return pipeline in PIPELINES ? { pipeline: pipeline as PipelineName, scan } : null;
+    const rest = scan ? name.slice(SCAN_PREFIX.length) : name;
+    const separator = rest.indexOf(":");
+    const pipeline = separator < 0 ? rest : rest.slice(0, separator);
+    const space = separator < 0 ? null : rest.slice(separator + 1);
+    if (!(pipeline in PIPELINES)) return null;
+    if ((spaceRoleOf(pipeline as PipelineName) !== null) !== (space !== null)) return null;
+    return { pipeline: pipeline as PipelineName, scan, space };
 }
 
 export function isLibraryAspect(aspect: Aspect): boolean {

@@ -21,7 +21,13 @@ import type {
     VisualEmbeddingProvider,
 } from "./types";
 
-const providerLimiter = createProviderLimiter(createRedisRateLimitStore(kv));
+const limitStore = createRedisRateLimitStore(kv);
+const providerLimiter = createProviderLimiter(limitStore);
+
+/** Lets calls to a provider through again after its connection was changed, since that may be what fixes it. */
+export function resetProviderLimits(providerId: string): Promise<void> {
+    return limitStore.reset(providerId);
+}
 
 /**
  * Recent query vectors, keyed by embedding space and query text. A vector depends only on the
