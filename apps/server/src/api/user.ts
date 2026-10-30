@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
+import { AuthEnv, ownedLibrary, requireAuth } from "@/lib/auth/middleware";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
 import * as v from "valibot";
@@ -21,42 +21,48 @@ router.get("/", (c) => {
     );
 });
 
+// Token management is account-wide, so a library-scoped token may not touch it at all
+router.use("/tokens/*", async (c, next) => {
+    if (c.get("apiToken")?.library_id) {
+        return c.json(error(Code.FORBIDDEN, "Library-scoped API tokens cannot manage API tokens"), 403);
+    }
+    return next();
+});
+
 export const TokenCreateBodySchema = v.strictObject({
     name: v.pipe(v.string(), v.nonEmpty("Name is required")),
     library_id: v.optional(v.nullable(v.pipe(v.string(), v.uuid("Invalid library_id format")))),
-    expires_in_seconds: v.optional(
-        v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1, "expires_in_seconds must be positive"))),
-    ),
+    expires_in_seconds: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1, "expires_in_seconds must be positive")))),
 });
 
 // Create a new API token
-router.post(
-    "/tokens",
-    validate("json", TokenCreateBodySchema),
-    async (c) => {
-        const user = c.get("user");
-        if (!user) {
-            return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
-        }
-        const body = c.req.valid("json");
+router.post("/tokens", validate("json", TokenCreateBodySchema), async (c) => {
+    const user = c.get("user");
+    if (!user) {
+        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+    }
+    const body = c.req.valid("json");
 
-        const result = await ApiTokenService.generateToken(user.id, body.name, body.library_id, body.expires_in_seconds);
+    if (body.library_id && !(await ownedLibrary(c, user.id, body.library_id))) {
+        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
+    }
 
-        return c.json(
-            success(Code.SUCCESS, {
-                id: result.token.id,
-                name: result.token.name,
-                prefix: result.token.prefix,
-                first_four: result.token.first_four,
-                last_four: result.token.last_four,
-                token: result.rawToken,
-                library_id: result.token.library_id,
-                expires_at: result.token.expire_time,
-                create_time: result.token.create_time,
-            }),
-        );
-    },
-);
+    const result = await ApiTokenService.generateToken(user.id, body.name, body.library_id, body.expires_in_seconds);
+
+    return c.json(
+        success(Code.SUCCESS, {
+            id: result.token.id,
+            name: result.token.name,
+            prefix: result.token.prefix,
+            first_four: result.token.first_four,
+            last_four: result.token.last_four,
+            token: result.rawToken,
+            library_id: result.token.library_id,
+            expires_at: result.token.expire_time,
+            create_time: result.token.create_time,
+        }),
+    );
+});
 
 // List all active tokens
 router.get("/tokens", async (c) => {
