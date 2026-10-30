@@ -10,6 +10,8 @@ const props = defineProps<{ libraryId: string }>();
 const POLL_INTERVAL_MS = 5000;
 /** Counts shown as plain text; failures get their own control. Zero counts are left out. */
 const QUIET_COUNTS = ["queued", "running", "retrying"] as const;
+/** Work that has waited this long is worth pointing out. */
+const LONG_WAIT_SECONDS = 300;
 
 const { t, locale } = useI18n();
 
@@ -19,6 +21,7 @@ const retrying = ref<PipelineName | null>(null);
 const expanded = ref<PipelineName | null>(null);
 const failures = ref<PipelineFailure[]>([]);
 const failuresLoading = ref(false);
+const minutes = (seconds: number) => Math.ceil(seconds / 60);
 const isIdle = (status: PipelineStatus) => !status.scanning && QUIET_COUNTS.every((column) => status[column] === 0) && status.failed === 0;
 
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -116,6 +119,12 @@ onUnmounted(() => {
                             {{ $t(`jobs.pipelines.count_${column}`, { count: status[column] }) }}
                         </span>
                     </template>
+                    <span v-if="status.blocked_seconds > 0" class="font-medium text-amber-700">
+                        {{ $t("jobs.pipelines.blocked", { minutes: minutes(status.blocked_seconds) }) }}
+                    </span>
+                    <span v-if="status.oldest_seconds >= LONG_WAIT_SECONDS" class="text-zinc-500">
+                        {{ $t("jobs.pipelines.oldest", { minutes: minutes(status.oldest_seconds) }) }}
+                    </span>
                     <template v-if="status.failed > 0">
                         <button
                             class="flex items-center gap-0.5 rounded-sm font-medium text-red-600 hover:text-red-700 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-950"

@@ -18,12 +18,15 @@ export interface RateLimitStore {
     /**
      * Counts a failure that points at the provider. Enough in a row block it, and each failure of a call made after a
      * block has passed blocks it twice as long. Calls that fail while it is blocked started earlier and do not count.
+     * Returns how many milliseconds this failure blocked it for, 0 when it did not.
      */
-    reportFailure(providerId: string): Promise<void>;
+    reportFailure(providerId: string): Promise<number>;
     /** The provider answered: forgets its failures. */
     reportSuccess(providerId: string): Promise<void>;
     /** Lifts any block and forgets the failures, for a connection that was changed and may work now. */
     reset(providerId: string): Promise<void>;
+    /** How long the provider stays out of reach, whether from a 429 or from failures; 0 when it can be called. */
+    blockedMs(providerId: string): Promise<number>;
 }
 
 /** How long a granted slot stays reserved if its holder crashes before releasing it. */
@@ -71,8 +74,9 @@ local failures = redis.call('incr', KEYS[2])
 redis.call('pexpire', KEYS[2], tonumber(ARGV[4]))
 local over = failures - tonumber(ARGV[1])
 if over >= 0 then
-    local ms = math.min(tonumber(ARGV[3]), tonumber(ARGV[2]) * 2 ^ over)
-    redis.call('set', KEYS[1], '1', 'PX', math.floor(ms))
+    local ms = math.floor(math.min(tonumber(ARGV[3]), tonumber(ARGV[2]) * 2 ^ over))
+    redis.call('set', KEYS[1], '1', 'PX', ms)
+    return ms
 end
 return 0`;
 
@@ -111,11 +115,12 @@ export function createRedisRateLimitStore(redis: {
         },
         async reportFailure(providerId) {
             const k = keys(providerId);
-            await redis.evalScript(
+            const blockedMs = await redis.evalScript(
                 REPORT_FAILURE_SCRIPT,
                 [k.coolDown, k.failures],
                 [String(FAILURES_TO_BLOCK), String(FIRST_BLOCK_MS), String(MAX_BLOCK_MS), String(FAILURE_MEMORY_MS)],
             );
+            return Number(blockedMs) || 0;
         },
         async reportSuccess(providerId) {
             await redis.evalScript("return redis.call('del', KEYS[1])", [keys(providerId).failures], []);
@@ -123,6 +128,10 @@ export function createRedisRateLimitStore(redis: {
         async reset(providerId) {
             const k = keys(providerId);
             await redis.evalScript("return redis.call('del', KEYS[1], KEYS[2])", [k.coolDown, k.failures], []);
+        },
+        async blockedMs(providerId) {
+            const ttl = await redis.evalScript("return redis.call('pttl', KEYS[1])", [keys(providerId).coolDown], []);
+            return Math.max(0, Number(ttl) || 0);
         },
     };
 }
@@ -186,7 +195,8 @@ export function createProviderLimiter(store: RateLimitStore): ProviderLimiter {
                 if (classification.kind === "RATE_LIMITED") {
                     await store.coolDown(providerId, classification.retryAfterMs ?? DEFAULT_COOL_DOWN_MS).catch(warn);
                 } else if (pointsAtProvider(classification.kind)) {
-                    await store.reportFailure(providerId).catch(warn);
+                    const blockedMs = await store.reportFailure(providerId).catch(warn);
+                    if (blockedMs) console.error(`[AI LIMIT] Provider ${providerId} keeps failing; blocked for ${blockedMs / 1000}s.`);
                 }
                 throw error;
             } finally {

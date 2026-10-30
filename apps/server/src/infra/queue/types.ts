@@ -1,5 +1,5 @@
 import type { Transaction } from "@/global/db";
-import type { PipelineName } from "@/infra/queue/pipelines";
+import type { Aspect, PipelineName } from "@/infra/queue/pipelines";
 
 export interface ReconcileContext {
     readonly subjectId: string;
@@ -8,13 +8,20 @@ export interface ReconcileContext {
     readonly space: string | null;
     /** Aborted when the lease is lost or the worker shuts down. */
     readonly signal: AbortSignal;
-    /** Must be the first statement of every transaction that writes results; throws LeaseLostError if the lease is gone. */
+    /**
+     * Call in every transaction that writes results, after those writes and before markChanged. Throws LeaseLostError if
+     * the lease is gone, which rolls them back. It comes after them because everyone locks in this order, result rows
+     * then queue rows, and because a run has no other reason to hold its queue row while it writes.
+     */
     readonly fence: (tx: Transaction) => Promise<void>;
 }
 
 export type ReconcileResult =
-    /** The subject matches its desired state (or nothing could be done yet). */
-    | { readonly kind: "done" }
+    /**
+     * The subject matches its desired state (or nothing could be done yet). `changed` is reported in the transaction
+     * that deletes the queue row, for a run that wrote nothing but may have been waited for.
+     */
+    | { readonly kind: "done"; readonly changed?: Aspect }
     /** The input itself cannot be processed: recorded at once with the input, and scans skip it until the input changes. */
     | { readonly kind: "rejected"; readonly error: string; readonly errorKind?: string }
     /**
@@ -64,6 +71,8 @@ interface PipelineHandlerBase {
     countFailures(libraryIds: readonly string[]): Promise<Map<string, number>>;
     /** Current failures of one library, most recent first; all of them when `limit` is omitted. */
     listFailures(libraryId: string, limit?: number): Promise<PipelineFailure[]>;
+    /** How long the provider this pipeline calls in a library stays out of reach, in milliseconds; 0 when it can be called. */
+    blockedMs?(libraryId: string): Promise<number>;
     /** Called after a run or a finished scan of a per-space pipeline, to act on the space once its queue drains. */
     settled?(libraryId: string, space: string): Promise<void>;
     /** Periodic upkeep, run with the patrol. */
@@ -86,8 +95,8 @@ export interface BatchContext {
     readonly head: string;
     readonly signal: AbortSignal;
     /**
-     * Leases up to `limit` more due subjects of the same queue that have not been attempted yet, without waiting for
-     * any. Returns nothing when this is not the head's first attempt, so a failing subject runs on its own.
+     * Leases up to `limit` more due subjects of the same queue, without waiting for any. A subject whose previous run
+     * was interrupted is not batched, as head or as one of these, since running it may take the worker down.
      */
     readonly claimMore: (limit: number) => Promise<string[]>;
     /** As ReconcileContext.fence, for one subject of the batch. */
@@ -96,7 +105,8 @@ export interface BatchContext {
 
 /**
  * A pipeline that reconciles several subjects with one provider request. Returns a result per subject of the batch;
- * a thrown error retries all of them.
+ * a thrown error retries all of them. An input error must not be returned for a whole batch: the handler has to find
+ * the subject at fault, since rows that fail and retry stay batched.
  */
 export interface BatchPipelineHandler extends PipelineHandlerBase {
     reconcileBatch(ctx: BatchContext): Promise<Map<string, ReconcileResult>>;

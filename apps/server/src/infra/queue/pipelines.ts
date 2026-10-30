@@ -119,6 +119,16 @@ export function parseQueueName(name: string): QueueName | null {
     return { pipeline: pipeline as PipelineName, scan, space };
 }
 
+/**
+ * Where a queue comes in the order transactions lock queue rows: a pipeline before those that read its outputs, as a
+ * run holds its own row when it queues them, and a scan before its pipeline, as a scan step holds its row when it
+ * queues subjects. PIPELINES is declared in dependency order.
+ */
+export function queueLockOrder(name: string): number {
+    const parsed = parseQueueName(name);
+    return parsed ? PIPELINE_NAMES.indexOf(parsed.pipeline) * 2 + (parsed.scan ? 0 : 1) : -1;
+}
+
 export function isLibraryAspect(aspect: Aspect): boolean {
     return aspect.startsWith("library.");
 }

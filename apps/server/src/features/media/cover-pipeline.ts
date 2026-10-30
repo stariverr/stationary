@@ -20,8 +20,9 @@ const matchesQuality = (track: CoverTrack, quality: Quality) =>
 
 /**
  * The cover qualities that need rendering from `sourceFileId`. A quality is current when a matching cover track is
- * completed, not stale, has an active file, and is either supplied by the source (not generated) or was generated
- * from this source file. With `skipRejected`, qualities rejected on this source file are left out too, so library
+ * completed, not stale, free of a failure, has an active file, and is either supplied by the source (not generated) or
+ * was generated from this source file. A failure left on such a cover was recorded for another source, and rendering
+ * it again clears it. With `skipRejected`, qualities rejected on this source file are left out too, so library
  * scans do not retry them; a change or an explicit requeue still does.
  */
 export function planCover(
@@ -37,6 +38,7 @@ export function planCover(
             (track) =>
                 track.sync_status === SyncStatus.COMPLETED &&
                 !track.is_stale &&
+                !track.last_error &&
                 track.file_id !== null &&
                 activeFileIds.has(track.file_id) &&
                 (!track.is_generated || track.metadata.source_file_id === sourceFileId),
@@ -118,17 +120,22 @@ const failedCovers = (libraryIds: readonly string[]) =>
  */
 export const coverPipeline: SubjectPipelineHandler = {
     async reconcile(ctx) {
+        // Without a cover to render, the pipelines that waited for this run go on with what there is.
+        const nothingToRender = { kind: "done", changed: Aspect.MEDIA_COVER } as const;
         const [state] = await loadCoverStates(db, [ctx.subjectId]);
-        if (!state) return { kind: "done" };
+        if (!state) return nothingToRender;
 
-        for (const quality of planCover(state.source.fileId, state.tracks, state.activeFileIds, state.qualities, false)) {
+        const qualities = planCover(state.source.fileId, state.tracks, state.activeFileIds, state.qualities, false);
+        if (qualities.length === 0) return nothingToRender;
+
+        for (const quality of qualities) {
             try {
                 const stored = await CoverService.generateCover({
                     media: state.media,
                     quality,
                     source: state.source,
                     signal: ctx.signal,
-                    beforePersist: async (tx) => {
+                    afterPersist: async (tx) => {
                         await ctx.fence(tx);
                         await markChanged(tx, Aspect.MEDIA_COVER, [state.media.id]);
                     },
@@ -143,8 +150,12 @@ export const coverPipeline: SubjectPipelineHandler = {
         return { kind: "done" };
     },
 
-    /** Records the failure on the cover track of every quality still missing, tagged with the source file if that is at fault. */
+    /**
+     * Records the failure on the cover track of every quality still missing, tagged with the source file if that is at
+     * fault. The pipelines that waited for the cover go on without it.
+     */
     async recordFailure(tx, { subjectId: mediaId, error, rejected }) {
+        await markChanged(tx, Aspect.MEDIA_COVER, [mediaId]);
         const [state] = await loadCoverStates(tx, [mediaId]);
         if (!state) return;
         const now = Temporal.Now.instant();

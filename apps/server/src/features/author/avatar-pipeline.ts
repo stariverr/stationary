@@ -90,7 +90,6 @@ export const avatarPipeline: SubjectPipelineHandler = {
         ctx.signal.throwIfAborted();
 
         await db.transaction(async (tx) => {
-            await ctx.fence(tx);
             const [file] = await tx
                 .insert(File)
                 .values({
@@ -127,6 +126,7 @@ export const avatarPipeline: SubjectPipelineHandler = {
                     .set({ delete_status: DeleteStatus.DELETED, delete_time: Temporal.Now.instant() })
                     .where(and(eq(File.id, author.avatar_file_id), eq(File.delete_status, DeleteStatus.ACTIVE)));
             }
+            await ctx.fence(tx);
         });
         return { kind: "done" };
     },

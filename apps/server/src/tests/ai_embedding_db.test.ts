@@ -32,9 +32,12 @@ import { batchDeleteMedia } from "@/features/media/lifecycle";
 import { createRedisRateLimitStore } from "@/features/ai/rate-limit";
 import { HybridSearchService } from "@/features/ai/search";
 import { AiService } from "@/features/ai/service";
-import { markChanged } from "@/infra/queue/changes";
+import { coverPipeline } from "@/features/media/cover-pipeline";
+import { markChanged, requestScan, requeue } from "@/infra/queue/changes";
 import { pipelineHandlers } from "@/infra/queue/handlers";
 import { Aspect } from "@/infra/queue/pipelines";
+import { pipelineStatus } from "@/infra/queue/status";
+import type { SubjectPipelineHandler } from "@/infra/queue/types";
 import { QueueWorker } from "@/infra/queue/worker";
 
 /**
@@ -106,11 +109,11 @@ async function fakeRerank(request: Request): Promise<Response> {
 }
 
 /** Runs the queue worker until a library has no queued work left. */
-async function drain(library: string, timeoutMs = 20_000) {
-    const worker = new QueueWorker(pipelineHandlers, { pollIntervalMs: 50, patrolIntervalMs: 0, listen: false });
+async function drain(library: string, concurrency?: number) {
+    const worker = new QueueWorker(pipelineHandlers, { concurrency, pollIntervalMs: 50, patrolIntervalMs: 0, listen: false });
     worker.start();
     try {
-        const deadline = Date.now() + timeoutMs;
+        const deadline = Date.now() + 20_000;
         while ((await db.$count(JobQueue, eq(JobQueue.library_id, library))) > 0) {
             if (Date.now() > deadline) throw new Error("The worker did not drain the library in time");
             await Bun.sleep(50);
@@ -255,6 +258,114 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
         expect(await statusOf(LibraryEmbeddingSpaceStatus.RETIRED)).toBe("qwen3-vl-embedding:768:plain");
     });
 
+    /** Renames all three media in one change. */
+    const retitle = (suffix: string) =>
+        db.transaction(async (tx) => {
+            for (const [animal, id] of Object.entries(mediaIds)) {
+                await tx
+                    .update(Media)
+                    .set({ title: `${animal}${suffix}` })
+                    .where(eq(Media.id, id));
+            }
+            await markChanged(tx, Aspect.MEDIA_META, Object.values(mediaIds));
+        });
+
+    databaseTest("finds the input a provider rejects in a batch and embeds the others", async () => {
+        const spaceId = "qwen3-vl-embedding:1024:plain";
+        const before = await rowsIn(spaceId);
+        const hashOf = (rows: typeof before, id: string) => rows.find((row) => row.entity_id === id)!.content_hash;
+        const requestsBefore = requests.length;
+
+        rejectedText = "dog edited";
+        await retitle(" edited");
+        // One at a time, every search document is ready before the first text run, so they share a request.
+        await drain(libraryId, 1);
+        rejectedText = null;
+
+        expect(requests[requestsBefore]?.contents).toHaveLength(3);
+        const after = await rowsIn(spaceId);
+        const dog = after.find((row) => row.entity_id === mediaIds.dog)!;
+        expect(dog).toMatchObject({ content_hash: hashOf(before, mediaIds.dog), error_kind: "INVALID_REQUEST" });
+        for (const id of [mediaIds.cat, mediaIds.car]) {
+            expect(hashOf(after, id)).not.toBe(hashOf(before, id));
+            expect(after.find((row) => row.entity_id === id)).toMatchObject({ last_error: null, error_hash: null });
+        }
+
+        await retitle("");
+        await drain(libraryId);
+        const restored = await rowsIn(spaceId);
+        for (const id of Object.values(mediaIds)) expect(hashOf(restored, id)).toBe(hashOf(before, id));
+        expect(restored.every((row) => row.last_error === null)).toBe(true);
+    });
+
+    databaseTest("a scan finds a search document that no longer matches its source", async () => {
+        const spaceId = "qwen3-vl-embedding:1024:plain";
+        const hashOfCat = async () => (await rowsIn(spaceId)).find((row) => row.entity_id === mediaIds.cat)!.content_hash;
+        const before = await hashOfCat();
+
+        // A change no writer reported.
+        await db.update(Media).set({ title: "cat renamed" }).where(eq(Media.id, mediaIds.cat));
+        const page = await pipelineHandlers["ai.index"].scanPage(libraryId, null, 100, null);
+        expect(page.subjectIds).toEqual([mediaIds.cat]);
+
+        await requestScan(db, "ai.index", [libraryId]);
+        await drain(libraryId);
+        expect(await hashOfCat()).not.toBe(before);
+
+        await retitle("");
+        await drain(libraryId);
+        expect(await hashOfCat()).toBe(before);
+    });
+
+    databaseTest("the end of a cover run wakes what waited for the cover, whether it stored one or not", async () => {
+        const describe = spyOn(pipelineHandlers["ai.describe"] as SubjectPipelineHandler, "reconcile");
+        try {
+            // Nothing to render: this media has no content to make a cover from.
+            await requeue(db, ["cover"], [mediaIds.cat]);
+            await drain(libraryId);
+            expect(describe).toHaveBeenCalledTimes(1);
+
+            await db.transaction((tx) =>
+                coverPipeline.recordFailure(tx, {
+                    subjectId: mediaIds.cat,
+                    space: null,
+                    error: "cannot render",
+                    errorKind: null,
+                    rejected: true,
+                }),
+            );
+            await drain(libraryId);
+            expect(describe).toHaveBeenCalledTimes(2);
+        } finally {
+            describe.mockRestore();
+        }
+    });
+
+    databaseTest("the status shows how long work has waited and how long its provider is blocked", async () => {
+        const store = createRedisRateLimitStore(kv);
+        const statusOfText = async () =>
+            (await pipelineStatus([libraryId])).get(libraryId)!.find((status) => status.pipeline === "ai.text")!;
+        expect(await statusOfText()).toMatchObject({ queued: 0, oldestSeconds: 0, blockedSeconds: 0 });
+
+        // A blocked provider says nothing about a pipeline that has no work for it.
+        await store.coolDown(otherProviderId, 60_000);
+        expect((await statusOfText()).blockedSeconds).toBe(0);
+
+        await requeue(db, ["ai.text"], [mediaIds.cat]);
+        await db
+            .update(JobQueue)
+            .set({ enqueued_at: sql`now() - interval '10 minutes'` })
+            .where(eq(JobQueue.library_id, libraryId));
+        const status = await statusOfText();
+        expect(status.queued).toBe(1);
+        expect(status.oldestSeconds).toBeGreaterThanOrEqual(600);
+        expect(status.blockedSeconds).toBeGreaterThan(50);
+        expect(status.blockedSeconds).toBeLessThanOrEqual(60);
+
+        await store.reset(otherProviderId);
+        await db.delete(JobQueue).where(eq(JobQueue.library_id, libraryId));
+    });
+
     databaseTest("records a rejected input, keeps the previous vector, and defers throttled work without counting attempts", async () => {
         const spaceId = "qwen3-vl-embedding:1024:plain";
         const vectorOf = async (mediaId: string) => (await rowsIn(spaceId)).find((row) => row.entity_id === mediaId)!;
@@ -352,11 +463,13 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
         for (let failure = 0; failure < 4; failure++) await store.reportFailure(providerId);
         expect(await blocked()).toBe(0);
 
-        await store.reportFailure(providerId);
+        expect(await store.reportFailure(providerId)).toBe(30_000);
         expect(await blocked()).toBeGreaterThan(20_000);
+        expect(await store.blockedMs(providerId)).toBeGreaterThan(20_000);
 
         await store.reset(providerId);
         expect(await blocked()).toBe(0);
+        expect(await store.blockedMs(providerId)).toBe(0);
         await store.reportFailure(providerId);
         expect(await blocked()).toBe(0);
     });

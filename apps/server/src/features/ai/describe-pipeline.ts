@@ -1,12 +1,12 @@
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { AssetAiMetadata, DeleteStatus, EntityType, Media } from "@/db/schema";
-import { db, type DbClient } from "@/global/db";
+import { db, type DbClient, type Transaction } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
-import type { SubjectPipelineHandler } from "@/infra/queue/types";
+import type { ReconcileContext, SubjectPipelineHandler } from "@/infra/queue/types";
 import { aiErrorResult } from "./pipeline-result";
 import { aiSourceHash, loadAiImageSources, readAiSourceImage, resolveAiImageSource } from "./image-source";
-import { AiService } from "./service";
+import { AiService, providerBlockedMs } from "./service";
 import type { DescribeTarget } from "./types";
 import { computeSha256 } from "./utils";
 
@@ -20,15 +20,16 @@ const activeMedia = and(eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Med
 /**
  * Whether the stored description still stands: it was made from the same image in the current language, and no
  * re-description was asked for. A description of another model or an older prompt version is still usable; a
- * re-description request marks those stale.
+ * re-description request marks those stale. A failure left on it was recorded for another image, and describing this
+ * one again clears it.
  */
 export function canReuseDescription(
-    stored: Pick<StoredAiMetadata, "input_hash" | "language" | "is_stale"> | undefined,
+    stored: Pick<StoredAiMetadata, "input_hash" | "language" | "is_stale" | "last_error"> | undefined,
     sourceHash: string | null,
     target: DescribeTarget,
 ): boolean {
     if (!stored || !sourceHash || stored.input_hash !== sourceHash) return false;
-    return stored.language === target.language && !stored.is_stale;
+    return stored.language === target.language && !stored.is_stale && stored.last_error === null;
 }
 
 /** Identifies one describe attempt: the source image and what it is described with. */
@@ -39,12 +40,18 @@ export function describeInputHash(sourceHash: string, target: DescribeTarget): P
 }
 
 /** Deletes the description a media kept from its previous library (§11.13 #2); the new library describes it again. */
-async function dropForeignDescription(client: DbClient, mediaId: string, libraryId: string): Promise<void> {
-    const deleted = await client
+async function dropForeignDescription(
+    tx: Transaction,
+    mediaId: string,
+    libraryId: string,
+    fence: ReconcileContext["fence"],
+): Promise<void> {
+    const deleted = await tx
         .delete(AssetAiMetadata)
         .where(and(metadataOf([mediaId]), sql`${AssetAiMetadata.library_id} <> ${libraryId}`))
         .returning({ id: AssetAiMetadata.id });
-    if (deleted.length > 0) await markChanged(client, Aspect.MEDIA_DESCRIPTION, [mediaId]);
+    await fence(tx);
+    if (deleted.length > 0) await markChanged(tx, Aspect.MEDIA_DESCRIPTION, [mediaId]);
 }
 
 const failedDescriptions = (libraryIds: readonly string[]) =>
@@ -76,10 +83,7 @@ export const describePipeline: SubjectPipelineHandler = {
                 .limit(1)
         )[0];
         if (stored && stored.library_id !== media.libraryId) {
-            await db.transaction(async (tx) => {
-                await ctx.fence(tx);
-                await dropForeignDescription(tx, media.id, media.libraryId);
-            });
+            await db.transaction((tx) => dropForeignDescription(tx, media.id, media.libraryId, ctx.fence));
             stored = undefined;
         }
 
@@ -119,7 +123,6 @@ export const describePipeline: SubjectPipelineHandler = {
             error_input_hash: null,
         };
         await db.transaction(async (tx) => {
-            await ctx.fence(tx);
             await tx
                 .insert(AssetAiMetadata)
                 .values({ library_id: media.libraryId, entity_type: EntityType.MEDIA, entity_id: media.id, ...result })
@@ -127,6 +130,7 @@ export const describePipeline: SubjectPipelineHandler = {
                     target: [AssetAiMetadata.entity_type, AssetAiMetadata.entity_id],
                     set: { ...result, library_id: media.libraryId, update_time: sql`now()` },
                 });
+            await ctx.fence(tx);
             await markChanged(tx, Aspect.MEDIA_DESCRIPTION, [media.id]);
         });
         return { kind: "done" };
@@ -198,6 +202,11 @@ export const describePipeline: SubjectPipelineHandler = {
             subjectIds.push(id);
         }
         return { subjectIds, nextCursor };
+    },
+
+    async blockedMs(libraryId) {
+        const provider = (await AiService.forLibrary(libraryId))?.describeProvider;
+        return provider ? providerBlockedMs(provider.providerId) : 0;
     },
 
     async countFailures(libraryIds) {

@@ -29,6 +29,11 @@ export function resetProviderLimits(providerId: string): Promise<void> {
     return limitStore.reset(providerId);
 }
 
+/** How long a provider stays out of reach, whether after a 429 or after failing repeatedly; 0 when it can be called. */
+export function providerBlockedMs(providerId: string): Promise<number> {
+    return limitStore.blockedMs(providerId);
+}
+
 /**
  * Recent query vectors, keyed by embedding space and query text. A vector depends only on the
  * space (model, dimension, template), never on the library or user, so entries are shared.

@@ -976,6 +976,10 @@ export const JobQueue = pgTable(
         subject_id: text("subject_id").notNull(),
         library_id: uuid("library_id").notNull(),
         priority: smallint("priority").default(0).notNull(),
+        /** When the row was added. Retries and enqueues of a row already here leave it, so it shows how long work has waited. */
+        enqueued_at: temporal("enqueued_at")
+            .default(sql`now()`)
+            .notNull(),
         available_at: temporal("available_at")
             .default(sql`now()`)
             .notNull(),

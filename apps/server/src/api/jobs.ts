@@ -51,7 +51,12 @@ jobsApp.get("/pipelines", requireAuth, validate("query", LibraryQuerySchema), as
     if (!library) return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
 
     const status = await pipelineStatus([library.id]);
-    return c.json(success(Code.SUCCESS, { pipelines: status.get(library.id) ?? [] }));
+    const pipelines = (status.get(library.id) ?? []).map(({ oldestSeconds, blockedSeconds, ...counts }) => ({
+        ...counts,
+        oldest_seconds: oldestSeconds,
+        blocked_seconds: blockedSeconds,
+    }));
+    return c.json(success(Code.SUCCESS, { pipelines }));
 });
 
 // GET /api/jobs/pipelines/:library_id/:pipeline/failures - Subjects whose failure still applies

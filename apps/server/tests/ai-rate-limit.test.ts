@@ -24,9 +24,14 @@ function memoryStore() {
             state.coolDownMs = Math.max(state.coolDownMs, ms);
             state.coolDowns.push(ms);
         },
-        async reportFailure() {},
+        async reportFailure() {
+            return 0;
+        },
         async reportSuccess() {},
         async reset() {},
+        async blockedMs() {
+            return state.coolDownMs;
+        },
     };
     return { store, state };
 }

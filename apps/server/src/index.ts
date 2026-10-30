@@ -30,7 +30,7 @@ const shutdown = async (signal: string) => {
 
     try {
         stopFilePurgeSchedule();
-        await queueWorker.drain(15000);
+        await queueWorker.drain();
         console.log("[Server] Graceful shutdown completed.");
     } catch (err) {
         console.error("[Server] Error during graceful shutdown:", err);
