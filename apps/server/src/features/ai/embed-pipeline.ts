@@ -17,7 +17,7 @@ import { AiProviderError } from "./errors";
 import { dropExpiredRetiredSpaces, EMBEDDING_ROLE_FOR, promoteBuiltSpaces, promoteIfBuilt } from "./embedding-spaces";
 import { aiSourceHash, loadAiEmbeddingImage, loadAiImageSources, resolveAiImageSource, type AiImageSource } from "./image-source";
 import { aiErrorResult } from "./pipeline-result";
-import { AiService } from "./service";
+import { AiService, providerBlockedMs } from "./service";
 import type { EmbedImageParams, EmbeddingBindingRole, EmbeddingResult, TextEmbeddingProvider, VisualEmbeddingProvider } from "./types";
 
 type SpaceRow = typeof LibraryEmbeddingSpace.$inferSelect;
@@ -100,7 +100,7 @@ async function loadInputs(space: SpaceRow, mediaIds: readonly string[], forScan:
     return inputs;
 }
 
-type StoredVector = Pick<typeof AssetEmbedding.$inferSelect, "entity_id" | "content_hash" | "dimension" | "error_hash">;
+type StoredVector = Pick<typeof AssetEmbedding.$inferSelect, "entity_id" | "content_hash" | "dimension" | "last_error" | "error_hash">;
 
 async function loadStored(space: SpaceRow, mediaIds: readonly string[]): Promise<Map<string, StoredVector>> {
     const rows = await db
@@ -108,6 +108,7 @@ async function loadStored(space: SpaceRow, mediaIds: readonly string[]): Promise
             entity_id: AssetEmbedding.entity_id,
             content_hash: AssetEmbedding.content_hash,
             dimension: AssetEmbedding.dimension,
+            last_error: AssetEmbedding.last_error,
             error_hash: AssetEmbedding.error_hash,
         })
         .from(AssetEmbedding)
@@ -115,9 +116,12 @@ async function loadStored(space: SpaceRow, mediaIds: readonly string[]): Promise
     return new Map(rows.map((row) => [row.entity_id, row]));
 }
 
-/** Whether the stored row has a vector of `input` (dimension is set only together with a vector). */
+/**
+ * Whether the stored row needs nothing for `input` (dimension is set only together with a vector). A vector with a
+ * failure does: the input changed back to what the vector was made from, and embedding it again clears the failure.
+ */
 const isCurrent = (stored: StoredVector | undefined, input: { hash: string }) =>
-    stored?.dimension != null && stored.content_hash === input.hash;
+    stored?.dimension != null && stored.content_hash === input.hash && stored.last_error === null;
 
 /** Finds the provider that writes the space, whether it is ACTIVE or BUILDING. */
 function spaceProvider(service: AiService, space: SpaceRow): TextEmbeddingProvider | VisualEmbeddingProvider | null {
@@ -125,12 +129,44 @@ function spaceProvider(service: AiService, space: SpaceRow): TextEmbeddingProvid
     return [providers.active, providers.building].find((provider) => provider?.spaceId === space.space_id) ?? null;
 }
 
+/** Vectors a request produced, and the result of every item it did not. */
+interface Embedded {
+    vectors: Map<string, EmbeddingResult>;
+    failures: Map<string, ReconcileResult>;
+}
+
+/**
+ * Embeds `items` in one request. An input error says that some item is at fault but not which, so the request is split
+ * in half until the item stands alone; the others still get their vectors. Any other error applies to the whole request.
+ */
+async function embedSplittingOnInputError<T extends { id: string }>(
+    items: readonly T[],
+    request: (items: readonly T[]) => Promise<EmbeddingResult[]>,
+): Promise<Embedded> {
+    try {
+        const vectors = await request(items);
+        return { vectors: new Map(items.map((item, index) => [item.id, vectors[index]!])), failures: new Map() };
+    } catch (error) {
+        const result = aiErrorResult(error);
+        if (result.kind !== "rejected" || items.length === 1) {
+            return { vectors: new Map(), failures: new Map(items.map((item) => [item.id, result])) };
+        }
+        const middle = Math.ceil(items.length / 2);
+        const first = await embedSplittingOnInputError(items.slice(0, middle), request);
+        const second = await embedSplittingOnInputError(items.slice(middle), request);
+        return {
+            vectors: new Map([...first.vectors, ...second.vectors]),
+            failures: new Map([...first.failures, ...second.failures]),
+        };
+    }
+}
+
 async function embedImages(
     service: AiService,
     provider: VisualEmbeddingProvider,
     items: Array<{ id: string; input: Extract<EmbeddingInput, { kind: "image" }> }>,
     signal: AbortSignal,
-): Promise<{ embedded: Map<string, EmbeddingResult>; failed: Map<string, unknown> }> {
+): Promise<Embedded> {
     const fileIds = items.map((item) => item.input.source.file.id);
     const tracks = await db
         .select({ fileId: Track.file_id, width: Track.width, height: Track.height })
@@ -144,30 +180,30 @@ async function embedImages(
             return loadAiEmbeddingImage(item.input.source.file, dimensions, provider, signal);
         }),
     );
-    const failed = new Map<string, unknown>();
+    const failures = new Map<string, ReconcileResult>();
     const ready: Array<{ id: string; image: EmbedImageParams }> = [];
     loaded.forEach((result, index) => {
         if (result.status === "fulfilled") ready.push({ id: items[index]!.id, image: result.value });
-        else failed.set(items[index]!.id, result.reason);
+        else failures.set(items[index]!.id, aiErrorResult(result.reason));
     });
-    const embedded = new Map<string, EmbeddingResult>();
-    if (ready.length > 0) {
-        const results = await service.embedImages(
+    if (ready.length === 0) return { vectors: new Map(), failures };
+
+    const embedded = await embedSplittingOnInputError(ready, (batch) =>
+        service.embedImages(
             provider,
-            ready.map((item) => item.image),
+            batch.map((item) => item.image),
             signal,
-        );
-        ready.forEach((item, index) => embedded.set(item.id, results[index]!));
-    }
-    return { embedded, failed };
+        ),
+    );
+    return { vectors: embedded.vectors, failures: new Map([...failures, ...embedded.failures]) };
 }
 
 /** Deletes the vectors of the given media in a space, inside a fenced transaction per media. */
 async function dropVectors(space: SpaceRow, mediaIds: readonly string[], fence: (tx: Transaction, id: string) => Promise<void>) {
     for (const id of mediaIds) {
         await db.transaction(async (tx) => {
-            await fence(tx, id);
             await tx.delete(AssetEmbedding).where(ofSpaceMedia(space, [id]));
+            await fence(tx, id);
         });
     }
 }
@@ -229,34 +265,27 @@ function embeddingPipeline(role: EmbeddingBindingRole): BatchPipelineHandler {
             });
             if (pending.length === 0) return results;
 
-            let embedded: Map<string, EmbeddingResult>;
-            try {
-                if (role === "imageEmbedding") {
-                    const images = await embedImages(
-                        service,
-                        provider as VisualEmbeddingProvider,
-                        pending.map((item) => ({ id: item.id, input: item.input as Extract<EmbeddingInput, { kind: "image" }> })),
-                        ctx.signal,
-                    );
-                    for (const [id, error] of images.failed) results.set(id, aiErrorResult(error));
-                    embedded = images.embedded;
-                } else {
-                    const texts = pending.map((item) => item.input as Extract<EmbeddingInput, { kind: "text" }>);
-                    const vectors = await service.embedDocuments(
-                        provider,
-                        texts.map((text) => ({ text: text.text, title: text.title || undefined, purpose: "DOCUMENT" as const })),
-                        ctx.signal,
-                    );
-                    embedded = new Map(pending.map((item, index) => [item.id, vectors[index]!]));
-                }
-            } catch (error) {
-                const result = aiErrorResult(error, pending.length > 1);
-                for (const item of pending) results.set(item.id, result);
-                return results;
-            }
+            const { vectors, failures } =
+                role === "imageEmbedding"
+                    ? await embedImages(
+                          service,
+                          provider as VisualEmbeddingProvider,
+                          pending.map((item) => ({ id: item.id, input: item.input as Extract<EmbeddingInput, { kind: "image" }> })),
+                          ctx.signal,
+                      )
+                    : await embedSplittingOnInputError(
+                          pending.map((item) => ({ id: item.id, ...(item.input as Extract<EmbeddingInput, { kind: "text" }>) })),
+                          (texts) =>
+                              service.embedDocuments(
+                                  provider,
+                                  texts.map((text) => ({ text: text.text, title: text.title || undefined, purpose: "DOCUMENT" as const })),
+                                  ctx.signal,
+                              ),
+                      );
+            for (const [id, result] of failures) results.set(id, result);
 
             for (const item of pending) {
-                const vector = embedded.get(item.id);
+                const vector = vectors.get(item.id);
                 if (!vector) continue;
                 const row = {
                     library_id: space.library_id,
@@ -271,7 +300,6 @@ function embeddingPipeline(role: EmbeddingBindingRole): BatchPipelineHandler {
                 };
                 try {
                     await db.transaction(async (tx) => {
-                        await ctx.fence(tx, item.id);
                         await tx
                             .insert(AssetEmbedding)
                             .values({
@@ -290,6 +318,7 @@ function embeddingPipeline(role: EmbeddingBindingRole): BatchPipelineHandler {
                                 ],
                                 set: { ...row, update_time: sql`now()` },
                             });
+                        await ctx.fence(tx, item.id);
                     });
                 } catch (error) {
                     // Another worker took this media over; the others of the batch are still stored.
@@ -350,6 +379,13 @@ function embeddingPipeline(role: EmbeddingBindingRole): BatchPipelineHandler {
                 return !isCurrent(row, input) && row?.error_hash !== input.hash;
             });
             return { subjectIds, nextCursor };
+        },
+
+        async blockedMs(libraryId) {
+            const service = await AiService.forLibrary(libraryId);
+            const providers = role === "imageEmbedding" ? service?.imageEmbedding : service?.textEmbedding;
+            const writing = [providers?.active, providers?.building].flatMap((provider) => (provider ? [provider.providerId] : []));
+            return Math.max(0, ...(await Promise.all(writing.map(providerBlockedMs))));
         },
 
         async countFailures(libraryIds) {

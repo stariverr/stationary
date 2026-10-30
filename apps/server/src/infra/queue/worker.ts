@@ -4,7 +4,7 @@ import { DeleteStatus, Library } from "@/db/schema";
 import { db } from "@/global/db";
 import { env } from "@/global/env";
 import { getErrorMessage } from "@/lib/utils/error";
-import { requestScan } from "@/infra/queue/changes";
+import { markChanged, requestScan } from "@/infra/queue/changes";
 import { PIPELINE_NAMES, parseQueueName, queueName, type QueueName } from "@/infra/queue/pipelines";
 import {
     DEFAULT_MAX_ATTEMPTS,
@@ -28,6 +28,7 @@ import {
     postpone,
     renew,
     type ClaimedRow,
+    type QueueInLibrary,
 } from "@/infra/queue/store";
 import type { BatchPipelineHandler, PipelineHandler, PipelineHandlers, ReconcileResult, SubjectPipelineHandler } from "@/infra/queue/types";
 
@@ -62,9 +63,12 @@ function startHeartbeat(rows: readonly ClaimedRow[], abort: AbortController): ()
     return () => clearInterval(timer);
 }
 
+/** A scan has no result rows to hold a failure and would lose its place, so it retries until it gets through. */
 function maxAttemptsOf(handler: PipelineHandler, name: QueueName): number {
-    return name.scan ? DEFAULT_MAX_ATTEMPTS : (handler.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
+    return name.scan ? Number.POSITIVE_INFINITY : (handler.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
 }
+
+const queueKey = (queue: QueueInLibrary) => `${queue.pipeline}\u0000${queue.libraryId}`;
 
 export class QueueWorker {
     private readonly concurrency: number;
@@ -72,7 +76,14 @@ export class QueueWorker {
     private readonly patrolIntervalMs: number;
     private readonly listen: boolean;
     private readonly active = new Set<Promise<void>>();
+    private readonly runs = new Set<AbortController>();
+    /**
+     * Queues found out of capacity, and until when. Their rows all use the same provider, so claiming them before then
+     * would only release them again. Purely a saving: another worker, or this one after a restart, finds out with one run.
+     */
+    private readonly paused = new Map<string, QueueInLibrary & { until: number }>();
     private running = false;
+    private aborting = false;
     private pumping = false;
     private wakeRequested = false;
     private timers: ReturnType<typeof setInterval>[] = [];
@@ -93,11 +104,12 @@ export class QueueWorker {
         this.running = true;
         this.timers.push(setInterval(() => this.wake(), this.pollIntervalMs));
         if (this.patrolIntervalMs > 0) {
-            this.timers.push(
-                setInterval(() => {
-                    this.patrol().catch((error: unknown) => console.error(`[Queue] Patrol failed: ${getErrorMessage(error)}`));
-                }, this.patrolIntervalMs),
-            );
+            const patrol = () => {
+                this.patrol().catch((error: unknown) => console.error(`[Queue] Patrol failed: ${getErrorMessage(error)}`));
+            };
+            this.timers.push(setInterval(patrol, this.patrolIntervalMs));
+            // The timer starts over with the process, so a server restarted more often than the interval needs this one.
+            patrol();
         }
         for (const timer of this.timers) timer.unref?.();
         if (this.listen) void this.connectListener();
@@ -112,7 +124,11 @@ export class QueueWorker {
 
     /** Runs the pipelines' upkeep and queues a scan of every library for every pipeline, catching changes no writer reported. */
     async patrol(): Promise<void> {
-        for (const pipeline of PIPELINE_NAMES) await this.handlers[pipeline].patrol?.();
+        for (const pipeline of PIPELINE_NAMES) {
+            await this.handlers[pipeline].patrol?.().catch((error: unknown) => {
+                console.error(`[Queue] Upkeep of ${pipeline} failed: ${getErrorMessage(error)}`);
+            });
+        }
         const libraries = await db.select({ id: Library.id }).from(Library).where(eq(Library.delete_status, DeleteStatus.ACTIVE));
         const ids = libraries.map((library) => library.id);
         for (const pipeline of PIPELINE_NAMES) await requestScan(db, pipeline, ids, "absent");
@@ -150,7 +166,7 @@ export class QueueWorker {
                 const free = this.concurrency - this.active.size;
                 if (free <= 0) break;
 
-                const rows = await claim(free);
+                const rows = await claim(free, this.pausedQueues());
                 for (const row of rows) {
                     const run = this.run(row)
                         .catch((error: unknown) => console.error(`[Queue] ${row.pipeline}/${row.subjectId} failed unexpectedly:`, error))
@@ -169,6 +185,28 @@ export class QueueWorker {
             // A wake that arrived after the loop's last check must not be lost.
             if (this.wakeRequested && this.running && this.active.size < this.concurrency) void this.pump();
         }
+    }
+
+    private pausedQueues(): QueueInLibrary[] {
+        const now = Date.now();
+        for (const [key, queue] of this.paused) {
+            if (queue.until <= now) this.paused.delete(key);
+        }
+        return [...this.paused.values()];
+    }
+
+    /** Tracks a run's abort signal and keeps its leases alive (`rows` may grow) until `stop` is called. */
+    private watch(rows: readonly ClaimedRow[]): { abort: AbortController; stop: () => void } {
+        const abort = new AbortController();
+        const stopHeartbeat = startHeartbeat(rows, abort);
+        this.runs.add(abort);
+        return {
+            abort,
+            stop: () => {
+                stopHeartbeat();
+                this.runs.delete(abort);
+            },
+        };
     }
 
     private async run(row: ClaimedRow): Promise<void> {
@@ -198,8 +236,7 @@ export class QueueWorker {
     }
 
     private async runSubject(handler: SubjectPipelineHandler, row: ClaimedRow, name: QueueName): Promise<void> {
-        const abort = new AbortController();
-        const stopHeartbeat = startHeartbeat([row], abort);
+        const { abort, stop } = this.watch([row]);
         let result: ReconcileResult;
         try {
             result = await handler.reconcile({
@@ -216,15 +253,14 @@ export class QueueWorker {
             }
             result = { kind: "retry", error: getErrorMessage(error) };
         } finally {
-            stopHeartbeat();
+            stop();
         }
         await this.settle(handler, row, name, result);
     }
 
     /** One step of a library scan: queue the subjects of one page that need work, then continue or finish. */
     private async runScan(handler: PipelineHandler, row: ClaimedRow, name: QueueName): Promise<void> {
-        const abort = new AbortController();
-        const stopHeartbeat = startHeartbeat([row], abort);
+        const { abort, stop } = this.watch([row]);
         try {
             const page = await handler.scanPage(row.libraryId, row.cursor, SCAN_PAGE_SIZE, name.space);
             const pipeline = queueName(name.pipeline, name.space);
@@ -243,17 +279,17 @@ export class QueueWorker {
                 console.warn(`[Queue] Dropped a step of ${row.pipeline}/${row.subjectId}; its lease was lost.`);
                 return;
             }
+            console.error(`[Queue] ${row.pipeline}/${row.subjectId} failed ${row.attempts} times in a row: ${getErrorMessage(error)}`);
             await this.settle(handler, row, name, { kind: "retry", error: getErrorMessage(error) });
         } finally {
-            stopHeartbeat();
+            stop();
         }
     }
 
     /** Runs a claimed row together with more due rows of its queue, each settled with its own result. */
     private async runBatch(handler: BatchPipelineHandler, head: ClaimedRow, name: QueueName): Promise<void> {
         const rows = [head];
-        const abort = new AbortController();
-        const stopHeartbeat = startHeartbeat(rows, abort);
+        const { abort, stop } = this.watch(rows);
         let results: Map<string, ReconcileResult>;
         try {
             results = await handler.reconcileBatch({
@@ -262,7 +298,7 @@ export class QueueWorker {
                 head: head.subjectId,
                 signal: abort.signal,
                 claimMore: async (limit) => {
-                    if (head.attempts > 1) return [];
+                    if (head.interrupted) return [];
                     const more = await claimBatch(head.pipeline, limit);
                     rows.push(...more);
                     return more.map((row) => row.subjectId);
@@ -281,23 +317,44 @@ export class QueueWorker {
             const failure: ReconcileResult = { kind: "retry", error: getErrorMessage(error) };
             results = new Map(rows.map((row) => [row.subjectId, failure]));
         } finally {
-            stopHeartbeat();
+            stop();
         }
-        for (const row of rows) await this.settle(handler, row, name, results.get(row.subjectId) ?? { kind: "done" });
+        // Rows that fail together come back together, so the retry is one request again.
+        const retryDelay = retryDelaySeconds(Math.max(...rows.map((row) => row.attempts)));
+        for (const row of rows) await this.settle(handler, row, name, results.get(row.subjectId) ?? { kind: "done" }, retryDelay);
     }
 
     /** Applies a run's result to its queue row. */
-    private async settle(handler: PipelineHandler, row: ClaimedRow, name: QueueName, result: ReconcileResult): Promise<void> {
+    private async settle(
+        handler: PipelineHandler,
+        row: ClaimedRow,
+        name: QueueName,
+        result: ReconcileResult,
+        retryDelay = retryDelaySeconds(row.attempts),
+    ): Promise<void> {
+        // A run cut short by the shutdown says nothing about its subject, so the row goes back as it came.
+        if (this.aborting && result.kind !== "done") {
+            await postpone(row, 0);
+            return;
+        }
         switch (result.kind) {
-            case "done":
-                await finish(row);
+            case "done": {
+                this.paused.delete(queueKey(row));
+                const { changed } = result;
+                if (!changed) await finish(row);
+                else
+                    await db.transaction(async (tx) => {
+                        if (await finish(row, tx)) await markChanged(tx, changed, [row.subjectId]);
+                    });
                 return;
+            }
             case "deferred":
                 await postpone(row, result.delaySeconds);
+                this.paused.set(queueKey(row), { ...row, until: Date.now() + result.delaySeconds * 1000 });
                 return;
             case "retry":
                 if (row.attempts < maxAttemptsOf(handler, name)) {
-                    await defer(row, retryDelaySeconds(row.attempts));
+                    await defer(row, retryDelay);
                     return;
                 }
                 console.error(`[Queue] ${row.pipeline}/${row.subjectId} failed ${row.attempts} times: ${result.error}`);
@@ -305,22 +362,23 @@ export class QueueWorker {
             case "rejected":
                 break;
         }
-        await giveUp(
-            row,
-            name.scan
-                ? async () => undefined
-                : (tx) =>
-                      handler.recordFailure(tx, {
-                          subjectId: row.subjectId,
-                          space: name.space,
-                          error: result.error,
-                          errorKind: result.errorKind ?? null,
-                          rejected: result.kind === "rejected",
-                      }),
+        await giveUp(row, (tx) =>
+            handler.recordFailure(tx, {
+                subjectId: row.subjectId,
+                space: name.space,
+                error: result.error,
+                errorKind: result.errorKind ?? null,
+                rejected: result.kind === "rejected",
+            }),
         );
     }
 
-    async drain(timeoutMs = 15_000): Promise<void> {
+    /**
+     * Stops claiming and gives the runs in progress `graceMs` to finish. The others are aborted, which puts their rows
+     * back without using an attempt. A run that ignores the signal keeps its lease until it expires and counts as
+     * interrupted.
+     */
+    async drain(graceMs = 10_000, abortMs = 5_000): Promise<void> {
         this.running = false;
         for (const timer of this.timers) clearInterval(timer);
         this.timers = [];
@@ -328,13 +386,20 @@ export class QueueWorker {
         this.listener = null;
         await listener?.end().catch(() => undefined);
 
-        if (this.active.size === 0) return;
+        if (await this.idleWithin(graceMs)) return;
+        this.aborting = true;
+        for (const run of this.runs) run.abort();
+        if (!(await this.idleWithin(abortMs))) console.warn(`[Queue] Drain timed out with ${this.active.size} run(s) still in progress.`);
+    }
+
+    private async idleWithin(ms: number): Promise<boolean> {
+        if (this.active.size === 0) return true;
         let timeout: ReturnType<typeof setTimeout> | undefined;
         const timedOut = new Promise<"timeout">((resolve) => {
-            timeout = setTimeout(() => resolve("timeout"), timeoutMs);
+            timeout = setTimeout(() => resolve("timeout"), ms);
         });
         const result = await Promise.race([Promise.allSettled(this.active), timedOut]);
         clearTimeout(timeout);
-        if (result === "timeout") console.warn(`[Queue] Drain timed out with ${this.active.size} run(s) still in progress.`);
+        return result !== "timeout";
     }
 }

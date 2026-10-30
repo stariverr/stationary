@@ -90,6 +90,7 @@ export async function renderCoverFrame(
     sourceUrl: string,
     mediaType: MediaType,
     targetQuality: Quality,
+    signal?: AbortSignal,
     timeoutMs = 45000,
 ): Promise<RenderedCoverResult> {
     const profile = COVER_PROFILES[targetQuality];
@@ -107,13 +108,14 @@ export async function renderCoverFrame(
 
         // Format-specific pre-downloading (e.g. HEIC/HEIF container images require local random seeking)
         if (isRemoteUrl && strategy.requiresLocalDownload) {
-            tempSourcePath = await downloadRemoteToTempFile(sourceUrl);
+            tempSourcePath = await downloadRemoteToTempFile(sourceUrl, signal);
             effectiveSource = tempSourcePath;
         }
 
         // 1. Direct ImageMagick / HEIC CLI rendering for static image formats (HEIC, HEIF, JPEG, PNG, WEBP, AVIF, GIF)
         if (strategy.category === "HEIF_IMAGE" || strategy.category === "STANDARD_IMAGE") {
-            const ok = await tryImageMagickCover(effectiveSource, profile, tempFilePath);
+            const ok = await tryImageMagickCover(effectiveSource, profile, tempFilePath, signal);
+            signal?.throwIfAborted();
             if (ok) {
                 const buffer = await readAndValidateAvif(tempFilePath);
                 const { width, height } = await probeImageDimensions(tempFilePath);
@@ -124,15 +126,16 @@ export async function renderCoverFrame(
         // 2. FFmpeg execution (for VIDEO_CONTAINER or fallback for images if ImageMagick is missing)
         try {
             const cmd = buildFFmpegCommand(effectiveSource, strategy, profile, tempFilePath);
-            await executeFFmpeg(cmd, timeoutMs, sourceUrl);
+            await executeFFmpeg(cmd, timeoutMs, sourceUrl, signal);
         } catch (err) {
+            signal?.throwIfAborted();
             if (isRemoteUrl && !tempSourcePath) {
                 console.warn(
                     `[COVER_RENDERER] Direct remote FFmpeg execution failed for ${strategy.category} (${redactUrl(sourceUrl)}), downloading local temp file fallback...`,
                 );
-                tempSourcePath = await downloadRemoteToTempFile(sourceUrl);
+                tempSourcePath = await downloadRemoteToTempFile(sourceUrl, signal);
                 const cmd = buildFFmpegCommand(tempSourcePath, strategy, profile, tempFilePath);
-                await executeFFmpeg(cmd, timeoutMs, sourceUrl);
+                await executeFFmpeg(cmd, timeoutMs, sourceUrl, signal);
             } else {
                 throw err;
             }
@@ -160,7 +163,7 @@ export async function renderCoverFrame(
  * using ImageMagick (`magick` / `convert`) or `heif-enc`.
  * Handles EXIF auto-rotation (-auto-orient) and aspect-ratio bounds directly.
  */
-async function tryImageMagickCover(inputPath: string, profile: CoverProfile, outputPath: string): Promise<boolean> {
+async function tryImageMagickCover(inputPath: string, profile: CoverProfile, outputPath: string, signal?: AbortSignal): Promise<boolean> {
     const maxDim = `${profile.maxEdge}x${profile.maxEdge}>`;
     const cliCandidates = [
         ["magick", inputPath, "-auto-orient", "-resize", maxDim, "-quality", String(profile.quality), outputPath],
@@ -174,8 +177,10 @@ async function tryImageMagickCover(inputPath: string, profile: CoverProfile, out
                 cmd,
                 stdout: "pipe",
                 stderr: "pipe",
+                signal,
             });
             const exitCode = await process.exited;
+            if (signal?.aborted) return false;
             if (exitCode === 0 && (await Bun.file(outputPath).exists())) {
                 const bytes = await Bun.file(outputPath).bytes();
                 if (bytes.byteLength > 0 && isValidAvifSignature(bytes)) {
@@ -197,13 +202,14 @@ async function tryImageMagickCover(inputPath: string, profile: CoverProfile, out
 /**
  * Downloads a remote file to a temporary file on disk using Bun's native streaming write.
  */
-async function downloadRemoteToTempFile(url: string): Promise<string> {
+async function downloadRemoteToTempFile(url: string, signal?: AbortSignal): Promise<string> {
     const ext = extractExtensionFromUrl(url);
     const tempPath = join(tmpdir(), `source-${crypto.randomUUID()}.${ext}`);
     const response = await fetch(url, {
         headers: {
             "User-Agent": DEFAULT_USER_AGENT,
         },
+        signal,
     });
     if (!response.ok) {
         throw new Error(`Failed to download remote media for cover rendering: HTTP ${response.status} ${response.statusText}`);
@@ -286,7 +292,7 @@ function buildScaleFilter(maxEdge: number): string {
 /**
  * Spawns an FFmpeg subprocess, awaits completion, and handles timeouts or non-zero exit codes.
  */
-async function executeFFmpeg(cmd: string[], timeoutMs: number, sourceUrl: string): Promise<void> {
+async function executeFFmpeg(cmd: string[], timeoutMs: number, sourceUrl: string, signal?: AbortSignal): Promise<void> {
     let process: Bun.Subprocess;
     try {
         process = Bun.spawn({
@@ -294,6 +300,7 @@ async function executeFFmpeg(cmd: string[], timeoutMs: number, sourceUrl: string
             stdout: "pipe",
             stderr: "pipe",
             timeout: timeoutMs,
+            signal,
         });
     } catch (spawnErr) {
         throw new Error(
@@ -302,6 +309,7 @@ async function executeFFmpeg(cmd: string[], timeoutMs: number, sourceUrl: string
     }
 
     const exitCode = await process.exited;
+    signal?.throwIfAborted();
 
     if (process.signalCode !== null) {
         throw new Error(`FFmpeg cover rendering timed out after ${timeoutMs}ms for URL: ${redactUrl(sourceUrl)}`);

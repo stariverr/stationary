@@ -45,8 +45,8 @@ function storagePath(media: MediaRow, track: TrackRow, ext: string): string {
 async function downloadTrack(ctx: ReconcileContext, media: MediaRow, track: TrackRow): Promise<void> {
     const sourceUrl = track.source_url!;
     await db.transaction(async (tx) => {
-        await ctx.fence(tx);
         await tx.update(Track).set({ sync_status: SyncStatus.IN_PROGRESS, update_time: Temporal.Now.instant() }).where(activeTrack(track));
+        await ctx.fence(tx);
     });
 
     const response = await downloadStream(sourceUrl, { signal: ctx.signal });
@@ -70,7 +70,6 @@ async function downloadTrack(ctx: ReconcileContext, media: MediaRow, track: Trac
     ctx.signal.throwIfAborted();
 
     await db.transaction(async (tx) => {
-        await ctx.fence(tx);
         const [current] = await tx.select({ file_id: Track.file_id }).from(Track).where(activeTrack(track)).limit(1);
         if (!current) return;
 
@@ -125,6 +124,7 @@ async function downloadTrack(ctx: ReconcileContext, media: MediaRow, track: Trac
                 .set({ delete_status: DeleteStatus.DELETED, delete_time: Temporal.Now.instant() })
                 .where(and(eq(File.id, current.file_id), eq(File.delete_status, DeleteStatus.ACTIVE)));
         }
+        await ctx.fence(tx);
     });
 }
 
@@ -158,11 +158,11 @@ export const downloadPipeline: SubjectPipelineHandler = {
 
         if (tracks.length > 0) {
             await db.transaction(async (tx) => {
-                await ctx.fence(tx);
                 await tx
                     .update(Media)
                     .set({ sync_status: SyncStatus.IN_PROGRESS, update_time: Temporal.Now.instant() })
                     .where(activeMedia(media.id));
+                await ctx.fence(tx);
             });
         }
 
@@ -175,7 +175,6 @@ export const downloadPipeline: SubjectPipelineHandler = {
                 const rejected = error instanceof DownloadStatusError && error.rejected;
                 const message = getErrorMessage(error);
                 await db.transaction(async (tx) => {
-                    await ctx.fence(tx);
                     await tx
                         .update(Track)
                         .set({
@@ -184,6 +183,7 @@ export const downloadPipeline: SubjectPipelineHandler = {
                             update_time: Temporal.Now.instant(),
                         })
                         .where(activeTrack(track));
+                    await ctx.fence(tx);
                 });
                 // Any track that may still work keeps the media retrying.
                 if (!failure || !rejected) failure = { kind: rejected ? "rejected" : "retry", error: message };
@@ -192,10 +192,10 @@ export const downloadPipeline: SubjectPipelineHandler = {
         if (failure) return failure;
 
         await db.transaction(async (tx) => {
-            await ctx.fence(tx);
             const completionError = await getMediaCompletionError(media.id, true, tx);
             if (completionError) {
                 await setMediaFailed(tx, media, completionError);
+                await ctx.fence(tx);
                 return;
             }
             const now = Temporal.Now.instant();
@@ -205,6 +205,7 @@ export const downloadPipeline: SubjectPipelineHandler = {
                 .where(and(activeMedia(media.id), ne(Media.sync_status, SyncStatus.COMPLETED)))
                 .returning({ id: Media.id });
             if (media.post_id) await refreshPostSyncStatus(tx, media.post_id, now);
+            await ctx.fence(tx);
             if (completed.length > 0 || tracks.length > 0) await markChanged(tx, Aspect.MEDIA_CONTENT, [media.id]);
         });
         return { kind: "done" };

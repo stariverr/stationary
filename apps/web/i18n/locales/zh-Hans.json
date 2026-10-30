@@ -1082,6 +1082,8 @@
             "count_running": "{count} 运行中",
             "count_retrying": "{count} 等待重试",
             "count_failed": "{count} 失败",
+            "blocked": "服务商暂不可用，约 {minutes} 分钟后再试",
+            "oldest": "最久已等 {minutes} 分钟",
             "failures_title": "最近失败：{name}",
             "hide_failures": "收起失败明细",
             "no_failures": "暂无失败记录"

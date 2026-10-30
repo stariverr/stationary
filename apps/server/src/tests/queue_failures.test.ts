@@ -23,10 +23,6 @@ describe("aiErrorResult", () => {
         expect(aiErrorResult(new Error("something odd"))).toMatchObject({ kind: "retry", errorKind: "UNKNOWN" });
     });
 
-    test("retries an input error of a batch, so the bad input can be singled out", () => {
-        expect(aiErrorResult(new AiProviderError("INVALID_REQUEST", "bad image"), true).kind).toBe("retry");
-    });
-
     test("postpones a throttled run", () => {
         expect(aiErrorResult(new AiThrottledError("provider", 1_000)).kind).toBe("deferred");
     });
@@ -45,9 +41,10 @@ describe("createProviderLimiter", () => {
             acquire: mock(async () => 0),
             release: mock(async () => undefined),
             coolDown: mock(async () => undefined),
-            reportFailure: mock(async () => undefined),
+            reportFailure: mock(async () => 0),
             reportSuccess: mock(async () => undefined),
             reset: mock(async () => undefined),
+            blockedMs: mock(async () => 0),
         };
         const limits = { maxConcurrency: 1, requestsPerMinute: null };
         const run = (call: () => Promise<string>) => createProviderLimiter(store).run("provider", limits, call);

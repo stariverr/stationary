@@ -1082,6 +1082,8 @@
             "count_running": "{count} running",
             "count_retrying": "{count} retrying",
             "count_failed": "{count} failed",
+            "blocked": "Provider unavailable, trying again in about {minutes} min",
+            "oldest": "Oldest waiting {minutes} min",
             "failures_title": "Recent failures: {name}",
             "hide_failures": "Hide failures",
             "no_failures": "No failures recorded"

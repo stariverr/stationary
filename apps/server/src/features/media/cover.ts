@@ -30,8 +30,8 @@ export interface GenerateCoverParams {
     quality: Quality;
     source: ResolvedCoverSource;
     signal?: AbortSignal;
-    /** Runs first in the transaction that stores the cover (the queue's fence goes here). */
-    beforePersist?: (tx: Transaction) => Promise<void>;
+    /** Runs last in the transaction that stores the cover (the queue's fence goes here). */
+    afterPersist?: (tx: Transaction) => Promise<void>;
 }
 
 export const coverVariantKey = (quality: Quality) => `cover:${quality.toLowerCase()}:recipe:${RECIPE_VERSION}`;
@@ -114,7 +114,7 @@ export const CoverService = {
      * Returns false without storing anything when the media was recycled or deleted, or the source track no longer
      * holds the source file, meanwhile. Throws UndecodableSourceError when the source cannot be decoded.
      */
-    async generateCover({ media, quality, source, signal, beforePersist }: GenerateCoverParams): Promise<boolean> {
+    async generateCover({ media, quality, source, signal, afterPersist }: GenerateCoverParams): Promise<boolean> {
         const sourceUrlForFFmpeg = await s3.getPresignedUrl(source.filePath, {
             bucket: source.fileBucket,
             expiresInSeconds: 900,
@@ -122,7 +122,7 @@ export const CoverService = {
 
         const renderMediaType = source.track.type === TrackType.VIDEO ? MediaType.VIDEO : MediaType.IMAGE;
 
-        const renderResult = await renderCoverFrame(sourceUrlForFFmpeg, renderMediaType, quality);
+        const renderResult = await renderCoverFrame(sourceUrlForFFmpeg, renderMediaType, quality, signal);
         signal?.throwIfAborted();
 
         const qualityLower = quality.toLowerCase();
@@ -136,7 +136,6 @@ export const CoverService = {
         signal?.throwIfAborted();
 
         return db.transaction(async (tx) => {
-            await beforePersist?.(tx);
             const [activeMedia] = await tx
                 .select({ id: Media.id })
                 .from(Media)
@@ -238,6 +237,7 @@ export const CoverService = {
                     create_time: now,
                 });
             }
+            await afterPersist?.(tx);
             return true;
         });
     },

@@ -12,6 +12,10 @@ export interface PipelineStatus {
     failed: number;
     /** A library scan is under way, so `queued` may still grow. */
     scanning: boolean;
+    /** How long the oldest queued row has been waiting. */
+    oldest_seconds: number;
+    /** How long the provider of this pipeline stays out of reach; 0 when it can be called. */
+    blocked_seconds: number;
 }
 
 export interface PipelineFailure {

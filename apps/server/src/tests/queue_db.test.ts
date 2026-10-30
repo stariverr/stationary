@@ -1,14 +1,15 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { and, eq, ne, sql } from "drizzle-orm";
-import { JobQueue } from "@/db/schema";
+import { JobQueue, Library } from "@/db/schema";
 import { db } from "@/global/db";
 import { markChanged, requeue } from "@/infra/queue/changes";
-import { Aspect, scanQueueName } from "@/infra/queue/pipelines";
+import { Aspect, PIPELINE_NAMES, scanQueueName } from "@/infra/queue/pipelines";
 import { DEFAULT_MAX_ATTEMPTS } from "@/infra/queue/policy";
 import {
     LeaseLostError,
     advance,
     claim,
+    claimBatch,
     countQueue,
     defer,
     enqueue,
@@ -20,7 +21,14 @@ import {
     renew,
     type ClaimedRow,
 } from "@/infra/queue/store";
-import type { FailureRecord, PipelineHandlers, ReconcileResult, SubjectPipelineHandler } from "@/infra/queue/types";
+import type {
+    BatchPipelineHandler,
+    FailureRecord,
+    PipelineHandler,
+    PipelineHandlers,
+    ReconcileResult,
+    SubjectPipelineHandler,
+} from "@/infra/queue/types";
 import { QueueWorker } from "@/infra/queue/worker";
 
 const databaseTest = process.env.RUN_QUEUE_DB_TESTS === "1" ? test : test.skip;
@@ -175,6 +183,59 @@ describe("job_queue store", () => {
         expect((await countQueue([libraryId]))[0]).toMatchObject({ queued: 1, running: 0, retrying: 1 });
     });
 
+    databaseTest("a claim leaves out the queues it is told to, in that library only", async () => {
+        await queue("avatar", [subject()]);
+        await queue("cover", [subject()]);
+
+        const rows = await claim(2, [
+            { pipeline: "avatar", libraryId },
+            { pipeline: "cover", libraryId: crypto.randomUUID() },
+        ]);
+        expect(rows.map((row) => row.pipeline)).toEqual(["cover"]);
+    });
+
+    databaseTest("a row that failed stays batched and a row whose run was interrupted does not", async () => {
+        const failedId = subject();
+        const interruptedId = subject();
+        await queue("avatar", [failedId, interruptedId]);
+        const rows = await claimOurs(2);
+        expect(rows.every((row) => !row.interrupted)).toBe(true);
+        await defer(
+            rows.find((row) => row.subjectId === failedId)!,
+            0,
+        );
+        await db
+            .update(JobQueue)
+            .set({ lease_expires_at: sql`now() - interval '1 second'` })
+            .where(eq(JobQueue.subject_id, interruptedId));
+
+        const batched = await claimBatch("avatar", 10);
+        expect(batched.map((row) => row.subjectId)).toEqual([failedId]);
+        expect(batched[0]?.attempts).toBe(2);
+
+        const [recovered] = await claimOurs(1);
+        expect(recovered).toMatchObject({ subjectId: interruptedId, interrupted: true, attempts: 2 });
+    });
+
+    databaseTest("the age of a row survives retries, postponing and being enqueued again", async () => {
+        const id = subject();
+        await queue("avatar", [id]);
+        await db
+            .update(JobQueue)
+            .set({ enqueued_at: sql`now() - interval '1 hour'` })
+            .where(eq(JobQueue.subject_id, id));
+
+        const [first] = await claimOurs(1);
+        expect(await defer(first!, 0)).toBe(true);
+        const [second] = await claimOurs(1);
+        expect(await postpone(second!, 0)).toBe(true);
+        await queue("avatar", [id]);
+
+        const [counts] = await countQueue([libraryId]);
+        expect(counts?.oldestSeconds).toBeGreaterThanOrEqual(3600);
+        expect(counts?.oldestSeconds).toBeLessThan(3660);
+    });
+
     databaseTest("a crashed run counts: reclaiming an expired lease adds an attempt", async () => {
         const id = subject();
         await queue("avatar", [id]);
@@ -240,6 +301,44 @@ describe("job_queue store", () => {
 });
 
 describe("QueueWorker", () => {
+    const idleHandler: SubjectPipelineHandler = {
+        reconcile: async () => ({ kind: "done" }),
+        recordFailure: async () => undefined,
+        scanPage: async () => ({ subjectIds: [], nextCursor: null }),
+        countFailures: async () => new Map(),
+        listFailures: async () => [],
+    };
+    const everyPipeline = (handler: PipelineHandler) =>
+        Object.fromEntries(PIPELINE_NAMES.map((pipeline) => [pipeline, handler])) as PipelineHandlers;
+    const workers: QueueWorker[] = [];
+    function worker(handlers: PipelineHandlers, concurrency: number) {
+        const started = new QueueWorker(handlers, { concurrency, pollIntervalMs: 50, patrolIntervalMs: 0, listen: false });
+        workers.push(started);
+        return started;
+    }
+
+    // A worker left running by a failed test would claim the rows of the next one.
+    afterEach(async () => {
+        await Promise.all(workers.splice(0).map((started) => started.drain(100, 100)));
+    });
+
+    async function until(condition: () => boolean | Promise<boolean>) {
+        const deadline = Date.now() + 5_000;
+        while (!(await condition())) {
+            if (Date.now() > deadline) throw new Error("The condition did not hold in time");
+            await Bun.sleep(20);
+        }
+    }
+
+    /** Seconds until each of the test rows is due. */
+    async function dueInSeconds() {
+        const rows = await db
+            .select({ seconds: sql<number>`extract(epoch FROM ${JobQueue.available_at} - now())::float` })
+            .from(JobQueue)
+            .where(eq(JobQueue.library_id, libraryId));
+        return rows.map((row) => row.seconds);
+    }
+
     /** Runs a worker over `subjectIds` until their rows are gone; returns the subjects it reconciled and the recorded failures. */
     async function runWorker(reconcile: (subjectId: string) => ReconcileResult, subjectIds: readonly string[], maxAttempts?: number) {
         // The worker claims any due row, so only run it when the queue holds nothing else.
@@ -318,5 +417,221 @@ describe("QueueWorker", () => {
         expect(failures).toEqual([
             { subjectId: id, space: null, error: `The run was interrupted ${DEFAULT_MAX_ATTEMPTS} times`, errorKind: null, rejected: true },
         ]);
+    });
+
+    databaseTest("patrols when it starts, as the timer starts over with the process", async () => {
+        const patrolling = new QueueWorker(everyPipeline(idleHandler), { patrolIntervalMs: 3_600_000, listen: false });
+        const patrol = spyOn(patrolling, "patrol").mockResolvedValue();
+        patrolling.start();
+        await patrolling.drain();
+        expect(patrol).toHaveBeenCalledTimes(1);
+    });
+
+    databaseTest("a failing upkeep does not stop the others or the scans", async () => {
+        await db.insert(Library).values({ id: libraryId, name: "Queue test", description: "", owner_id: crypto.randomUUID() });
+        const ran: string[] = [];
+        const patrolling = new QueueWorker(
+            {
+                ...everyPipeline(idleHandler),
+                avatar: { ...idleHandler, patrol: () => Promise.reject(new Error("upkeep failed")) },
+                cover: {
+                    ...idleHandler,
+                    patrol: async () => {
+                        ran.push("cover");
+                    },
+                },
+            },
+            { listen: false },
+        );
+        try {
+            await patrolling.patrol();
+            expect(ran).toEqual(["cover"]);
+            expect(await rowOf(scanQueueName("download"), libraryId)).toBeDefined();
+        } finally {
+            await db.delete(Library).where(eq(Library.id, libraryId));
+            await db.delete(JobQueue).where(sql`${JobQueue.pipeline} LIKE 'scan:%'`);
+        }
+    });
+
+    databaseTest("a scan never gives up: it keeps its place and retries", async () => {
+        const name = scanQueueName("cover");
+        await queue(name, [libraryId]);
+        await db.update(JobQueue).set({ attempts: 99, cursor: "page-7" }).where(eq(JobQueue.library_id, libraryId));
+        const failures: FailureRecord[] = [];
+        const running = worker(
+            everyPipeline({
+                ...idleHandler,
+                scanPage: () => Promise.reject(new Error("database went away")),
+                recordFailure: async (_tx, failure) => {
+                    failures.push(failure);
+                },
+            }),
+            1,
+        );
+
+        running.start();
+        await until(async () => (await rowOf(name, libraryId))?.attempts === 100);
+        await until(async () => (await rowOf(name, libraryId))?.lease_token === null);
+        await running.drain();
+
+        expect(await rowOf(name, libraryId)).toMatchObject({ cursor: "page-7", dirty: false });
+        expect(failures).toEqual([]);
+    });
+
+    databaseTest("a queue out of capacity is not claimed again before its delay has passed", async () => {
+        const seen: string[] = [];
+        const running = worker(
+            everyPipeline({
+                ...idleHandler,
+                async reconcile(ctx) {
+                    seen.push(ctx.subjectId);
+                    return seen.length === 1 ? { kind: "deferred", delaySeconds: 1 } : { kind: "done" };
+                },
+            }),
+            1,
+        );
+
+        await queue("avatar", [subject(), subject(), subject()]);
+        running.start();
+        await until(() => seen.length > 0);
+        await Bun.sleep(400);
+        expect(seen).toHaveLength(1);
+
+        await until(async () => (await db.$count(JobQueue, eq(JobQueue.library_id, libraryId))) === 0);
+        await running.drain();
+        expect(seen).toHaveLength(4);
+    });
+
+    databaseTest("a queue paused for a busy provider resumes as soon as a run gets through", async () => {
+        let calls = 0;
+        const { promise: released, resolve: release } = Promise.withResolvers<void>();
+        const running = worker(
+            everyPipeline({
+                ...idleHandler,
+                async reconcile() {
+                    const call = ++calls;
+                    if (call === 1) await released;
+                    return call === 2 ? { kind: "deferred", delaySeconds: 60 } : { kind: "done" };
+                },
+            }),
+            2,
+        );
+
+        await queue("avatar", [subject(), subject(), subject()]);
+        running.start();
+        await until(async () => (await dueInSeconds()).some((seconds) => seconds > 30));
+        await Bun.sleep(200);
+        expect(calls).toBe(2);
+
+        release();
+        await until(() => calls === 3);
+        await running.drain();
+    });
+
+    /** Handles every queue with `run`, as a batch pipeline. */
+    const batchHandlers = (run: BatchPipelineHandler["reconcileBatch"]) =>
+        everyPipeline({ ...idleHandler, reconcile: undefined, reconcileBatch: run } as unknown as BatchPipelineHandler);
+
+    databaseTest("a row whose run was interrupted runs alone", async () => {
+        const interruptedId = subject();
+        await queue("avatar", [interruptedId, subject()]);
+        await claimOurs(2);
+        await db.update(JobQueue).set({ lease_token: null, lease_expires_at: null }).where(ne(JobQueue.subject_id, interruptedId));
+        await db
+            .update(JobQueue)
+            .set({ lease_expires_at: sql`now() - interval '1 second'` })
+            .where(eq(JobQueue.subject_id, interruptedId));
+
+        const batches: string[][] = [];
+        const running = worker(
+            batchHandlers(async (ctx) => {
+                batches.push([ctx.head, ...(await ctx.claimMore(10))]);
+                return new Map();
+            }),
+            1,
+        );
+        running.start();
+        await until(async () => (await db.$count(JobQueue, eq(JobQueue.library_id, libraryId))) === 0);
+        await running.drain();
+
+        expect(batches.map((batch) => batch.length)).toEqual([1, 1]);
+    });
+
+    databaseTest("rows that fail in one batch come back together", async () => {
+        const fresh = subject();
+        const failedTwice = subject();
+        await queue("avatar", [fresh, failedTwice]);
+        await db.update(JobQueue).set({ attempts: 2 }).where(eq(JobQueue.subject_id, failedTwice));
+
+        const running = worker(
+            batchHandlers(async (ctx) => {
+                const subjects = [ctx.head, ...(await ctx.claimMore(10))];
+                return new Map(subjects.map((id) => [id, { kind: "retry", error: "bad gateway" } as const]));
+            }),
+            1,
+        );
+        running.start();
+        await until(async () => (await dueInSeconds()).every((seconds) => seconds > 30));
+        await running.drain();
+
+        const delays = await dueInSeconds();
+        expect(delays).toHaveLength(2);
+        expect(Math.abs(delays[0]! - delays[1]!)).toBeLessThan(1);
+        expect(await rowOf("avatar", fresh)).toMatchObject({ attempts: 1, lease_token: null });
+        expect(await rowOf("avatar", failedTwice)).toMatchObject({ attempts: 3, lease_token: null });
+    });
+
+    databaseTest("a shutdown aborts the runs still going and puts their rows back without using an attempt", async () => {
+        const id = subject();
+        const failures: FailureRecord[] = [];
+        let started = false;
+        const running = worker(
+            everyPipeline({
+                ...idleHandler,
+                reconcile: (ctx) =>
+                    new Promise((_resolve, reject) => {
+                        started = true;
+                        ctx.signal.addEventListener("abort", () => reject(ctx.signal.reason));
+                    }),
+                recordFailure: async (_tx, failure) => {
+                    failures.push(failure);
+                },
+            }),
+            1,
+        );
+
+        await queue("avatar", [id]);
+        running.start();
+        await until(() => started);
+        await running.drain(50, 2_000);
+
+        expect(await rowOf("avatar", id)).toMatchObject({ attempts: 0, lease_token: null, dirty: false });
+        expect(failures).toEqual([]);
+    });
+
+    databaseTest("a run that finishes within the grace period settles normally", async () => {
+        const id = subject();
+        const { promise: finishing, resolve: finish } = Promise.withResolvers<void>();
+        let started = false;
+        const running = worker(
+            everyPipeline({
+                ...idleHandler,
+                async reconcile() {
+                    started = true;
+                    await finishing;
+                    return { kind: "done" };
+                },
+            }),
+            1,
+        );
+
+        await queue("avatar", [id]);
+        running.start();
+        await until(() => started);
+        const drained = running.drain(2_000, 100);
+        finish();
+        await drained;
+
+        expect(await rowOf("avatar", id)).toBeUndefined();
     });
 });

@@ -2,6 +2,7 @@ import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { JobQueue } from "@/db/schema";
 import { db, type DbClient, type Transaction } from "@/global/db";
+import { queueLockOrder } from "@/infra/queue/pipelines";
 import { LEASE_SECONDS } from "@/infra/queue/policy";
 
 /** Postgres channel notified on commit of every enqueue; workers LISTEN on it to wake up. */
@@ -22,9 +23,17 @@ export interface ClaimedRow {
     /** This run's attempt, starting at 1. Counted at claim, so a run that dies without settling counts too. */
     readonly attempts: number;
     readonly cursor: string | null;
+    /** The previous run died without settling, so the row's lease had to expire. */
+    readonly interrupted: boolean;
 }
 
 export type Lease = Pick<ClaimedRow, "pipeline" | "subjectId" | "leaseToken">;
+
+/** The rows of one queue in one library. */
+export interface QueueInLibrary {
+    readonly pipeline: string;
+    readonly libraryId: string;
+}
 
 /** The lease was taken over by another worker; nothing this run computed may be written. */
 export class LeaseLostError extends Error {
@@ -82,8 +91,14 @@ export async function enqueue(client: DbClient, rows: readonly EnqueueRow[], mod
     }
     if (unique.size === 0) return;
 
-    // Sorted so concurrent enqueues lock rows in the same order.
-    const sorted = [...unique.values()].sort((a, b) => a.pipeline.localeCompare(b.pipeline) || a.subjectId.localeCompare(b.subjectId));
+    // Sorted so concurrent transactions lock rows in the same order, the one a run's follow-ups are queued in.
+    const order = new Map([...unique.values()].map((row) => [row.pipeline, queueLockOrder(row.pipeline)]));
+    const sorted = [...unique.values()].sort(
+        (a, b) =>
+            order.get(a.pipeline)! - order.get(b.pipeline)! ||
+            a.pipeline.localeCompare(b.pipeline) ||
+            a.subjectId.localeCompare(b.subjectId),
+    );
 
     await client.execute(sql`
         INSERT INTO job_queue (pipeline, subject_id, library_id, priority)
@@ -105,13 +120,14 @@ type ClaimedRecord = {
     lease_token: string;
     attempts: number;
     cursor: string | null;
+    interrupted: boolean;
 };
 
 async function claimWhere(filter: SQL, limit: number): Promise<ClaimedRow[]> {
     if (limit <= 0) return [];
     const result = await db.execute<ClaimedRecord>(sql`
         WITH picked AS (
-            SELECT pipeline, subject_id FROM job_queue
+            SELECT pipeline, subject_id, lease_token IS NOT NULL AS interrupted FROM job_queue
             WHERE available_at <= now() AND (lease_token IS NULL OR lease_expires_at < now()) AND ${filter}
             ORDER BY priority DESC, available_at
             LIMIT ${limit}
@@ -124,7 +140,7 @@ async function claimWhere(filter: SQL, limit: number): Promise<ClaimedRow[]> {
             attempts = q.attempts + 1
         FROM picked
         WHERE q.pipeline = picked.pipeline AND q.subject_id = picked.subject_id
-        RETURNING q.pipeline, q.subject_id, q.library_id, q.lease_token, q.attempts, q.cursor
+        RETURNING q.pipeline, q.subject_id, q.library_id, q.lease_token, q.attempts, q.cursor, picked.interrupted
     `);
     return result.rows.map((row) => ({
         pipeline: row.pipeline,
@@ -133,20 +149,27 @@ async function claimWhere(filter: SQL, limit: number): Promise<ClaimedRow[]> {
         leaseToken: row.lease_token,
         attempts: row.attempts,
         cursor: row.cursor,
+        interrupted: row.interrupted,
     }));
 }
 
-/** Leases up to `limit` due rows, highest priority first. Expired leases are reclaimed here; there is no sweeper. */
-export function claim(limit: number): Promise<ClaimedRow[]> {
-    return claimWhere(sql`true`, limit);
+/**
+ * Leases up to `limit` due rows, highest priority first, leaving out the `paused` queues. Expired leases are reclaimed
+ * here; there is no sweeper.
+ */
+export function claim(limit: number, paused: readonly QueueInLibrary[] = []): Promise<ClaimedRow[]> {
+    if (paused.length === 0) return claimWhere(sql`true`, limit);
+    const pipelines = sql.param(paused.map((queue) => queue.pipeline));
+    const libraries = sql.param(paused.map((queue) => queue.libraryId));
+    return claimWhere(sql`(pipeline, library_id) NOT IN (SELECT * FROM unnest(${pipelines}::text[], ${libraries}::uuid[]))`, limit);
 }
 
 /**
- * Leases up to `limit` more due rows of one queue to batch with a row already claimed. Only rows that have not been
- * attempted yet: a row that failed or was interrupted is run on its own, so one bad input cannot keep failing a batch.
+ * Leases up to `limit` more due rows of one queue to batch with a row already claimed. Rows that were interrupted are
+ * left out: running one may be what took the worker down, so it must not take a batch with it.
  */
 export function claimBatch(pipeline: string, limit: number): Promise<ClaimedRow[]> {
-    return claimWhere(sql`pipeline = ${pipeline} AND attempts = 0`, limit);
+    return claimWhere(sql`pipeline = ${pipeline} AND lease_token IS NULL`, limit);
 }
 
 export async function renew(lease: Lease, seconds = LEASE_SECONDS): Promise<boolean> {
@@ -159,8 +182,9 @@ export async function renew(lease: Lease, seconds = LEASE_SECONDS): Promise<bool
 }
 
 /**
- * Fencing: called first inside the transaction that writes a run's results. Locks the queue row while the lease is
- * still ours, so a worker whose lease was reclaimed cannot write, and nobody can reclaim it until this commits.
+ * Fencing: called inside the transaction that writes a run's results, after those writes. Locks the queue row while
+ * the lease is still ours, so a worker whose lease was reclaimed rolls back, and nobody can reclaim it until this
+ * commits. Writers lock result rows and then queue rows; a fence taken first would lock them the other way round.
  */
 export async function fence(tx: Transaction, lease: Lease): Promise<void> {
     const rows = await tx.select({ dirty: JobQueue.dirty }).from(JobQueue).where(holds(lease)).for("no key update");
@@ -282,9 +306,10 @@ export interface QueueCounts {
     readonly queued: number;
     readonly running: number;
     readonly retrying: number;
+    readonly oldestSeconds: number;
 }
 
-/** Per library and queue name: all rows, rows with a live lease, and rows waiting for another attempt. */
+/** Per library and queue name: all rows, rows with a live lease, rows waiting for another attempt, and how long the oldest row has been here. */
 export async function countQueue(libraryIds: readonly string[]): Promise<QueueCounts[]> {
     if (libraryIds.length === 0) return [];
     const rows = await db
@@ -294,6 +319,7 @@ export async function countQueue(libraryIds: readonly string[]): Promise<QueueCo
             queued: sql<number>`count(*)::int`,
             running: sql<number>`(count(*) FILTER (WHERE ${leased}))::int`,
             retrying: sql<number>`(count(*) FILTER (WHERE ${JobQueue.attempts} > 0 AND NOT ${leased}))::int`,
+            oldestSeconds: sql<number>`extract(epoch FROM now() - min(${JobQueue.enqueued_at}))::int`,
         })
         .from(JobQueue)
         .where(inArray(JobQueue.library_id, [...libraryIds]))

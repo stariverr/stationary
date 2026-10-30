@@ -156,7 +156,7 @@ describe("reciprocal rank fusion", () => {
 
 describe("reusing a stored description", () => {
     const target = { model: "new-model", promptVersion: "v2", language: "zh-Hans" };
-    const stored = { input_hash: "h", language: "zh-Hans", is_stale: false };
+    const stored = { input_hash: "h", language: "zh-Hans", is_stale: false, last_error: null };
 
     it("keeps a description of the same image, whichever model wrote it", () => {
         expect(canReuseDescription(stored, "h", target)).toBe(true);
@@ -174,6 +174,7 @@ describe("reusing a stored description", () => {
 
     it("describes again once a re-description marked it stale", () => {
         expect(canReuseDescription({ ...stored, is_stale: true }, "h", target)).toBe(false);
+        expect(canReuseDescription({ ...stored, last_error: "failed on another image" }, "h", target)).toBe(false);
     });
 });
 

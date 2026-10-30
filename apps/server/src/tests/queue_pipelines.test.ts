@@ -3,7 +3,17 @@ import { DeleteStatus, File as DbFile, SyncStatus, Track, TrackPurpose, TrackTyp
 import { avatarOrigin } from "@/features/author/avatar-pipeline";
 import { coverVariantKey, pickCoverSource } from "@/features/media/cover";
 import { planCover } from "@/features/media/cover-pipeline";
-import { Aspect, PIPELINES, assertAcyclic, parseQueueName, pipelinesReading, queueName, scanQueueName } from "@/infra/queue/pipelines";
+import {
+    Aspect,
+    PIPELINES,
+    PIPELINE_NAMES,
+    assertAcyclic,
+    parseQueueName,
+    pipelinesReading,
+    queueLockOrder,
+    queueName,
+    scanQueueName,
+} from "@/infra/queue/pipelines";
 import { Quality } from "@/lib/types";
 
 type TrackRow = typeof Track.$inferSelect;
@@ -57,6 +67,20 @@ describe("pipeline declarations", () => {
         expect(pipelinesReading(Aspect.LIBRARY_SPACES)).toEqual(["ai.text", "ai.image"]);
     });
 
+    test("pipelines are declared in dependency order, which the queue's lock order relies on", () => {
+        PIPELINE_NAMES.forEach((pipeline, index) => {
+            for (const output of PIPELINES[pipeline].outputs) {
+                for (const reader of pipelinesReading(output)) expect(PIPELINE_NAMES.indexOf(reader)).toBeGreaterThan(index);
+            }
+        });
+    });
+
+    test("a scan locks before its pipeline, and a pipeline before the ones that read it", () => {
+        const order = [scanQueueName("cover"), queueName("cover", null), scanQueueName("ai.text", "s"), queueName("ai.text", "s")];
+        expect(order.map(queueLockOrder)).toEqual(order.map(queueLockOrder).toSorted((a, b) => a - b));
+        expect(new Set(order.map(queueLockOrder)).size).toBe(order.length);
+    });
+
     test("queue names round-trip", () => {
         expect(parseQueueName("cover")).toEqual({ pipeline: "cover", scan: false, space: null });
         expect(parseQueueName(scanQueueName("avatar"))).toEqual({ pipeline: "avatar", scan: true, space: null });
@@ -107,6 +131,14 @@ describe("planCover", () => {
     test("a cover generated from the current source is current", () => {
         const tracks = [cover(Quality.LOW, { file_id: "c1", metadata: { source_file_id: "src" } })];
         expect(planCover("src", tracks, new Set(["c1"]), qualities, false)).toEqual([Quality.HIGH]);
+    });
+
+    test("a cover whose source came back is rendered again to clear the failure of the other source", () => {
+        const tracks = [
+            cover(Quality.LOW, { file_id: "c1", metadata: { source_file_id: "src" }, last_error: "unrenderable" }),
+            cover(Quality.HIGH, { file_id: "c2", metadata: { source_file_id: "src" } }),
+        ];
+        expect(planCover("src", tracks, new Set(["c1", "c2"]), qualities, true)).toEqual([Quality.LOW]);
     });
 
     test("stale covers, covers of an older source and covers without an active file are rendered again", () => {

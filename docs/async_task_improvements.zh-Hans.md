@@ -192,8 +192,8 @@
 ```sql
 job_queue(
   pipeline text, subject_id text, library_id uuid,
-  priority smallint, available_at timestamptz,
-  dirty boolean, cursor text, resource_key text,
+  priority smallint, enqueued_at timestamptz, available_at timestamptz,
+  dirty boolean, cursor text,
   lease_token uuid, lease_expires_at timestamptz, attempts int,
   PRIMARY KEY (pipeline, subject_id)
 )
@@ -222,7 +222,11 @@ job_queue(
 
 其他约定：
 
-- 写结果的事务里，先确认队列行的 `lease_token` 仍是自己的（fencing），租约已经过期的 worker 写不进去。同一 `(流水线, 对象)` 只有一行、一个租约，所以不会出现两个 worker 同时描述同一个媒体（第 5 节的竞态）。
+- 写结果的事务里，确认队列行的 `lease_token` 仍是自己的（fencing），租约已经过期的 worker 写不进去，事务回滚。同一 `(流水线, 对象)` 只有一行、一个租约，所以不会出现两个 worker 同时描述同一个媒体（第 5 节的竞态）。
+- 加锁顺序全系统一致：先结果行，后队列行。所以 fencing 放在写完结果之后、`markChanged` 之前；`enqueue` 按声明顺序排序（scan 在自己的流水线之前，流水线在读它产出的流水线之前），`pipelines.ts` 的声明顺序因此必须是依赖顺序，有测试保证。压测（8 个写入方对 16 个并发 run，15 秒）：fencing 放在写入之前有 108 次死锁，放到写入之后 0 次，吞吐约高 10 倍，所以没有加 40P01 重试。
+- 结果行上留着失败时不算"已是最新"：输入改回向量或描述当初的样子时，再做一次就能清掉那条失败。否则失败数永远留着，"重试"也清不掉。
+- 关停分两段：先等 10 秒让进行中的 run 自然结束，之后中止其余 run，它们的行用 `postpone` 放回，不计次数。中止错误归类为取消，不计入熔断。不响应中止信号的 run 等租约过期，算一次中断。
+- `enqueued_at` 只在建行时写，重试、`postpone`、再次入队都不改，所以能看出真实等待时长。`GET /jobs/pipelines` 返回最久等待时长和 provider 剩余封锁时长，任务页展示；scan 行也算在内，卡住的 scan 同样看得出。
 - 这张表插入和删除都很频繁：索引只保留上面三个，单独调低它的 autovacuum 阈值，领取事务保持很短。
   `drizzle push` 不管表的存储参数，建表后在每个库手动执行一次：
 
@@ -252,9 +256,9 @@ markChanged(tx, aspect, ids)
 ```
 
 - 媒体级的方面：直接给依赖它的流水线入队。`ai.text` / `ai.image` 展开为该库写入的每个空间各一条。
-- 库级的方面（`library.*`）：入队一行 `scan:<pipeline>`，对象是 library_id。scan 每次领取后，从 `cursor` 往后取一页媒体，只挑需要处理的（复用 `coverage.ts` 的条件），按低优先级批量入队，保存 `cursor` 后 defer 自己，扫完就删除。扫描期间再次触发时 `cursor` 清零（运行中的先标 `dirty`，释放时清零），从头重扫。已入队的行运行时读的是当前配置，不会生成过期的东西。
-- 定期巡检：定时给每个库入队一次 scan，补上漏掉的变化。
-- 只有产出**真的变了**才调用 `markChanged`；reconcile 发现已是最新，就不往下传。
+- 库级的方面（`library.*`）：入队一行 `scan:<pipeline>`，对象是 library_id。scan 每次领取后，从 `cursor` 往后取一页媒体，只挑需要处理的（复用 `coverage.ts` 的条件），按低优先级批量入队，保存 `cursor` 后 defer 自己，扫完就删除。scan 没有结果行可以记录失败，放弃还会丢掉进度，所以它不设次数上限，每次失败打日志后继续退避重试。扫描期间再次触发时 `cursor` 清零（运行中的先标 `dirty`，释放时清零），从头重扫。已入队的行运行时读的是当前配置，不会生成过期的东西。
+- 定期巡检：进程启动时和之后每小时，给每个库入队一次 scan，补上漏掉的变化。计时器随进程重启，只靠定时的话，重启比间隔频繁的服务永远等不到巡检。各流水线的 upkeep 互相隔离，一个失败不影响其他的。
+- 只有产出**真的变了**才调用 `markChanged`；reconcile 发现已是最新，就不往下传。例外是封面：它是别人等待的前置条件，所以最终失败（`recordFailure`）和无事可做（`{ kind: "done", changed }`，在删队列行的事务里报告）时也报告 `media.cover`，否则等它的 `ai.describe`、`ai.image` 再也不会被唤醒。
 - 启动时检查声明表没有环。
 - 每个 reconcile 开头先检查前置条件，比如封面没好时 `ai.describe` 直接结束、不记失败。封面写好后的 `markChanged("media.cover")` 会再把它入队（取代第 4 节的 `CoverNotReadyError`）。
 
@@ -307,13 +311,18 @@ markChanged(tx, aspect, ids)
 
 - **限流**：provider 打满时，Redis 限流器（`rate-limit.ts`）给出可重试时间，行按这个时间 defer，不计失败。
 - **熔断**：放在 Redis 限流器里，和限流共用冷却键，新增一个连续失败计数。指向 provider 的失败（鉴权、不可用、模型、未知）连续 5 次后封锁 30 秒，之后每次探测失败时长翻倍，最长 1 小时；任一次成功清零。封锁期间，调用方看到的和限流一样，行走 `deferred`，不计次数也不打 provider。输入错误和 429 不计入。provider 的 Key、地址或模板更新时清除封锁。
-- 第 3 层再加认领时按资源排除：入队时把 `resource_key`（如 `provider:<id>`）写在行上，冷却中的资源不认领。这一步只省空转的认领，不影响是否打 provider，也不影响重试次数。通知用户也放到第 3 层。
+- **认领时暂停队列**：每个 worker 在内存里记着 `(队列, 库) → 到期时间`。同一队列在同一个库里的行用的都是同一个 provider，所以第一次 `deferred` 就暂停这个队列 `delaySeconds`，`done` 立刻解除，并发槽位一空出来就继续。没有新字段，认领时也不读 Redis，做法接近 BullMQ 的手动限流。这只是省空转：别的 worker 或重启后的进程跑一次 run 就会知道。实测 5000 行积压、provider 打满时，3 秒内只跑了 8 次 run（第一批的并发数）；认领时跳过 20 万行暂停中的行约 19 毫秒，和不暂停时相当。
+- 熔断开始时打 `[AI LIMIT]` 日志，剩余封锁时长显示在任务页（11.3）。主动通知用户放到第 3 层。
 - **优先级**：导入和编辑触发的为高，scan 入队的为低，新内容不会被整库回填饿死。多用户部署需要时，再加按库轮转。
 - **暂停**：库上加一个暂停字段，认领时排除。用于停掉大规模回填，又不想改回配置的情况。
 
 ### 11.8 攒批
 
 `ai.text:<space>`、`ai.image:<space>` 一次认领同一流水线最多 N 行（文本 64，Gemini 图片 6），一次 provider 请求，每行单独结算。先不做"凑不满就等"，有多少取多少。批内只解析一次 `forLibrary()`。
+
+- 失败过的行继续攒批，否则一次 provider 故障之后，积压的行全部变成单条请求。同一批失败的行共用一个退避时间（按批内最大次数算），回来时还是一批。
+- 上一次运行被中断（`lease_token` 还在）的行单独跑，既不当队首也不被 `claimBatch` 拿走，因为运行它本身可能就是 worker 挂掉的原因。
+- 批内的输入类错误由 `embedSplittingOnInputError` 在这次运行里二分定位：对半拆开重发，直到坏的那一项单独失败，其他项正常拿到向量。做法同 Lambda 的 `BisectBatchOnFunctionError`。其他错误作用于整批。
 
 ### 11.9 operation 层（第一个操作要做时再建）
 
@@ -359,16 +368,16 @@ markChanged(tx, aspect, ids)
      - 前端轮询间隔为 5 秒，任务页和设置页都读 `GET /api/jobs/pipelines`。
 2. **AI 迁移**：`ai.describe`、`ai.index`、`ai.text`、`ai.image`，含按空间攒批和限流 defer；空间切换按覆盖率。删除旧引擎、两张任务表和 embedding 队列，旧任务页下线。
    - **已完成（2026-10-30，分支 `refactor/job-queue`）。** 四条流水线在 `features/ai/describe-pipeline.ts`、`index-pipeline.ts`、`embed-pipeline.ts`（`ai.text` / `ai.image` 共用），库级操作在 `features/ai/actions.ts`。`infra/jobs`、`async_task` / `async_task_unit` 及其枚举、embedding 队列和 worker、`queue-enrichment.ts`、`CoverNotReadyError`、`backfill_task_id` 均已删除；任务页只剩流水线视图。与上文的出入：
-     - 按空间的队列名是 `ai.text:<空间行 id>` / `scan:ai.text:<空间行 id>`。批处理只在队首是第一次尝试时用 `claimBatch` 拿同一队列里已到期、从未尝试过的行，不等待；失败或崩溃过的行单独跑，批里的输入类错误先重试，借此找出出错的那一项。限流返回 `deferred`，`postpone` 退回这次尝试。
+     - 按空间的队列名是 `ai.text:<空间行 id>` / `scan:ai.text:<空间行 id>`。批处理用 `claimBatch` 拿同一队列里已到期的行，不等待，规则见 11.8。限流返回 `deferred`，`postpone` 退回这次尝试。
      - `ai.describe` 和 `ai.image` 还声明了 `media.content`：没有生成封面的图片直接用内容图。
-     - 失败写在结果行上：描述写 `asset_ai_metadata.last_error`，向量写 `asset_embedding.last_error`。输入被拒时再写 `error_input_hash`（图片、模型、prompt 版本、语言的哈希）或 `error_hash`。`ai.index` 不调用 provider，失败只打日志，不计入失败数。
+     - 失败写在结果行上：描述写 `asset_ai_metadata.last_error`，向量写 `asset_embedding.last_error`。输入被拒时再写 `error_input_hash`（图片、模型、prompt 版本、语言的哈希）或 `error_hash`。`ai.index` 不调用 provider，失败只打日志，不计入失败数；它的 scan 比较内容哈希，所以巡检会重试这些失败，也能发现漏报的变化，代价是每 200 个媒体多一组查询。哈希取决于标签名，标签名先排序。
      - `asset_ai_metadata.processing_status` 和 `asset_embedding` 上的队列字段已删除，进度和覆盖率只读队列行和结果行。"重新描述"改为把其他模型 / 旧 prompt 写的描述标记 `is_stale`，再报告 `library.ai_config`。
      - BUILDING 空间在自己的队列（含 scan）清空后，由该队列每次运行后的 `settled` 和巡检判断是否提升；提升时删除被替换空间的队列。
      - 11.13 #2 已修：`ai.describe` 删掉别的库留下的描述，`ai.index` 重写文档并删掉别的库留下的向量，新库的空间重新生成。
      - 标题、描述、标签、post 绑定和标签改名 / 合并 / 删除都在各自事务里报告 `media.meta`（`features/media/meta-changes.ts`）；封面 track 的变化报告 `media.cover`。
      - 库的"处理"不再返回 409，改为重试已记录的失败并对四条 AI 流水线各请求一次 scan。`/api/task/queue-ai` 改为 `POST /api/ai/media/process`；保存绑定不再返回 `indexingStarted`。`AiService.forLibrary` 没有加缓存。
      - 文本向量的 `content_hash` 现在是搜索文档的哈希，上线后已有的文本向量会重新生成一次。
-3. **调度增强**：认领时按资源排除和熔断通知、优先级、库级暂停；需要时加按库轮转。熔断本身已在第 2 层做完（11.7）。
+3. **调度增强**：熔断通知、优先级、库级暂停；需要时加按库轮转。熔断和认领时暂停已在第 2 层做完（11.7）。
 4. **operation 层**：第一个操作要做时（11.9）。
 
 ### 11.13 评审中发现的现有 bug（2026-10-26）

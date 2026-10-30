@@ -1,10 +1,10 @@
-import { and, asc, eq, gt, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import { AssetEmbedding, AssetSearchDocument, DeleteStatus, EntityType, Media } from "@/db/schema";
 import { db } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
 import type { SubjectPipelineHandler } from "@/infra/queue/types";
-import { buildSearchDocument } from "./search-document";
+import { buildSearchDocuments } from "./search-document";
 
 const ofMedia = (mediaId: string) => and(eq(AssetSearchDocument.entity_type, EntityType.MEDIA), eq(AssetSearchDocument.entity_id, mediaId));
 
@@ -13,12 +13,12 @@ const ofMedia = (mediaId: string) => and(eq(AssetSearchDocument.entity_type, Ent
  * depends on it with or without AI, so it is written for every active media. It also deletes the vectors a moved media
  * kept from its previous library (§11.13 #2); the spaces of its new library embed it again.
  *
- * Building a document makes no provider call, so a failure is a bug or a database problem: it is retried and logged,
- * and not counted as a failure of the media.
+ * Building a document makes no provider call, so a failure is a bug or a database problem: it is retried, logged and
+ * retried again by the next patrol, and not counted as a failure of the media.
  */
 export const indexPipeline: SubjectPipelineHandler = {
     async reconcile(ctx) {
-        const built = await buildSearchDocument(ctx.subjectId);
+        const built = (await buildSearchDocuments([ctx.subjectId])).get(ctx.subjectId);
         if (!built) return { kind: "done" };
         const { document, contentHash } = built;
 
@@ -40,8 +40,8 @@ export const indexPipeline: SubjectPipelineHandler = {
             .limit(1);
         if (existing?.content_hash === contentHash && !foreignVector) return { kind: "done" };
 
+        const stale = existing?.content_hash !== contentHash;
         await db.transaction(async (tx) => {
-            await ctx.fence(tx);
             if (foreignVector) {
                 await tx
                     .delete(AssetEmbedding)
@@ -53,15 +53,17 @@ export const indexPipeline: SubjectPipelineHandler = {
                         ),
                     );
             }
-            if (existing?.content_hash === contentHash) return;
-            await tx
-                .insert(AssetSearchDocument)
-                .values({ entity_type: EntityType.MEDIA, entity_id: ctx.subjectId, ...document, content_hash: contentHash })
-                .onConflictDoUpdate({
-                    target: [AssetSearchDocument.entity_type, AssetSearchDocument.entity_id],
-                    set: { ...document, content_hash: contentHash, update_time: sql`now()` },
-                });
-            await markChanged(tx, Aspect.MEDIA_SEARCH_DOC, [ctx.subjectId]);
+            if (stale) {
+                await tx
+                    .insert(AssetSearchDocument)
+                    .values({ entity_type: EntityType.MEDIA, entity_id: ctx.subjectId, ...document, content_hash: contentHash })
+                    .onConflictDoUpdate({
+                        target: [AssetSearchDocument.entity_type, AssetSearchDocument.entity_id],
+                        set: { ...document, content_hash: contentHash, update_time: sql`now()` },
+                    });
+            }
+            await ctx.fence(tx);
+            if (stale) await markChanged(tx, Aspect.MEDIA_SEARCH_DOC, [ctx.subjectId]);
         });
         return { kind: "done" };
     },
@@ -70,15 +72,11 @@ export const indexPipeline: SubjectPipelineHandler = {
         console.error(`[AI INDEX] Gave up indexing media ${subjectId}: ${error}`);
     },
 
-    /** Media without a search document, or with one of another library. Edits reach the pipeline through markChanged. */
+    /** Media whose search document is missing or differs from the one they should have now, a moved media's included. */
     async scanPage(libraryId, cursor, limit) {
         const page = await db
-            .select({ id: Media.id, indexed: sql<boolean>`${AssetSearchDocument.library_id} = ${libraryId}` })
+            .select({ id: Media.id })
             .from(Media)
-            .leftJoin(
-                AssetSearchDocument,
-                and(eq(AssetSearchDocument.entity_type, EntityType.MEDIA), eq(AssetSearchDocument.entity_id, Media.id)),
-            )
             .where(
                 and(
                     eq(Media.library_id, libraryId),
@@ -89,8 +87,17 @@ export const indexPipeline: SubjectPipelineHandler = {
             )
             .orderBy(asc(Media.id))
             .limit(limit);
+        const ids = page.map((row) => row.id);
+        const [built, stored] = await Promise.all([
+            buildSearchDocuments(ids),
+            db
+                .select({ id: AssetSearchDocument.entity_id, contentHash: AssetSearchDocument.content_hash })
+                .from(AssetSearchDocument)
+                .where(and(eq(AssetSearchDocument.entity_type, EntityType.MEDIA), inArray(AssetSearchDocument.entity_id, ids))),
+        ]);
+        const storedHash = new Map(stored.map((row) => [row.id, row.contentHash]));
         return {
-            subjectIds: page.filter((row) => !row.indexed).map((row) => row.id),
+            subjectIds: ids.filter((id) => built.has(id) && built.get(id)!.contentHash !== storedHash.get(id)),
             nextCursor: page.length === limit ? page[page.length - 1]!.id : null,
         };
     },
