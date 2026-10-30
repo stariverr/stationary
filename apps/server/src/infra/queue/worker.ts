@@ -5,7 +5,7 @@ import { db } from "@/global/db";
 import { env } from "@/global/env";
 import { getErrorMessage } from "@/lib/utils/error";
 import { requestScan } from "@/infra/queue/changes";
-import { PIPELINE_NAMES, parseQueueName } from "@/infra/queue/pipelines";
+import { PIPELINE_NAMES, parseQueueName, queueName, type QueueName } from "@/infra/queue/pipelines";
 import {
     DEFAULT_MAX_ATTEMPTS,
     HEARTBEAT_INTERVAL_MS,
@@ -19,15 +19,17 @@ import {
     LeaseLostError,
     advance,
     claim,
+    claimBatch,
     defer,
     enqueue,
     fence,
     finish,
     giveUp,
+    postpone,
     renew,
     type ClaimedRow,
 } from "@/infra/queue/store";
-import type { PipelineHandler, PipelineHandlers } from "@/infra/queue/types";
+import type { BatchPipelineHandler, PipelineHandler, PipelineHandlers, ReconcileResult, SubjectPipelineHandler } from "@/infra/queue/types";
 
 export interface QueueWorkerOptions {
     readonly concurrency?: number;
@@ -38,23 +40,30 @@ export interface QueueWorkerOptions {
     readonly listen?: boolean;
 }
 
-/** Keeps the lease alive while a run is in progress and aborts the run if it is lost. */
-function startHeartbeat(row: ClaimedRow, abort: AbortController): () => void {
+/** Keeps the leases of a run alive while it is in progress (`rows` may grow) and aborts the run if one is lost. */
+function startHeartbeat(rows: readonly ClaimedRow[], abort: AbortController): () => void {
     let inFlight = false;
     const timer = setInterval(() => {
         if (inFlight) return;
         inFlight = true;
-        renew(row)
-            .then((renewed) => {
-                if (!renewed) abort.abort(new LeaseLostError(row));
-            })
-            .catch((error: unknown) => console.error(`[Queue] Lease renewal failed for ${row.pipeline}/${row.subjectId}:`, error))
+        Promise.all(
+            rows.map((row) =>
+                renew(row).then((renewed) => {
+                    if (!renewed) abort.abort(new LeaseLostError(row));
+                }),
+            ),
+        )
+            .catch((error: unknown) => console.error(`[Queue] Lease renewal failed for ${rows[0]?.pipeline}:`, error))
             .finally(() => {
                 inFlight = false;
             });
     }, HEARTBEAT_INTERVAL_MS);
     timer.unref?.();
     return () => clearInterval(timer);
+}
+
+function maxAttemptsOf(handler: PipelineHandler, name: QueueName): number {
+    return name.scan ? DEFAULT_MAX_ATTEMPTS : (handler.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
 }
 
 export class QueueWorker {
@@ -101,8 +110,9 @@ export class QueueWorker {
         if (!this.pumping) void this.pump();
     }
 
-    /** Queues a scan of every library for every pipeline, catching changes no writer reported. */
+    /** Runs the pipelines' upkeep and queues a scan of every library for every pipeline, catching changes no writer reported. */
     async patrol(): Promise<void> {
+        for (const pipeline of PIPELINE_NAMES) await this.handlers[pipeline].patrol?.();
         const libraries = await db.select({ id: Library.id }).from(Library).where(eq(Library.delete_status, DeleteStatus.ACTIVE));
         const ids = libraries.map((library) => library.id);
         for (const pipeline of PIPELINE_NAMES) await requestScan(db, pipeline, ids, "absent");
@@ -169,58 +179,145 @@ export class QueueWorker {
             return;
         }
         const handler = this.handlers[name.pipeline];
+        if (row.attempts > maxAttemptsOf(handler, name)) {
+            // Every attempt ended without settling, so running it may be what takes the worker down.
+            console.error(`[Queue] ${row.pipeline}/${row.subjectId} was interrupted ${row.attempts - 1} times; giving up.`);
+            await this.settle(handler, row, name, { kind: "rejected", error: `The run was interrupted ${row.attempts - 1} times` });
+        } else if (name.scan) {
+            await this.runScan(handler, row, name);
+        } else if ("reconcileBatch" in handler) {
+            await this.runBatch(handler, row, name);
+        } else {
+            await this.runSubject(handler, row, name);
+        }
+        if (name.space && handler.settled) {
+            await handler.settled(row.libraryId, name.space).catch((error: unknown) => {
+                console.error(`[Queue] Settling ${row.pipeline} failed: ${getErrorMessage(error)}`);
+            });
+        }
+    }
 
+    private async runSubject(handler: SubjectPipelineHandler, row: ClaimedRow, name: QueueName): Promise<void> {
         const abort = new AbortController();
-        const stopHeartbeat = startHeartbeat(row, abort);
+        const stopHeartbeat = startHeartbeat([row], abort);
+        let result: ReconcileResult;
         try {
-            if (name.scan) {
-                await this.scan(handler, row, name.pipeline);
-                return;
-            }
-            const result = await handler.reconcile({
+            result = await handler.reconcile({
                 subjectId: row.subjectId,
                 libraryId: row.libraryId,
-                attempts: row.attempts,
+                space: name.space,
                 signal: abort.signal,
                 fence: (tx) => fence(tx, row),
             });
-            if (result.kind === "done") {
-                await finish(row);
-            } else {
-                await giveUp(row, (tx) => handler.recordFailure(tx, row.subjectId, result.error));
-            }
         } catch (error) {
             if (error instanceof LeaseLostError || abort.signal.reason instanceof LeaseLostError) {
                 console.warn(`[Queue] Dropped the result of ${row.pipeline}/${row.subjectId}; its lease was lost.`);
                 return;
             }
-            const message = getErrorMessage(error);
-            const attempt = row.attempts + 1;
-            const maxAttempts = name.scan ? DEFAULT_MAX_ATTEMPTS : (handler.maxAttempts ?? DEFAULT_MAX_ATTEMPTS);
-            if (attempt < maxAttempts) {
-                await defer(row, retryDelaySeconds(attempt));
+            result = { kind: "retry", error: getErrorMessage(error) };
+        } finally {
+            stopHeartbeat();
+        }
+        await this.settle(handler, row, name, result);
+    }
+
+    /** One step of a library scan: queue the subjects of one page that need work, then continue or finish. */
+    private async runScan(handler: PipelineHandler, row: ClaimedRow, name: QueueName): Promise<void> {
+        const abort = new AbortController();
+        const stopHeartbeat = startHeartbeat([row], abort);
+        try {
+            const page = await handler.scanPage(row.libraryId, row.cursor, SCAN_PAGE_SIZE, name.space);
+            const pipeline = queueName(name.pipeline, name.space);
+            await db.transaction(async (tx) => {
+                await fence(tx, row);
+                await enqueue(
+                    tx,
+                    page.subjectIds.map((subjectId) => ({ pipeline, subjectId, libraryId: row.libraryId, priority: Priority.BACKFILL })),
+                    "scan",
+                );
+                if (page.nextCursor) await advance(row, page.nextCursor, tx);
+                else await finish(row, tx);
+            });
+        } catch (error) {
+            if (error instanceof LeaseLostError || abort.signal.reason instanceof LeaseLostError) {
+                console.warn(`[Queue] Dropped a step of ${row.pipeline}/${row.subjectId}; its lease was lost.`);
                 return;
             }
-            console.error(`[Queue] ${row.pipeline}/${row.subjectId} failed ${attempt} times: ${message}`);
-            await giveUp(row, name.scan ? async () => undefined : (tx) => handler.recordFailure(tx, row.subjectId, message));
+            await this.settle(handler, row, name, { kind: "retry", error: getErrorMessage(error) });
         } finally {
             stopHeartbeat();
         }
     }
 
-    /** One step of a library scan: queue the subjects of one page that need work, then continue or finish. */
-    private async scan(handler: PipelineHandler, row: ClaimedRow, pipeline: string): Promise<void> {
-        const page = await handler.scanPage(row.libraryId, row.cursor, SCAN_PAGE_SIZE);
-        await db.transaction(async (tx) => {
-            await fence(tx, row);
-            await enqueue(
-                tx,
-                page.subjectIds.map((subjectId) => ({ pipeline, subjectId, libraryId: row.libraryId, priority: Priority.BACKFILL })),
-                "scan",
-            );
-            if (page.nextCursor) await advance(row, page.nextCursor, tx);
-            else await finish(row, tx);
-        });
+    /** Runs a claimed row together with more due rows of its queue, each settled with its own result. */
+    private async runBatch(handler: BatchPipelineHandler, head: ClaimedRow, name: QueueName): Promise<void> {
+        const rows = [head];
+        const abort = new AbortController();
+        const stopHeartbeat = startHeartbeat(rows, abort);
+        let results: Map<string, ReconcileResult>;
+        try {
+            results = await handler.reconcileBatch({
+                libraryId: head.libraryId,
+                space: name.space,
+                head: head.subjectId,
+                signal: abort.signal,
+                claimMore: async (limit) => {
+                    if (head.attempts > 1) return [];
+                    const more = await claimBatch(head.pipeline, limit);
+                    rows.push(...more);
+                    return more.map((row) => row.subjectId);
+                },
+                fence: (tx, subjectId) => {
+                    const row = rows.find((candidate) => candidate.subjectId === subjectId);
+                    if (!row) throw new Error(`${subjectId} is not part of this batch`);
+                    return fence(tx, row);
+                },
+            });
+        } catch (error) {
+            if (error instanceof LeaseLostError || abort.signal.reason instanceof LeaseLostError) {
+                console.warn(`[Queue] Dropped the result of a ${head.pipeline} batch of ${rows.length}; a lease was lost.`);
+                return;
+            }
+            const failure: ReconcileResult = { kind: "retry", error: getErrorMessage(error) };
+            results = new Map(rows.map((row) => [row.subjectId, failure]));
+        } finally {
+            stopHeartbeat();
+        }
+        for (const row of rows) await this.settle(handler, row, name, results.get(row.subjectId) ?? { kind: "done" });
+    }
+
+    /** Applies a run's result to its queue row. */
+    private async settle(handler: PipelineHandler, row: ClaimedRow, name: QueueName, result: ReconcileResult): Promise<void> {
+        switch (result.kind) {
+            case "done":
+                await finish(row);
+                return;
+            case "deferred":
+                await postpone(row, result.delaySeconds);
+                return;
+            case "retry":
+                if (row.attempts < maxAttemptsOf(handler, name)) {
+                    await defer(row, retryDelaySeconds(row.attempts));
+                    return;
+                }
+                console.error(`[Queue] ${row.pipeline}/${row.subjectId} failed ${row.attempts} times: ${result.error}`);
+                break;
+            case "rejected":
+                break;
+        }
+        await giveUp(
+            row,
+            name.scan
+                ? async () => undefined
+                : (tx) =>
+                      handler.recordFailure(tx, {
+                          subjectId: row.subjectId,
+                          space: name.space,
+                          error: result.error,
+                          errorKind: result.errorKind ?? null,
+                          rejected: result.kind === "rejected",
+                      }),
+        );
     }
 
     async drain(timeoutMs = 15_000): Promise<void> {

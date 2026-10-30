@@ -23,7 +23,7 @@ describe("readAiSourceImage", () => {
         spyOn(s3, "read").mockRejectedValue(new S3ObjectTooLargeError(60_000_000, 50 * 1024 * 1024));
 
         const error = await readAiSourceImage(file).catch((caught: unknown) => caught);
-        expect(classifyAiError(error)).toEqual({ kind: "INVALID_REQUEST", retryable: false });
+        expect(classifyAiError(error)).toEqual({ kind: "INVALID_REQUEST" });
     });
 
     test("keeps caller cancellation as cancellation", async () => {
@@ -35,7 +35,7 @@ describe("readAiSourceImage", () => {
         });
 
         const error = await readAiSourceImage(file, controller.signal).catch((caught: unknown) => caught);
-        expect(classifyAiError(error)).toEqual({ kind: "CANCELLED", retryable: false });
+        expect(classifyAiError(error)).toEqual({ kind: "CANCELLED" });
     });
 });
 

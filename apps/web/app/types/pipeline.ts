@@ -1,4 +1,4 @@
-export type PipelineName = "download" | "avatar" | "cover";
+export type PipelineName = "download" | "avatar" | "cover" | "ai.describe" | "ai.index" | "ai.text" | "ai.image";
 
 /** One pipeline in one library, as returned by GET /jobs/pipelines. */
 export interface PipelineStatus {

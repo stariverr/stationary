@@ -7,6 +7,7 @@ import { TrackService } from "./track";
 import { assignTrackPriorities, MediaDraftSchema } from "@/lib/validation/media-composition";
 import { replaceMediaTagsTx } from "./tags";
 import { assertMediaReady } from "./composition";
+import { markMediaMetaChanged } from "./meta-changes";
 
 export type DraftMediaInput = v.InferOutput<typeof MediaDraftSchema>;
 
@@ -61,6 +62,8 @@ export async function createMediaFromDraft({ tx, libraryId, draft, sortOrder, no
     if (draft.tag_ids.length > 0) {
         await replaceMediaTagsTx(tx, mediaId, libraryId, draft.tag_ids);
     }
+    // A new media needs a search document.
+    await markMediaMetaChanged(tx, [mediaId]);
 
     return mediaId;
 }

@@ -1,6 +1,7 @@
 import { and, count, eq, isNull, inArray, sql } from "drizzle-orm";
 import { db, Transaction } from "@/global/db";
 import { DeleteStatus, Media, Post, PostTag, Tag } from "@/db/schema";
+import { markMediaMetaChanged, markPostMetaChanged } from "@/features/media/meta-changes";
 
 /**
  * Transactional helper to replace post tags.
@@ -55,6 +56,7 @@ export async function replacePostTagsTx(tx: Transaction, postId: string, library
             })),
         );
     }
+    if (toDelete.length > 0 || toInsert.length > 0) await markPostMetaChanged(tx, [postId]);
 }
 
 /**
@@ -85,12 +87,15 @@ export const PostService = {
         if (fields.published_time !== undefined) updateFields.published_time = fields.published_time;
         if (fields.url !== undefined) updateFields.url = fields.url;
 
-        const updated = await db
-            .update(Post)
-            .set(updateFields)
-            .where(and(eq(Post.id, id), eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time)))
-            .returning();
-        return updated[0];
+        return db.transaction(async (tx) => {
+            const [updated] = await tx
+                .update(Post)
+                .set(updateFields)
+                .where(and(eq(Post.id, id), eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time)))
+                .returning();
+            if (updated) await markPostMetaChanged(tx, [id]);
+            return updated;
+        });
     },
 
     /**
@@ -202,7 +207,7 @@ export const PostService = {
             }
 
             // Attach new media items and update their sorting orders
-            let attachedCount = 0;
+            const attachedIds: string[] = [];
             for (const mediaId of uniqueMediaIds) {
                 const isAlreadyAttached = currentActiveMedias.some((cam) => cam.id === mediaId);
                 if (!isAlreadyAttached) {
@@ -215,9 +220,11 @@ export const PostService = {
                             update_time: Temporal.Now.instant(),
                         })
                         .where(eq(Media.id, mediaId));
-                    attachedCount++;
+                    attachedIds.push(mediaId);
                 }
             }
+            // The post's title, description and tags now describe these media too.
+            await markMediaMetaChanged(tx, attachedIds);
 
             // Recalculate total active media count for the post
             const totalActiveCount = await tx
@@ -235,7 +242,7 @@ export const PostService = {
                 })
                 .where(eq(Post.id, postId));
 
-            return { success: true, attached: attachedCount, total: totalActiveCount };
+            return { success: true, attached: attachedIds.length, total: totalActiveCount };
         });
     },
 
@@ -349,6 +356,7 @@ export const PostService = {
                     update_time: Temporal.Now.instant(),
                 })
                 .where(eq(Media.id, mediaId));
+            await markMediaMetaChanged(tx, [mediaId]);
 
             // Fetch the remaining media items still associated with the post
             const remainingMedias = await tx

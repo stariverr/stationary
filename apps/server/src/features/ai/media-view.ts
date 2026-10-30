@@ -1,13 +1,16 @@
 import { db } from "@/global/db";
-import { AssetAiMetadata, EntityType, ProcessingStatus } from "@/db/schema";
+import { AssetAiMetadata, EntityType } from "@/db/schema";
 import { and, eq } from "drizzle-orm";
 import { toIsoTimestamp } from "@/lib/utils/time";
 
 type StoredAiMetadata = typeof AssetAiMetadata.$inferSelect;
 
+/** FAILED: the last description attempt failed (a stored older description may still be shown). */
+export type MediaAiStatus = "PENDING" | "COMPLETED" | "FAILED";
+
 /** AI-generated content of a media item as clients show it. */
 export interface MediaAiView {
-    status: ProcessingStatus;
+    status: MediaAiStatus;
     error: string | null;
     result: {
         caption: string;
@@ -22,12 +25,13 @@ export interface MediaAiView {
     } | null;
 }
 
-/** Processing status of a media item; one without a row has not been processed yet. */
-export function summarizeAiStatus(row: Pick<StoredAiMetadata, "processing_status" | "last_error"> | undefined): {
-    status: ProcessingStatus;
+/** Description status of a media item, read from its result row; one without a description has not been described yet. */
+export function summarizeAiStatus(row: Pick<StoredAiMetadata, "input_hash" | "last_error"> | undefined): {
+    status: MediaAiStatus;
     error: string | null;
 } {
-    return { status: row?.processing_status ?? ProcessingStatus.PENDING, error: row?.last_error ?? null };
+    if (row?.last_error) return { status: "FAILED", error: row.last_error };
+    return { status: row?.input_hash ? "COMPLETED" : "PENDING", error: null };
 }
 
 /** The status and stored description of a media item. */

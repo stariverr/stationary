@@ -15,7 +15,14 @@ export const Priority = {
 
 export function retryDelaySeconds(attemptCount: number, random = Math.random): number {
     const normalizedAttempt = Math.max(1, Math.trunc(attemptCount));
-    const exponentialDelay = Math.min(MAX_RETRY_DELAY_SECONDS, 5 * 2 ** (normalizedAttempt - 1));
+    const exponentialDelay = Math.min(MAX_RETRY_DELAY_SECONDS, 5 * 4 ** (normalizedAttempt - 1));
     const jitterMultiplier = 0.75 + Math.min(1, Math.max(0, random())) * 0.5;
     return Math.min(MAX_RETRY_DELAY_SECONDS, Math.max(1, Math.round(exponentialDelay * jitterMultiplier)));
+}
+
+/** Spreads runs held back by a rate limit over the wait window so they do not all reclaim capacity at once. */
+export function throttledDelaySeconds(retryAfterSeconds: number | undefined, random = Math.random): number {
+    const base = Math.max(1, retryAfterSeconds ?? 1);
+    const jitterMultiplier = 1 + Math.min(1, Math.max(0, random())) * 0.5;
+    return Math.min(MAX_RETRY_DELAY_SECONDS, Math.ceil(base * jitterMultiplier));
 }

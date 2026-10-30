@@ -18,7 +18,7 @@ export interface IngestPostCommand {
 }
 
 export const IngestPipeline = {
-    /** Saves one post's metadata and reports its media sources as changed, which queues their downloads. */
+    /** Saves one post's metadata and reports its media sources and metadata as changed, which queues their downloads and search documents. */
     async processPostIngest({
         postData,
         targetLibraryId,
@@ -29,8 +29,11 @@ export const IngestPipeline = {
         const saveResult = await db.transaction(async (tx) => {
             const saved = await saveIngestMetadata(postData, targetLibraryId, workflowRunId, tx);
             if (saved.skipUpdate) return saved;
-            if (saved.mediaIds.length > 0) await markChanged(tx, Aspect.MEDIA_SOURCE, saved.mediaIds);
-            else await refreshPostSyncStatus(tx, saved.postId, Temporal.Now.instant());
+            if (saved.mediaIds.length > 0) {
+                await markChanged(tx, Aspect.MEDIA_SOURCE, saved.mediaIds);
+                // The post's metadata describes its media in search.
+                await markChanged(tx, Aspect.MEDIA_META, saved.mediaIds);
+            } else await refreshPostSyncStatus(tx, saved.postId, Temporal.Now.instant());
             return saved;
         });
 

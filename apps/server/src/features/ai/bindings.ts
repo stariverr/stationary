@@ -1,9 +1,12 @@
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
-import { Library, LibraryEmbeddingSpace, LibraryEmbeddingSpaceStatus } from "@/db/schema";
+import { AiModel, Library, LibraryEmbeddingSpace, LibraryEmbeddingSpaceStatus } from "@/db/schema";
 import { db, type Transaction } from "@/global/db";
-import { alignEmbeddingSpace, dropSpacesOfModels, startBackfill } from "./embedding-spaces";
+import { markChanged } from "@/infra/queue/changes";
+import { Aspect } from "@/infra/queue/pipelines";
+import { requestRedescribe } from "./describe-pipeline";
+import { alignEmbeddingSpace, dropSpacesOfModels } from "./embedding-spaces";
+import { IMAGE_METADATA_PROMPT_VERSION } from "./image-metadata";
 import { AI_BINDING_ROLES, type AiBindingRole, type LibraryAiBindings, type RoleBinding } from "./model-schema";
-import { queueLibraryAiEnrichment } from "./queue-enrichment";
 import type { UpdateLibraryAiBindings } from "./schema";
 import type { EmbeddingBindingRole } from "./types";
 
@@ -75,16 +78,14 @@ export async function getRolesUsingModel(ownerId: string, modelId: string): Prom
 
 /**
  * Applies the requested role changes and language to a library in one transaction, so a failure
- * leaves nothing half-applied. Work that needs the committed state (backfills, re-describing
- * after a language change) is queued afterwards. A new describe model only describes new content
- * unless `redescribe` asks for the existing descriptions of other models to be replaced.
+ * leaves nothing half-applied, and queues the work they call for in the same transaction: a scan
+ * filling a new embedding space, and a describe scan after the describe model or language
+ * changed. A new describe model only describes what has no description yet, unless `redescribe`
+ * asks for the descriptions of other models to be replaced.
  */
-export async function saveLibraryBindings(
-    library: { id: string; owner_id: string },
-    changes: UpdateLibraryAiBindings,
-): Promise<{ indexingStarted: boolean }> {
+export async function saveLibraryBindings(library: { id: string; owner_id: string }, changes: UpdateLibraryAiBindings): Promise<void> {
     const { language, redescribe } = changes;
-    const { backfills, languageChanged, describeModelId } = await db.transaction(async (tx) => {
+    await db.transaction(async (tx) => {
         const [current] = await tx
             .select({ ai_bindings: Library.ai_bindings, ai_language: Library.ai_language })
             .from(Library)
@@ -96,37 +97,28 @@ export async function saveLibraryBindings(
         for (const role of LIBRARY_ROLES) {
             if (changes[role] !== undefined) next[role] = changes[role];
         }
-        const languageChanged = language !== undefined && language !== current.ai_language;
-        await tx
-            .update(Library)
-            .set({ ai_bindings: next, ...(languageChanged ? { ai_language: language } : {}) })
-            .where(eq(Library.id, library.id));
+        const nextLanguage = language ?? current.ai_language;
+        await tx.update(Library).set({ ai_bindings: next, ai_language: nextLanguage }).where(eq(Library.id, library.id));
 
-        const backfills: string[] = [];
         for (const role of EMBEDDING_ROLES) {
-            if (changes[role] === undefined) continue;
-            const spaceRowId = await alignEmbeddingSpace(tx, library, role, changes[role]?.modelId ?? null);
-            if (spaceRowId) backfills.push(spaceRowId);
+            if (changes[role] !== undefined) await alignEmbeddingSpace(tx, library, role, changes[role]?.modelId ?? null);
         }
-        return { backfills, languageChanged, describeModelId: next.describe?.modelId };
-    });
 
-    // The bindings are saved either way. If queuing fails, saving the same bindings again retries
-    // it: a space without a backfill task is returned by alignEmbeddingSpace.
-    try {
-        // A backfill is already a full library enrichment, so it also re-describes after a language
-        // change. Descriptions in the old language are stale: re-describe the library (search
-        // documents and text vectors follow automatically).
-        if (backfills.length > 0) {
-            await startBackfill(library, backfills, { redescribe });
-        } else if (describeModelId && (languageChanged || redescribe)) {
-            await queueLibraryAiEnrichment(library.id, library.owner_id, { redescribe });
+        const describeModelId = next.describe?.modelId;
+        if (!describeModelId) return;
+        if (redescribe) {
+            const [model] = await tx.select({ name: AiModel.name }).from(AiModel).where(eq(AiModel.id, describeModelId)).limit(1);
+            if (model) {
+                await requestRedescribe(tx, library.id, {
+                    model: model.name,
+                    promptVersion: IMAGE_METADATA_PROMPT_VERSION,
+                    language: nextLanguage,
+                });
+            }
+        } else if (describeModelId !== current.ai_bindings?.describe?.modelId || nextLanguage !== current.ai_language) {
+            await markChanged(tx, Aspect.LIBRARY_AI_CONFIG, [library.id]);
         }
-        return { indexingStarted: true };
-    } catch (error) {
-        console.error(`[AI BINDINGS] Saved bindings of library ${library.id} but could not start indexing:`, error);
-        return { indexingStarted: false };
-    }
+    });
 }
 
 /** Clears the roles and drops the spaces of the owner's libraries that use any of `modelIds`. */

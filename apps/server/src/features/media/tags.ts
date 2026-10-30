@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { Media, MediaTag, Tag, DeleteStatus } from "@/db/schema";
 import { db, type Transaction } from "@/global/db";
+import { markMediaMetaChanged } from "./meta-changes";
 
 export async function replaceMediaTagsTx(tx: Transaction, mediaId: string, libraryId: string, tagIds: string[]) {
     const [media] = await tx
@@ -34,6 +35,7 @@ export async function replaceMediaTagsTx(tx: Transaction, mediaId: string, libra
     if (toInsert.length > 0) {
         await tx.insert(MediaTag).values(toInsert.map((tagId) => ({ media_id: mediaId, tag_id: tagId })));
     }
+    if (toDelete.length > 0 || toInsert.length > 0) await markMediaMetaChanged(tx, [mediaId]);
 }
 
 export async function replaceMediaTags(mediaId: string, libraryId: string, tagIds: string[]) {

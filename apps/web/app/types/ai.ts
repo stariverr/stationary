@@ -97,7 +97,7 @@ export interface AiEmbeddingSpaceStatus {
     status: "ACTIVE" | "BUILDING" | "RETIRED";
     modelId: string;
     spaceId: string;
-    /** Media the space has a vector or a queued request for. */
+    /** Media the space has a vector, a failure or queued work for. */
     total: number;
     ready: number;
     pending: number;
@@ -105,7 +105,7 @@ export interface AiEmbeddingSpaceStatus {
     /** BUILDING only: why the drained space does not replace the ACTIVE one yet. */
     blocked: "low_coverage" | "too_many_failures" | null;
     retainedUntil: string | null;
-    /** Latest error of the vectors still queued or failed. */
+    /** Latest error recorded in the space. */
     lastError: AiErrorView | null;
 }
 
@@ -140,9 +140,12 @@ export interface AiCoverage {
     lastFailure: (AiErrorView & { category: AiFailureCategory }) | null;
 }
 
+/** AI work of a library on the background queue (server: features/ai/coverage.ts). */
 export interface AiProgress {
-    task: { done: number; total: number } | null;
-    queuedVectors: number;
+    /** Media queued for an AI pipeline (description, search document, vectors). */
+    queued: number;
+    /** A library scan is under way, so `queued` may still grow. */
+    scanning: boolean;
 }
 
 /** A bound model the server cannot use; its role is left out until the binding is fixed. */
@@ -206,7 +209,7 @@ export function describeModelSpec(capabilities: AiModelCapabilities, t: (key: st
 
 /** AI-generated content of a media item, as returned by the media detail API. */
 export interface MediaAiView {
-    status: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "FAILED";
+    status: "PENDING" | "COMPLETED" | "FAILED";
     error: string | null;
     result: {
         caption: string;

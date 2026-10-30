@@ -39,10 +39,10 @@ describe("AI provider HTTP client", () => {
         const url = `http://localhost:${server.port}/v1/embed`;
         const failure = (signal: AbortSignal) => postJson(url, { json: {}, signal }).then(() => null, (error: unknown) => error);
         try {
-            expect(classifyAiError(await failure(withTimeout(undefined, 50)))).toMatchObject({ kind: "TIMEOUT", retryable: true });
+            expect(classifyAiError(await failure(withTimeout(undefined, 50)))).toMatchObject({ kind: "TIMEOUT" });
             const controller = new AbortController();
             setTimeout(() => controller.abort(), 50);
-            expect(classifyAiError(await failure(withTimeout(controller.signal, 5_000)))).toMatchObject({ kind: "CANCELLED", retryable: false });
+            expect(classifyAiError(await failure(withTimeout(controller.signal, 5_000)))).toMatchObject({ kind: "CANCELLED" });
         } finally {
             server.stop(true);
         }

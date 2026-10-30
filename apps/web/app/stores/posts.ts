@@ -506,7 +506,7 @@ export const usePostStore = defineStore("posts", () => {
     };
 
     const queueAi = async (postIds: string[]) => {
-        const response = await useApi<any>("/task/queue-ai", {
+        const response = await useApi<any>("/ai/media/process", {
             method: "POST",
             body: { post_ids: postIds },
         });

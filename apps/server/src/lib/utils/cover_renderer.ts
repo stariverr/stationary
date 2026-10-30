@@ -7,6 +7,17 @@ import { COVER_PROFILES, type CoverProfile } from "@/lib/utils/cover_profiles";
 const DEFAULT_USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+/** What FFmpeg says when the bytes it read cannot be decoded, as opposed to a read that failed or a broken environment. */
+const UNDECODABLE_SOURCE = /invalid data found|moov atom not found|could not find codec parameters|does not contain any stream/i;
+
+/** FFmpeg cannot decode the source; rendering the same file again will not help. */
+export class UndecodableSourceError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = "UndecodableSourceError";
+    }
+}
+
 export interface RenderedCoverResult {
     buffer: Uint8Array;
     width: number;
@@ -301,7 +312,8 @@ async function executeFFmpeg(cmd: string[], timeoutMs: number, sourceUrl: string
         if (process.stderr && typeof process.stderr !== "number") {
             stderr = (await new Response(process.stderr).text()).trim();
         }
-        throw new Error(`FFmpeg failed with exit status ${exitCode}. Stderr: ${stderr}`);
+        const message = `FFmpeg failed with exit status ${exitCode}. Stderr: ${stderr}`;
+        throw UNDECODABLE_SOURCE.test(stderr) ? new UndecodableSourceError(message) : new Error(message);
     }
 }
 

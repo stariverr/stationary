@@ -1,6 +1,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { DeleteStatus, Media } from "@/db/schema";
 import { db } from "@/global/db";
+import { markMediaMetaChanged } from "./meta-changes";
 
 export type UpdateMediaInfoInput = {
     title?: string;
@@ -16,10 +17,13 @@ export async function updateMediaInfo(id: string, fields: UpdateMediaInfoInput) 
     if (fields.description !== undefined) updateFields.description = fields.description;
     if (fields.published_time !== undefined) updateFields.published_time = fields.published_time;
 
-    const [updated] = await db
-        .update(Media)
-        .set(updateFields)
-        .where(and(eq(Media.id, id), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
-        .returning();
-    return updated;
+    return db.transaction(async (tx) => {
+        const [updated] = await tx
+            .update(Media)
+            .set(updateFields)
+            .where(and(eq(Media.id, id), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)))
+            .returning();
+        if (updated) await markMediaMetaChanged(tx, [id]);
+        return updated;
+    });
 }

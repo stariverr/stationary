@@ -55,7 +55,6 @@ export class AiConfigurationError extends Error {
 
 export interface AiErrorClassification {
     kind: AiProviderErrorKind | "CONFIGURATION" | "CANCELLED" | "THROTTLED";
-    retryable: boolean;
     /** Provider-requested (Retry-After) or limiter-computed delay before the next attempt. */
     retryAfterMs?: number;
 }
@@ -165,43 +164,35 @@ export function getSafeAiErrorMessage(error: unknown): string {
  */
 export function classifyAiError(error: unknown): AiErrorClassification {
     if (error instanceof AiConfigurationError) {
-        return { kind: "CONFIGURATION", retryable: false };
+        return { kind: "CONFIGURATION" };
     }
 
     if (error instanceof AiThrottledError) {
-        return { kind: "THROTTLED", retryable: true, retryAfterMs: error.retryAfterMs };
+        return { kind: "THROTTLED", retryAfterMs: error.retryAfterMs };
     }
 
     if (error instanceof AiProviderError) {
-        return {
-            kind: error.kind,
-            retryable: error.kind === "RATE_LIMITED" || error.kind === "TRANSIENT" || error.kind === "TIMEOUT",
-            retryAfterMs: error.retryAfterMs,
-        };
+        return { kind: error.kind, retryAfterMs: error.retryAfterMs };
     }
 
     // Cancellation is decided by the error type, never by message text: a provider message that
     // merely mentions "cancel" is not a cancelled job.
     const abortName = getAbortName(error);
-    if (abortName === "AbortError") return { kind: "CANCELLED", retryable: false };
-    if (abortName === "TimeoutError") return { kind: "TIMEOUT", retryable: true };
+    if (abortName === "AbortError") return { kind: "CANCELLED" };
+    if (abortName === "TimeoutError") return { kind: "TIMEOUT" };
 
     const text = getErrorText(error);
 
     const status = getNumericStatus(error);
-    if (status === 401 || status === 403) return { kind: "AUTHENTICATION", retryable: false };
-    if (status === 404) return { kind: "NOT_FOUND", retryable: false };
-    if (status === 400 || status === 422) return { kind: "INVALID_REQUEST", retryable: false };
+    if (status === 401 || status === 403) return { kind: "AUTHENTICATION" };
+    if (status === 404) return { kind: "NOT_FOUND" };
+    if (status === 400 || status === 422) return { kind: "INVALID_REQUEST" };
     if (status === 408 || status === 429 || (status !== undefined && status >= 500)) {
-        return {
-            kind: status === 429 ? "RATE_LIMITED" : "TRANSIENT",
-            retryable: true,
-            retryAfterMs: getSdkRetryAfterMs(error),
-        };
+        return { kind: status === 429 ? "RATE_LIMITED" : "TRANSIENT", retryAfterMs: getSdkRetryAfterMs(error) };
     }
 
     if (error && typeof error === "object" && (error as { isRetryable?: unknown }).isRetryable === true) {
-        return { kind: "TRANSIENT", retryable: true };
+        return { kind: "TRANSIENT" };
     }
 
     if (
@@ -221,8 +212,8 @@ export function classifyAiError(error: unknown): AiErrorClassification {
         text.includes("too many requests") ||
         text.includes("overloaded")
     ) {
-        return { kind: text.includes("timeout") || text.includes("timed out") ? "TIMEOUT" : "TRANSIENT", retryable: true };
+        return { kind: text.includes("timeout") || text.includes("timed out") ? "TIMEOUT" : "TRANSIENT" };
     }
 
-    return { kind: "UNKNOWN", retryable: false };
+    return { kind: "UNKNOWN" };
 }

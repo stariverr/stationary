@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { AiProviderError, AiThrottledError, classifyAiError, parseRetryAfterHeader } from "@/features/ai/errors";
 import { createProviderLimiter, type ProviderLimits, type RateLimitStore } from "@/features/ai/rate-limit";
-import { throttledDelaySeconds } from "@/infra/jobs/policy";
+import { throttledDelaySeconds } from "@/infra/queue/policy";
 
 const limits: ProviderLimits = { maxConcurrency: 1, requestsPerMinute: null };
 
@@ -24,6 +24,9 @@ function memoryStore() {
             state.coolDownMs = Math.max(state.coolDownMs, ms);
             state.coolDowns.push(ms);
         },
+        async reportFailure() {},
+        async reportSuccess() {},
+        async reset() {},
     };
     return { store, state };
 }
@@ -72,12 +75,12 @@ describe("provider limiter", () => {
 
 describe("retry timing", () => {
     it("classifies throttling and Retry-After from provider and SDK errors", () => {
-        expect(classifyAiError(new AiThrottledError("p", 5_000))).toEqual({ kind: "THROTTLED", retryable: true, retryAfterMs: 5_000 });
+        expect(classifyAiError(new AiThrottledError("p", 5_000))).toEqual({ kind: "THROTTLED", retryAfterMs: 5_000 });
         expect(classifyAiError(new AiProviderError("RATE_LIMITED", "slow down", 429, 7_000))).toMatchObject({ retryAfterMs: 7_000 });
         // AI SDK APICallError: retryable flag plus raw response headers.
         expect(
             classifyAiError({ statusCode: 429, isRetryable: true, responseHeaders: { "Retry-After": "20" }, message: "Too Many Requests" }),
-        ).toEqual({ kind: "RATE_LIMITED", retryable: true, retryAfterMs: 20_000 });
+        ).toEqual({ kind: "RATE_LIMITED", retryAfterMs: 20_000 });
     });
 
     it("parses Retry-After seconds and HTTP dates", () => {

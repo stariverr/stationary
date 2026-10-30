@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { AiThrottledError, classifyAiError } from "./errors";
+import { AiThrottledError, classifyAiError, getFailureCategory, type AiErrorClassification } from "./errors";
 
 /** Per-provider request limits, configured on the provider connection. */
 export interface ProviderLimits {
@@ -15,6 +15,15 @@ export interface RateLimitStore {
     release(providerId: string, leaseId: string): Promise<void>;
     /** Blocks the provider for `ms`, extending but never shortening an existing cool-down. */
     coolDown(providerId: string, ms: number): Promise<void>;
+    /**
+     * Counts a failure that points at the provider. Enough in a row block it, and each failure of a call made after a
+     * block has passed blocks it twice as long. Calls that fail while it is blocked started earlier and do not count.
+     */
+    reportFailure(providerId: string): Promise<void>;
+    /** The provider answered: forgets its failures. */
+    reportSuccess(providerId: string): Promise<void>;
+    /** Lifts any block and forgets the failures, for a connection that was changed and may work now. */
+    reset(providerId: string): Promise<void>;
 }
 
 /** How long a granted slot stays reserved if its holder crashes before releasing it. */
@@ -23,6 +32,12 @@ const LEASE_TTL_MS = 10 * 60 * 1000;
 const DEFAULT_COOL_DOWN_MS = 30_000;
 /** Suggested wait when every concurrency slot is taken; slots free up as calls finish. */
 const CONCURRENCY_WAIT_MS = 2_000;
+/** Failures in a row that block a provider, how long the first block lasts, and how long a block can get. */
+const FAILURES_TO_BLOCK = 5;
+const FIRST_BLOCK_MS = 30_000;
+const MAX_BLOCK_MS = 60 * 60 * 1000;
+/** A provider nobody called for this long starts counting from zero; must outlast the longest block. */
+const FAILURE_MEMORY_MS = 2 * MAX_BLOCK_MS;
 
 const ACQUIRE_SCRIPT = `
 local now = tonumber(ARGV[1])
@@ -50,10 +65,22 @@ local ms = tonumber(ARGV[1])
 if redis.call('pttl', KEYS[1]) < ms then redis.call('set', KEYS[1], '1', 'PX', ms) end
 return 0`;
 
+const REPORT_FAILURE_SCRIPT = `
+if redis.call('pttl', KEYS[1]) > 0 then return 0 end
+local failures = redis.call('incr', KEYS[2])
+redis.call('pexpire', KEYS[2], tonumber(ARGV[4]))
+local over = failures - tonumber(ARGV[1])
+if over >= 0 then
+    local ms = math.min(tonumber(ARGV[3]), tonumber(ARGV[2]) * 2 ^ over)
+    redis.call('set', KEYS[1], '1', 'PX', math.floor(ms))
+end
+return 0`;
+
 const keys = (providerId: string) => ({
     coolDown: `ai:limit:${providerId}:cooldown`,
     window: `ai:limit:${providerId}:rpm`,
     inFlight: `ai:limit:${providerId}:inflight`,
+    failures: `ai:limit:${providerId}:failures`,
 });
 
 export function createRedisRateLimitStore(redis: {
@@ -82,7 +109,28 @@ export function createRedisRateLimitStore(redis: {
         async coolDown(providerId, ms) {
             await redis.evalScript(COOL_DOWN_SCRIPT, [keys(providerId).coolDown], [String(Math.ceil(ms))]);
         },
+        async reportFailure(providerId) {
+            const k = keys(providerId);
+            await redis.evalScript(
+                REPORT_FAILURE_SCRIPT,
+                [k.coolDown, k.failures],
+                [String(FAILURES_TO_BLOCK), String(FIRST_BLOCK_MS), String(MAX_BLOCK_MS), String(FAILURE_MEMORY_MS)],
+            );
+        },
+        async reportSuccess(providerId) {
+            await redis.evalScript("return redis.call('del', KEYS[1])", [keys(providerId).failures], []);
+        },
+        async reset(providerId) {
+            const k = keys(providerId);
+            await redis.evalScript("return redis.call('del', KEYS[1], KEYS[2])", [k.coolDown, k.failures], []);
+        },
     };
+}
+
+/** Bad input and busy providers say nothing about whether the provider works, and neither does a caller giving up. */
+function pointsAtProvider(kind: AiErrorClassification["kind"]): boolean {
+    const category = getFailureCategory(kind);
+    return kind !== "CANCELLED" && category !== "input" && category !== "quota";
 }
 
 export interface RunLimitedOptions {
@@ -111,8 +159,10 @@ export interface ProviderLimiter {
 }
 
 /**
- * Wraps every provider call: waits for (or reports) capacity, and turns a provider 429 into a
- * shared cool-down so other workers stop calling the provider until Retry-After has passed.
+ * Wraps every provider call: waits for (or reports) capacity, turns a provider 429 into a shared
+ * cool-down so other workers stop calling the provider until Retry-After has passed, and blocks a
+ * provider that keeps failing the same way, so an outage costs a few probes instead of every queued
+ * subject's attempts. Callers see a block as throttling; once it passes, the next calls are the probes.
  */
 export function createProviderLimiter(store: RateLimitStore): ProviderLimiter {
     return {
@@ -126,12 +176,17 @@ export function createProviderLimiter(store: RateLimitStore): ProviderLimiter {
                 await sleep(wait, options.signal);
             }
 
+            const warn = (error: unknown) => console.warn(`[AI LIMIT] Failed to update the state of provider ${providerId}.`, error);
             try {
-                return await call();
+                const result = await call();
+                await store.reportSuccess(providerId).catch(warn);
+                return result;
             } catch (error) {
                 const classification = classifyAiError(error);
                 if (classification.kind === "RATE_LIMITED") {
-                    await store.coolDown(providerId, classification.retryAfterMs ?? DEFAULT_COOL_DOWN_MS);
+                    await store.coolDown(providerId, classification.retryAfterMs ?? DEFAULT_COOL_DOWN_MS).catch(warn);
+                } else if (pointsAtProvider(classification.kind)) {
+                    await store.reportFailure(providerId).catch(warn);
                 }
                 throw error;
             } finally {

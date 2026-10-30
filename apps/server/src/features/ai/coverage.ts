@@ -4,25 +4,19 @@ import {
     AssetAiMetadata,
     AssetEmbedding,
     AssetSearchDocument,
-    AsyncTask,
-    AsyncTaskStatus,
-    AsyncTaskType,
     DeleteStatus,
     EmbeddingRole,
-    EmbeddingStatus,
     EntityType,
     File as DbFile,
-    LibraryEmbeddingSpace,
-    LibraryEmbeddingSpaceStatus,
     Media,
-    ProcessingStatus,
     SyncStatus,
     Track,
     TrackPurpose,
     TrackType,
 } from "@/db/schema";
 import { db } from "@/global/db";
-import { ofActiveMedia as ofActiveEmbeddingMedia } from "./embedding-queue";
+import { parseQueueName } from "@/infra/queue/pipelines";
+import { countQueue } from "@/infra/queue/store";
 import { getFailureCategory, INPUT_ERROR_KINDS, type AiFailureCategory } from "./errors";
 import type { AiService } from "./service";
 
@@ -97,6 +91,14 @@ const hasImageSource = exists(
 );
 
 const ofItemMetadata = and(eq(AssetAiMetadata.entity_type, EntityType.MEDIA), eq(AssetAiMetadata.entity_id, Media.id));
+/** Vectors of media that are neither deleted nor in the recycle bin. */
+const ofActiveEmbeddingMedia = sql`exists (
+    select 1 from ${Media}
+    where ${Media.id} = ${AssetEmbedding.entity_id}
+      and ${Media.delete_status} = ${DeleteStatus.ACTIVE}
+      and ${Media.recycle_time} is null
+)`;
+
 const ofItemEmbedding = and(eq(AssetEmbedding.entity_type, EntityType.MEDIA), eq(AssetEmbedding.entity_id, Media.id));
 
 const metadataExists = (...conditions: SQL[]) =>
@@ -118,7 +120,7 @@ function vectorReady(spaceId: string, role: EmbeddingRole): SQL {
     return embeddingExists(
         eq(AssetEmbedding.embedding_space_id, spaceId),
         eq(AssetEmbedding.embedding_role, role),
-        eq(AssetEmbedding.embedding_status, EmbeddingStatus.READY),
+        isNotNull(AssetEmbedding.embedding),
     );
 }
 
@@ -166,15 +168,12 @@ function hasFailure(targets: CoverageTargets, input: boolean): SQL {
     return (
         or(
             targets.describeLanguage
-                ? metadataExists(
-                      eq(AssetAiMetadata.processing_status, ProcessingStatus.FAILED),
-                      ofFailureKind(AssetAiMetadata.error_kind, input),
-                  )
+                ? metadataExists(isNotNull(AssetAiMetadata.last_error), ofFailureKind(AssetAiMetadata.error_kind, input))
                 : undefined,
             ids.length > 0
                 ? embeddingExists(
                       inArray(AssetEmbedding.embedding_space_id, ids),
-                      eq(AssetEmbedding.embedding_status, EmbeddingStatus.FAILED),
+                      isNotNull(AssetEmbedding.last_error),
                       ofFailureKind(AssetEmbedding.error_kind, input),
                   )
                 : undefined,
@@ -232,7 +231,7 @@ async function latestFailure(libraryId: string, targets: CoverageTargets): Promi
                   .where(
                       and(
                           eq(AssetAiMetadata.library_id, libraryId),
-                          eq(AssetAiMetadata.processing_status, ProcessingStatus.FAILED),
+                          isNotNull(AssetAiMetadata.last_error),
                           ofFailureKind(AssetAiMetadata.error_kind, false),
                       ),
                   )
@@ -247,7 +246,7 @@ async function latestFailure(libraryId: string, targets: CoverageTargets): Promi
                       and(
                           eq(AssetEmbedding.library_id, libraryId),
                           inArray(AssetEmbedding.embedding_space_id, ids),
-                          eq(AssetEmbedding.embedding_status, EmbeddingStatus.FAILED),
+                          isNotNull(AssetEmbedding.last_error),
                           ofFailureKind(AssetEmbedding.error_kind, false),
                           ofActiveEmbeddingMedia,
                       ),
@@ -283,50 +282,21 @@ export async function getLibraryCoverage(libraryId: string, targets: CoverageTar
 }
 
 export interface LibraryAiProgress {
-    /** The running library-wide enrichment: items handled so far, out of the items discovered so far. */
-    task: { done: number; total: number } | null;
-    /** Vectors waiting in the queue for the spaces the library writes. */
-    queuedVectors: number;
+    /** Media queued for an AI pipeline of the library (description, search document, vectors). */
+    queued: number;
+    /** A library scan of an AI pipeline is under way, so `queued` may still grow. */
+    scanning: boolean;
 }
 
-/** Cheap progress of AI work in a library, for polling while it runs. */
+/** Cheap progress of AI work in a library, read from its queue, for polling while it runs. */
 export async function getLibraryAiProgress(libraryId: string): Promise<LibraryAiProgress> {
-    const writtenSpaceIds = db
-        .select({ space_id: LibraryEmbeddingSpace.space_id })
-        .from(LibraryEmbeddingSpace)
-        .where(
-            and(
-                eq(LibraryEmbeddingSpace.library_id, libraryId),
-                inArray(LibraryEmbeddingSpace.status, [LibraryEmbeddingSpaceStatus.ACTIVE, LibraryEmbeddingSpaceStatus.BUILDING]),
-            ),
-        );
-    const [[task], [queue]] = await Promise.all([
-        db
-            .select({ succeeded: AsyncTask.succeeded_units, failed: AsyncTask.failed_units, total: AsyncTask.total_units })
-            .from(AsyncTask)
-            .where(
-                and(
-                    eq(AsyncTask.library_id, libraryId),
-                    eq(AsyncTask.type, AsyncTaskType.AI_ENRICH),
-                    inArray(AsyncTask.status, [AsyncTaskStatus.DISCOVERING, AsyncTaskStatus.RUNNING]),
-                ),
-            )
-            .orderBy(desc(AsyncTask.create_time))
-            .limit(1),
-        db
-            .select({ count: sql<number>`count(*)::int` })
-            .from(AssetEmbedding)
-            .where(
-                and(
-                    eq(AssetEmbedding.library_id, libraryId),
-                    eq(AssetEmbedding.embedding_status, EmbeddingStatus.PENDING),
-                    inArray(AssetEmbedding.embedding_space_id, writtenSpaceIds),
-                    ofActiveEmbeddingMedia,
-                ),
-            ),
-    ]);
-    return {
-        task: task ? { done: task.succeeded + task.failed, total: task.total } : null,
-        queuedVectors: queue!.count,
-    };
+    let queued = 0;
+    let scanning = false;
+    for (const row of await countQueue([libraryId])) {
+        const name = parseQueueName(row.pipeline);
+        if (!name?.pipeline.startsWith("ai.")) continue;
+        if (name.scan) scanning = true;
+        else queued += row.queued;
+    }
+    return { queued, scanning };
 }

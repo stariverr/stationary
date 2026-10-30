@@ -1,11 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import { assessBuildingSpace, type BuildProgress } from "@/features/ai/embedding-spaces";
 
-const drained: BuildProgress = { backfillRunning: false, total: 100, ready: 100, pending: 0, failed: 0, activeReady: 100 };
+const drained: BuildProgress = { pending: 0, ready: 100, failed: 0, activeReady: 100 };
 
 describe("assessBuildingSpace", () => {
-    it("waits while the backfill runs or vectors are queued", () => {
-        expect(assessBuildingSpace({ ...drained, backfillRunning: true })).toEqual({ state: "waiting" });
+    it("waits while the space has media queued", () => {
         expect(assessBuildingSpace({ ...drained, pending: 1 })).toEqual({ state: "waiting" });
     });
 
@@ -23,7 +22,7 @@ describe("assessBuildingSpace", () => {
     });
 
     it("holds back a space that covers clearly less than the active one", () => {
-        // e.g. a cancelled backfill.
+        // e.g. media whose input is not ready yet.
         expect(assessBuildingSpace({ ...drained, ready: 40 })).toEqual({ state: "blocked", reason: "low_coverage" });
     });
 });

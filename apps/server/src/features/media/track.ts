@@ -25,9 +25,10 @@ import { assertMediaComposition, syncMediaAndPostStatus } from "./composition";
 import { markChanged, requeue } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
 
-/** Content tracks are what covers are rendered from. */
-async function markContentChanged(tx: Transaction, mediaId: string, purpose: TrackPurpose) {
+/** Content tracks are what covers are rendered from; covers (and content) are what AI describes and embeds. */
+async function markTrackChanged(tx: Transaction, mediaId: string, purpose: TrackPurpose) {
     if (purpose === TrackPurpose.CONTENT) await markChanged(tx, Aspect.MEDIA_CONTENT, [mediaId]);
+    else if (purpose === TrackPurpose.COVER) await markChanged(tx, Aspect.MEDIA_COVER, [mediaId]);
 }
 
 export interface FileData {
@@ -407,7 +408,7 @@ export const TrackService = {
         // 4. Recompute aggregate status after the Track write. Batch importers can defer
         // the strict check until all tracks in the composition have been written.
         await syncMediaAndPostStatus(mediaId, tx, now);
-        await markContentChanged(tx, mediaId, trackInfo.purpose);
+        await markTrackChanged(tx, mediaId, trackInfo.purpose);
         if (!options.deferCompositionCheck) {
             await assertMediaComposition(mediaId, tx);
         }
@@ -493,7 +494,7 @@ export const TrackService = {
             }
 
             await syncMediaAndPostStatus(mediaId, tx, now);
-            await markContentChanged(tx, mediaId, existingTrack.purpose);
+            await markTrackChanged(tx, mediaId, existingTrack.purpose);
 
             return {
                 track: updatedTrack,
@@ -531,7 +532,7 @@ export const TrackService = {
                                 .where(eq(Track.id, trackId));
 
                             await assertMediaComposition(mediaId, tx);
-                            await markContentChanged(tx, mediaId, trackRecord.purpose);
+                            await markTrackChanged(tx, mediaId, trackRecord.purpose);
                             if (trackRecord.file_id) {
                                 await tx
                                     .update(File)
@@ -615,7 +616,7 @@ export const TrackService = {
             await syncMediaAndPostStatus(mediaId, tx, now);
             await assertMediaComposition(mediaId, tx);
             // Order, default, primary and staleness decide which cover is rendered and from what.
-            await markContentChanged(tx, mediaId, trackRecord.purpose);
+            await markTrackChanged(tx, mediaId, trackRecord.purpose);
             if (trackRecord.purpose === TrackPurpose.COVER) await requeue(tx, ["cover"], [mediaId]);
 
             return updated;

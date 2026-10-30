@@ -37,13 +37,6 @@ const qualityRank: Record<Quality, number> = {
     [Quality.HIGH]: 3,
 };
 
-export class CoverNotReadyError extends Error {
-    constructor(mediaId: string) {
-        super(`Cover generation is still running for media ${mediaId}`);
-        this.name = "CoverNotReadyError";
-    }
-}
-
 /**
  * Select the best completed cover, regardless of its track priority.
  * A generated cover from a superseded content file is not a usable cover.
@@ -80,31 +73,52 @@ export function selectAiImageSource<T extends ImageSourceRow>(rows: T[]): T | nu
     return images[0] ?? null;
 }
 
-export async function resolveAiImageSource(mediaId: string) {
-    // Check before loading tracks: a cover run that finishes while tracks are
-    // being read must still prevent an original-image fallback from racing its cover.
-    const coverPending = await isQueued("cover", mediaId);
+export interface AiImageSource {
+    track: typeof Track.$inferSelect;
+    file: typeof DbFile.$inferSelect;
+}
 
+/** The best AI image source of each media (missing for media without one). */
+export async function loadAiImageSources(mediaIds: readonly string[]): Promise<Map<string, AiImageSource>> {
+    if (mediaIds.length === 0) return new Map();
     const rows = await db
         .select({ track: Track, file: DbFile })
         .from(Track)
         .innerJoin(DbFile, and(eq(Track.file_id, DbFile.id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
         .where(
             and(
-                eq(Track.media_id, mediaId),
+                inArray(Track.media_id, [...mediaIds]),
                 eq(Track.delete_status, DeleteStatus.ACTIVE),
                 eq(Track.sync_status, SyncStatus.COMPLETED),
                 inArray(Track.purpose, [TrackPurpose.COVER, TrackPurpose.CONTENT]),
             ),
         );
+    const byMedia = new Map<string, typeof rows>();
+    for (const row of rows) byMedia.set(row.track.media_id, [...(byMedia.get(row.track.media_id) ?? []), row]);
 
-    const source = selectAiImageSource(rows);
-    if (source?.track.purpose === TrackPurpose.COVER) return source;
-    // Downloads queue the cover once content is in place. While it is still
-    // pending, do not enrich from the original image yet.
-    if (coverPending) throw new CoverNotReadyError(mediaId);
+    const sources = new Map<string, AiImageSource>();
+    for (const [mediaId, mediaRows] of byMedia) {
+        const source = selectAiImageSource(mediaRows);
+        if (source) sources.set(mediaId, source);
+    }
+    return sources;
+}
 
-    return source;
+/**
+ * The image AI work on a media starts from. `waitingForCover` is set while the cover pipeline still has the media
+ * queued and the best source so far is not a cover: the work waits, and the cover's change queues it again.
+ */
+export async function resolveAiImageSource(mediaId: string): Promise<{ source: AiImageSource | null; waitingForCover: boolean }> {
+    // Check before loading tracks: a cover run that finishes while tracks are
+    // being read must still prevent an original-image fallback from racing its cover.
+    const coverPending = await isQueued("cover", mediaId);
+    const source = (await loadAiImageSources([mediaId])).get(mediaId) ?? null;
+    return { source, waitingForCover: coverPending && source?.track.purpose !== TrackPurpose.COVER };
+}
+
+/** What identifies a source image's content: its file hash, or the file itself when it has no hash. */
+export function aiSourceHash(file: Pick<typeof DbFile.$inferSelect, "id" | "hash">): string {
+    return file.hash || `file:${file.id}`;
 }
 
 /**
