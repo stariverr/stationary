@@ -1086,11 +1086,20 @@
             "oldest": "Oldest waiting {minutes} min",
             "failures_title": "Recent failures: {name}",
             "hide_failures": "Hide failures",
-            "no_failures": "No failures recorded"
+            "no_failures": "No failures recorded",
+            "pause": "Pause",
+            "resume": "Resume",
+            "paused": "Paused",
+            "paused_notice": "Background tasks in this library are paused. Running tasks will finish, new ones stay queued, and work continues when you resume."
         },
         "toast": {
             "swept": "Stuck tasks were reset",
             "action_failed": "Couldn't complete the action. Try again."
+        },
+        "provider_blocked": {
+            "message": "The AI provider is unavailable. Tasks will retry automatically in about {minutes} min.",
+            "view": "View tasks",
+            "dismiss": "Dismiss"
         }
     },
     "trash": {

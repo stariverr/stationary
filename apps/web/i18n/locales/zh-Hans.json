@@ -1086,11 +1086,20 @@
             "oldest": "最久已等 {minutes} 分钟",
             "failures_title": "最近失败：{name}",
             "hide_failures": "收起失败明细",
-            "no_failures": "暂无失败记录"
+            "no_failures": "暂无失败记录",
+            "pause": "暂停",
+            "resume": "恢复",
+            "paused": "已暂停",
+            "paused_notice": "此库的后台任务已暂停：运行中的任务会跑完，新任务继续排队，恢复后接着处理。"
         },
         "toast": {
             "swept": "已重置卡住的任务",
             "action_failed": "操作没有完成，请重试。"
+        },
+        "provider_blocked": {
+            "message": "AI 服务商暂不可用，相关任务约 {minutes} 分钟后自动重试。",
+            "view": "查看任务",
+            "dismiss": "关闭提醒"
         }
     },
     "trash": {

@@ -1,6 +1,6 @@
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
-import { JobQueue } from "@/db/schema";
+import { JobQueue, Library } from "@/db/schema";
 import { db, type DbClient, type Transaction } from "@/global/db";
 import { queueLockOrder } from "@/infra/queue/pipelines";
 import { LEASE_SECONDS } from "@/infra/queue/policy";
@@ -123,13 +123,15 @@ type ClaimedRecord = {
     interrupted: boolean;
 };
 
+// NULLS LAST only matches job_queue_claim_idx (priority is never null): plain DESC means NULLS FIRST, which sorts every due row.
 async function claimWhere(filter: SQL, limit: number): Promise<ClaimedRow[]> {
     if (limit <= 0) return [];
     const result = await db.execute<ClaimedRecord>(sql`
         WITH picked AS (
             SELECT pipeline, subject_id, lease_token IS NOT NULL AS interrupted FROM job_queue
             WHERE available_at <= now() AND (lease_token IS NULL OR lease_expires_at < now()) AND ${filter}
-            ORDER BY priority DESC, available_at
+                AND library_id NOT IN (SELECT id FROM library WHERE jobs_paused)
+            ORDER BY priority DESC NULLS LAST, available_at
             LIMIT ${limit}
             FOR NO KEY UPDATE SKIP LOCKED
         )
@@ -154,8 +156,9 @@ async function claimWhere(filter: SQL, limit: number): Promise<ClaimedRow[]> {
 }
 
 /**
- * Leases up to `limit` due rows, highest priority first, leaving out the `paused` queues. Expired leases are reclaimed
- * here; there is no sweeper.
+ * Leases up to `limit` due rows, highest priority first, leaving out the `paused` queues (a worker's own note that
+ * their provider is out of capacity) and every library the user put on hold. Expired leases are reclaimed here; there
+ * is no sweeper.
  */
 export function claim(limit: number, paused: readonly QueueInLibrary[] = []): Promise<ClaimedRow[]> {
     if (paused.length === 0) return claimWhere(sql`true`, limit);
@@ -170,6 +173,17 @@ export function claim(limit: number, paused: readonly QueueInLibrary[] = []): Pr
  */
 export function claimBatch(pipeline: string, limit: number): Promise<ClaimedRow[]> {
     return claimWhere(sql`pipeline = ${pipeline} AND lease_token IS NULL`, limit);
+}
+
+/**
+ * Puts a library's background work on hold or lets it go on. Only claims read this: runs in progress finish, retries
+ * and new work wait in the queue, and the NOTIFY gets a resumed library going without waiting for the next poll.
+ */
+export async function setLibraryPaused(libraryId: string, paused: boolean): Promise<void> {
+    await db.transaction(async (tx) => {
+        await tx.update(Library).set({ jobs_paused: paused, update_time: Temporal.Now.instant() }).where(eq(Library.id, libraryId));
+        await tx.execute(sql`SELECT pg_notify(${QUEUE_CHANNEL}, '')`);
+    });
 }
 
 export async function renew(lease: Lease, seconds = LEASE_SECONDS): Promise<boolean> {

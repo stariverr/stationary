@@ -213,6 +213,8 @@ export const Library = pgTable("library", {
     }>(),
     /** Cover Qualities: cover qualities for the library */
     cover_qualities: jsonb("cover_qualities").$type<Quality[]>().default([Quality.LOW, Quality.MEDIUM]).notNull(),
+    /** Background work is on hold: the job queue claims none of the library's rows until this is cleared. */
+    jobs_paused: boolean("jobs_paused").default(false).notNull(),
     create_time: temporal("create_time")
         .default(sql`now()`)
         .notNull(),

@@ -18,6 +18,13 @@ export interface PipelineStatus {
     blocked_seconds: number;
 }
 
+/** GET /jobs/pipelines for one library. */
+export interface LibraryPipelines {
+    /** The library's background work is on hold: nothing new starts until it is resumed. */
+    paused: boolean;
+    pipelines: PipelineStatus[];
+}
+
 export interface PipelineFailure {
     subject_id: string;
     label: string | null;
