@@ -17,6 +17,7 @@ import { jobRunner } from "@/infra/jobs/runner";
 import { JobSweeper } from "@/infra/jobs/sweeper";
 import { initJobHandlers } from "@/infra/jobs/register-handlers";
 import { embeddingWorker } from "@/features/ai/embedding-worker";
+import { startFilePurgeSchedule, stopFilePurgeSchedule } from "@/features/trash/purge-expired-files";
 // 1. Initialize Task Handlers Strategy Registry
 initJobHandlers();
 
@@ -24,6 +25,7 @@ initJobHandlers();
 jobRunner.start();
 JobSweeper.start(30000);
 embeddingWorker.start();
+startFilePurgeSchedule();
 
 // 3. Graceful Shutdown Handlers
 let isShuttingDown = false;
@@ -34,6 +36,7 @@ const shutdown = async (signal: string) => {
 
     try {
         JobSweeper.stop();
+        stopFilePurgeSchedule();
         await Promise.all([jobRunner.drain(15000), embeddingWorker.drain(15000)]);
         console.log("[Server] Graceful shutdown completed.");
     } catch (err) {

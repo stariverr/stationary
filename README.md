@@ -115,6 +115,8 @@ From the repository root, start development servers concurrently:
 bun run dev
 ```
 
+The server purges files that have been in the recycle bin for more than 30 days on its own, on startup and every 24 hours, so neither deployment below needs an external scheduler. To trigger a purge manually, call `POST /api/task/purge-expired-files` with `Authorization: Bearer <CRON_SECRET>`.
+
 ---
 
 ## 🐳 Docker Compose Deployment (Single-Host / Self-Hosted)

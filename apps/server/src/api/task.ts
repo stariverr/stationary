@@ -8,7 +8,6 @@ import { AuthEnv, ownedLibrary, requireAuth, requireCronSecret } from "@/lib/aut
 import { db } from "@/global/db";
 import {
     File as DbFile,
-    DeleteStatus,
     DraftFile,
     DraftFileStatus,
 } from "@/db/schema";
@@ -34,6 +33,7 @@ import { RetrySyncError } from "@/features/sync/errors";
 import { RetrySyncSchema, SweepStuckLibrarySchema } from "@/features/sync/schema";
 import { retrySync } from "@/features/sync/retry-sync";
 import { sweepStuckEntities } from "@/features/sync/sweep-stuck";
+import { purgeExpiredFiles } from "@/features/trash/purge-expired-files";
 
 export { CreateTaskSchema };
 export type { AuthorData, MediaItemData, PostItemData, CreateTaskPayload, WorkflowPayload };
@@ -78,50 +78,9 @@ taskApp.post("/create", requireAuth, validate("json", CreateTaskSchema), async (
     );
 });
 
-// Cron endpoint to purge expired soft-deleted files
+// Manual trigger for the daily purge of expired soft-deleted files
 taskApp.post("/purge-expired-files", requireCronSecret, async (c) => {
-    const thirtyDaysAgo = Temporal.Now.instant().subtract({ hours: 30 * 24 });
-    const BATCH_SIZE = 500;
-
-    let purgedCount = 0;
-    let failedCount = 0;
-    const errors: Array<{ fileId: string; error: string }> = [];
-
-    while (true) {
-        const expiredFiles = await db
-            .select()
-            .from(DbFile)
-            .where(and(eq(DbFile.delete_status, DeleteStatus.DELETED), lt(DbFile.delete_time, thirtyDaysAgo)))
-            .limit(BATCH_SIZE);
-
-        if (expiredFiles.length === 0) break;
-
-        for (const file of expiredFiles) {
-            try {
-                try {
-                    await s3.delete(file.path, { bucket: file.bucket });
-                } catch (s3Err: any) {
-                    if (s3Err.name !== "NotFound" && s3Err.name !== "NoSuchKey") {
-                        throw s3Err;
-                    }
-                }
-
-                await db.delete(DbFile).where(eq(DbFile.id, file.id));
-                purgedCount++;
-            } catch (e: any) {
-                failedCount++;
-                errors.push({ fileId: file.id, error: e.message || String(e) });
-            }
-        }
-    }
-
-    return c.json(
-        success(Code.SUCCESS, {
-            purgedCount,
-            failedCount,
-            errors,
-        }),
-    );
+    return c.json(success(Code.SUCCESS, await purgeExpiredFiles()));
 });
 
 // Cron endpoint to purge stale PENDING uploads that were never confirmed

@@ -75,7 +75,7 @@ describe("POST /task/purge-expired-files", () => {
 
     test("runs the purge for the scheduler's secret", async () => {
         selectSpy.mockReturnValue({
-            from: () => ({ where: () => ({ limit: async () => [] }) }),
+            from: () => ({ where: () => ({ orderBy: () => ({ limit: async () => [] }) }) }),
         } as never);
 
         const res = await purge(bearer(secret));

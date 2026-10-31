@@ -113,6 +113,8 @@ bun run db:migrate
 bun run dev
 ```
 
+服务会在启动时及之后每 24 小时自动清理进入回收站超过 30 天的文件，下面两种部署方式都无需外部定时器。如需手动触发，携带 `Authorization: Bearer <CRON_SECRET>` 调用 `POST /api/task/purge-expired-files`。
+
 ---
 
 ## 🐳 Docker Compose 联合部署 (单机 / 私有化部署)
