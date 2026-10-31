@@ -42,10 +42,12 @@ import {
 import { toast } from "vue-sonner";
 import { useAppLayout } from "@/composables/useAppLayout";
 import { useApi } from "@/composables/useApi";
+import { useLibraryStore } from "@/stores/library";
 import { formatTemporalDateTime, formatTemporalRelative, formatTemporalDuration } from "@/utils/temporal";
 import JobDetailView, { type MasterTaskItem } from "@/components/JobDetailView.vue";
 
 const { toggleSidebar, isSidebarCollapsed } = useAppLayout();
+const libraryStore = useLibraryStore();
 const { t, locale } = useI18n();
 const route = useRoute();
 const router = useRouter();
@@ -428,9 +430,14 @@ async function handleBulkCancel() {
 }
 
 async function sweepStuckTasks() {
+    const libraryId = libraryStore.activeLibrary?.id;
+    if (!libraryId) return;
     isSweeping.value = true;
     try {
-        const res: any = await useApi("/task/sweep-stuck-tasks", { method: "POST" });
+        const res: any = await useApi("/task/sweep-stuck-library", {
+            method: "POST",
+            body: { library_id: libraryId },
+        });
         if (isApiSuccess(res)) {
             toast.success("停滞的任务已诊断并修复完成");
             await refreshAll();
@@ -670,7 +677,7 @@ onUnmounted(() => {
 
                         <Button
                             @click="sweepStuckTasks"
-                            :disabled="isSweeping"
+                            :disabled="isSweeping || !libraryStore.activeLibrary"
                             variant="outline"
                             size="sm"
                             class="h-8.5 px-2.5 text-xs font-medium cursor-pointer active:scale-[0.96] transition-transform rounded-lg"

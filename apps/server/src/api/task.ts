@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import { validate } from "@/lib/validation/validator";
-import { env } from "@/global/env";
 
 import { IngestPipeline } from "@/features/ingest/pipeline";
 import { Code } from "@/lib/code";
@@ -32,7 +31,7 @@ import { QueueAiError } from "@/features/ai/errors";
 import { QueueAiSchema } from "@/features/ai/schema";
 import { queueAiEnrichment } from "@/features/ai/queue-enrichment";
 import { RetrySyncError } from "@/features/sync/errors";
-import { RetrySyncSchema } from "@/features/sync/schema";
+import { RetrySyncSchema, SweepStuckLibrarySchema } from "@/features/sync/schema";
 import { retrySync } from "@/features/sync/retry-sync";
 import { sweepStuckEntities } from "@/features/sync/sweep-stuck";
 
@@ -126,27 +125,7 @@ taskApp.post("/purge-expired-files", requireCronSecret, async (c) => {
 });
 
 // Cron endpoint to purge stale PENDING uploads that were never confirmed
-taskApp.post("/purge-stale-pending-drafts", async (c) => {
-    // Auth Check: Validate cron secret
-    const cronSecret = env.CRON_SECRET;
-    if (cronSecret) {
-        const authHeader = c.req.header("Authorization");
-        const internalHeader = c.req.header("X-Internal-Token");
-        let token = "";
-        if (authHeader && authHeader.startsWith("Bearer ")) {
-            token = authHeader.substring(7);
-        } else if (internalHeader) {
-            token = internalHeader;
-        }
-        if (token !== cronSecret) {
-            return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
-        }
-    } else {
-        if (process.env.NODE_ENV === "production") {
-            return c.json(error(Code.SERVICE_UNAVAILABLE, "CRON_SECRET is not configured in production"), 500);
-        }
-    }
-
+taskApp.post("/purge-stale-pending-drafts", requireCronSecret, async (c) => {
     // Set expiration threshold to 2 hours ago
     const twoHoursAgo = Temporal.Now.instant().subtract({ hours: 2 });
     const BATCH_SIZE = 500;
@@ -226,6 +205,26 @@ taskApp.post("/retry-sync", requireAuth, validate("json", RetrySyncSchema), asyn
 });
 
 /**
+ * User-triggered recovery of one library: marks its Post, Media and Track records stuck in IN_PROGRESS as FAILED.
+ * Generic job recovery is not part of this, it spans all libraries and JobSweeper already runs it on an interval.
+ */
+taskApp.post("/sweep-stuck-library", requireAuth, validate("json", SweepStuckLibrarySchema), async (c) => {
+    const user = c.get("user");
+    if (!user) {
+        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
+    }
+
+    const { library_id } = c.req.valid("json");
+    const library = await ownedLibrary(c, user.id, library_id);
+    if (!library) {
+        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
+    }
+
+    const { sweptCount } = await sweepStuckEntities(30, library_id);
+    return c.json(success(Code.SUCCESS, { stuck_entities_swept: sweptCount }));
+});
+
+/**
  * Universal endpoint to sweep stuck background processes and jobs.
  *
  * Performs a two-tier cleanup:
@@ -233,29 +232,7 @@ taskApp.post("/retry-sync", requireAuth, validate("json", RetrySyncSchema), asyn
  * 2. Generic async job system sweep (JobSweeper): Reclaims expired task unit leases, dispatches pending units,
  *    reconciles completed tasks, and purges obsolete job records across all registered AsyncTask types automatically.
  */
-taskApp.post("/sweep-stuck-tasks", async (c) => {
-    // Auth Check: Validate cron secret
-    const cronSecret = env.CRON_SECRET;
-    if (cronSecret) {
-        const authHeader = c.req.header("Authorization");
-        const internalHeader = c.req.header("X-Internal-Token");
-
-        let token = "";
-        if (authHeader && authHeader.startsWith("Bearer ")) {
-            token = authHeader.substring(7);
-        } else if (internalHeader) {
-            token = internalHeader;
-        }
-
-        if (token !== cronSecret) {
-            return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
-        }
-    } else {
-        if (process.env.NODE_ENV === "production") {
-            return c.json(error(Code.SERVICE_UNAVAILABLE, "CRON_SECRET is not configured in production"), 500);
-        }
-    }
-
+taskApp.post("/sweep-stuck-tasks", requireCronSecret, async (c) => {
     let thresholdMinutes = 30;
     try {
         const body = await c.req.json();
@@ -286,28 +263,7 @@ taskApp.post("/sweep-stuck-tasks", async (c) => {
 });
 
 // Endpoint to sweep orphan tags
-taskApp.post("/sweep-orphan-tags", async (c) => {
-    const cronSecret = env.CRON_SECRET;
-    if (cronSecret) {
-        const authHeader = c.req.header("Authorization");
-        const internalHeader = c.req.header("X-Internal-Token");
-
-        let token = "";
-        if (authHeader && authHeader.startsWith("Bearer ")) {
-            token = authHeader.substring(7);
-        } else if (internalHeader) {
-            token = internalHeader;
-        }
-
-        if (token !== cronSecret) {
-            return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
-        }
-    } else {
-        if (process.env.NODE_ENV === "production") {
-            return c.json(error(Code.SERVICE_UNAVAILABLE, "CRON_SECRET is not configured in production"), 500);
-        }
-    }
-
+taskApp.post("/sweep-orphan-tags", requireCronSecret, async (c) => {
     try {
         const result = await sweepOrphanTags();
         return c.json(success(Code.SUCCESS, result));
@@ -320,24 +276,7 @@ taskApp.post("/sweep-orphan-tags", async (c) => {
 
 // Endpoint to reconcile Media / Track / File logical references
 
-taskApp.post("/sweep-media-track-integrity", async (c) => {
-    const cronSecret = env.CRON_SECRET;
-    if (cronSecret) {
-        const authHeader = c.req.header("Authorization");
-        const internalHeader = c.req.header("X-Internal-Token");
-        let token = "";
-        if (authHeader && authHeader.startsWith("Bearer ")) {
-            token = authHeader.substring(7);
-        } else if (internalHeader) {
-            token = internalHeader;
-        }
-        if (token !== cronSecret) {
-            return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
-        }
-    } else if (process.env.NODE_ENV === "production") {
-        return c.json(error(Code.SERVICE_UNAVAILABLE, "CRON_SECRET is not configured in production"), 500);
-    }
-
+taskApp.post("/sweep-media-track-integrity", requireCronSecret, async (c) => {
     try {
         const report = await runMediaTrackIntegrityScan();
         return c.json(success(Code.SUCCESS, report));

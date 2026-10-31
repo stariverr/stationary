@@ -9,3 +9,7 @@ export const RetrySyncSchema = v.pipe(
 );
 
 export type RetrySyncInput = v.InferOutput<typeof RetrySyncSchema>;
+
+export const SweepStuckLibrarySchema = v.object({
+    library_id: v.pipe(v.string(), v.uuid()),
+});
