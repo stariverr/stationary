@@ -10,12 +10,10 @@
 
 ### 安全
 
-1. **`/library/list` 和 `/library/update` 没有 owner 校验**：`apps/server/src/api/library.ts` 的 `/list` 返回所有用户的库，`/update` 只按库 id 更新，任何已登录用户都能读取和修改别人的库。这是这次核对时发现的旧问题，和任务队列无关。
+1. **`/library/list` 和 `/library/update` 没有 owner 校验**：已修，在本地 `main` 的 `42c7a32`。这个分支合入 main 后删掉本条。
 
 ### 上线和运维
 
-2. **容器收到 SIGTERM 时跳过优雅关停**：`docker/entrypoint.ts` 的 `shutdown` 给子进程发完信号就 `process.exit(0)`，不等它们退出。入口是容器的 1 号进程，它一退出，容器里其余进程都会被立刻杀掉，所以 `queueWorker.drain()` 实际跑不完。每次发布时进行中的 run 都要等租约过期（最多 60 秒），并计一次中断。应该等子进程退出后再退出。k8s 没有配 `terminationGracePeriodSeconds`，默认 30 秒，够 15 秒的 drain 用。
-3. **`job_queue` 的 autovacuum 要手动设置**：`drizzle push` 不管表的存储参数，每个库都要手动执行一次 `ALTER TABLE`（11.3），漏了不会有提示，时间长了领取会变慢。要做成部署步骤。
 4. **滚动发布时可能丢行**：`QueueWorker.run` 遇到不认识的流水线名会直接删除该行。k8s 是 1 副本，但默认滚动更新时新旧 Pod 会短暂并存，新增流水线时旧版本 worker 可能删掉新版本入队的行。能靠 scan 补回的要等下次巡检。
 
 ### 调度公平性
@@ -54,6 +52,15 @@
 19. **暂停没有全局提醒**：忘了恢复时只能在任务页和设置页看到。暂停覆盖库的全部流水线，所以新上传的文件也不会生成封面。
 20. **熔断提醒的覆盖范围有限**：只看当前活动库，设置页布局里不显示，60 秒采样加 120 秒阈值，故障开始几分钟后才出现。
 
+### 2026-11-02 复核新增
+
+22. **没有指标和告警**：只有任务页的最久等待和封锁时长，没人打开页面就不知道出了问题。
+23. **Batch API 没有重建计划**：设计文档第 2 节写明要在任务引擎上重建，但分层计划里没有它。
+24. **合并 main 时要确认权限校验**：`queue-enrichment.ts`、`retry-sync.ts`、`trash-service.ts` 等处和 `main` 的 owner 修复冲突，合并后要确认校验还在，并跑 `test:library:db`、`test:content:db`、`test:tokens:db`。`jobs.ts` 和 `main` 的 `ownedLibrary` 也要合成一份。
+25. **上线步骤没有集中记录**：要执行 `drizzle push`，含 `enqueued_at`、`interruptions` 和 `jobs_paused`；已有的文本向量会全部重新生成一次，要预估 provider 费用。
+26. **Docker 构建依赖没有入库的目录**：`Dockerfile` 和 `apps/server/Dockerfile` 都 `COPY apps/server/drizzle`，但这个目录在 `.gitignore` 里，而 `deploy.yaml` 从干净的 checkout 构建。只读代码判断 CI 上这一步会失败，本地有这个目录所以能构建。没有在 CI 上确认。
+27. **毒丸会连累同时运行的对象**：worker 崩溃时，同一进程里所有运行中的行都记一次中断。这些行重启后往往又和毒丸一起跑，连续 5 次就会被一起记成"输入被拒"。这是原有行为，单独计中断次数后也没有改变。
+
 ## 待验证
 
 - 真实 AI provider 和完整的故障演练。第 3 层的提醒是直接写 Redis 模拟封锁验证的。
@@ -63,4 +70,5 @@
 - 控制台里 `LibrarySwitcher` 和任务页的 hydration 警告，没有和改动前对比过。
 - `cover-all-formats` 测试，需要 S3。
 - 生产环境的 Postgres 版本，以及 `DB_URL` 前面有没有连接池。有的话 `LISTEN` 会失效，队列退回 5 秒轮询；`secret.example.yaml` 写的是直连。
-- 有 run 正在执行时收到 SIGTERM 的完整流程。目前只在空闲时测过 `apps/server/src/index.ts`，没有经过容器入口。
+- 开发库的 worker 恢复情况。57 行 `ai.text` 的 `attempts` 最高到 112，现在被认领后会再跑一次，再失败就只记错误、由巡检重新入队。还没在开发库上看过。
+- 接入 PgBouncer 时要配 `ignore_startup_parameters`，否则带超时参数的连接可能被拒。

@@ -81,6 +81,14 @@ async function rowOf(pipeline: string, subjectId: string) {
     return row;
 }
 
+/** What a worker dying in the middle of a run leaves behind. */
+async function expireLease(subjectId: string) {
+    await db
+        .update(JobQueue)
+        .set({ lease_expires_at: sql`now() - interval '1 second'` })
+        .where(eq(JobQueue.subject_id, subjectId));
+}
+
 describe("job_queue store", () => {
     databaseTest("enqueue merges into one row and marks a running row dirty", async () => {
         const id = subject();
@@ -258,7 +266,7 @@ describe("job_queue store", () => {
         await setLibraryPaused(libraryId, false);
         const resumed = await claimOurs(3);
         expect(resumed.map((row) => row.subjectId).sort()).toEqual([added, interrupted, waiting].sort());
-        expect(resumed.find((row) => row.subjectId === interrupted)).toMatchObject({ interrupted: true, attempts: 2 });
+        expect(resumed.find((row) => row.subjectId === interrupted)).toMatchObject({ interruptions: 1, attempts: 2 });
     });
 
     databaseTest("a row that failed stays batched and a row whose run was interrupted does not", async () => {
@@ -266,7 +274,7 @@ describe("job_queue store", () => {
         const interruptedId = subject();
         await queue("avatar", [failedId, interruptedId]);
         const rows = await claimOurs(2);
-        expect(rows.every((row) => !row.interrupted)).toBe(true);
+        expect(rows.every((row) => row.interruptions === 0)).toBe(true);
         await defer(
             rows.find((row) => row.subjectId === failedId)!,
             0,
@@ -281,7 +289,48 @@ describe("job_queue store", () => {
         expect(batched[0]?.attempts).toBe(2);
 
         const [recovered] = await claimOurs(1);
-        expect(recovered).toMatchObject({ subjectId: interruptedId, interrupted: true, attempts: 2 });
+        expect(recovered).toMatchObject({ subjectId: interruptedId, interruptions: 1, attempts: 2 });
+    });
+
+    databaseTest("only runs that settle or a change of input start the count of interruptions over", async () => {
+        const id = subject();
+        await queue("avatar", [id]);
+        const interruptedRun = async () => {
+            await claimOurs(1);
+            await expireLease(id);
+            return (await claimOurs(1))[0]!;
+        };
+
+        const first = await interruptedRun();
+        expect(first.interruptions).toBe(1);
+
+        // A row held back by a rate limit did not run, so that says nothing about whether it kills workers.
+        await postpone(first, 0);
+        expect(await claimBatch("avatar", 1)).toEqual([]);
+        const postponed = (await claimOurs(1))[0]!;
+        expect(postponed.interruptions).toBe(1);
+
+        await defer(postponed, 0);
+        expect((await claimOurs(1))[0]?.interruptions).toBe(0);
+
+        await expireLease(id);
+        expect((await claimOurs(1))[0]?.interruptions).toBe(1);
+        await expireLease(id);
+        await queue("avatar", [id]);
+        expect((await rowOf("avatar", id))?.interruptions).toBe(0);
+
+        const rerun = await interruptedRun();
+        await queue("avatar", [id]);
+        await finish(rerun);
+        expect((await rowOf("avatar", id))?.interruptions).toBe(0);
+
+        const scan = scanQueueName("cover");
+        await db.delete(JobQueue).where(eq(JobQueue.subject_id, id));
+        await queue(scan, [libraryId]);
+        await claimOurs(1);
+        await expireLease(libraryId);
+        await advance((await claimOurs(1))[0]!, "page-2");
+        expect((await rowOf(scan, libraryId))?.interruptions).toBe(0);
     });
 
     databaseTest("the age of a row survives retries, postponing and being enqueued again", async () => {
@@ -546,17 +595,39 @@ describe("QueueWorker", () => {
         expect(failures).toEqual([{ subjectId: id, space: null, error: "bad gateway", errorKind: "TRANSIENT", rejected: false }]);
     });
 
-    databaseTest("gives up on a subject whose every attempt was interrupted, and never runs it again", async () => {
+    databaseTest("gives up on a subject interrupted too many times in a row, and never runs it again", async () => {
         const id = subject();
         await queue("avatar", [id]);
-        await db.update(JobQueue).set({ attempts: DEFAULT_MAX_ATTEMPTS }).where(eq(JobQueue.subject_id, id));
+        for (let run = 0; run < DEFAULT_MAX_ATTEMPTS; run += 1) {
+            await claimOurs(1);
+            await expireLease(id);
+        }
 
         const { reconciled, failures } = await runWorker(() => ({ kind: "done" }), []);
 
         expect(reconciled).toEqual([]);
         expect(failures).toEqual([
-            { subjectId: id, space: null, error: `The run was interrupted ${DEFAULT_MAX_ATTEMPTS} times`, errorKind: null, rejected: true },
+            {
+                subjectId: id,
+                space: null,
+                error: `The run was interrupted ${DEFAULT_MAX_ATTEMPTS} times in a row`,
+                errorKind: null,
+                rejected: true,
+            },
         ]);
+    });
+
+    databaseTest("an interruption after ordinary failures does not blame the input", async () => {
+        const id = subject();
+        await queue("avatar", [id]);
+        for (let run = 1; run < DEFAULT_MAX_ATTEMPTS; run += 1) await defer((await claimOurs(1))[0]!, 0);
+        await claimOurs(1);
+        await expireLease(id);
+
+        const { reconciled, failures } = await runWorker(() => ({ kind: "retry", error: "bad gateway" }), []);
+
+        expect(reconciled).toEqual([id]);
+        expect(failures).toEqual([{ subjectId: id, space: null, error: "bad gateway", errorKind: null, rejected: false }]);
     });
 
     databaseTest("patrols when it starts, as the timer starts over with the process", async () => {
@@ -864,7 +935,7 @@ describe("QueueWorker", () => {
             .set({ lease_expires_at: sql`now() - interval '1 second'` })
             .where(eq(JobQueue.subject_id, stuckId));
         const [recovered] = await claimOurs(1);
-        expect(recovered).toMatchObject({ subjectId: stuckId, interrupted: true, attempts: 2 });
+        expect(recovered).toMatchObject({ subjectId: stuckId, interruptions: 1, attempts: 2 });
     });
 
     databaseTest("asks for a restart only while too many runs are stuck", async () => {

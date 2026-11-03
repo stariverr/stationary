@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile
     container_name: stationary
     restart: unless-stopped
+    # The server drains its queue for up to 15 seconds; Docker's default is 10.
+    stop_grace_period: 30s
     ports:
       - "${PORT:-4000}:4000"
     environment:

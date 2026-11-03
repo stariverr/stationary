@@ -992,6 +992,8 @@ export const JobQueue = pgTable(
         lease_token: uuid("lease_token"),
         lease_expires_at: temporal("lease_expires_at"),
         attempts: integer("attempts").default(0).notNull(),
+        /** Runs in a row that died without settling. A run that fails normally starts the count over. */
+        interruptions: integer("interruptions").default(0).notNull(),
     },
     (table) => [
         primaryKey({ columns: [table.pipeline, table.subject_id] }),

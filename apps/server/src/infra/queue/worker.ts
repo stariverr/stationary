@@ -286,10 +286,11 @@ export class QueueWorker {
             return;
         }
         const handler = this.handlers[name.pipeline];
-        if (row.attempts > maxAttemptsOf(handler, name)) {
-            // Every attempt ended without settling, so running it may be what takes the worker down.
-            console.error(`[Queue] ${row.pipeline}/${row.subjectId} was interrupted ${row.attempts - 1} times; giving up.`);
-            await this.settle(handler, row, name, { kind: "rejected", error: `The run was interrupted ${row.attempts - 1} times` });
+        if (row.interruptions >= maxAttemptsOf(handler, name)) {
+            // None of these runs got as far as failing, so running it may be what takes the worker down.
+            const error = `The run was interrupted ${row.interruptions} times in a row`;
+            console.error(`[Queue] ${row.pipeline}/${row.subjectId}: ${error}; giving up.`);
+            await this.settle(handler, row, name, { kind: "rejected", error });
         } else if (name.scan) {
             await this.runScan(handler, row, name);
         } else if ("reconcileBatch" in handler) {
@@ -373,7 +374,7 @@ export class QueueWorker {
                 head: head.subjectId,
                 signal: abort.signal,
                 claimMore: async (limit) => {
-                    if (head.interrupted || abort.signal.aborted) return [];
+                    if (head.interruptions > 0 || abort.signal.aborted) return [];
                     const more = await claimBatch(head.pipeline, limit);
                     rows.push(...more);
                     return more.map((row) => row.subjectId);

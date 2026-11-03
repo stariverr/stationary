@@ -23,8 +23,8 @@ export interface ClaimedRow {
     /** This run's attempt, starting at 1. Counted at claim, so a run that dies without settling counts too. */
     readonly attempts: number;
     readonly cursor: string | null;
-    /** The previous run died without settling, so the row's lease had to expire. */
-    readonly interrupted: boolean;
+    /** Runs in a row that died without settling, each leaving a lease to expire. Above 0, this run may be what kills a worker. */
+    readonly interruptions: number;
 }
 
 export type Lease = Pick<ClaimedRow, "pipeline" | "subjectId" | "leaseToken">;
@@ -75,6 +75,7 @@ const ON_CONFLICT: Record<EnqueueMode, SQL> = {
         dirty = job_queue.dirty OR ${leased},
         available_at = CASE WHEN ${leased} THEN job_queue.available_at ELSE now() END,
         attempts = CASE WHEN ${leased} THEN job_queue.attempts ELSE 0 END,
+        interruptions = CASE WHEN ${leased} THEN job_queue.interruptions ELSE 0 END,
         cursor = CASE WHEN ${leased} THEN job_queue.cursor ELSE NULL END`,
 };
 
@@ -120,7 +121,7 @@ type ClaimedRecord = {
     lease_token: string;
     attempts: number;
     cursor: string | null;
-    interrupted: boolean;
+    interruptions: number;
 };
 
 // NULLS LAST only matches job_queue_claim_idx (priority is never null): plain DESC means NULLS FIRST, which sorts every due row.
@@ -139,10 +140,11 @@ async function claimWhere(filter: SQL, limit: number): Promise<ClaimedRow[]> {
         SET
             lease_token = gen_random_uuid(),
             lease_expires_at = now() + make_interval(secs => ${LEASE_SECONDS}),
-            attempts = q.attempts + 1
+            attempts = q.attempts + 1,
+            interruptions = q.interruptions + picked.interrupted::int
         FROM picked
         WHERE q.pipeline = picked.pipeline AND q.subject_id = picked.subject_id
-        RETURNING q.pipeline, q.subject_id, q.library_id, q.lease_token, q.attempts, q.cursor, picked.interrupted
+        RETURNING q.pipeline, q.subject_id, q.library_id, q.lease_token, q.attempts, q.cursor, q.interruptions
     `);
     return result.rows.map((row) => ({
         pipeline: row.pipeline,
@@ -151,7 +153,7 @@ async function claimWhere(filter: SQL, limit: number): Promise<ClaimedRow[]> {
         leaseToken: row.lease_token,
         attempts: row.attempts,
         cursor: row.cursor,
-        interrupted: row.interrupted,
+        interruptions: row.interruptions,
     }));
 }
 
@@ -172,7 +174,7 @@ export function claim(limit: number, paused: readonly QueueInLibrary[] = []): Pr
  * left out: running one may be what took the worker down, so it must not take a batch with it.
  */
 export function claimBatch(pipeline: string, limit: number): Promise<ClaimedRow[]> {
-    return claimWhere(sql`pipeline = ${pipeline} AND lease_token IS NULL`, limit);
+    return claimWhere(sql`pipeline = ${pipeline} AND lease_token IS NULL AND interruptions = 0`, limit);
 }
 
 /**
@@ -209,7 +211,15 @@ export async function fence(tx: Transaction, lease: Lease): Promise<void> {
 async function rerun(client: DbClient, lease: Lease): Promise<boolean> {
     const rows = await client
         .update(JobQueue)
-        .set({ lease_token: null, lease_expires_at: null, dirty: false, available_at: sql`now()`, attempts: 0, cursor: null })
+        .set({
+            lease_token: null,
+            lease_expires_at: null,
+            dirty: false,
+            available_at: sql`now()`,
+            attempts: 0,
+            interruptions: 0,
+            cursor: null,
+        })
         .where(and(holds(lease), eq(JobQueue.dirty, true)))
         .returning({ pipeline: JobQueue.pipeline });
     return rows.length > 0;
@@ -235,6 +245,7 @@ export async function defer(lease: Lease, delaySeconds: number): Promise<boolean
         .set({
             lease_token: null,
             lease_expires_at: null,
+            interruptions: 0,
             available_at: sql`now() + make_interval(secs => ${delaySeconds})`,
         })
         .where(holds(lease))
@@ -244,7 +255,8 @@ export async function defer(lease: Lease, delaySeconds: number): Promise<boolean
 
 /**
  * The run could not start yet (a provider at its rate limit): release the row to run after `delaySeconds` and take
- * its attempt back. A row marked dirty meanwhile reruns now.
+ * its attempt back. It says nothing about the subject, so a count of interruptions stands. A row marked dirty
+ * meanwhile reruns now.
  */
 export async function postpone(lease: Lease, delaySeconds: number): Promise<boolean> {
     if (await rerun(db, lease)) return true;
@@ -287,6 +299,7 @@ export async function advance(lease: Lease, cursor: string, client: DbClient = d
             dirty: false,
             available_at: sql`now()`,
             attempts: 0,
+            interruptions: 0,
         })
         .where(holds(lease))
         .returning({ pipeline: JobQueue.pipeline });

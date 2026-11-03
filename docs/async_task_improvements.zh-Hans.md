@@ -194,7 +194,7 @@ job_queue(
   pipeline text, subject_id text, library_id uuid,
   priority smallint, enqueued_at timestamptz, available_at timestamptz,
   dirty boolean, cursor text,
-  lease_token uuid, lease_expires_at timestamptz, attempts int,
+  lease_token uuid, lease_expires_at timestamptz, attempts int, interruptions int,
   PRIMARY KEY (pipeline, subject_id)
 )
 -- 另有领取用索引 (priority, available_at)，以及进度用索引 (library_id, pipeline)
@@ -218,24 +218,19 @@ job_queue(
 
 判断不准的错误一律按可重试处理，只有确定是输入的问题才拒绝。这样出错的代价只是多试几次，不会有内容被永久跳过。
 
-`attempts` 在认领时计数，所以进程崩溃也算一次尝试。一个对象连续崩溃到超过最大次数时，worker 不再运行它，按"输入被拒"记录。否则毒丸任务会每小时被巡检重新拉起，再把 worker 打挂一轮。
+`attempts` 在认领时计数，所以进程崩溃也算一次尝试。崩溃和失败要分开看，所以另有 `interruptions` 记连续中断次数：认领时发现上一次的租约没释放就加 1，run 正常失败（`defer`）或输入变化时清零，`postpone` 保持不变，因为被限流的 run 根本没开始。一个对象连续中断达到最大次数时，worker 不再运行它，按"输入被拒"记录。否则毒丸任务会每小时被巡检重新拉起，再把 worker 打挂一轮。失败和中断交替时不算毒丸，只消耗 `attempts`：次数用完后再失败，按"其他失败"记录。
 
 其他约定：
 
 - 写结果的事务里，确认队列行的 `lease_token` 仍是自己的（fencing），租约已经过期的 worker 写不进去，事务回滚。同一 `(流水线, 对象)` 只有一行、一个租约，所以不会出现两个 worker 同时描述同一个媒体（第 5 节的竞态）。
 - 加锁顺序全系统一致：先结果行，后队列行。所以 fencing 放在写完结果之后、`markChanged` 之前；`enqueue` 按声明顺序排序（scan 在自己的流水线之前，流水线在读它产出的流水线之前），`pipelines.ts` 的声明顺序因此必须是依赖顺序，有测试保证。压测（8 个写入方对 16 个并发 run，15 秒）：fencing 放在写入之前有 108 次死锁，放到写入之后 0 次，吞吐约高 10 倍，所以没有加 40P01 重试。
 - 结果行上留着失败时不算"已是最新"：输入改回向量或描述当初的样子时，再做一次就能清掉那条失败。否则失败数永远留着，"重试"也清不掉。
-- 关停分两段：先等 10 秒让进行中的 run 自然结束，之后中止其余 run，它们的行用 `postpone` 放回，不计次数。中止错误归类为取消，不计入熔断。不响应中止信号的 run 等租约过期，算一次中断。
+- 关停分两段：先等 10 秒让进行中的 run 自然结束，之后中止其余 run，它们的行用 `postpone` 放回，不计次数。中止错误归类为取消，不计入熔断。不响应中止信号的 run 等租约过期，算一次中断。容器入口（`docker/entrypoint.ts`）是 1 号进程，要等子进程全部退出才退出，退出码用 server 的，所以 drain 能跑完，卡死重启的退出码 1 也不会丢。drain 最长 15 秒，k8s 默认的 30 秒宽限期够用，`docker-compose.yml` 的默认只有 10 秒，要配 `stop_grace_period`。
 - 每个 run 有总时长上限，默认 10 分钟。下载是 2 小时：大文件在慢线路上本来就慢，真正停滞的连接由 30 秒空闲读超时处理。scan 步骤固定用默认值。超时后中止 run，行按失败重试，不看 run 中止后报告的 `rejected` 或 `deferred`，因为这时的错误（比如渲染进程被杀）说明不了输入有问题。
 - 中止后 30 秒还没返回的 run 算卡死（不管中止原因是超时、丢租约还是关停），这和 River 的 stuck job 做法一致：JS 杀不掉它，所以 worker 不再等它，让出槽位，停掉心跳。租约过期后行按中断处理，中断次数有上限，所以不会无限重来；它之后的写入被 fencing 挡住，批处理中止后也领不到新行。卡死的 run 还占着内存和连接，超过 8 个时进程优雅关停并以退出码 1 退出，由 k8s 拉起。
 - 数据库连接都带 `statement_timeout`（默认 120 秒，`DB_STATEMENT_TIMEOUT_MS` 可调，0 表示不限，给确实要跑得更久的一次性脚本用）、`lock_timeout`（30 秒）、`idle_in_transaction_session_timeout`（60 秒），再加客户端的 `query_timeout` 兜住服务端或网络不响应的情况。这些参数在建连时发送，如果以后接 PgBouncer，要配 `ignore_startup_parameters`，而 `LISTEN` 本来也需要 session 模式。
 - `enqueued_at` 只在建行时写，重试、`postpone`、再次入队都不改，所以能看出真实等待时长。`GET /jobs/pipelines` 返回最久等待时长和 provider 剩余封锁时长，任务页展示；scan 行也算在内，卡住的 scan 同样看得出。
-- 这张表插入和删除都很频繁：索引只保留上面三个，单独调低它的 autovacuum 阈值，领取事务保持很短。
-  `drizzle push` 不管表的存储参数，建表后在每个库手动执行一次：
-
-  ```sql
-  ALTER TABLE job_queue SET (autovacuum_vacuum_scale_factor = 0.01, autovacuum_vacuum_threshold = 200, autovacuum_analyze_scale_factor = 0.02);
-  ```
+- 这张表插入和删除都很频繁：索引只保留上面三个，领取事务保持很短。autovacuum 用默认参数，没有实测出领取变慢之前不单独调。
 
 ### 11.4 流水线和依赖声明
 
@@ -330,7 +325,7 @@ markChanged(tx, aspect, ids)
 `ai.text:<space>`、`ai.image:<space>` 一次认领同一流水线最多 N 行（文本 64，Gemini 图片 6），一次 provider 请求，每行单独结算。先不做"凑不满就等"，有多少取多少。批内只解析一次 `forLibrary()`。
 
 - 失败过的行继续攒批，否则一次 provider 故障之后，积压的行全部变成单条请求。同一批失败的行共用一个退避时间（按批内最大次数算），回来时还是一批。
-- 上一次运行被中断（`lease_token` 还在）的行单独跑，既不当队首也不被 `claimBatch` 拿走，因为运行它本身可能就是 worker 挂掉的原因。
+- 有连续中断记录（`interruptions` 大于 0）的行单独跑，既不当队首也不被 `claimBatch` 拿走，因为运行它本身可能就是 worker 挂掉的原因。
 - 批内的输入类错误由 `embedSplittingOnInputError` 在这次运行里二分定位：对半拆开重发，直到坏的那一项单独失败，其他项正常拿到向量。做法同 Lambda 的 `BisectBatchOnFunctionError`。其他错误作用于整批。
 
 ### 11.9 operation 层（第一个操作要做时再建）

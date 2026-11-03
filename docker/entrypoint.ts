@@ -28,22 +28,31 @@ const caddyProc = spawn(["caddy", "run", "--config", "/app/Caddyfile"], {
     env: process.env,
 });
 
-const shutdown = (signal: string) => {
+const processes = [caddyProc, serverProc, webProc];
+let stopping = false;
+
+// The container ends with this process, so it has to outlive the others: the server may still be draining its queue.
+const stopAll = () => {
+    stopping = true;
+    for (const proc of processes) proc.kill();
+    return Promise.all(processes.map((proc) => proc.exited));
+};
+
+const shutdown = async (signal: string) => {
+    if (stopping) return;
     console.log(`[Stationary] Received ${signal}, gracefully terminating processes...`);
-    caddyProc.kill();
-    serverProc.kill();
-    webProc.kill();
-    process.exit(0);
+    await stopAll();
+    // The others die by the signal; the server says how its shutdown went, e.g. 1 if it was already restarting.
+    process.exit(await serverProc.exited);
 };
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 
 // If any critical process exits unexpectedly, terminate the container so the orchestrator restarts it
-Promise.race([serverProc.exited, webProc.exited, caddyProc.exited]).then((code) => {
+Promise.race([serverProc.exited, webProc.exited, caddyProc.exited]).then(async (code) => {
+    if (stopping) return;
     console.log(`[Stationary] Subprocess exited with code ${code}, shutting down container...`);
-    caddyProc.kill();
-    serverProc.kill();
-    webProc.kill();
+    await stopAll();
     process.exit(code || 1);
 });
