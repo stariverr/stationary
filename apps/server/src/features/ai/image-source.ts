@@ -143,7 +143,7 @@ export async function readAiSourceImage(
         }
         if (error instanceof S3ObjectTooLargeError) {
             throw new AiProviderError(
-                "INVALID_REQUEST",
+                "UNSUPPORTED",
                 `Source file ${file.id} is ${error.size} bytes, over the ${error.maxBytes} byte limit`,
             );
         }

@@ -136,10 +136,13 @@ export function createRedisRateLimitStore(redis: {
     };
 }
 
-/** Bad input and busy providers say nothing about whether the provider works, and neither does a caller giving up. */
+/**
+ * Bad input and busy providers say nothing about whether the provider works, and neither does a caller giving up. Nor
+ * does a 400: splitting a batch to find its bad input sends several in a row.
+ */
 function pointsAtProvider(kind: AiErrorClassification["kind"]): boolean {
     const category = getFailureCategory(kind);
-    return kind !== "CANCELLED" && category !== "input" && category !== "quota";
+    return kind !== "CANCELLED" && kind !== "INVALID_REQUEST" && category !== "input" && category !== "quota";
 }
 
 export interface RunLimitedOptions {

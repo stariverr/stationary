@@ -25,25 +25,24 @@ export type ReconcileResult =
      * that deletes the queue row, for a run that wrote nothing but may have been waited for.
      */
     | { readonly kind: "done"; readonly changed?: Aspect }
-    /** The input itself cannot be processed: recorded at once with the input, and scans skip it until the input changes. */
+    /** The input itself cannot be processed: recorded at once. */
     | { readonly kind: "rejected"; readonly error: string; readonly errorKind?: string }
-    /**
-     * May work later (an outage, an unknown error): retried after a backoff. Once the attempts run out the error is
-     * recorded without the input, so the next patrol's scan queues the subject again. Same as throwing.
-     */
+    /** May work later (an outage, an unknown error): retried after a backoff, and recorded once the attempts run out. Same as throwing. */
     | { readonly kind: "retry"; readonly error: string; readonly errorKind?: string }
     /** Could not start yet (a provider at its rate limit): runs again after `delaySeconds`, without using an attempt. */
     | { readonly kind: "deferred"; readonly delaySeconds: number };
 
-/** A failure to store on a subject's result rows. */
+/**
+ * A failure to store on a subject's result rows, together with the input it failed on, so scans skip the subject until
+ * the input changes or its failures are retried. Retrying on every patrol would spend a provider's quota on a subject
+ * that keeps failing.
+ */
 export interface FailureRecord {
     readonly subjectId: string;
     readonly space: string | null;
     readonly error: string;
     /** Classified kind of the error, when the pipeline classifies its errors. */
     readonly errorKind: string | null;
-    /** The input is at fault: store it with the error, so scans skip the subject until it changes. */
-    readonly rejected: boolean;
 }
 
 export interface ScanPage {
@@ -68,8 +67,8 @@ interface PipelineHandlerBase {
     readonly timeoutMs?: number;
     recordFailure(tx: Transaction, failure: FailureRecord): Promise<void>;
     /**
-     * One page of a library scan, in subject id order after `cursor`. Leaves out subjects rejected on their current
-     * input; other recorded failures stay in, so the patrol retries them.
+     * One page of a library scan, in subject id order after `cursor`. Leaves out subjects with a failure recorded on
+     * their current input.
      */
     scanPage(libraryId: string, cursor: string | null, limit: number, space: string | null): Promise<ScanPage>;
     /** Number of current failures per library id (libraries without failures may be missing). */

@@ -449,7 +449,6 @@ export class QueueWorker {
                 space: name.space,
                 error: result.error,
                 errorKind: result.errorKind ?? null,
-                rejected: result.kind === "rejected",
             }),
         );
     }

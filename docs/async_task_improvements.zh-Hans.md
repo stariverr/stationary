@@ -212,11 +212,13 @@ job_queue(
 
 | 类别 | 例子 | 处理 |
 |---|---|---|
-| 输入被拒（`rejected`） | provider 返回 400 / 422、下载返回 4xx（408、425、429 除外）、FFmpeg 解不开文件、连续崩溃 | 不重试，失败连同输入写到结果行。scan 跳过，直到输入变化或用户点"重试失败" |
-| 其他失败（`retry`），未知错误也归这类 | 5xx、超时、网络错误、鉴权失败、存储不可用 | 退避重试，次数用完后只记错误、不记输入，下一轮巡检重新入队 |
+| 输入被拒（`rejected`） | 图片超过大小上限或格式不支持、provider 返回 413、下载返回 400 / 404 / 410、FFmpeg 解不开文件、连续崩溃 | 不重试，失败连同输入写到结果行。scan 跳过，直到输入变化或用户点"重试失败" |
+| 其他失败（`retry`），未知错误也归这类 | provider 返回 400 / 422、其他 4xx、5xx、超时、网络错误、鉴权失败、存储不可用 | 退避重试，次数用完后和被拒一样连同输入写到结果行，等输入变化或用户点"重试失败" |
 | 限流（`deferred`） | provider 打满、熔断中 | 不计次数，等待后再跑 |
 
-判断不准的错误一律按可重试处理，只有确定是输入的问题才拒绝。这样出错的代价只是多试几次，不会有内容被永久跳过。
+判断不准的错误一律按可重试处理，只有确定是输入的问题才拒绝。provider 对配置错误也会返回 400 / 422，CDN 也会临时返回 403，所以这些都按其他失败处理。embedding 批处理遇到 400 / 422 照样对半拆批，找出出问题的对象，但它按其他失败重试，不记成被拒；这些 400 也不计入熔断，因为拆批时会连着出现好几个。
+
+两类失败的区别只是要不要先重试。重试次数用完的失败也记下输入、不再由巡检拉起，否则持续失败的对象每小时要再试 5 次，一直消耗 provider 配额。代价是长时间故障之后不会自动恢复，要用户点"重试失败"。故障期间熔断会推迟 run、不消耗次数，所以受影响的主要是熔断触发前的少数对象，以及配置错误或鉴权失败时的对象。
 
 `attempts` 在认领时计数，所以进程崩溃也算一次尝试。崩溃和失败要分开看，所以另有 `interruptions` 记连续中断次数：认领时发现上一次的租约没释放就加 1，run 正常失败（`defer`）或输入变化时清零，`postpone` 保持不变，因为被限流的 run 根本没开始。一个对象连续中断达到最大次数时，worker 不再运行它，按"输入被拒"记录。否则毒丸任务会每小时被巡检重新拉起，再把 worker 打挂一轮。失败和中断交替时不算毒丸，只消耗 `attempts`：次数用完后再失败，按"其他失败"记录。
 
@@ -366,15 +368,15 @@ markChanged(tx, aspect, ids)
 
 1. **队列和声明表**：`job_queue`、`markChanged`、scan、巡检；迁移 `download`、`avatar`、`cover`，接入 11.5 的入口；设置页进度和新的"库 × 流水线"视图。COVER_*、POST_PROCESS、AVATAR_COPY 从旧引擎下线，旧引擎只剩 AI_ENRICH。
    - **已完成（2026-10-27，分支 `refactor/job-queue`）。** 代码在 `apps/server/src/infra/queue/`，三条流水线在 `features/ingest/download-pipeline.ts`、`features/author/avatar-pipeline.ts`、`features/media/cover-pipeline.ts`。与上文的出入：
-     - 队列行被删除前没有"失败行"：放弃时由各流水线的 `recordFailure` 把失败写到结果行。只有"输入被拒"才同时记下输入（cover 写 `metadata.error_source_file_id`，avatar 写 `avatar_error_origin`），scan 只跳过这一种；其他失败由巡检重试，变化或"重试失败"都会重新入队。
-     - `download` 没有输入字段：被拒的 track 标 FAILED，其他失败退回 PENDING，scan 只找 PENDING / IN_PROGRESS。重试期间媒体保持 IN_PROGRESS，放弃时才标 FAILED。
+     - 队列行被删除前没有"失败行"：放弃时由各流水线的 `recordFailure` 把失败连同输入写到结果行（cover 写 `metadata.error_source_file_id`，avatar 写 `avatar_error_origin`），scan 跳过输入没变的失败；变化或"重试失败"都会重新入队。
+     - `download` 没有输入字段：被拒的 track 当场标 FAILED，其他失败在重试期间退回 PENDING，放弃时也标 FAILED，scan 只找 PENDING / IN_PROGRESS。重试期间媒体保持 IN_PROGRESS，放弃时才标 FAILED。
      - 防抖、按库轮转、暂停没有做（第 3 层）。
      - 前端轮询间隔为 5 秒，任务页和设置页都读 `GET /api/jobs/pipelines`。
 2. **AI 迁移**：`ai.describe`、`ai.index`、`ai.text`、`ai.image`，含按空间攒批和限流 defer；空间切换按覆盖率。删除旧引擎、两张任务表和 embedding 队列，旧任务页下线。
    - **已完成（2026-10-30，分支 `refactor/job-queue`）。** 四条流水线在 `features/ai/describe-pipeline.ts`、`index-pipeline.ts`、`embed-pipeline.ts`（`ai.text` / `ai.image` 共用），库级操作在 `features/ai/actions.ts`。`infra/jobs`、`async_task` / `async_task_unit` 及其枚举、embedding 队列和 worker、`queue-enrichment.ts`、`CoverNotReadyError`、`backfill_task_id` 均已删除；任务页只剩流水线视图。与上文的出入：
      - 按空间的队列名是 `ai.text:<空间行 id>` / `scan:ai.text:<空间行 id>`。批处理用 `claimBatch` 拿同一队列里已到期的行，不等待，规则见 11.8。限流返回 `deferred`，`postpone` 退回这次尝试。
      - `ai.describe` 和 `ai.image` 还声明了 `media.content`：没有生成封面的图片直接用内容图。
-     - 失败写在结果行上：描述写 `asset_ai_metadata.last_error`，向量写 `asset_embedding.last_error`。输入被拒时再写 `error_input_hash`（图片、模型、prompt 版本、语言的哈希）或 `error_hash`。`ai.index` 不调用 provider，失败只打日志，不计入失败数；它的 scan 比较内容哈希，所以巡检会重试这些失败，也能发现漏报的变化，代价是每 200 个媒体多一组查询。哈希取决于标签名，标签名先排序。
+     - 失败写在结果行上：描述写 `asset_ai_metadata.last_error`，向量写 `asset_embedding.last_error`。同时写 `error_input_hash`（图片、模型、prompt 版本、语言的哈希）或 `error_hash`。`ai.index` 不调用 provider，失败只打日志，不计入失败数；它的 scan 比较内容哈希，所以巡检会重试这些失败，也能发现漏报的变化，代价是每 200 个媒体多一组查询。哈希取决于标签名，标签名先排序。
      - `asset_ai_metadata.processing_status` 和 `asset_embedding` 上的队列字段已删除，进度和覆盖率只读队列行和结果行。"重新描述"改为把其他模型 / 旧 prompt 写的描述标记 `is_stale`，再报告 `library.ai_config`。
      - BUILDING 空间在自己的队列（含 scan）清空后，由该队列每次运行后的 `settled` 和巡检判断是否提升；提升时删除被替换空间的队列。
      - 11.13 #2 已修：`ai.describe` 删掉别的库留下的描述，`ai.index` 重写文档并删掉别的库留下的向量，新库的空间重新生成。

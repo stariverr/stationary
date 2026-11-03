@@ -22,7 +22,7 @@ const matchesQuality = (track: CoverTrack, quality: Quality) =>
  * The cover qualities that need rendering from `sourceFileId`. A quality is current when a matching cover track is
  * completed, not stale, free of a failure, has an active file, and is either supplied by the source (not generated) or
  * was generated from this source file. A failure left on such a cover was recorded for another source, and rendering
- * it again clears it. With `skipRejected`, qualities rejected on this source file are left out too, so library
+ * it again clears it. With `skipFailed`, qualities that failed on this source file are left out too, so library
  * scans do not retry them; a change or an explicit requeue still does.
  */
 export function planCover(
@@ -30,7 +30,7 @@ export function planCover(
     tracks: readonly CoverTrack[],
     activeFileIds: ReadonlySet<string>,
     qualities: readonly Quality[],
-    skipRejected: boolean,
+    skipFailed: boolean,
 ): Quality[] {
     return qualities.filter((quality) => {
         const matching = tracks.filter((track) => matchesQuality(track, quality));
@@ -44,8 +44,7 @@ export function planCover(
                 (!track.is_generated || track.metadata.source_file_id === sourceFileId),
         );
         if (current) return false;
-        if (skipRejected && matching.some((track) => track.last_error && track.metadata.error_source_file_id === sourceFileId))
-            return false;
+        if (skipFailed && matching.some((track) => track.last_error && track.metadata.error_source_file_id === sourceFileId)) return false;
         return true;
     });
 }
@@ -151,15 +150,15 @@ export const coverPipeline: SubjectPipelineHandler = {
     },
 
     /**
-     * Records the failure on the cover track of every quality still missing, tagged with the source file if that is at
-     * fault. The pipelines that waited for the cover go on without it.
+     * Records the failure on the cover track of every quality still missing, tagged with the source file it failed on.
+     * The pipelines that waited for the cover go on without it.
      */
-    async recordFailure(tx, { subjectId: mediaId, error, rejected }) {
+    async recordFailure(tx, { subjectId: mediaId, error }) {
         await markChanged(tx, Aspect.MEDIA_COVER, [mediaId]);
         const [state] = await loadCoverStates(tx, [mediaId]);
         if (!state) return;
         const now = Temporal.Now.instant();
-        const errorSource = { error_source_file_id: rejected ? state.source.fileId : undefined };
+        const errorSource = { error_source_file_id: state.source.fileId };
         for (const quality of planCover(state.source.fileId, state.tracks, state.activeFileIds, state.qualities, false)) {
             const variantKey = coverVariantKey(quality);
             const existing = state.tracks.find((track) => track.purpose === TrackPurpose.COVER && track.variant_key === variantKey);

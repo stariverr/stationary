@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { jobsApp } from "@/api/jobs";
-import { ExternalApiToken, JobQueue, Library, User } from "@/db/schema";
+import { ExternalApiToken, JobQueue, Library, Media, MediaType, Track, TrackPurpose, TrackType, User } from "@/db/schema";
+import { downloadPipeline } from "@/features/ingest/download-pipeline";
 import { deleteLibrary } from "@/features/library/delete-library";
 import { ApiTokenService } from "@/features/auth/api-token";
 import { db } from "@/global/db";
 import { markChanged, requeue } from "@/infra/queue/changes";
 import { Aspect, PIPELINE_NAMES, scanQueueName } from "@/infra/queue/pipelines";
 import { DEFAULT_MAX_ATTEMPTS } from "@/infra/queue/policy";
+import { Quality } from "@/lib/types";
 import {
     LeaseLostError,
     advance,
@@ -584,7 +586,7 @@ describe("QueueWorker", () => {
         );
 
         expect(reconciled.sort()).toEqual([...ok, bad].sort());
-        expect(failures).toEqual([{ subjectId: bad, space: null, error: "unrenderable", errorKind: null, rejected: true }]);
+        expect(failures).toEqual([{ subjectId: bad, space: null, error: "unrenderable", errorKind: null }]);
     });
 
     databaseTest("records a failure without blaming the input once its attempts run out", async () => {
@@ -592,7 +594,7 @@ describe("QueueWorker", () => {
         const { reconciled, failures } = await runWorker(() => ({ kind: "retry", error: "bad gateway", errorKind: "TRANSIENT" }), [id], 1);
 
         expect(reconciled).toEqual([id]);
-        expect(failures).toEqual([{ subjectId: id, space: null, error: "bad gateway", errorKind: "TRANSIENT", rejected: false }]);
+        expect(failures).toEqual([{ subjectId: id, space: null, error: "bad gateway", errorKind: "TRANSIENT" }]);
     });
 
     databaseTest("gives up on a subject interrupted too many times in a row, and never runs it again", async () => {
@@ -612,7 +614,6 @@ describe("QueueWorker", () => {
                 space: null,
                 error: `The run was interrupted ${DEFAULT_MAX_ATTEMPTS} times in a row`,
                 errorKind: null,
-                rejected: true,
             },
         ]);
     });
@@ -627,7 +628,7 @@ describe("QueueWorker", () => {
         const { reconciled, failures } = await runWorker(() => ({ kind: "retry", error: "bad gateway" }), []);
 
         expect(reconciled).toEqual([id]);
-        expect(failures).toEqual([{ subjectId: id, space: null, error: "bad gateway", errorKind: null, rejected: false }]);
+        expect(failures).toEqual([{ subjectId: id, space: null, error: "bad gateway", errorKind: null }]);
     });
 
     databaseTest("patrols when it starts, as the timer starts over with the process", async () => {
@@ -1055,5 +1056,43 @@ describe("pausing a library", () => {
 
         await deleteLibrary(libraryId, { ownerId });
         expect(await claimOurs(1)).toHaveLength(1);
+    });
+});
+
+describe("download pipeline", () => {
+    databaseTest("a media whose attempts are used up waits for a retry instead of the next scan", async () => {
+        const mediaId = crypto.randomUUID();
+        await db.insert(Library).values({ id: libraryId, name: "test", description: "", owner_id: crypto.randomUUID() });
+        await db.insert(Media).values({
+            id: mediaId,
+            library_id: libraryId,
+            eid: `download-${mediaId}`,
+            title: "",
+            description: "",
+            type: MediaType.IMAGE,
+            sort_order: 0,
+        });
+        await db.insert(Track).values({
+            media_id: mediaId,
+            type: TrackType.IMAGE,
+            purpose: TrackPurpose.CONTENT,
+            quality: Quality.HIGH,
+            source_url: "https://cdn.test/a.jpg",
+            variant_key: "original",
+            is_primary: true,
+        });
+        try {
+            expect((await downloadPipeline.scanPage(libraryId, null, 100, null)).subjectIds).toEqual([mediaId]);
+
+            await db.transaction((tx) =>
+                downloadPipeline.recordFailure(tx, { subjectId: mediaId, space: null, error: "503 from the CDN", errorKind: null }),
+            );
+
+            expect((await downloadPipeline.scanPage(libraryId, null, 100, null)).subjectIds).toEqual([]);
+            expect(await downloadPipeline.countFailures([libraryId])).toEqual(new Map([[libraryId, 1]]));
+        } finally {
+            await db.delete(Track).where(eq(Track.media_id, mediaId));
+            await db.delete(Media).where(eq(Media.id, mediaId));
+        }
     });
 });
