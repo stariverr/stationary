@@ -196,6 +196,18 @@ function createResumableStream(
 }
 
 /**
+ * Byte length of the body `fetch` hands back, or undefined when it is unknown.
+ * `fetch` decodes any Content-Encoding (gzip, br, ...) while Content-Length keeps the encoded size,
+ * so the header only describes the body when the response is not encoded.
+ */
+export function getBodyLength(response: Response): number | undefined {
+    const encoding = response.headers.get("Content-Encoding");
+    if (encoding && encoding.toLowerCase() !== "identity") return undefined;
+    const header = response.headers.get("Content-Length");
+    return header ? parseInt(header) : undefined;
+}
+
+/**
  * Downloads media and returns the Response for streaming.
  */
 export async function downloadStream(

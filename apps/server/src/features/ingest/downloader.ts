@@ -1,7 +1,7 @@
 import { db } from "@/global/db";
 import { Post, Media, Track, Author, File, DeleteStatus, SyncStatus, TrackType, TrackPurpose, MediaType, AsyncTaskType } from "@/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
-import { downloadStream, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
+import { downloadStream, getBodyLength, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
 import { extractSegmentBase } from "@/lib/utils/mp4-segment";
 import { withLock } from "@/lib/utils/lock";
 import { env } from "@/global/env";
@@ -78,7 +78,7 @@ export async function processMedia(mediaId: string, signal?: AbortSignal) {
                         if (response) {
                             lockSignal.throwIfAborted();
                             let contentType = response.headers.get("Content-Type");
-                            let contentLength = response.headers.get("Content-Length");
+                            const contentLength = getBodyLength(response);
                             let ext = getExtensionFromContentType(contentType, mf.source_url);
                             let responseBody: ReadableStream | Uint8Array;
 
@@ -119,7 +119,7 @@ export async function processMedia(mediaId: string, signal?: AbortSignal) {
                                 S3Data,
                                 contentType || "application/octet-stream",
                                 env.S3_BUCKET,
-                                contentLength ? parseInt(contentLength) : undefined,
+                                contentLength,
                                 lockSignal,
                             );
                             lockSignal.throwIfAborted();
@@ -131,7 +131,7 @@ export async function processMedia(mediaId: string, signal?: AbortSignal) {
                                 .limit(1);
                             if (!activeTrackBeforePersist) return;
 
-                            const size = contentLength ? parseInt(contentLength) : null;
+                            const size = contentLength ?? null;
 
                             const fileResults = await db
                                 .insert(File)
@@ -316,7 +316,7 @@ export async function processAvatar(authorId: string, avatarUrl: string, signal?
                 if (avatarResponse && avatarResponse.body) {
                     lockSignal.throwIfAborted();
                     const avatarContentType = avatarResponse.headers.get("Content-Type");
-                    const avatarContentLength = avatarResponse.headers.get("Content-Length");
+                    const avatarContentLength = getBodyLength(avatarResponse);
                     const ext = getExtensionFromContentType(avatarContentType, avatarUrl);
                     const path = `v2/a/${authorId.slice(-2)}/${authorId}/original.${ext}`;
 
@@ -325,7 +325,7 @@ export async function processAvatar(authorId: string, avatarUrl: string, signal?
                         avatarResponse.body,
                         avatarContentType || "application/octet-stream",
                         env.S3_BUCKET,
-                        avatarContentLength ? parseInt(avatarContentLength) : undefined,
+                        avatarContentLength,
                         lockSignal,
                     );
                     lockSignal.throwIfAborted();
@@ -337,14 +337,14 @@ export async function processAvatar(authorId: string, avatarUrl: string, signal?
                             mime_type: avatarContentType || "application/octet-stream",
                             extension: ext,
                             bucket: env.S3_BUCKET,
-                            size: avatarContentLength ? parseInt(avatarContentLength) : null,
+                            size: avatarContentLength ?? null,
                         })
                         .onConflictDoUpdate({
                             target: File.path,
                             set: {
                                 mime_type: avatarContentType || "application/octet-stream",
                                 extension: ext,
-                                size: avatarContentLength ? parseInt(avatarContentLength) : null,
+                                size: avatarContentLength ?? null,
                                 delete_status: DeleteStatus.ACTIVE,
                                 delete_time: null,
                             },
