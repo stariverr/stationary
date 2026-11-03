@@ -136,8 +136,8 @@ export const describePipeline: SubjectPipelineHandler = {
         return { kind: "done" };
     },
 
-    /** Records the error, with the input when that is at fault; a stored description stays, and so does what it was made with. */
-    async recordFailure(tx, { subjectId, error, errorKind, rejected }) {
+    /** Records the error with the input; a stored description stays, and so does what it was made with. */
+    async recordFailure(tx, { subjectId, error, errorKind }) {
         const [media] = await tx
             .select({ libraryId: Media.library_id })
             .from(Media)
@@ -150,7 +150,7 @@ export const describePipeline: SubjectPipelineHandler = {
         const failure = {
             last_error: error,
             error_kind: errorKind,
-            error_input_hash: rejected ? await describeInputHash(aiSourceHash(source.file), target) : null,
+            error_input_hash: await describeInputHash(aiSourceHash(source.file), target),
         };
         await tx
             .insert(AssetAiMetadata)

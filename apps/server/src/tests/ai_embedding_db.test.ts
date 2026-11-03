@@ -35,7 +35,7 @@ import { AiService } from "@/features/ai/service";
 import { coverPipeline } from "@/features/media/cover-pipeline";
 import { markChanged, requestScan, requeue } from "@/infra/queue/changes";
 import { pipelineHandlers } from "@/infra/queue/handlers";
-import { Aspect } from "@/infra/queue/pipelines";
+import { Aspect, queueName } from "@/infra/queue/pipelines";
 import { pipelineStatus } from "@/infra/queue/status";
 import type { SubjectPipelineHandler } from "@/infra/queue/types";
 import { QueueWorker } from "@/infra/queue/worker";
@@ -72,8 +72,12 @@ function fakeVector(text: string, dimension: number): number[] {
 }
 
 const requests: Array<{ contents: Array<{ text?: string }>; dimension: number }> = [];
-/** Requests with a text containing this are rejected with a 400, like a provider refusing a bad input. */
+/**
+ * Requests with a text containing this fail with `rejectedStatus`: by default a 413, like a provider refusing an input it
+ * cannot take, which only the input can be blamed for.
+ */
 let rejectedText: string | null = null;
+let rejectedStatus = 413;
 const originalFetch = globalThis.fetch;
 
 function fakeDashScope() {
@@ -85,7 +89,10 @@ function fakeDashScope() {
         const dimension = body.parameters?.dimension ?? 1024;
         requests.push({ contents: body.input.contents, dimension });
         if (rejectedText !== null && body.input.contents.some((content) => content.text?.includes(rejectedText!))) {
-            return new Response(JSON.stringify({ message: "bad input" }), { status: 400, headers: { "content-type": "application/json" } });
+            return new Response(JSON.stringify({ message: "bad input" }), {
+                status: rejectedStatus,
+                headers: { "content-type": "application/json" },
+            });
         }
         const embeddings = body.input.contents.map((content, index) => ({
             index,
@@ -285,7 +292,7 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
         expect(requests[requestsBefore]?.contents).toHaveLength(3);
         const after = await rowsIn(spaceId);
         const dog = after.find((row) => row.entity_id === mediaIds.dog)!;
-        expect(dog).toMatchObject({ content_hash: hashOf(before, mediaIds.dog), error_kind: "INVALID_REQUEST" });
+        expect(dog).toMatchObject({ content_hash: hashOf(before, mediaIds.dog), error_kind: "UNSUPPORTED" });
         for (const id of [mediaIds.cat, mediaIds.car]) {
             expect(hashOf(after, id)).not.toBe(hashOf(before, id));
             expect(after.find((row) => row.entity_id === id)).toMatchObject({ last_error: null, error_hash: null });
@@ -296,6 +303,45 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
         const restored = await rowsIn(spaceId);
         for (const id of Object.values(mediaIds)) expect(hashOf(restored, id)).toBe(hashOf(before, id));
         expect(restored.every((row) => row.last_error === null)).toBe(true);
+    });
+
+    databaseTest("a 400 in a batch finds the input it is about but retries it, as a bad configuration answers the same", async () => {
+        const spaceId = "qwen3-vl-embedding:1024:plain";
+        const before = await rowsIn(spaceId);
+        const hashOf = (rows: typeof before, id: string) => rows.find((row) => row.entity_id === id)!.content_hash;
+        const textQueue = queueName("ai.text", (await spaces()).find((row) => row.space_id === spaceId)!.id);
+        const dogRow = and(eq(JobQueue.pipeline, textQueue), eq(JobQueue.subject_id, mediaIds.dog));
+
+        rejectedText = "dog edited";
+        rejectedStatus = 400;
+        const worker = new QueueWorker(pipelineHandlers, { concurrency: 1, pollIntervalMs: 50, patrolIntervalMs: 0, listen: false });
+        try {
+            await retitle(" edited");
+            worker.start();
+            const deadline = Date.now() + 20_000;
+            for (;;) {
+                const [row] = await db.select().from(JobQueue).where(dogRow);
+                if (row && row.attempts > 0 && row.lease_token === null) break;
+                if (Date.now() > deadline) throw new Error("The dog was never retried");
+                await Bun.sleep(50);
+            }
+        } finally {
+            await worker.drain();
+            rejectedText = null;
+            rejectedStatus = 413;
+        }
+
+        // The others got their vectors; the dog waits for its next attempt with no failure recorded yet.
+        const after = await rowsIn(spaceId);
+        for (const id of [mediaIds.cat, mediaIds.car]) expect(hashOf(after, id)).not.toBe(hashOf(before, id));
+        expect(after.find((row) => row.entity_id === mediaIds.dog)).toMatchObject({
+            content_hash: hashOf(before, mediaIds.dog),
+            last_error: null,
+        });
+
+        await db.delete(JobQueue).where(eq(JobQueue.library_id, libraryId));
+        await retitle("");
+        await drain(libraryId);
     });
 
     databaseTest("a scan finds a search document that no longer matches its source", async () => {
@@ -331,7 +377,6 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
                     space: null,
                     error: "cannot render",
                     errorKind: null,
-                    rejected: true,
                 }),
             );
             await drain(libraryId);
@@ -379,7 +424,7 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
         });
         await drain(libraryId);
         const failed = await vectorOf(mediaIds.dog);
-        expect(failed).toMatchObject({ content_hash: previousHash, error_kind: "INVALID_REQUEST" });
+        expect(failed).toMatchObject({ content_hash: previousHash, error_kind: "UNSUPPORTED" });
         expect(failed.embedding).not.toBeNull();
         expect(failed.error_hash).not.toBe(previousHash);
 
@@ -402,7 +447,7 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
         expect(retried).toMatchObject({ last_error: null, error_hash: null });
         expect(retried.content_hash).not.toBe(previousHash);
 
-        // A failure that is not about the input is recorded too, but the next scan queues it again.
+        // A failure that is not about the input, once its attempts are used up, waits for processing the library too.
         const currentHash = retried.content_hash;
         const dogVector = eq(AssetEmbedding.id, retried.id);
         await db.update(AssetEmbedding).set({ content_hash: "an older input" }).where(dogVector);
@@ -412,13 +457,15 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
                 space: spaceRow.id,
                 error: "provider is down",
                 errorKind: "TRANSIENT",
-                rejected: false,
             }),
         );
-        expect(await vectorOf(mediaIds.dog)).toMatchObject({ last_error: "provider is down", error_hash: null });
+        expect(await vectorOf(mediaIds.dog)).toMatchObject({ last_error: "provider is down", error_hash: currentHash });
         const rescanned = await pipelineHandlers["ai.text"].scanPage(libraryId, null, 100, spaceRow.id);
-        expect(rescanned.subjectIds).toContain(mediaIds.dog);
-        await db.update(AssetEmbedding).set({ content_hash: currentHash, last_error: null, error_kind: null }).where(dogVector);
+        expect(rescanned.subjectIds).not.toContain(mediaIds.dog);
+        await db
+            .update(AssetEmbedding)
+            .set({ content_hash: currentHash, last_error: null, error_kind: null, error_hash: null })
+            .where(dogVector);
 
         // At the provider's rate limit, the run is postponed without an attempt.
         await createRedisRateLimitStore(kv).coolDown(otherProviderId, 5_000);
@@ -811,24 +858,23 @@ describe("AI description (PostgreSQL + Redis)", () => {
         const [document] = await db.select().from(AssetSearchDocument).where(eq(AssetSearchDocument.entity_id, mediaId));
         expect(document?.content).toContain("harbour at dusk");
         const [metadata] = await db.select().from(AssetAiMetadata).where(eq(AssetAiMetadata.entity_id, mediaId));
-        expect(metadata).toMatchObject({ error_kind: "INVALID_REQUEST", input_hash: null });
+        expect(metadata).toMatchObject({ error_kind: "UNSUPPORTED", input_hash: null });
         expect(metadata?.last_error).toContain("byte limit");
         expect(metadata?.error_input_hash).not.toBeNull();
 
         // A scan leaves the failure alone while the image is unchanged; processing the library queues it again.
         expect((await pipelineHandlers["ai.describe"].scanPage(enrichLibraryId, null, 100, null)).subjectIds).toEqual([]);
 
-        // A failure that is not about the image is left for the next scan.
+        // So does a failure that is not about the image, once its attempts are used up.
         await db.transaction((tx) =>
             pipelineHandlers["ai.describe"].recordFailure(tx, {
                 subjectId: mediaId,
                 space: null,
                 error: "provider is down",
                 errorKind: "TRANSIENT",
-                rejected: false,
             }),
         );
-        expect((await pipelineHandlers["ai.describe"].scanPage(enrichLibraryId, null, 100, null)).subjectIds).toEqual([mediaId]);
+        expect((await pipelineHandlers["ai.describe"].scanPage(enrichLibraryId, null, 100, null)).subjectIds).toEqual([]);
 
         await processLibraryAi(enrichLibraryId);
         expect(await db.$count(JobQueue, and(eq(JobQueue.library_id, enrichLibraryId), eq(JobQueue.pipeline, "ai.describe")))).toBe(1);

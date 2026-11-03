@@ -137,7 +137,9 @@ interface Embedded {
 
 /**
  * Embeds `items` in one request. An input error says that some item is at fault but not which, so the request is split
- * in half until the item stands alone; the others still get their vectors. Any other error applies to the whole request.
+ * in half until the item stands alone; the others still get their vectors. A 400 or 422 may be about an item too, so it
+ * splits the same way, but the item left alone is retried rather than rejected. Any other error applies to the whole
+ * request.
  */
 async function embedSplittingOnInputError<T extends { id: string }>(
     items: readonly T[],
@@ -148,7 +150,8 @@ async function embedSplittingOnInputError<T extends { id: string }>(
         return { vectors: new Map(items.map((item, index) => [item.id, vectors[index]!])), failures: new Map() };
     } catch (error) {
         const result = aiErrorResult(error);
-        if (result.kind !== "rejected" || items.length === 1) {
+        const aboutAnItem = result.kind === "rejected" || (result.kind === "retry" && result.errorKind === "INVALID_REQUEST");
+        if (!aboutAnItem || items.length === 1) {
             return { vectors: new Map(), failures: new Map(items.map((item) => [item.id, result])) };
         }
         const middle = Math.ceil(items.length / 2);
@@ -328,14 +331,14 @@ function embeddingPipeline(role: EmbeddingBindingRole): BatchPipelineHandler {
             return results;
         },
 
-        /** Records the error, with the input when that is at fault; a stored vector stays. */
-        async recordFailure(tx, { subjectId, space: spaceRowId, error, errorKind, rejected }) {
+        /** Records the error with the input; a stored vector stays. */
+        async recordFailure(tx, { subjectId, space: spaceRowId, error, errorKind }) {
             const space = spaceRowId ? await loadSpace(tx, spaceRowId) : undefined;
             if (!space || space.status === LibraryEmbeddingSpaceStatus.RETIRED) return;
             const input = (await loadInputs(space, [subjectId], true)).get(subjectId);
             if (!input || input.kind === "wait" || input.kind === "none") return;
 
-            const failure = { last_error: error, error_kind: errorKind, error_hash: rejected ? input.hash : null };
+            const failure = { last_error: error, error_kind: errorKind, error_hash: input.hash };
             await tx
                 .insert(AssetEmbedding)
                 .values({

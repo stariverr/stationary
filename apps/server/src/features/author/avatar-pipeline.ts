@@ -131,7 +131,7 @@ export const avatarPipeline: SubjectPipelineHandler = {
         return { kind: "done" };
     },
 
-    async recordFailure(tx, { subjectId: authorId, error, rejected }) {
+    async recordFailure(tx, { subjectId: authorId, error }) {
         const [author] = await tx
             .select({ avatar_source_url: Author.avatar_source_url, avatar_source_file_id: Author.avatar_source_file_id })
             .from(Author)
@@ -140,7 +140,7 @@ export const avatarPipeline: SubjectPipelineHandler = {
         if (!author) return;
         await tx
             .update(Author)
-            .set({ avatar_error: error, avatar_error_origin: rejected ? avatarOrigin(author) : null, update_time: Temporal.Now.instant() })
+            .set({ avatar_error: error, avatar_error_origin: avatarOrigin(author), update_time: Temporal.Now.instant() })
             .where(activeAuthor(authorId));
     },
 

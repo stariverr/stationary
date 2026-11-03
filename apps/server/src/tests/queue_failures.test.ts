@@ -11,10 +11,10 @@ import { DownloadStatusError } from "@/lib/utils/media";
 
 describe("aiErrorResult", () => {
     test("rejects only errors about the input", () => {
-        expect(aiErrorResult(new AiProviderError("INVALID_REQUEST", "bad image")).kind).toBe("rejected");
         expect(aiErrorResult(new AiProviderError("UNSUPPORTED", "not an image")).kind).toBe("rejected");
 
-        for (const kind of ["AUTHENTICATION", "NOT_FOUND", "RATE_LIMITED", "TRANSIENT", "TIMEOUT", "UNKNOWN"] as const) {
+        // A provider answers a bad configuration with a 400 or 422 too, so that says nothing certain about the input.
+        for (const kind of ["INVALID_REQUEST", "AUTHENTICATION", "NOT_FOUND", "RATE_LIMITED", "TRANSIENT", "TIMEOUT", "UNKNOWN"] as const) {
             expect(aiErrorResult(new AiProviderError(kind, "provider failed")).kind).toBe("retry");
         }
     });
@@ -29,9 +29,10 @@ describe("aiErrorResult", () => {
 });
 
 describe("DownloadStatusError", () => {
-    test("blames the URL for client errors, except those that ask to try again", () => {
-        for (const status of [400, 403, 404, 410]) expect(new DownloadStatusError(status, "https://a").rejected).toBe(true);
-        for (const status of [408, 425, 429, 500, 503]) expect(new DownloadStatusError(status, "https://a").rejected).toBe(false);
+    test("blames the URL only for statuses that say it is malformed or gone", () => {
+        for (const status of [400, 404, 410]) expect(new DownloadStatusError(status, "https://a").rejected).toBe(true);
+        // A CDN may refuse a request for a while (403), which a later attempt gets past.
+        for (const status of [401, 403, 408, 425, 429, 500, 503]) expect(new DownloadStatusError(status, "https://a").rejected).toBe(false);
     });
 });
 

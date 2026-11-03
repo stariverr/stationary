@@ -205,9 +205,9 @@ export class DownloadStatusError extends Error {
         this.name = "DownloadStatusError";
     }
 
-    /** A 4xx says the URL itself is at fault, apart from the statuses that ask to try again later. */
+    /** The URL itself is at fault: malformed or gone. Other refusals, such as a CDN's 403, may pass on a later attempt. */
     get rejected(): boolean {
-        return this.status >= 400 && this.status < 500 && ![408, 425, 429].includes(this.status);
+        return [400, 404, 410].includes(this.status);
     }
 }
 

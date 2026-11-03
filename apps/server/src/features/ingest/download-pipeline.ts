@@ -19,7 +19,7 @@ const activeMedia = (mediaId: string) =>
 const activeTrack = (track: Pick<TrackRow, "id" | "media_id">) =>
     and(eq(Track.id, track.id), eq(Track.media_id, track.media_id), eq(Track.delete_status, DeleteStatus.ACTIVE));
 
-/** A track still waiting for its remote source; FAILED tracks were rejected and run only when the media is requeued. */
+/** A track still waiting for its remote source; FAILED tracks failed on it and run only when the media is requeued. */
 const pendingSourceTrack = (failedToo: boolean): SQL =>
     and(
         eq(Track.delete_status, DeleteStatus.ACTIVE),
@@ -214,9 +214,15 @@ export const downloadPipeline: SubjectPipelineHandler = {
         return { kind: "done" };
     },
 
+    /** Marks the media failed, and its tracks still waiting for a source too, so scans leave them until a requeue. */
     async recordFailure(tx, { subjectId: mediaId, error }) {
         const [media] = await tx.select({ id: Media.id, post_id: Media.post_id }).from(Media).where(activeMedia(mediaId)).limit(1);
-        if (media) await setMediaFailed(tx, media, error);
+        if (!media) return;
+        await tx
+            .update(Track)
+            .set({ sync_status: SyncStatus.FAILED, update_time: Temporal.Now.instant() })
+            .where(and(eq(Track.media_id, mediaId), pendingSourceTrack(false)));
+        await setMediaFailed(tx, media, error);
     },
 
     async scanPage(libraryId, cursor, limit) {

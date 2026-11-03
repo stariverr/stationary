@@ -65,12 +65,12 @@ export type AiErrorKind = AiErrorClassification["kind"] | "NO_SOURCE";
 /**
  * What a stored failure means for the user. "input" failures belong to the item itself (unreadable
  * or unsupported image, no image at all) and do not go away on retry; the others are about the
- * provider or its configuration and do once that is fixed.
+ * provider or its configuration and do once that is fixed. A provider's 400 or 422 is "unknown":
+ * it answers a bad configuration with them as well as a bad input.
  */
 export type AiFailureCategory = "input" | "auth" | "quota" | "unavailable" | "model" | "unknown";
 
 const FAILURE_CATEGORY: Record<AiErrorKind, AiFailureCategory> = {
-    INVALID_REQUEST: "input",
     UNSUPPORTED: "input",
     NO_SOURCE: "input",
     AUTHENTICATION: "auth",
@@ -80,6 +80,7 @@ const FAILURE_CATEGORY: Record<AiErrorKind, AiFailureCategory> = {
     TIMEOUT: "unavailable",
     NOT_FOUND: "model",
     CONFIGURATION: "model",
+    INVALID_REQUEST: "unknown",
     CANCELLED: "unknown",
     UNKNOWN: "unknown",
 };

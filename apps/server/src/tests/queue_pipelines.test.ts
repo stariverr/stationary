@@ -156,18 +156,13 @@ describe("planCover", () => {
         expect(planCover("src", [supplied], new Set(["c1"]), qualities, false)).toEqual([Quality.LOW]);
     });
 
-    test("scans skip a quality rejected on the current source, changes do not", () => {
+    test("scans skip a quality that failed on the current source, changes do not", () => {
         const failed = [
             cover(Quality.LOW, { sync_status: SyncStatus.FAILED, last_error: "bad", metadata: { error_source_file_id: "src" } }),
         ];
         expect(planCover("src", failed, new Set(), [Quality.LOW], true)).toEqual([]);
         expect(planCover("src", failed, new Set(), [Quality.LOW], false)).toEqual([Quality.LOW]);
         expect(planCover("new", failed, new Set(), [Quality.LOW], true)).toEqual([Quality.LOW]);
-    });
-
-    test("scans retry a quality that failed for another reason", () => {
-        const failed = [cover(Quality.LOW, { sync_status: SyncStatus.FAILED, last_error: "storage is down" })];
-        expect(planCover("src", failed, new Set(), [Quality.LOW], true)).toEqual([Quality.LOW]);
     });
 });
 
