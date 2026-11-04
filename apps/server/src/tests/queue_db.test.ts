@@ -202,10 +202,56 @@ describe("job_queue store", () => {
         expect(recorded).toBe(0);
         expect((await rowOf("avatar", id))?.attempts).toBe(0);
 
+        // Dirty while the failure is being recorded: the record is rolled back and the row reruns.
+        const [again] = await claimOurs(1);
+        expect(
+            await giveUp(again!, async (tx) => {
+                await tx.insert(Library).values({ id: libraryId, name: "test", description: "", owner_id: crypto.randomUUID() });
+                await queue("avatar", [id]);
+            }),
+        ).toBe(true);
+        expect(await db.select().from(Library).where(eq(Library.id, libraryId))).toHaveLength(0);
+        expect((await rowOf("avatar", id))?.dirty).toBe(false);
+        expect((await rowOf("avatar", id))?.lease_token).toBeNull();
+
         const [last] = await claimOurs(1);
         expect(await giveUp(last!, async () => void recorded++)).toBe(true);
         expect(recorded).toBe(1);
         expect(await rowOf("avatar", id)).toBeUndefined();
+    });
+
+    databaseTest("giveUp locks the result rows before the queue row, so it cannot deadlock with a writer", async () => {
+        // The library row stands in for the result rows a failure is recorded on.
+        await db.insert(Library).values({ id: libraryId, name: "test", description: "", owner_id: crypto.randomUUID() });
+        const id = subject();
+        await queue("avatar", [id]);
+        const [row] = await claimOurs(1);
+        const ofLibrary = eq(Library.id, libraryId);
+
+        let recording!: () => void;
+        const recordStarted = new Promise<void>((resolve) => (recording = resolve));
+        let locked!: () => void;
+        const writerLocked = new Promise<void>((resolve) => (locked = resolve));
+
+        // A writer that follows the rule: the result rows first, then the subject's queue row (here: dropping it).
+        const writer = db.transaction(async (tx) => {
+            await tx.update(Library).set({ description: "writer" }).where(ofLibrary);
+            locked();
+            await recordStarted;
+            await tx.delete(JobQueue).where(eq(JobQueue.subject_id, id));
+        });
+        const failure = giveUp(row!, async (tx) => {
+            recording();
+            await writerLocked;
+            await tx.update(Library).set({ description: "failure" }).where(ofLibrary);
+        });
+
+        const [written, gaveUp] = await Promise.allSettled([writer, failure]);
+        expect(written.status).toBe("fulfilled");
+        // The writer dropped the row first, so the lease is lost and the failure is not recorded.
+        expect(gaveUp).toEqual({ status: "fulfilled", value: false });
+        const [library] = await db.select({ description: Library.description }).from(Library).where(ofLibrary);
+        expect(library?.description).toBe("writer");
     });
 
     databaseTest("a claim counts as an attempt unless the run is postponed, and only idle rows count as retrying", async () => {
