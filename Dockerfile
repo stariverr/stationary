@@ -12,7 +12,6 @@ RUN --mount=type=cache,id=stationary-bun,target=/root/.bun/install/cache \
 
 # 1. Build Server
 COPY apps/server/tsconfig.json apps/server/tsconfig.json
-COPY apps/server/drizzle.config.ts apps/server/drizzle.config.ts
 COPY apps/server/src apps/server/src
 WORKDIR /app/apps/server
 RUN bun run build

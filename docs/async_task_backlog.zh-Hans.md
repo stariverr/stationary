@@ -58,8 +58,7 @@
 23. **Batch API 没有重建计划**：设计文档第 2 节写明要在任务引擎上重建，但分层计划里没有它。
 24. **合并 main 时要确认权限校验**：`queue-enrichment.ts`、`retry-sync.ts`、`trash-service.ts` 等处和 `main` 的 owner 修复冲突，合并后要确认校验还在，并跑 `test:library:db`、`test:content:db`、`test:tokens:db`。`jobs.ts` 和 `main` 的 `ownedLibrary` 也要合成一份。
 25. **上线步骤没有集中记录**：要执行 `drizzle push`，含 `enqueued_at`、`interruptions` 和 `jobs_paused`；已有的文本向量会全部重新生成一次，要预估 provider 费用。
-26. **Docker 构建依赖没有入库的目录**：`Dockerfile` 和 `apps/server/Dockerfile` 都 `COPY apps/server/drizzle`，但这个目录在 `.gitignore` 里，而 `deploy.yaml` 从干净的 checkout 构建。只读代码判断 CI 上这一步会失败，本地有这个目录所以能构建。没有在 CI 上确认。
-27. **毒丸会连累同时运行的对象**：worker 崩溃时，同一进程里所有运行中的行都记一次中断。这些行重启后往往又和毒丸一起跑，连续 5 次就会被一起记成"输入被拒"。这是原有行为，单独计中断次数后也没有改变。
+26. **毒丸会连累同时运行的对象**：worker 崩溃时，同一进程里所有运行中的行都记一次中断。这些行重启后往往又和毒丸一起跑，连续 5 次就会被一起记成"输入被拒"。这是原有行为，单独计中断次数后也没有改变。
 
 ## 待验证
 
