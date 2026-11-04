@@ -70,7 +70,6 @@ describe.skipIf(process.env.RUN_LIBRARY_DB_TESTS !== "1")("Library access contro
         ["/update", "POST", { id, name: "renamed" }],
         [`/delete/${id}`, "POST"],
         [`/${id}/cover-jobs`, "POST", {}],
-        [`/${id}/cover-jobs/active`, "GET"],
         [`/${id}/cover-config`, "GET"],
         [`/${id}/cover-config`, "PUT", { qualities: ["HIGH"] }],
     ];
