@@ -295,7 +295,7 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
         expect(dog).toMatchObject({ content_hash: hashOf(before, mediaIds.dog), error_kind: "UNSUPPORTED" });
         for (const id of [mediaIds.cat, mediaIds.car]) {
             expect(hashOf(after, id)).not.toBe(hashOf(before, id));
-            expect(after.find((row) => row.entity_id === id)).toMatchObject({ last_error: null, error_hash: null });
+            expect(after.find((row) => row.entity_id === id)).toMatchObject({ last_error: null, error_input_hash: null });
         }
 
         await retitle("");
@@ -426,7 +426,7 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
         const failed = await vectorOf(mediaIds.dog);
         expect(failed).toMatchObject({ content_hash: previousHash, error_kind: "UNSUPPORTED" });
         expect(failed.embedding).not.toBeNull();
-        expect(failed.error_hash).not.toBe(previousHash);
+        expect(failed.error_input_hash).not.toBe(previousHash);
 
         // Settings show the provider's error next to the failed count, and the item stays covered by its old vector.
         const status = await getLibraryAiStatus(libraryId);
@@ -444,7 +444,7 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
         await drain(libraryId);
         expect(requests.length).toBe(requestsBefore + 1);
         const retried = await vectorOf(mediaIds.dog);
-        expect(retried).toMatchObject({ last_error: null, error_hash: null });
+        expect(retried).toMatchObject({ last_error: null, error_input_hash: null });
         expect(retried.content_hash).not.toBe(previousHash);
 
         // A failure that is not about the input, once its attempts are used up, waits for processing the library too.
@@ -459,12 +459,12 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
                 errorKind: "TRANSIENT",
             }),
         );
-        expect(await vectorOf(mediaIds.dog)).toMatchObject({ last_error: "provider is down", error_hash: currentHash });
+        expect(await vectorOf(mediaIds.dog)).toMatchObject({ last_error: "provider is down", error_input_hash: currentHash });
         const rescanned = await pipelineHandlers["ai.text"].scanPage(libraryId, null, 100, spaceRow.id);
         expect(rescanned.subjectIds).not.toContain(mediaIds.dog);
         await db
             .update(AssetEmbedding)
-            .set({ content_hash: currentHash, last_error: null, error_kind: null, error_hash: null })
+            .set({ content_hash: currentHash, last_error: null, error_kind: null, error_input_hash: null })
             .where(dogVector);
 
         // At the provider's rate limit, the run is postponed without an attempt.

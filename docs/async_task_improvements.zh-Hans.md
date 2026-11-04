@@ -376,7 +376,7 @@ markChanged(tx, aspect, ids)
    - **已完成（2026-10-30，分支 `refactor/job-queue`）。** 四条流水线在 `features/ai/describe-pipeline.ts`、`index-pipeline.ts`、`embed-pipeline.ts`（`ai.text` / `ai.image` 共用），库级操作在 `features/ai/actions.ts`。`infra/jobs`、`async_task` / `async_task_unit` 及其枚举、embedding 队列和 worker、`queue-enrichment.ts`、`CoverNotReadyError`、`backfill_task_id` 均已删除；任务页只剩流水线视图。与上文的出入：
      - 按空间的队列名是 `ai.text:<空间行 id>` / `scan:ai.text:<空间行 id>`。批处理用 `claimBatch` 拿同一队列里已到期的行，不等待，规则见 11.8。限流返回 `deferred`，`postpone` 退回这次尝试。
      - `ai.describe` 和 `ai.image` 还声明了 `media.content`：没有生成封面的图片直接用内容图。
-     - 失败写在结果行上：描述写 `asset_ai_metadata.last_error`，向量写 `asset_embedding.last_error`。同时写 `error_input_hash`（图片、模型、prompt 版本、语言的哈希）或 `error_hash`。`ai.index` 不调用 provider，失败只打日志，不计入失败数；它的 scan 比较内容哈希，所以巡检会重试这些失败，也能发现漏报的变化，代价是每 200 个媒体多一组查询。哈希取决于标签名，标签名先排序。
+     - 失败写在结果行上：描述写 `asset_ai_metadata.last_error`，向量写 `asset_embedding.last_error`。同时写 `error_input_hash`：描述是图片、模型、prompt 版本、语言的哈希，向量是搜索文档或图片的哈希。`ai.index` 不调用 provider，失败只打日志，不计入失败数；它的 scan 比较内容哈希，所以巡检会重试这些失败，也能发现漏报的变化，代价是每 200 个媒体多一组查询。哈希取决于标签名，标签名先排序。
      - `asset_ai_metadata.processing_status` 和 `asset_embedding` 上的队列字段已删除，进度和覆盖率只读队列行和结果行。"重新描述"改为把其他模型 / 旧 prompt 写的描述标记 `is_stale`，再报告 `library.ai_config`。
      - BUILDING 空间在自己的队列（含 scan）清空后，由该队列每次运行后的 `settled` 和巡检判断是否提升；提升时删除被替换空间的队列。
      - 11.13 #2 已修：`ai.describe` 删掉别的库留下的描述，`ai.index` 重写文档并删掉别的库留下的向量，新库的空间重新生成。
