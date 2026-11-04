@@ -1,8 +1,6 @@
 import { eq } from "drizzle-orm";
-import { Client } from "pg";
 import { DeleteStatus, Library } from "@/db/schema";
 import { db } from "@/global/db";
-import { env } from "@/global/env";
 import { getErrorMessage } from "@/lib/utils/error";
 import { markChanged, requestScan } from "@/infra/queue/changes";
 import { PIPELINE_NAMES, parseQueueName, queueName, type QueueName } from "@/infra/queue/pipelines";
@@ -18,7 +16,6 @@ import {
     retryDelaySeconds,
 } from "@/infra/queue/policy";
 import {
-    QUEUE_CHANNEL,
     LeaseLostError,
     advance,
     claim,
@@ -31,17 +28,15 @@ import {
     postpone,
     renew,
     type ClaimedRow,
-    type QueueInLibrary,
 } from "@/infra/queue/store";
 import type { BatchPipelineHandler, PipelineHandler, PipelineHandlers, ReconcileResult, SubjectPipelineHandler } from "@/infra/queue/types";
 
 export interface QueueWorkerOptions {
     readonly concurrency?: number;
+    /** How often to look for due rows; new work waits at most this long. */
     readonly pollIntervalMs?: number;
     /** Set to 0 to disable periodic library scans. */
     readonly patrolIntervalMs?: number;
-    /** LISTEN for enqueue notifications on a dedicated connection; polling alone still works without it. */
-    readonly listen?: boolean;
     readonly stuckAfterMs?: number;
     readonly maxStuckRuns?: number;
     /** Called when more runs are stuck than `maxStuckRuns`: the process should restart, the only way to end them. */
@@ -93,41 +88,29 @@ function afterDeadline(result: ReconcileResult, signal: AbortSignal): ReconcileR
     return timedOut ? { kind: "retry", error: signal.reason.message } : result;
 }
 
-const queueKey = (queue: QueueInLibrary) => `${queue.pipeline}\u0000${queue.libraryId}`;
-
 export class QueueWorker {
     private readonly concurrency: number;
     private readonly pollIntervalMs: number;
     private readonly patrolIntervalMs: number;
-    private readonly listen: boolean;
     private readonly stuckAfterMs: number;
     private readonly maxStuckRuns: number;
     private readonly onTooManyStuckRuns?: () => void;
     private readonly active = new Set<Promise<void>>();
     private readonly runs = new Set<AbortController>();
-    /**
-     * Queues found out of capacity, and until when. Their rows all use the same provider, so claiming them before then
-     * would only release them again. Purely a saving: another worker, or this one after a restart, finds out with one run.
-     */
-    private readonly paused = new Map<string, QueueInLibrary & { until: number }>();
     private stuckRuns = 0;
-    /** A run of an interrupted row is in progress, and nothing may run beside it. */
-    private isolated = false;
     private running = false;
     private aborting = false;
     private pumping = false;
     private wakeRequested = false;
     private timers: ReturnType<typeof setInterval>[] = [];
-    private listener: Client | null = null;
 
     constructor(
         private readonly handlers: PipelineHandlers,
         options: QueueWorkerOptions = {},
     ) {
         this.concurrency = options.concurrency ?? 8;
-        this.pollIntervalMs = options.pollIntervalMs ?? 5_000;
+        this.pollIntervalMs = options.pollIntervalMs ?? 1_000;
         this.patrolIntervalMs = options.patrolIntervalMs ?? PATROL_INTERVAL_MS;
-        this.listen = options.listen ?? true;
         this.stuckAfterMs = options.stuckAfterMs ?? STUCK_AFTER_MS;
         this.maxStuckRuns = options.maxStuckRuns ?? MAX_STUCK_RUNS;
         this.onTooManyStuckRuns = options.onTooManyStuckRuns;
@@ -146,7 +129,6 @@ export class QueueWorker {
             patrol();
         }
         for (const timer of this.timers) timer.unref?.();
-        if (this.listen) void this.connectListener();
         this.wake();
     }
 
@@ -168,46 +150,19 @@ export class QueueWorker {
         for (const pipeline of PIPELINE_NAMES) await requestScan(db, pipeline, ids, "absent");
     }
 
-    private async connectListener(): Promise<void> {
-        const client = new Client({ connectionString: env.DB_URL });
-        const reconnect = () => {
-            if (this.listener !== client) return;
-            this.listener = null;
-            client.end().catch(() => undefined);
-            if (this.running) setTimeout(() => void this.connectListener(), 5_000).unref?.();
-        };
-        client.on("error", (error) => {
-            console.warn(`[Queue] Listener connection error: ${error.message}`);
-            reconnect();
-        });
-        client.on("end", reconnect);
-        client.on("notification", () => this.wake());
-        this.listener = client;
-        try {
-            await client.connect();
-            await client.query(`LISTEN ${QUEUE_CHANNEL}`);
-        } catch (error) {
-            console.warn(`[Queue] Could not listen for queue notifications: ${getErrorMessage(error)}`);
-            reconnect();
-        }
-    }
-
     private async pump(): Promise<void> {
         this.pumping = true;
         try {
             while (this.wakeRequested && this.running) {
                 this.wakeRequested = false;
                 const free = this.concurrency - this.active.size;
-                if (free <= 0 || this.isolated) break;
+                if (free <= 0) break;
 
-                const rows = await claim(free, this.pausedQueues(), this.active.size === 0);
+                const rows = await claim(free);
                 for (const row of rows) {
-                    // Only an interrupted row has a count here, and the store hands it out alone.
-                    if (row.interruptions > 0) this.isolated = true;
                     const run = this.run(row)
                         .catch((error: unknown) => console.error(`[Queue] ${row.pipeline}/${row.subjectId} failed unexpectedly:`, error))
                         .finally(() => {
-                            if (row.interruptions > 0) this.isolated = false;
                             this.active.delete(run);
                             this.wake();
                         });
@@ -220,16 +175,8 @@ export class QueueWorker {
         } finally {
             this.pumping = false;
             // A wake that arrived after the loop's last check must not be lost.
-            if (this.wakeRequested && this.running && this.active.size < this.concurrency && !this.isolated) void this.pump();
+            if (this.wakeRequested && this.running && this.active.size < this.concurrency) void this.pump();
         }
-    }
-
-    private pausedQueues(): QueueInLibrary[] {
-        const now = Date.now();
-        for (const [key, queue] of this.paused) {
-            if (queue.until <= now) this.paused.delete(key);
-        }
-        return [...this.paused.values()];
     }
 
     /** Tracks a run's abort signal, keeps its leases alive (`rows` may grow) and enforces its deadline until `stop` is called. */
@@ -422,7 +369,6 @@ export class QueueWorker {
         }
         switch (result.kind) {
             case "done": {
-                this.paused.delete(queueKey(row));
                 const { changed } = result;
                 if (!changed) await finish(row);
                 else
@@ -433,7 +379,6 @@ export class QueueWorker {
             }
             case "deferred":
                 await postpone(row, result.delaySeconds);
-                this.paused.set(queueKey(row), { ...row, until: Date.now() + result.delaySeconds * 1000 });
                 return;
             case "retry":
                 if (row.attempts < maxAttemptsOf(handler, name)) {
@@ -464,9 +409,6 @@ export class QueueWorker {
         this.running = false;
         for (const timer of this.timers) clearInterval(timer);
         this.timers = [];
-        const listener = this.listener;
-        this.listener = null;
-        await listener?.end().catch(() => undefined);
 
         if (await this.idleWithin(graceMs)) return;
         this.aborting = true;

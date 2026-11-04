@@ -117,7 +117,7 @@ async function fakeRerank(request: Request): Promise<Response> {
 
 /** Runs the queue worker until a library has no queued work left. */
 async function drain(library: string, concurrency?: number) {
-    const worker = new QueueWorker(pipelineHandlers, { concurrency, pollIntervalMs: 50, patrolIntervalMs: 0, listen: false });
+    const worker = new QueueWorker(pipelineHandlers, { concurrency, pollIntervalMs: 50, patrolIntervalMs: 0 });
     worker.start();
     try {
         const deadline = Date.now() + 20_000;
@@ -314,7 +314,7 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
 
         rejectedText = "dog edited";
         rejectedStatus = 400;
-        const worker = new QueueWorker(pipelineHandlers, { concurrency: 1, pollIntervalMs: 50, patrolIntervalMs: 0, listen: false });
+        const worker = new QueueWorker(pipelineHandlers, { concurrency: 1, pollIntervalMs: 50, patrolIntervalMs: 0 });
         try {
             await retitle(" edited");
             worker.start();
@@ -473,7 +473,7 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
             await tx.update(Media).set({ title: "dog v3" }).where(eq(Media.id, mediaIds.dog));
             await markChanged(tx, Aspect.MEDIA_META, [mediaIds.dog]);
         });
-        const worker = new QueueWorker(pipelineHandlers, { pollIntervalMs: 50, patrolIntervalMs: 0, listen: false });
+        const worker = new QueueWorker(pipelineHandlers, { pollIntervalMs: 50, patrolIntervalMs: 0 });
         worker.start();
         try {
             const deadline = Date.now() + 10_000;

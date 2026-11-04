@@ -5,9 +5,6 @@ import { db, type DbClient, type Transaction } from "@/global/db";
 import { KNOWN_QUEUE_PATTERNS, queueLockOrder } from "@/infra/queue/pipelines";
 import { LEASE_SECONDS } from "@/infra/queue/policy";
 
-/** Postgres channel notified on commit of every enqueue; workers LISTEN on it to wake up. */
-export const QUEUE_CHANNEL = "job_queue";
-
 export interface EnqueueRow {
     readonly pipeline: string;
     readonly subjectId: string;
@@ -28,12 +25,6 @@ export interface ClaimedRow {
 }
 
 export type Lease = Pick<ClaimedRow, "pipeline" | "subjectId" | "leaseToken">;
-
-/** The rows of one queue in one library. */
-export interface QueueInLibrary {
-    readonly pipeline: string;
-    readonly libraryId: string;
-}
 
 /** The lease was taken over by another worker; nothing this run computed may be written. */
 export class LeaseLostError extends Error {
@@ -111,7 +102,6 @@ export async function enqueue(client: DbClient, rows: readonly EnqueueRow[], mod
         )
         ON CONFLICT (pipeline, subject_id) ${ON_CONFLICT[mode]}
     `);
-    await client.execute(sql`SELECT pg_notify(${QUEUE_CHANNEL}, '')`);
 }
 
 type ClaimedRecord = {
@@ -130,9 +120,6 @@ const claimable = (filter: SQL) => sql`
     AND pipeline LIKE ANY (${sql.param(KNOWN_QUEUE_PATTERNS)}::text[])
     AND library_id NOT IN (SELECT id FROM library WHERE jobs_paused)
 `;
-
-/** A row whose last run was interrupted, or is being found so now: running it may be what takes a worker down. */
-const SUSPECT = sql`(interruptions > 0 OR lease_token IS NOT NULL)`;
 
 // NULLS LAST only matches job_queue_claim_idx (priority is never null): plain DESC means NULLS FIRST, which sorts every due row.
 async function claimWhere(filter: SQL, limit: number): Promise<ClaimedRow[]> {
@@ -166,30 +153,9 @@ async function claimWhere(filter: SQL, limit: number): Promise<ClaimedRow[]> {
     }));
 }
 
-/**
- * Leases up to `limit` due rows, highest priority first, leaving out the `paused` queues (a worker's own note that
- * their provider is out of capacity) and every library the user put on hold. Expired leases are reclaimed here; there
- * is no sweeper.
- *
- * A row whose run was interrupted is leased on its own and only by an `idle` worker, so that if it is a poison pill
- * the next crash interrupts no one else. While one waits, a busy worker gets nothing, letting its runs drain.
- */
-export async function claim(limit: number, paused: readonly QueueInLibrary[] = [], idle = true): Promise<ClaimedRow[]> {
-    if (limit <= 0) return [];
-    const pipelines = sql.param(paused.map((queue) => queue.pipeline));
-    const libraries = sql.param(paused.map((queue) => queue.libraryId));
-    const open =
-        paused.length === 0
-            ? sql`true`
-            : sql`(pipeline, library_id) NOT IN (SELECT * FROM unnest(${pipelines}::text[], ${libraries}::uuid[]))`;
-    if (idle) {
-        const suspects = await claimWhere(sql`${open} AND ${SUSPECT}`, 1);
-        if (suspects.length > 0) return suspects;
-    }
-    return claimWhere(
-        sql`${open} AND NOT ${SUSPECT} AND NOT EXISTS (SELECT 1 FROM job_queue WHERE ${claimable(sql`${open} AND ${SUSPECT}`)})`,
-        limit,
-    );
+/** Leases up to `limit` due rows, highest priority first, leaving out every library the user put on hold. Expired leases are reclaimed here; there is no sweeper. */
+export function claim(limit: number): Promise<ClaimedRow[]> {
+    return claimWhere(sql`true`, limit);
 }
 
 /**
@@ -201,14 +167,11 @@ export function claimBatch(pipeline: string, limit: number): Promise<ClaimedRow[
 }
 
 /**
- * Puts a library's background work on hold or lets it go on. Only claims read this: runs in progress finish, retries
- * and new work wait in the queue, and the NOTIFY gets a resumed library going without waiting for the next poll.
+ * Puts a library's background work on hold or lets it go on. Only claims read this: runs in progress finish, and
+ * retries and new work wait in the queue.
  */
 export async function setLibraryPaused(libraryId: string, paused: boolean): Promise<void> {
-    await db.transaction(async (tx) => {
-        await tx.update(Library).set({ jobs_paused: paused, update_time: Temporal.Now.instant() }).where(eq(Library.id, libraryId));
-        await tx.execute(sql`SELECT pg_notify(${QUEUE_CHANNEL}, '')`);
-    });
+    await db.update(Library).set({ jobs_paused: paused, update_time: Temporal.Now.instant() }).where(eq(Library.id, libraryId));
 }
 
 export async function renew(lease: Lease, seconds = LEASE_SECONDS): Promise<boolean> {
