@@ -203,7 +203,7 @@ job_queue(
 四个操作，语义与 client-go workqueue 一致：
 
 - **enqueue**：`INSERT … ON CONFLICT DO UPDATE`。行已存在时，可以把 `available_at` 往后推实现防抖，`priority` 取两者中较高的；这一行正在运行时标 `dirty`。
-- **claim**：选出到期、且没有租约或租约已过期的行，`FOR NO KEY UPDATE SKIP LOCKED` 锁住后写上租约，同时 `attempts + 1`。过期租约在这里直接回收，不需要单独的 sweeper。认领时附加的条件见 11.7。
+- **claim**：选出到期、且没有租约或租约已过期的行，`FOR NO KEY UPDATE SKIP LOCKED` 锁住后写上租约，同时 `attempts + 1`。过期租约在这里直接回收，不需要单独的 sweeper。只认领本版本认识的队列名，所以滚动发布时新旧 Pod 短暂并存，旧版本 worker 也不会碰新版本新增流水线的行。反过来，删掉一条流水线时，它留下的行要在上线步骤里删掉。认领时附加的条件见 11.7。
 - **finish**：校验 `lease_token` 后删除这一行。被标了 `dirty` 的，释放租约后立刻重跑。
 - **defer**：失败时用。设置新的 `available_at`（指数退避加随机抖动），释放租约。超过最大重试次数时，把失败写到结果行，然后删除队列行。
 - **postpone**：被限流时用。和 defer 一样释放租约，但把这次认领计入的 `attempts` 退回。

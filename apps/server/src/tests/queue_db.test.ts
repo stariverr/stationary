@@ -661,6 +661,30 @@ describe("QueueWorker", () => {
         expect(overlaps).toEqual([]);
     });
 
+    databaseTest("leaves the rows of a pipeline it does not know to the newer version that queued them", async () => {
+        const known = subject();
+        const [unknown, unknownSpace] = [subject(), subject()];
+        await queue("avatar", [known]);
+        await queue("ai.future", [unknown]);
+        await queue("cover:space", [unknownSpace]);
+        let reconciled = false;
+        worker(
+            everyPipeline({
+                ...idleHandler,
+                async reconcile() {
+                    reconciled = true;
+                    return { kind: "done" };
+                },
+            }),
+            4,
+        ).start();
+        await until(async () => reconciled && !(await rowOf("avatar", known)));
+        await Bun.sleep(200);
+
+        expect(await rowOf("ai.future", unknown)).toMatchObject({ attempts: 0, lease_token: null });
+        expect(await rowOf("cover:space", unknownSpace)).toMatchObject({ attempts: 0, lease_token: null });
+    });
+
     databaseTest("an interruption after ordinary failures does not blame the input", async () => {
         const id = subject();
         await queue("avatar", [id]);

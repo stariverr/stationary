@@ -100,6 +100,15 @@ export function scanQueueName(pipeline: PipelineName, space: string | null = nul
     return `${SCAN_PREFIX}${queueName(pipeline, space)}`;
 }
 
+/**
+ * LIKE patterns matching exactly the queue names parseQueueName accepts. Claims use them so a worker of an older
+ * version, briefly running beside a newer one, leaves the rows of a pipeline it does not know alone.
+ */
+export const KNOWN_QUEUE_PATTERNS = PIPELINE_NAMES.flatMap((pipeline) => {
+    const own = spaceRoleOf(pipeline) ? `${pipeline}:_%` : pipeline;
+    return [own, `${SCAN_PREFIX}${own}`];
+});
+
 export interface QueueName {
     readonly pipeline: PipelineName;
     readonly scan: boolean;
