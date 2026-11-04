@@ -1,6 +1,6 @@
 # 异步任务待处理清单
 
-设计见 [async_task_improvements.zh-Hans.md](./async_task_improvements.zh-Hans.md) 第 11 节。这里只记还没做完的事，处理完就删掉对应条目。
+设计见 [async_task_improvements.zh-Hans.md](./async_task_improvements.zh-Hans.md) 第 11 节。上线步骤见 [async_task_rollout.zh-Hans.md](./async_task_rollout.zh-Hans.md)。这里只记还没做完的事，处理完就删掉对应条目。
 
 2026-10-30 对照 `1a030f9` 和第 3 层的工作区改动核对。
 
@@ -44,7 +44,6 @@
 
 22. **没有指标和告警**：只有任务页的最久等待和封锁时长，没人打开页面就不知道出了问题。
 23. **Batch API 没有重建计划**：设计文档第 2 节写明要在任务引擎上重建，但分层计划里没有它。
-25. **上线步骤没有集中记录**：要执行 `drizzle push`，含 `enqueued_at`、`interruptions` 和 `jobs_paused`；已有的文本向量会全部重新生成一次，要预估 provider 费用。
 
 ## 待验证
 
