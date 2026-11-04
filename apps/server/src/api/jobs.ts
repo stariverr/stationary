@@ -1,8 +1,5 @@
 import { Hono, type Context } from "hono";
-import { db } from "@/global/db";
-import { DeleteStatus, Library } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
-import { AuthEnv, requireAuth } from "@/lib/auth/middleware";
+import { AuthEnv, ownedLibrary, requireAuth } from "@/lib/auth/middleware";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
 import * as v from "valibot";
@@ -12,18 +9,6 @@ import { listFailures, pipelineStatus, retryFailures } from "@/infra/queue/statu
 import { setLibraryPaused } from "@/infra/queue/store";
 
 export const jobsApp = new Hono<AuthEnv>();
-
-/** The library, if the user owns it and their API token, when scoped to a library, is scoped to this one. */
-async function ownedLibrary(c: Context<AuthEnv>, userId: string, libraryId: string) {
-    const scopedLibraryId = c.get("apiToken")?.library_id;
-    if (scopedLibraryId && scopedLibraryId !== libraryId) return null;
-    const [library] = await db
-        .select({ id: Library.id, jobsPaused: Library.jobs_paused })
-        .from(Library)
-        .where(and(eq(Library.id, libraryId), eq(Library.owner_id, userId), eq(Library.delete_status, DeleteStatus.ACTIVE)))
-        .limit(1);
-    return library ?? null;
-}
 
 /** Resolves `:library_id/:pipeline` to an owned library and a known pipeline. */
 async function resolvePipelineParams(c: Context<AuthEnv>, userId: string, libraryId: string, pipelineParam: string) {
@@ -68,7 +53,7 @@ jobsApp.get("/pipelines", requireAuth, validate("query", LibraryQuerySchema), as
         oldest_seconds: oldestSeconds,
         blocked_seconds: blockedSeconds,
     }));
-    return c.json(success(Code.SUCCESS, { paused: library.jobsPaused, pipelines }));
+    return c.json(success(Code.SUCCESS, { paused: library.jobs_paused, pipelines }));
 });
 
 // PUT /api/jobs/pipelines/:library_id/paused - Put the library's background work on hold, or let it go on

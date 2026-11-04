@@ -8,10 +8,6 @@
 
 按建议的处理顺序排列。
 
-### 安全
-
-1. **`/library/list` 和 `/library/update` 没有 owner 校验**：已修，在本地 `main` 的 `42c7a32`。这个分支合入 main 后删掉本条。
-
 ### 上线和运维
 
 4. **滚动发布时可能丢行**：`QueueWorker.run` 遇到不认识的流水线名会直接删除该行。k8s 是 1 副本，但默认滚动更新时新旧 Pod 会短暂并存，新增流水线时旧版本 worker 可能删掉新版本入队的行。能靠 scan 补回的要等下次巡检。
@@ -52,7 +48,6 @@
 
 22. **没有指标和告警**：只有任务页的最久等待和封锁时长，没人打开页面就不知道出了问题。
 23. **Batch API 没有重建计划**：设计文档第 2 节写明要在任务引擎上重建，但分层计划里没有它。
-24. **合并 main 时要确认权限校验**：`queue-enrichment.ts`、`retry-sync.ts`、`trash-service.ts` 等处和 `main` 的 owner 修复冲突，合并后要确认校验还在，并跑 `test:library:db`、`test:content:db`、`test:tokens:db`。`jobs.ts` 和 `main` 的 `ownedLibrary` 也要合成一份。
 25. **上线步骤没有集中记录**：要执行 `drizzle push`，含 `enqueued_at`、`interruptions` 和 `jobs_paused`；已有的文本向量会全部重新生成一次，要预估 provider 费用。
 26. **毒丸会连累同时运行的对象**：worker 崩溃时，同一进程里所有运行中的行都记一次中断。这些行重启后往往又和毒丸一起跑，连续 5 次就会被一起记成"输入被拒"。这是原有行为，单独计中断次数后也没有改变。
 

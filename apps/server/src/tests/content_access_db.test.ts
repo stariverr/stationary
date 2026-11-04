@@ -15,6 +15,7 @@ import {
     DraftFile,
     ExternalApiToken,
     File as DbFile,
+    JobQueue,
     Library,
     Media,
     MediaType,
@@ -186,8 +187,8 @@ describe.skipIf(process.env.RUN_CONTENT_DB_TESTS !== "1")("Content access contro
         [importRouter, `/draft/files/${draftId}/delete`, "POST"],
         [taskRouter, "/retry-sync", "POST", { post_ids: [postId] }],
         [taskRouter, "/retry-sync", "POST", { media_ids: [mediaId] }],
-        [taskRouter, "/queue-ai", "POST", { post_ids: [postId] }],
-        [taskRouter, "/queue-ai", "POST", { media_ids: [mediaId] }],
+        [aiRouter, "/media/process", "POST", { post_ids: [postId] }],
+        [aiRouter, "/media/process", "POST", { media_ids: [mediaId] }],
     ];
 
     const expectSameAsMissing = async (token: string, foreign: Route[], missing: Route[]) => {
@@ -224,6 +225,8 @@ describe.skipIf(process.env.RUN_CONTENT_DB_TESTS !== "1")("Content access contro
     });
 
     afterAll(async () => {
+        // Retrying an item queues its download.
+        await db.delete(JobQueue).where(inArray(JobQueue.library_id, libraryIds));
         await db.delete(DraftFile).where(inArray(DraftFile.library_id, libraryIds));
         await db.delete(DbFile).where(inArray(DbFile.id, fileIds));
         await db.delete(Tag).where(inArray(Tag.library_id, libraryIds));
@@ -278,7 +281,12 @@ describe.skipIf(process.env.RUN_CONTENT_DB_TESTS !== "1")("Content access contro
         expect(tag.name).toBe("secret-tag");
         expect(post.sync_status).toBe(SyncStatus.FAILED);
         expect(draft).toBeDefined();
-        expect(await db.select().from(Post).where(and(eq(Post.library_id, bobLibrary), eq(Post.title, "escape")))).toEqual([]);
+        expect(
+            await db
+                .select()
+                .from(Post)
+                .where(and(eq(Post.library_id, bobLibrary), eq(Post.title, "escape"))),
+        ).toEqual([]);
     });
 
     test("/media/list requires a library", async () => {
@@ -320,7 +328,12 @@ describe.skipIf(process.env.RUN_CONTENT_DB_TESTS !== "1")("Content access contro
 
     test("/tag/merge treats a foreign tag like a missing one", async () => {
         const merge = (targetId: string) =>
-            request(aliceToken, [tagRouter, "/merge", "POST", { library_id: aliceLibrary, source_tag_id: aliceTag, target_tag_id: targetId }]);
+            request(aliceToken, [
+                tagRouter,
+                "/merge",
+                "POST",
+                { library_id: aliceLibrary, source_tag_id: aliceTag, target_tag_id: targetId },
+            ]);
 
         const foreign = await merge(bobTag);
         const missing = await merge(crypto.randomUUID());
