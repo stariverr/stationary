@@ -384,7 +384,7 @@ markChanged(tx, aspect, ids)
      - 11.13 #2 已修：`ai.describe` 删掉别的库留下的描述，`ai.index` 重写文档并删掉别的库留下的向量，新库的空间重新生成。
      - 标题、描述、标签、post 绑定和标签改名 / 合并 / 删除都在各自事务里报告 `media.meta`（`features/media/meta-changes.ts`）；封面 track 的变化报告 `media.cover`。
      - 库的"处理"不再返回 409，改为重试已记录的失败并对四条 AI 流水线各请求一次 scan。`/api/task/queue-ai` 改为 `POST /api/ai/media/process`；保存绑定不再返回 `indexingStarted`。`AiService.forLibrary` 没有加缓存。
-     - 文本向量的 `content_hash` 现在是搜索文档的哈希，上线后已有的文本向量会重新生成一次。
+     - 文本向量的 `content_hash` 现在是搜索文档的哈希，上线后已有的文本向量会重新生成一次，上线步骤和费用预估见 [async_task_rollout.zh-Hans.md](./async_task_rollout.zh-Hans.md)。
 3. **调度增强**：熔断通知、优先级、库级暂停；需要时加按库轮转。熔断和认领时暂停已在第 2 层做完（11.7）。
    - **已完成（2026-10-30，分支 `refactor/job-queue`）。** 库级暂停和熔断提醒的做法见 11.7，优先级是 `Priority.CHANGE` / `Priority.BACKFILL`。与上文的出入：
      - "熔断通知"没有做成通知系统，也没有邮件或推送，只有用户打开应用时能看到的顶部提醒。设置页有自己的布局，不显示这条提醒；其他库的封锁要切到那个库才看得到。
