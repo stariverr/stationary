@@ -266,9 +266,11 @@ describe("job_queue store", () => {
         expect(unaffected.map((row) => row.subjectId)).toEqual([other]);
 
         await setLibraryPaused(libraryId, false);
-        const resumed = await claimOurs(3);
-        expect(resumed.map((row) => row.subjectId).sort()).toEqual([added, interrupted, waiting].sort());
-        expect(resumed.find((row) => row.subjectId === interrupted)).toMatchObject({ interruptions: 1, attempts: 2 });
+        const [recovered] = await claimOurs(3);
+        expect(recovered).toMatchObject({ subjectId: interrupted, interruptions: 1, attempts: 2 });
+        await finish(recovered!);
+        const resumed = await claimOurs(2);
+        expect(resumed.map((row) => row.subjectId).sort()).toEqual([added, waiting].sort());
     });
 
     databaseTest("a row that failed stays batched and a row whose run was interrupted does not", async () => {
@@ -292,6 +294,21 @@ describe("job_queue store", () => {
 
         const [recovered] = await claimOurs(1);
         expect(recovered).toMatchObject({ subjectId: interruptedId, interruptions: 1, attempts: 2 });
+    });
+
+    databaseTest("a row whose run was interrupted is claimed alone, and only by an idle worker", async () => {
+        const [fresh, interrupted] = [subject(), subject()];
+        await queue("avatar", [interrupted]);
+        await claimOurs(1);
+        await expireLease(interrupted);
+        await queue("avatar", [fresh]);
+
+        // A busy worker takes nothing until the suspect has run, so the suspect cannot wait forever behind new work.
+        expect(await claim(2, [], false)).toEqual([]);
+        const alone = await claimOurs(2);
+        expect(alone).toMatchObject([{ subjectId: interrupted, interruptions: 1 }]);
+        await finish(alone[0]!);
+        expect((await claimOurs(2)).map((row) => row.subjectId)).toEqual([fresh]);
     });
 
     databaseTest("only runs that settle or a change of input start the count of interruptions over", async () => {
@@ -616,6 +633,32 @@ describe("QueueWorker", () => {
                 errorKind: null,
             },
         ]);
+    });
+
+    databaseTest("runs an interrupted subject on its own, so a poison pill takes down no one else with it", async () => {
+        const suspects = [subject(), subject()];
+        const fresh = [subject(), subject(), subject()];
+        await queue("avatar", suspects);
+        await claimOurs(2);
+        for (const id of suspects) await expireLease(id);
+        await queue("avatar", fresh);
+
+        const running = new Set<string>();
+        const overlaps: string[][] = [];
+        const handler: SubjectPipelineHandler = {
+            ...idleHandler,
+            async reconcile({ subjectId }) {
+                running.add(subjectId);
+                await Bun.sleep(80);
+                if ([...running].some((id) => suspects.includes(id)) && running.size > 1) overlaps.push([...running].sort());
+                running.delete(subjectId);
+                return { kind: "done" };
+            },
+        };
+        worker(everyPipeline(handler), 4).start();
+        await until(async () => (await db.$count(JobQueue, eq(JobQueue.library_id, libraryId))) === 0);
+
+        expect(overlaps).toEqual([]);
     });
 
     databaseTest("an interruption after ordinary failures does not blame the input", async () => {
