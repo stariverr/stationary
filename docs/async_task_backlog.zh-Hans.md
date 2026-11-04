@@ -10,7 +10,6 @@
 
 11. **`giveUp` 仍然先锁队列行**：这是"先结果行、后队列行"的唯一例外。它很少触发，也能自愈，但压测没有覆盖这条路径。
 13. **文档过期**：`apps/server/README.md` 第 46 行起的一节和 `apps/server/docs/README.zh-Hans.md` 还在写 `AsyncTask` / `JobRunner`；`docs/task_engine_extension.md` 及其中文版整篇都是旧引擎，根目录 `README.md` 还链接着它；`apps/server/docs/openapi.json` 也过期了，还留着 `/api/jobs/list`，要重新生成。
-14. **字段命名不统一**：`asset_ai_metadata.error_input_hash` 和 `asset_embedding.error_hash` 是同一个含义。还没上线，现在改最便宜。
 16. **`scanPage` 不接收中止信号**：scan 步骤超时后不会真正停下，只靠语句超时和让出槽位兜底。
 17. **长语句可能被 120 秒超时杀掉**：大库的 `dropSpace`、删除媒体库和 `markCoversStale` 要按生产数据量确认。
 

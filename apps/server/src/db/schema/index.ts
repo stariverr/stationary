@@ -868,7 +868,7 @@ export const AssetEmbedding = pgTable(
         /** Classified kind of `last_error` (see AiErrorKind in features/ai/errors.ts). */
         error_kind: text("error_kind"),
         /** Hash of the input `last_error` happened on; a changed input is tried again. */
-        error_hash: text("error_hash"),
+        error_input_hash: text("error_input_hash"),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),

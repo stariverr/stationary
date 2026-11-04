@@ -52,7 +52,7 @@
      {"type":"create","kind":"table","entity":["public","job_queue"]},
      {"type":"create","kind":"column","entity":["public","asset_ai_metadata","is_stale"]},
      {"type":"create","kind":"column","entity":["public","asset_ai_metadata","error_input_hash"]},
-     {"type":"create","kind":"column","entity":["public","asset_embedding","error_hash"]},
+     {"type":"create","kind":"column","entity":["public","asset_embedding","error_input_hash"]},
      {"type":"create","kind":"column","entity":["public","library","jobs_paused"]},
      {"type":"create","kind":"index","entity":["public","asset_ai_metadata","ai_metadata_library_target_idx"]},
      {"type":"create","kind":"index","entity":["public","asset_embedding","asset_emb_entity_space_unique"]},

@@ -100,7 +100,7 @@ async function loadInputs(space: SpaceRow, mediaIds: readonly string[], forScan:
     return inputs;
 }
 
-type StoredVector = Pick<typeof AssetEmbedding.$inferSelect, "entity_id" | "content_hash" | "dimension" | "last_error" | "error_hash">;
+type StoredVector = Pick<typeof AssetEmbedding.$inferSelect, "entity_id" | "content_hash" | "dimension" | "last_error" | "error_input_hash">;
 
 async function loadStored(space: SpaceRow, mediaIds: readonly string[]): Promise<Map<string, StoredVector>> {
     const rows = await db
@@ -109,7 +109,7 @@ async function loadStored(space: SpaceRow, mediaIds: readonly string[]): Promise
             content_hash: AssetEmbedding.content_hash,
             dimension: AssetEmbedding.dimension,
             last_error: AssetEmbedding.last_error,
-            error_hash: AssetEmbedding.error_hash,
+            error_input_hash: AssetEmbedding.error_input_hash,
         })
         .from(AssetEmbedding)
         .where(ofSpaceMedia(space, mediaIds));
@@ -299,7 +299,7 @@ function embeddingPipeline(role: EmbeddingBindingRole): BatchPipelineHandler {
                     source_file_id: item.input.kind === "image" ? item.input.source.file.id : null,
                     last_error: null,
                     error_kind: null,
-                    error_hash: null,
+                    error_input_hash: null,
                 };
                 try {
                     await db.transaction(async (tx) => {
@@ -338,7 +338,7 @@ function embeddingPipeline(role: EmbeddingBindingRole): BatchPipelineHandler {
             const input = (await loadInputs(space, [subjectId], true)).get(subjectId);
             if (!input || input.kind === "wait" || input.kind === "none") return;
 
-            const failure = { last_error: error, error_kind: errorKind, error_hash: input.hash };
+            const failure = { last_error: error, error_kind: errorKind, error_input_hash: input.hash };
             await tx
                 .insert(AssetEmbedding)
                 .values({
@@ -379,7 +379,7 @@ function embeddingPipeline(role: EmbeddingBindingRole): BatchPipelineHandler {
                 const row = stored.get(id);
                 if (!input || input.kind === "wait") return false;
                 if (input.kind === "none") return row !== undefined;
-                return !isCurrent(row, input) && row?.error_hash !== input.hash;
+                return !isCurrent(row, input) && row?.error_input_hash !== input.hash;
             });
             return { subjectIds, nextCursor };
         },
