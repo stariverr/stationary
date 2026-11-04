@@ -82,7 +82,7 @@
 
 - 新增可选环境变量 `DB_STATEMENT_TIMEOUT_MS`，默认 120000，设为 0 表示不限时，交给数据库自己的配置。
 - 关停时 worker 最多 drain 15 秒。k8s 默认的 30 秒宽限期够用。`docker-compose.yml` 已配 `stop_grace_period: 30s`。
-- `DB_URL` 要直连 Postgres。前面有连接池时 `LISTEN` 会失效，队列会退回 5 秒轮询。接入 PgBouncer 时还要配 `ignore_startup_parameters`，否则带超时参数的连接可能被拒。
+- 接入 PgBouncer 时要配 `ignore_startup_parameters`，否则带超时参数的连接可能被拒。
 
 ## 以后的版本
 

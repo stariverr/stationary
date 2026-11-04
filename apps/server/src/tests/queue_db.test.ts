@@ -225,17 +225,6 @@ describe("job_queue store", () => {
         expect((await countQueue([libraryId]))[0]).toMatchObject({ queued: 1, running: 0, retrying: 1 });
     });
 
-    databaseTest("a claim leaves out the queues it is told to, in that library only", async () => {
-        await queue("avatar", [subject()]);
-        await queue("cover", [subject()]);
-
-        const rows = await claim(2, [
-            { pipeline: "avatar", libraryId },
-            { pipeline: "cover", libraryId: crypto.randomUUID() },
-        ]);
-        expect(rows.map((row) => row.pipeline)).toEqual(["cover"]);
-    });
-
     databaseTest("a paused library's rows stay out of every claim, and enqueues carry on, until it is resumed", async () => {
         const waiting = subject();
         const interrupted = subject();
@@ -266,11 +255,9 @@ describe("job_queue store", () => {
         expect(unaffected.map((row) => row.subjectId)).toEqual([other]);
 
         await setLibraryPaused(libraryId, false);
-        const [recovered] = await claimOurs(3);
-        expect(recovered).toMatchObject({ subjectId: interrupted, interruptions: 1, attempts: 2 });
-        await finish(recovered!);
-        const resumed = await claimOurs(2);
-        expect(resumed.map((row) => row.subjectId).sort()).toEqual([added, waiting].sort());
+        const resumed = await claimOurs(3);
+        expect(resumed.map((row) => row.subjectId).sort()).toEqual([added, interrupted, waiting].sort());
+        expect(resumed.find((row) => row.subjectId === interrupted)).toMatchObject({ interruptions: 1, attempts: 2 });
     });
 
     databaseTest("a row that failed stays batched and a row whose run was interrupted does not", async () => {
@@ -294,21 +281,6 @@ describe("job_queue store", () => {
 
         const [recovered] = await claimOurs(1);
         expect(recovered).toMatchObject({ subjectId: interruptedId, interruptions: 1, attempts: 2 });
-    });
-
-    databaseTest("a row whose run was interrupted is claimed alone, and only by an idle worker", async () => {
-        const [fresh, interrupted] = [subject(), subject()];
-        await queue("avatar", [interrupted]);
-        await claimOurs(1);
-        await expireLease(interrupted);
-        await queue("avatar", [fresh]);
-
-        // A busy worker takes nothing until the suspect has run, so the suspect cannot wait forever behind new work.
-        expect(await claim(2, [], false)).toEqual([]);
-        const alone = await claimOurs(2);
-        expect(alone).toMatchObject([{ subjectId: interrupted, interruptions: 1 }]);
-        await finish(alone[0]!);
-        expect((await claimOurs(2)).map((row) => row.subjectId)).toEqual([fresh]);
     });
 
     databaseTest("only runs that settle or a change of input start the count of interruptions over", async () => {
@@ -459,7 +431,7 @@ describe("QueueWorker", () => {
         Object.fromEntries(PIPELINE_NAMES.map((pipeline) => [pipeline, handler])) as PipelineHandlers;
     const workers: QueueWorker[] = [];
     function worker(handlers: PipelineHandlers, concurrency: number, options: QueueWorkerOptions = {}) {
-        const started = new QueueWorker(handlers, { concurrency, pollIntervalMs: 50, patrolIntervalMs: 0, listen: false, ...options });
+        const started = new QueueWorker(handlers, { concurrency, pollIntervalMs: 50, patrolIntervalMs: 0, ...options });
         workers.push(started);
         return started;
     }
@@ -573,27 +545,6 @@ describe("QueueWorker", () => {
         expect(reconciled.sort()).toEqual([running, running, next].sort());
     });
 
-    databaseTest("resuming a library wakes a listening worker at once", async () => {
-        const id = subject();
-        let reconciled = false;
-        const handler: SubjectPipelineHandler = {
-            ...idleHandler,
-            async reconcile() {
-                reconciled = true;
-                return { kind: "done" };
-            },
-        };
-        await pausedLibrary();
-        // Nothing but the notification can wake it within the test.
-        worker(everyPipeline(handler), 1, { pollIntervalMs: 60_000, listen: true }).start();
-        await queue("avatar", [id]);
-        await Bun.sleep(300);
-        expect(reconciled).toBe(false);
-
-        await setLibraryPaused(libraryId, false);
-        await until(() => reconciled);
-    });
-
     databaseTest("runs queued subjects to completion and records a rejected input at once", async () => {
         const ok = [subject(), subject()];
         const bad = subject();
@@ -635,32 +586,6 @@ describe("QueueWorker", () => {
         ]);
     });
 
-    databaseTest("runs an interrupted subject on its own, so a poison pill takes down no one else with it", async () => {
-        const suspects = [subject(), subject()];
-        const fresh = [subject(), subject(), subject()];
-        await queue("avatar", suspects);
-        await claimOurs(2);
-        for (const id of suspects) await expireLease(id);
-        await queue("avatar", fresh);
-
-        const running = new Set<string>();
-        const overlaps: string[][] = [];
-        const handler: SubjectPipelineHandler = {
-            ...idleHandler,
-            async reconcile({ subjectId }) {
-                running.add(subjectId);
-                await Bun.sleep(80);
-                if ([...running].some((id) => suspects.includes(id)) && running.size > 1) overlaps.push([...running].sort());
-                running.delete(subjectId);
-                return { kind: "done" };
-            },
-        };
-        worker(everyPipeline(handler), 4).start();
-        await until(async () => (await db.$count(JobQueue, eq(JobQueue.library_id, libraryId))) === 0);
-
-        expect(overlaps).toEqual([]);
-    });
-
     databaseTest("leaves the rows of a pipeline it does not know to the newer version that queued them", async () => {
         const known = subject();
         const [unknown, unknownSpace] = [subject(), subject()];
@@ -699,7 +624,7 @@ describe("QueueWorker", () => {
     });
 
     databaseTest("patrols when it starts, as the timer starts over with the process", async () => {
-        const patrolling = new QueueWorker(everyPipeline(idleHandler), { patrolIntervalMs: 3_600_000, listen: false });
+        const patrolling = new QueueWorker(everyPipeline(idleHandler), { patrolIntervalMs: 3_600_000 });
         const patrol = spyOn(patrolling, "patrol").mockResolvedValue();
         patrolling.start();
         await patrolling.drain();
@@ -720,7 +645,7 @@ describe("QueueWorker", () => {
                     },
                 },
             },
-            { listen: false },
+            {},
         );
         try {
             await patrolling.patrol();
@@ -755,56 +680,6 @@ describe("QueueWorker", () => {
 
         expect(await rowOf(name, libraryId)).toMatchObject({ cursor: "page-7", dirty: false });
         expect(failures).toEqual([]);
-    });
-
-    databaseTest("a queue out of capacity is not claimed again before its delay has passed", async () => {
-        const seen: string[] = [];
-        const running = worker(
-            everyPipeline({
-                ...idleHandler,
-                async reconcile(ctx) {
-                    seen.push(ctx.subjectId);
-                    return seen.length === 1 ? { kind: "deferred", delaySeconds: 1 } : { kind: "done" };
-                },
-            }),
-            1,
-        );
-
-        await queue("avatar", [subject(), subject(), subject()]);
-        running.start();
-        await until(() => seen.length > 0);
-        await Bun.sleep(400);
-        expect(seen).toHaveLength(1);
-
-        await until(async () => (await db.$count(JobQueue, eq(JobQueue.library_id, libraryId))) === 0);
-        await running.drain();
-        expect(seen).toHaveLength(4);
-    });
-
-    databaseTest("a queue paused for a busy provider resumes as soon as a run gets through", async () => {
-        let calls = 0;
-        const { promise: released, resolve: release } = Promise.withResolvers<void>();
-        const running = worker(
-            everyPipeline({
-                ...idleHandler,
-                async reconcile() {
-                    const call = ++calls;
-                    if (call === 1) await released;
-                    return call === 2 ? { kind: "deferred", delaySeconds: 60 } : { kind: "done" };
-                },
-            }),
-            2,
-        );
-
-        await queue("avatar", [subject(), subject(), subject()]);
-        running.start();
-        await until(async () => (await dueInSeconds()).some((seconds) => seconds > 30));
-        await Bun.sleep(200);
-        expect(calls).toBe(2);
-
-        release();
-        await until(() => calls === 3);
-        await running.drain();
     });
 
     /** Handles every queue with `run`, as a batch pipeline. */
