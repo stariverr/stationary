@@ -259,19 +259,30 @@ export async function postpone(lease: Lease, delaySeconds: number): Promise<bool
     return rows.length > 0;
 }
 
+/** Rolls back a giveUp whose queue row turned out to be dirty or gone. */
+class NotGivenUp extends Error {}
+
 /**
  * The run failed for good: `record` stores the failure on the result rows, and the queue row is deleted in the same
- * transaction. A row marked dirty meanwhile reruns instead and nothing is recorded.
+ * transaction. A row marked dirty meanwhile reruns instead and nothing is recorded. The result rows are written
+ * before the queue row is touched, keeping the lock order every other writer uses.
  */
 export async function giveUp(lease: Lease, record: (tx: Transaction) => Promise<void>): Promise<boolean> {
-    return db.transaction(async (tx) => {
-        const [row] = await tx.select({ dirty: JobQueue.dirty }).from(JobQueue).where(holds(lease)).for("no key update");
-        if (!row) return false;
-        if (row.dirty) return rerun(tx, lease);
-        await record(tx);
-        await tx.delete(JobQueue).where(holds(lease));
-        return true;
-    });
+    if (await rerun(db, lease)) return true;
+    try {
+        return await db.transaction(async (tx) => {
+            await record(tx);
+            const deleted = await tx
+                .delete(JobQueue)
+                .where(and(holds(lease), eq(JobQueue.dirty, false)))
+                .returning({ pipeline: JobQueue.pipeline });
+            if (deleted.length === 0) throw new NotGivenUp();
+            return true;
+        });
+    } catch (error) {
+        if (!(error instanceof NotGivenUp)) throw error;
+        return rerun(db, lease);
+    }
 }
 
 /** Library scans: store how far the scan got and release the row to continue right away (from scratch if dirty). */
