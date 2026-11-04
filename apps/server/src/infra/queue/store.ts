@@ -124,14 +124,22 @@ type ClaimedRecord = {
     interruptions: number;
 };
 
+/** Due rows that no worker holds, outside the libraries put on hold. */
+const claimable = (filter: SQL) => sql`
+    available_at <= now() AND (lease_token IS NULL OR lease_expires_at < now()) AND ${filter}
+    AND library_id NOT IN (SELECT id FROM library WHERE jobs_paused)
+`;
+
+/** A row whose last run was interrupted, or is being found so now: running it may be what takes a worker down. */
+const SUSPECT = sql`(interruptions > 0 OR lease_token IS NOT NULL)`;
+
 // NULLS LAST only matches job_queue_claim_idx (priority is never null): plain DESC means NULLS FIRST, which sorts every due row.
 async function claimWhere(filter: SQL, limit: number): Promise<ClaimedRow[]> {
     if (limit <= 0) return [];
     const result = await db.execute<ClaimedRecord>(sql`
         WITH picked AS (
             SELECT pipeline, subject_id, lease_token IS NOT NULL AS interrupted FROM job_queue
-            WHERE available_at <= now() AND (lease_token IS NULL OR lease_expires_at < now()) AND ${filter}
-                AND library_id NOT IN (SELECT id FROM library WHERE jobs_paused)
+            WHERE ${claimable(filter)}
             ORDER BY priority DESC NULLS LAST, available_at
             LIMIT ${limit}
             FOR NO KEY UPDATE SKIP LOCKED
@@ -161,12 +169,26 @@ async function claimWhere(filter: SQL, limit: number): Promise<ClaimedRow[]> {
  * Leases up to `limit` due rows, highest priority first, leaving out the `paused` queues (a worker's own note that
  * their provider is out of capacity) and every library the user put on hold. Expired leases are reclaimed here; there
  * is no sweeper.
+ *
+ * A row whose run was interrupted is leased on its own and only by an `idle` worker, so that if it is a poison pill
+ * the next crash interrupts no one else. While one waits, a busy worker gets nothing, letting its runs drain.
  */
-export function claim(limit: number, paused: readonly QueueInLibrary[] = []): Promise<ClaimedRow[]> {
-    if (paused.length === 0) return claimWhere(sql`true`, limit);
+export async function claim(limit: number, paused: readonly QueueInLibrary[] = [], idle = true): Promise<ClaimedRow[]> {
+    if (limit <= 0) return [];
     const pipelines = sql.param(paused.map((queue) => queue.pipeline));
     const libraries = sql.param(paused.map((queue) => queue.libraryId));
-    return claimWhere(sql`(pipeline, library_id) NOT IN (SELECT * FROM unnest(${pipelines}::text[], ${libraries}::uuid[]))`, limit);
+    const open =
+        paused.length === 0
+            ? sql`true`
+            : sql`(pipeline, library_id) NOT IN (SELECT * FROM unnest(${pipelines}::text[], ${libraries}::uuid[]))`;
+    if (idle) {
+        const suspects = await claimWhere(sql`${open} AND ${SUSPECT}`, 1);
+        if (suspects.length > 0) return suspects;
+    }
+    return claimWhere(
+        sql`${open} AND NOT ${SUSPECT} AND NOT EXISTS (SELECT 1 FROM job_queue WHERE ${claimable(sql`${open} AND ${SUSPECT}`)})`,
+        limit,
+    );
 }
 
 /**

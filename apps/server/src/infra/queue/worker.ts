@@ -111,6 +111,8 @@ export class QueueWorker {
      */
     private readonly paused = new Map<string, QueueInLibrary & { until: number }>();
     private stuckRuns = 0;
+    /** A run of an interrupted row is in progress, and nothing may run beside it. */
+    private isolated = false;
     private running = false;
     private aborting = false;
     private pumping = false;
@@ -196,13 +198,16 @@ export class QueueWorker {
             while (this.wakeRequested && this.running) {
                 this.wakeRequested = false;
                 const free = this.concurrency - this.active.size;
-                if (free <= 0) break;
+                if (free <= 0 || this.isolated) break;
 
-                const rows = await claim(free, this.pausedQueues());
+                const rows = await claim(free, this.pausedQueues(), this.active.size === 0);
                 for (const row of rows) {
+                    // Only an interrupted row has a count here, and the store hands it out alone.
+                    if (row.interruptions > 0) this.isolated = true;
                     const run = this.run(row)
                         .catch((error: unknown) => console.error(`[Queue] ${row.pipeline}/${row.subjectId} failed unexpectedly:`, error))
                         .finally(() => {
+                            if (row.interruptions > 0) this.isolated = false;
                             this.active.delete(run);
                             this.wake();
                         });
@@ -215,7 +220,7 @@ export class QueueWorker {
         } finally {
             this.pumping = false;
             // A wake that arrived after the loop's last check must not be lost.
-            if (this.wakeRequested && this.running && this.active.size < this.concurrency) void this.pump();
+            if (this.wakeRequested && this.running && this.active.size < this.concurrency && !this.isolated) void this.pump();
         }
     }
 
