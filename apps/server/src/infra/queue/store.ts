@@ -2,7 +2,7 @@ import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { JobQueue, Library } from "@/db/schema";
 import { db, type DbClient, type Transaction } from "@/global/db";
-import { queueLockOrder } from "@/infra/queue/pipelines";
+import { KNOWN_QUEUE_PATTERNS, queueLockOrder } from "@/infra/queue/pipelines";
 import { LEASE_SECONDS } from "@/infra/queue/policy";
 
 /** Postgres channel notified on commit of every enqueue; workers LISTEN on it to wake up. */
@@ -124,9 +124,10 @@ type ClaimedRecord = {
     interruptions: number;
 };
 
-/** Due rows that no worker holds, outside the libraries put on hold. */
+/** Due rows of a pipeline this version knows that no worker holds, outside the libraries put on hold. */
 const claimable = (filter: SQL) => sql`
     available_at <= now() AND (lease_token IS NULL OR lease_expires_at < now()) AND ${filter}
+    AND pipeline LIKE ANY (${sql.param(KNOWN_QUEUE_PATTERNS)}::text[])
     AND library_id NOT IN (SELECT id FROM library WHERE jobs_paused)
 `;
 

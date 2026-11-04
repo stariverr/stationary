@@ -285,11 +285,8 @@ export class QueueWorker {
 
     private async run(row: ClaimedRow): Promise<void> {
         const name = parseQueueName(row.pipeline);
-        if (!name) {
-            console.error(`[Queue] Dropping row of unknown pipeline '${row.pipeline}'`);
-            await giveUp(row, async () => undefined);
-            return;
-        }
+        // Claims only take the queue names this version knows.
+        if (!name) throw new Error(`Claimed a row of unknown pipeline '${row.pipeline}'`);
         const handler = this.handlers[name.pipeline];
         if (row.interruptions >= maxAttemptsOf(handler, name)) {
             // None of these runs got as far as failing, so running it may be what takes the worker down.
