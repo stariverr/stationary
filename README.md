@@ -11,12 +11,12 @@
 </p>
 
 <p align="center">
-  <a href="https://bun.sh"><img src="https://img.shields.io/badge/Bun-1.3+-black?logo=bun" alt="Bun"></a>
-  <a href="https://nuxt.com"><img src="https://img.shields.io/badge/Nuxt-4.5+-00DC82?logo=nuxt&logoColor=white" alt="Nuxt 4"></a>
-  <a href="https://hono.dev"><img src="https://img.shields.io/badge/Hono-4.12+-E36002?logo=hono&logoColor=white" alt="Hono"></a>
-  <a href="https://flutter.dev"><img src="https://img.shields.io/badge/Flutter-3.12+-02569B?logo=flutter&logoColor=white" alt="Flutter"></a>
-  <a href="https://orm.drizzle.team"><img src="https://img.shields.io/badge/Drizzle_ORM-1.0+-C5F74F?logo=drizzle" alt="Drizzle ORM"></a>
-  <a href="https://www.postgresql.org"><img src="https://img.shields.io/badge/PostgreSQL-15+-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL"></a>
+  <a href="https://bun.sh"><img src="https://shieldcn.dev/badge/Bun-1.4.4.svg?variant=branded&brand=bun" alt="Bun 1.4.4"></a>
+  <a href="https://nuxt.com"><img src="https://shieldcn.dev/badge/Nuxt-4.6.4.svg?variant=branded&brand=nuxt" alt="Nuxt 4.6.4"></a>
+  <a href="https://hono.dev"><img src="https://shieldcn.dev/badge/Hono-4.13.16.svg?variant=branded&brand=hono" alt="Hono 4.13.16"></a>
+  <a href="https://flutter.dev"><img src="https://shieldcn.dev/badge/Flutter-3.47.9-02569B.svg?variant=branded&logo=flutter" alt="Flutter 3.47.9"></a>
+  <a href="https://orm.drizzle.team"><img src="https://shieldcn.dev/badge/Drizzle%20ORM-1.0.0--rc.5.svg?variant=branded&brand=drizzle" alt="Drizzle ORM 1.0.0-rc.5"></a>
+  <a href="https://www.postgresql.org"><img src="https://shieldcn.dev/badge/PostgreSQL-18.6.svg?variant=branded&brand=postgresql" alt="PostgreSQL 18.6"></a>
 </p>
 
 <p align="center">
