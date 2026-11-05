@@ -1,5 +1,5 @@
 /**
- * The declaration table (docs/async_task_improvements.zh-Hans.md §11.4): which aspects of the source data each
+ * The declaration table (docs/job_queue.zh-Hans.md, section 5): which aspects of the source data each
  * pipeline reads and which it produces. Writers only report what changed through markChanged(); this table decides
  * which pipelines follow. Pipelines never enqueue each other.
  */

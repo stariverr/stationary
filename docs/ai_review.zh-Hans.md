@@ -4,7 +4,7 @@
 
 适用范围：`apps/server/src/features/ai/*`、`apps/server/src/api/ai.ts`、`apps/server/src/api/search.ts`，以及 `apps/web/app/components/settings/` 下的 AI 设置页（前端只粗看过）。
 
-与异步任务系统相关的问题（两套任务系统、自动触发、按资源限流、队列公平性、熔断等）记在 [async_task_improvements.zh-Hans.md](async_task_improvements.zh-Hans.md)，这里只引用编号。
+与异步任务系统相关的问题（两套任务系统、自动触发、按资源限流、队列公平性、熔断等）已由任务队列重构处理，现状、取舍和未做的部分见 [job_queue.zh-Hans.md](job_queue.zh-Hans.md)。下文的"async 文档第 N 节"指重构前的 `docs/async_task_improvements.zh-Hans.md`，已删除，在 git 历史里。
 
 ## 1. 高可用与可靠性
 
@@ -271,13 +271,13 @@ AI 生成的 `tags`、`objects`、`styles`、`colors` 不能一键采纳为正�
 **AI SDK 调用没有超时（已修复）**：走 ky 的适配器有 30 秒超时，但 `generateText`（描述）、`embedMany`（OpenAI 兼容和 Gemini 的文本向量）只受任务自己的 signal 控制。供应商卡住时，搜索请求会一直挂着；后台 unit 靠心跳一直占着，限流并发槽 10 分钟后过期，实际并发会超过 `max_concurrency`。现在由 `withTimeout()`（`utils.ts`）加上限：描述 120 秒，SDK 文本向量批次 60 秒，搜索时的查询向量和 rerank 10 秒。超时归为可重试的 TIMEOUT；搜索中超时的通道记入 `degraded`。
 
 **仍待处理**：
-- "继续处理"会重复描述已经确定无法处理的图片：`input` 类失败的描述不会被复用，每次库级处理都会再下载、再调用一次视觉模型。要跳过它们，需要记下失败时源文件的 hash，以便图片换掉后自动重试（现在的 `input_hash` 表示"描述由哪张图生成"，不能复用）。
+- ~~"继续处理"会重复描述已经确定无法处理的图片~~（已由任务队列解决：描述失败时记下 `error_input_hash`，scan 跳过输入没变的失败）：`input` 类失败的描述不会被复用，每次库级处理都会再下载、再调用一次视觉模型。要跳过它们，需要记下失败时源文件的 hash，以便图片换掉后自动重试（现在的 `input_hash` 表示"描述由哪张图生成"，不能复用）。
 - OCR 用的是缩小后的封面（不超过 1440 px，送模型前还会压到 1536 px / 4 MB 以内），长截图和小字海报的 OCR 质量会下降。原图是图片时，可以考虑改用原图。
-- `/process` 和 `/redescribe` 先检查"有没有任务在跑"再建任务，中间没有加锁，连点两次可能建出两个库级任务。记在 async 文档第 5 节。
+- ~~`/process` 和 `/redescribe` 先检查"有没有任务在跑"再建任务，中间没有加锁，连点两次可能建出两个库级任务。~~ 已由任务队列解决：处理改为重试失败并请求 scan，同一对象在队列里只有一行。
 
 ## 5. 缺失的功能
 
-- **新内容自动建索引**：最大的缺口，见 async 文档第 5 节。
+- ~~**新内容自动建索引**~~：已由任务队列解决，写入方在事务里调用 `markChanged`。
 - **以图搜图 / 相似图片**：图片向量已经有了，却没有相应接口。
 - **近重复检测**：基于同一批向量即可实现。
 - **图片 embedding 供应商**：已支持 Gemini、DashScope，以及自托管的 llama.cpp（`llama-cpp` 适配器）和 vLLM（`vllm` 适配器），模型限定为 qwen3-vl-embedding 和 embeddinggemma-2。各家请求格式不统一，因此一种线协议对应一个适配器：SGLang 与 Jina 共用 `input:[{text},{image}]`，Voyage（`inputs[].content[]`）和 Cohere（顶层 `images`）各是一种，暂不支持。图片按张选择传输方式（2026-10-20）：适配器声明 `fetchesImageUrls`，目前只有 llama.cpp 和 vLLM 为真。来源文件的格式在模型声明的 `imageFormats` 里，并且已记录的宽高和文件大小不超过 1536 px / 4 MB 时，发 1 小时有效的预签名 URL，由模型服务器自己下载；否则服务器读取字节、按需转码后发 base64 data URI。封面是不超过 1440 px 的 AVIF，所以模型勾选 `image/avif` 后，有封面的媒体都走 URL。模型服务器要能访问 `S3_ENDPOINT` 签出的地址；llama.cpp 下载 https 需要带 OpenSSL 编译。Gemini 和 DashScope 仍只发字节（DashScope 能收公网 URL，但未接入）。
@@ -292,10 +292,10 @@ AI 生成的 `tags`、`objects`、`styles`、`colors` 不能一键采纳为正�
 1. **P0**
    - ~~空间切换加覆盖率阈值并支持回滚（1.1）~~ 已修复
    - ~~堵住 SSRF（4.1）~~ 已修复
-   - 新内容自动建索引（async 文档第 5 节）
+   - ~~新内容自动建索引~~ 已由任务队列解决
    - ~~把降级展示给用户（1.2）~~ 已修复
 2. **P1**
-   - provider 熔断（async 文档第 6 节）
+   - ~~provider 熔断~~ 已由任务队列解决
    - ~~描述模型退回 JSON mode（2.3）~~ 决定不做
    - 控制描述输出长度（4.2，prompt 上下文待做）、记录用量（4.3）
    - ~~绑定只保留一份并原子写入（1.5）~~ 已修复

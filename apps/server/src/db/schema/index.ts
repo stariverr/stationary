@@ -967,7 +967,7 @@ export const DraftFile = pgTable("draft_file", {
 });
 
 /**
- * Reconcile queue (docs/async_task_improvements.zh-Hans.md §11.3). A row only says "this subject may be out of
+ * Reconcile queue (docs/job_queue.zh-Hans.md, section 4). A row only says "this subject may be out of
  * date for this pipeline"; the pipeline reads current state and does the difference. One row and one lease per
  * (pipeline, subject), so a subject is never reconciled twice at once.
  */

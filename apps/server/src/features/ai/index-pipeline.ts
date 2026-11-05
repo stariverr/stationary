@@ -11,7 +11,7 @@ const ofMedia = (mediaId: string) => and(eq(AssetSearchDocument.entity_type, Ent
 /**
  * `ai.index`: keeps the media's search document in step with its metadata and stored description. Keyword search
  * depends on it with or without AI, so it is written for every active media. It also deletes the vectors a moved media
- * kept from its previous library (§11.13 #2); the spaces of its new library embed it again.
+ * kept from its previous library; the spaces of its new library embed it again.
  *
  * Building a document makes no provider call, so a failure is a bug or a database problem: it is retried, logged and
  * retried again by the next patrol, and not counted as a failure of the media.
