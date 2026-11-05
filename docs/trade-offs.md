@@ -57,5 +57,5 @@ To support different display layouts (board covers, masonry grid scrolling, ligh
 - **Tier 2 (Cover / Thumbnail)**: The backend automatically extracts video keyframes or resizes photos into compressed AVIF/WebP covers (e.g., 400px thumbnails) for responsive grid rendering.
 
 ### Rationales
-* **Asynchronous Local Generation**: The background job engine (`CoverJobHandler`) extracts cover frames and generates derivative tracks asynchronously, uploading them to S3.
+* **Asynchronous Local Generation**: The `cover` pipeline on the background job queue extracts cover frames and generates derivative tracks asynchronously, uploading them to S3.
 * **Minimal Computational Overhead**: Video playback streams the Tier 1 master file directly using HTTP Range requests, eliminating full video re-encoding costs.

@@ -114,48 +114,36 @@ The system supports group collaboration using fine-grained permissions. Ownershi
 
 ---
 
-## 6. Task Queue Engine & JobRunner Architecture
+## 6. Background Job Queue
 
-Stationary implements an **in-house, PostgreSQL-backed asynchronous task queue** and in-process `JobRunner`, eliminating external message broker dependencies (e.g., Redis/BullMQ). Task state, chunked discovery, lease locking, exponential backoff retries, and progress reconciliation are managed directly within PostgreSQL.
+Background work (downloads, covers, avatars, AI descriptions, search documents and vectors) runs on a reconcile queue kept in PostgreSQL (`job_queue`) and an in-process `QueueWorker`. There is no message broker; Redis is only used to share AI provider rate limits. Code lives in `apps/server/src/infra/queue`; the full design is section 11 of [async_task_improvements.zh-Hans.md](./async_task_improvements.zh-Hans.md).
 
 ```mermaid
 flowchart TD
-    A[API / Client] -->|createTask| B[(async_task Master)]
-    B -->|Stream Discovery| C[(async_task_unit Children)]
-    D[JobRunner Worker] -->|claimUnits FOR UPDATE SKIP LOCKED| C
-    D -->|executeUnit| E[TaskHandler Strategy]
-    E -->|Heartbeat Lease Renewal| F[renewUnitLease]
-    E -->|Success / Failure| G[settleTaskUnit]
-    G -->|Update Counters & Terminal Check| H[reconcileTask]
-    I[JobSweeper Background Process] -.-|Reclaim Dead Leases & Purge| C
+    A[API / ingest / settings] -->|markChanged in the same transaction| B[(job_queue)]
+    P[Hourly patrol / library scans] -->|enqueue missing work| B
+    W[QueueWorker] -->|claim FOR NO KEY UPDATE SKIP LOCKED| B
+    W -->|reconcile subject| H[Pipeline handler]
+    H -->|write results, then fence and settle| B
 ```
 
-### 6.1 Master-Child Data Model
+### 6.1 Data Model
 
-- **`AsyncTask` (Master Table)**: Represents high-level asynchronous operations (`COVER_RECONCILE`, `COVER_BATCH`, `AI_ENRICH`, `POST_PROCESS`, `AVATAR_COPY`). Tracks stream discovery state (`discovery_cursor`, `discovery_complete`), user control signals (`PAUSE`, `CANCEL`), concurrency limit (`max_in_flight`), and atomic counters (`succeeded_units`, `failed_units`, `cancelled_units`).
-- **`AsyncTaskUnit` (Child Table)**: Represents atomic execution units scoped to a master task (e.g., generating a `COVER_DERIVATIVE` thumbnail or calling AI for a single media item). Maintains entity references (`subject_type`, `subject_id`), idempotent key (`unit_key`), execution status (`PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED`), lease token (`lease_token`), and lease expiry timestamp (`lease_expires_at`).
+- **One row per (queue, subject)**: a queue is a pipeline (`download`, `avatar`, `cover`, `ai.describe`, `ai.index`, `ai.text`, `ai.image`), optionally per embedding space, plus a `scan:` queue per library. Enqueuing an existing row merges into it; a row that is running is marked `dirty` and reruns once the current run settles.
+- **Pipelines reconcile, they do not replay commands**: each handler reads the subject's current state and brings its outputs up to date. Writers only report which aspect of a subject changed (`markChanged`), and `infra/queue/pipelines.ts` maps aspects to the pipelines that read them.
+- **Results live on the result rows**: failures and the input they happened on are stored next to the outputs (for example `track.last_error`, `asset_embedding.last_error` and `error_input_hash`). A queue row is deleted when its run finishes.
 
-### 6.2 Execution Lifecycle & Safety
+### 6.2 Execution and Safety
 
-1. **Chunked Stream Discovery**: Master tasks scan candidate items incrementally using cursor payloads (`discoverTaskBatch`), preventing massive query memory overhead.
-2. **Atomic Lease Locking & Claiming**: `JobRunner` retrieves eligible `PENDING` units using PostgreSQL `FOR UPDATE SKIP LOCKED` (`claimUnits`), acquiring a 60-second execution lease (`lease_token`).
-3. **Heartbeat Lease Renewal**: During execution (`executeUnit`), a 20-second background heartbeat interval continuously extends active leases (`renewUnitLease`). Loss of lease or parent task cancellation aborts execution via `AbortController`.
-4. **Exponential Backoff Retries**: Failed units with retry eligibility recalculate next availability (`available_at`) using jittered exponential backoff:
-   $$\text{Delay} = \min\left(300, 5 \times 2^{\text{attempt}-1} \times \text{jitter}\right) \text{ seconds}$$
-5. **Reconciliation & Finalization**: Upon unit completion, progress counters update atomically. Once all units finish and `discovery_complete = true`, the master task auto-converges to `COMPLETED` or `FAILED` and invokes `finalizeTask`.
-6. **Multi-Node Real-Time Wake & Fallback (Redis Pub/Sub)**: When new jobs are enqueued, resumed, or discovered, a lightweight broadcast signal is published via Redis Pub/Sub (`jobs:wake_channel`), instantly triggering `JobRunner.wake()` across all worker instances in a horizontally scaled cluster. To guarantee absolute execution reliability, `JobRunner` maintains a 5-second periodic polling fallback (`setInterval`) alongside `JobSweeper` background audits, ensuring jobs are picked up within 5 seconds even if Redis connectivity fails or messages are missed.
+1. **Claiming**: due rows are leased with `FOR NO KEY UPDATE SKIP LOCKED`, highest priority first (changes before backfills), skipping libraries the user paused. The worker polls every second; expired leases are reclaimed by the same claim, so there is no sweeper.
+2. **Leases and fencing**: a 60-second lease is renewed every 20 seconds. Results are written first and the queue row is fenced afterwards, so a worker that lost its lease cannot commit. All writers lock result rows before queue rows.
+3. **Retries**: failed runs back off exponentially with jitter (5 s × 4ⁿ, at most 300 s) for 5 attempts by default, then the failure is recorded on the result rows. Rate-limited runs are postponed without using an attempt. Inputs a provider rejects are not retried until they change.
+4. **At-least-once**: a run can be repeated after a crash, so handlers must be idempotent.
+5. **Patrol and scans**: on start and every hour each library gets a scan per pipeline, which pages through its media and queues what is missing or stale.
 
-### 6.3 Recovery & Maintenance (`JobSweeper`)
+### 6.3 Cover Generation & Reconciliation Specification
 
-An automated background sweeper (`JobSweeper`) runs every 30 seconds to handle edge cases:
-- **`reclaimExpiredLeases`**: Recovers abandoned `RUNNING` units from crashed workers.
-- **`recoverInterruptedDiscovery`**: Resumes interrupted stream discovery scans following server restarts.
-- **`reconcileReadyTasks`**: Audits and aligns state for completed task units.
-- **`purgeOldTasks`**: Hard purges terminal task records older than 7 days to prevent database bloat.
-
-### 6.4 Cover Generation & Reconciliation Specification
-
-Cover generation, updating, and reconciliation workflows are governed by `CoverJobHandler` and `CoverService` following these specification rules:
+Cover generation, updating, and reconciliation workflows are governed by the `cover` pipeline and `CoverService` following these specification rules:
 
 1. **Manual Re-generation & Same-Quality Overwrite**:
    - Manually triggering cover generation for an existing quality (e.g. `LOW` + `MEDIUM`) re-renders the cover frame from source media and uploads the output AVIF to S3, **overwriting the existing S3 key**.
@@ -163,9 +151,9 @@ Cover generation, updating, and reconciliation workflows are governed by `CoverJ
 2. **Coexistence of Un-targeted Qualities**:
    - If a media item already possesses `LOW` + `MEDIUM` + `HIGH` cover tracks and a task dispatches only `LOW` + `MEDIUM`, only `LOW` and `MEDIUM` covers are rendered and updated.
    - The existing `HIGH` cover `Track` and S3 file remain **fully active** (`ACTIVE` state) and are not pruned or mutated.
-3. **`COVER_RECONCILE` Rules**:
-   - **Incremental Reconciliation**: Reconciliation tasks only ensure that media items possess cover tracks matching the currently configured library qualities (`library.cover_qualities`).
+3. **`cover` Pipeline Rules**:
+   - **Incremental Reconciliation**: The pipeline only ensures that media items possess cover tracks matching the currently configured library qualities (`library.cover_qualities`).
    - **No Pruning on Configuration Reduction**: Reducing library cover quality config from `[LOW, MEDIUM, HIGH]` to `[LOW, MEDIUM]` will **never delete** existing `HIGH` cover tracks or S3 files.
-   - **Skip Re-rendering on Config Restoration**: Restoring configuration back to `[LOW, MEDIUM, HIGH]` and running `COVER_RECONCILE` recognizes existing `HIGH` cover tracks whose source file is unchanged, automatically setting `isAlreadyCompleted = true` to skip redundant rendering.
+   - **Skip Re-rendering on Config Restoration**: Restoring configuration back to `[LOW, MEDIUM, HIGH]` lets the library scan find the existing `HIGH` cover tracks; those still generated from the unchanged source file count as current and are not rendered again.
 
 

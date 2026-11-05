@@ -43,17 +43,17 @@ bun run db:migrate
 
 ---
 
-## 🔄 持久化后台任务引擎 (PostgreSQL Queue & JobRunner)
+## 🔄 后台任务队列 (Background Job Queue)
 
-由于媒体下载与封面生成非常消耗 network I/O 与 CPU，系统基于 PostgreSQL `AsyncTask` / `AsyncTaskUnit` 作为唯一事实来源，并在 Bun 进程内通过轻量 `JobRunner` 进行调度。
+下载、封面、头像和 AI 工作都跑在 PostgreSQL 里的调和队列（`job_queue`）和进程内的 `QueueWorker` 上（`src/infra/queue`）。
 
 ### 1. 核心设计原则
-- **PostgreSQL 唯一事实来源**：所有任务与单元均在业务事务提交时原子写入 DB。
-- **租约与 Fencing**：采用 `SELECT ... FOR UPDATE SKIP LOCKED`、数据库时钟租约与 fencing token，阻止过期 worker 提交队列状态。
-- **至少一次执行**：worker 可能在产生外部副作用后、提交执行结果前崩溃，因此 handler 的业务副作用必须保持幂等。
-- **自动异常恢复**：Sweeper 会回收过期 unit 租约、通过独立的 fenced lease 恢复 Discovery，并收敛未完成的终态转换。
+- **调和而不是重放**：写入方在同一个事务里报告对象的哪个方面变了（`markChanged`）；每条流水线读取对象的当前状态，把产出补到最新。每个队列、每个对象只有一行，重复的变化会合并。
+- **租约与 Fencing**：认领用 `FOR NO KEY UPDATE SKIP LOCKED`，租约按数据库时钟计时，由心跳续期。先写结果再 fence 队列行，丢了租约的 worker 提交不了。
+- **至少一次执行**：崩溃后同一次运行可能重复，所以 handler 必须幂等。
+- **自动恢复**：过期租约由下一次认领回收；每小时巡检会扫描每个库，补上写入方漏报的工作。
 
-> 📖 **任务引擎与封面调和规范**：关于任务引擎扩展与封面生成/调和规则（`COVER_RECONCILE`、多规格并存与覆盖机制），请参阅 [系统设计与数据库规范](../../docs/system_design.zh-Hans.md#64-封面生成与调和行为规范-cover-generation--reconciliation-specification) 及 [任务引擎接入指南](../../docs/task_engine_extension.zh-Hans.md)。
+> 📖 **规范**：队列和封面规则见 [系统设计与数据库规范第 6 节](../../docs/system_design.zh-Hans.md#6-后台任务队列-background-job-queue)，完整设计见 [async_task_improvements.zh-Hans.md](../../docs/async_task_improvements.zh-Hans.md) 第 11 节。
 
 ---
 
