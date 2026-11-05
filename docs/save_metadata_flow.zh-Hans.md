@@ -10,7 +10,7 @@
 
 当外部同步负载发送到 `/api/task/create` 时，后端会为每个帖子**同步且原子性地**执行 `saveMetadata`。
 
-通过对比传入的负载与数据库现有的状态，该方法能够确定是否需要触发后台下载任务（通过 PostgreSQL DB Task 队列引擎与进程内 JobRunner 驱动）。如果传入的所有媒体 URL 及元数据与数据库完全一致，该方法将返回 `skipUpdate: true`，从而跳过后台任务入队，减少网络和计算开销。
+通过对比传入的负载与数据库现有的状态，该方法能够确定是否需要把后台下载放进队列（PostgreSQL 任务队列，见 [系统设计第 6 节](./system_design.zh-Hans.md#6-后台任务队列-background-job-queue)）。如果传入的所有媒体 URL 及元数据与数据库完全一致，该方法将返回 `skipUpdate: true`，从而跳过后台任务入队，减少网络和计算开销。
 
 ---
 
@@ -25,7 +25,7 @@ graph TD
     Step3_1 --> Step3_2[3.2 轨道同步与文件 URL 差异检查]
     Step3_2 --> Step3_3[3.3 关联标签映射]
     Step3_3 --> Step4[4. 作者头像检查]
-    Step4 --> Step5[5. 若存在未决任务则原子入队 POST_PROCESS 任务与 Units]
+    Step4 --> Step5[5. 若有待处理内容则向任务队列报告变化]
     Step5 --> End([返回 postId, authorId, skipUpdate])
 ```
 
@@ -75,7 +75,7 @@ graph TD
 ### 5. 同步完成与响应
 - 若 `hasPendingTasks` 为 `true`：
   - 如果帖子已经存在，则将其状态更新为 `IN_PROGRESS`，清除历史错误。
-  - 在数据库事务内原子写入 `POST_PROCESS` `AsyncTask` 与 `AsyncTaskUnit` 记录，随后唤醒 `jobRunner`。
+  - 在同一个事务里报告帖子媒体的来源和元数据有变化（`markChanged`），由此入队下载和搜索文档。头像来源变化在第 4 步以同样方式报告。
   - 返回 `{ postId, authorId, skipUpdate: false }`。
 - 若 `hasPendingTasks` 为 `false`：
   - 直接返回 `{ postId, authorId, skipUpdate: true }`。调用端收到后跳过任务入队，避免冗余的网络调用和 API 损耗。

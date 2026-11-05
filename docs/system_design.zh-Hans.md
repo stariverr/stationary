@@ -115,48 +115,36 @@ erDiagram
 
 ---
 
-## 6. 任务队列引擎与 JobRunner 架构 (Task Queue Engine & JobRunner Architecture)
+## 6. 后台任务队列 (Background Job Queue)
 
-Stationary 采用**自研的基于 PostgreSQL 数据库轻量级异步任务队列**与进程内 `JobRunner`，完全消除了对外部集中式消息中间件（如 Redis / BullMQ）的强依赖。任务状态、分片发现、租约锁、指数退避重试与状态对账逻辑全部由 PostgreSQL 原生支撑。
+下载、封面、头像、AI 描述、搜索文档和向量这些后台工作，都跑在 PostgreSQL 里的调和队列（`job_queue`）和进程内的 `QueueWorker` 上。不依赖消息中间件；Redis 只用来在进程之间共享 AI provider 的限流。代码在 `apps/server/src/infra/queue`，完整设计见 [async_task_improvements.zh-Hans.md](./async_task_improvements.zh-Hans.md) 第 11 节。
 
 ```mermaid
 flowchart TD
-    A[API / 业务发起] -->|createTask| B[(async_task 主任务)]
-    B -->|流式分批扫描| C[(async_task_unit 执行单元)]
-    D[JobRunner 调度器] -->|claimUnits FOR UPDATE SKIP LOCKED| C
-    D -->|executeUnit| E[TaskHandler 策略处理器]
-    E -->|定时心跳续租| F[renewUnitLease]
-    E -->|结算执行结果| G[settleTaskUnit]
-    G -->|更新计数并校验终态| H[reconcileTask]
-    I[JobSweeper 定时扫尾 process] -.-|清理死锁租约/恢复中断发现| C
+    A[API / 采集 / 设置] -->|同一事务内 markChanged| B[(job_queue)]
+    P[每小时巡检 / 库扫描] -->|补入缺的工作| B
+    W[QueueWorker] -->|claim FOR NO KEY UPDATE SKIP LOCKED| B
+    W -->|调和对象| H[流水线 handler]
+    H -->|先写结果，再 fence 并结算| B
 ```
 
-### 6.1 主任务与执行单元数据模型
+### 6.1 数据模型
 
-- **`AsyncTask` (主任务表)**：代表大粒度异步业务操作（如 `COVER_RECONCILE`、`COVER_BATCH`、`AI_ENRICH`、`POST_PROCESS`、`AVATAR_COPY`）。维护流式发现游标 (`discovery_cursor` / `discovery_complete`)、外部控制信号 (`PAUSE` / `CANCEL`)、全局并发度上限 (`max_in_flight`) 以及四项进度计数 (`total_units`, `succeeded_units`, `failed_units`, `cancelled_units`)。
-- **`AsyncTaskUnit` (执行单元表)**：代表最小原子执行单位（如具体单张图片的 `COVER_DERIVATIVE` 缩略图生成或单条媒体的 AI 打标）。记录实体映射 (`subject_type` / `subject_id`)、全局唯一业务键 (`unit_key`)、执行状态 (`PENDING`, `RUNNING`, `SUCCEEDED`, `FAILED`, `CANCELLED`) 以及抢占租约锁 (`lease_token` / `lease_expires_at`)。
+- **每个（队列, 对象）一行**：队列是一条流水线（`download`、`avatar`、`cover`、`ai.describe`、`ai.index`、`ai.text`、`ai.image`），向量流水线按空间分队列；每个库还有 `scan:` 队列。重复入队会合并到已有的行；行正在运行时只标记 `dirty`，这次运行结束后再跑一次。
+- **流水线做调和，不重放命令**：handler 读对象的当前状态，把产出补到最新。写入方只报告对象的哪个方面变了（`markChanged`），`infra/queue/pipelines.ts` 负责把方面映射到读它的流水线。
+- **结果记在结果行上**：失败和失败时的输入哈希写在产出旁边（如 `track.last_error`、`asset_embedding.last_error` 和 `error_input_hash`）。运行结束后队列行就删除。
 
-### 6.2 任务生命周期与安全机制
+### 6.2 执行与安全
 
-1. **流式分批发现 (Chunked Discovery)**：主任务启动后通过游标增量扫描候选数据，避免单次大表查询造成 DB 性能抖动。
-2. **原子抢占与租约锁 (Lease Locking)**：`JobRunner` 利用 PostgreSQL `FOR UPDATE SKIP LOCKED` 语法 (`claimUnits`) 安全抢占就绪的 `PENDING` 单元，并授予 60 秒的租约。
-3. **心跳续租与异常中断 (Heartbeat & Cancellation)**：执行阶段由后台定时器每 20 秒发起 `renewUnitLease` 自动续期。若租约丢失或主任务收到取消信号，系统将通过 `AbortController` 协同中断当前 Handler 的物理执行。
-4. **指数退避与随机抖动 (Exponential Backoff with Jitter)**：对于可重试失败，系统根据重试次数自动计算下一次可执行时间 (`available_at`)：
-   $$\text{延迟时间} = \min\left(300, 5 \times 2^{\text{attempt}-1} \times \text{jitter}\right) \text{ 秒}$$
-5. **状态对账与终态收敛 (Reconciliation)**：单元结算时更新原子计数。当所有单元消费完毕且 `discovery_complete = true`，主任务自动收敛至 `COMPLETED` 或 `FAILED` 并触发 `finalizeTask` 回调。
-6. **跨节点实时唤醒与兜底机制 (Redis Pub/Sub & Fallback)**：当新任务创建、恢复或流式发现时，系统通过 Redis Pub/Sub 广播频道 (`jobs:wake_channel`) 实时发布唤醒信号（`notifyJobsAvailable`），驱动多节点集群下的 `JobRunner` 立即抢占执行。为保证高可用与强容错，`JobRunner` 保留了 5 秒 `setInterval` 定时轮询与 `JobSweeper` 后台巡检作为兜底机制，即使 Redis 发生闪断或 Pub/Sub 丢包，任务依然能确保在 5 秒内被正确拉起执行。
+1. **认领**：按优先级（变化先于回填）认领到期的行，用 `FOR NO KEY UPDATE SKIP LOCKED` 加租约，跳过用户暂停的库。worker 每秒轮询一次；过期租约由认领本身回收，没有单独的 sweeper。
+2. **租约与 fencing**：租约 60 秒，每 20 秒续一次。先写结果，再 fence 队列行，丢了租约的 worker 提交不了。所有写入方都先锁结果行、后锁队列行。
+3. **重试**：失败后带抖动指数退避（5 秒 × 4ⁿ，最多 300 秒），默认最多 5 次，之后把失败记到结果行上。被限流的运行只推迟，不计次数。provider 拒绝的输入在变化之前不再重试。
+4. **至少一次**：崩溃后同一次运行可能重复，所以 handler 必须幂等。
+5. **巡检与扫描**：启动时和之后每小时，给每个库的每条流水线入队一次 scan，按页扫描媒体，把缺的或过期的补进队列。
 
-### 6.3 容错与自动修复 (`JobSweeper`)
+### 6.3 封面生成与调和行为规范 (Cover Generation & Reconciliation Specification)
 
-后台定时巡检器 `JobSweeper` 每 30 秒自动执行自我修复：
-- **`reclaimExpiredLeases`**：回收已崩溃 Worker 留下的死锁租约，重置为 `PENDING` 或标记超限失败。
-- **`recoverInterruptedDiscovery`**：自动拉起服务重启前未完成的流式数据扫描。
-- **`reconcileReadyTasks`**：审计并修复状态未对齐的主任务。
-- **`purgeOldTasks`**：清理 7 天前已处于终态的历史任务与单元数据，防止数据库膨胀。
-
-### 6.4 封面生成与调和行为规范 (Cover Generation & Reconciliation Specification)
-
-媒体封面的生成、更新与调和逻辑由 `CoverJobHandler` 与 `CoverService` 共同维护，遵循以下行为规范：
+媒体封面的生成、更新与调和逻辑由 `cover` 流水线与 `CoverService` 共同维护，遵循以下行为规范：
 
 1. **手动重新生成与同规格覆盖**：
    - 当对已有封面的媒体手动触发生成某规格（如 `LOW` + `MEDIUM`）时，系统会重新提取渲染源媒体帧，将渲染出的 AVIF 文件上传至 S3 **覆盖原有 S3 路径**。
@@ -164,9 +152,9 @@ flowchart TD
 2. **多规格独立并存**：
    - 若媒体已存在 `LOW` + `MEDIUM` + `HIGH` 三种规格，而任务仅派发了 `LOW` + `MEDIUM`，系统仅渲染并更新 `LOW` 与 `MEDIUM` 规格。
    - 已存在的 `HIGH` 规格 `Track` 记录与 S3 文件完全保留（保持 `ACTIVE` 状态），不会受到影响。
-3. **`COVER_RECONCILE` 调和规则**：
-   - **增量调和 (Incremental Reconcile)**：调和任务仅负责补齐当前媒体库配置（`library.cover_qualities`）所要求的规格。
-   - **配置缩减不裁切**：若媒体库配置由 `[LOW, MEDIUM, HIGH]` 缩减为 `[LOW, MEDIUM]`，`COVER_RECONCILE` **绝不清理或删除**已有的 `HIGH` 封面。
-   - **配置恢复免重复计算**：若后续重新将配置改回 `[LOW, MEDIUM, HIGH]`，再次运行 `COVER_RECONCILE` 时，系统会识别到 `HIGH` 封面已存在且关联源文件未变，自动标记 `isAlreadyCompleted = true` 跳过渲染。
+3. **`cover` 流水线规则**：
+   - **增量调和 (Incremental Reconcile)**：流水线只负责补齐当前媒体库配置（`library.cover_qualities`）所要求的规格。
+   - **配置缩减不裁切**：若媒体库配置由 `[LOW, MEDIUM, HIGH]` 缩减为 `[LOW, MEDIUM]`，`cover` 流水线**绝不清理或删除**已有的 `HIGH` 封面。
+   - **配置恢复免重复计算**：若后续重新将配置改回 `[LOW, MEDIUM, HIGH]`，库扫描会找到已有的 `HIGH` 封面；只要它仍是由未变的源文件生成的，就算作最新，不会重新渲染。
 
 

@@ -43,17 +43,17 @@ The config resides in `drizzle.config.ts`.
 
 ---
 
-## 🔄 Durable Background Job Engine (PostgreSQL Queue & JobRunner)
+## 🔄 Background Job Queue
 
-Because downloading media assets and generating video covers is I/O intensive, the system manages background execution using PostgreSQL as the single source of truth (`AsyncTask` / `AsyncTaskUnit`) driven by an in-process Bun `JobRunner`.
+Downloads, covers, avatars and AI work run on a reconcile queue kept in PostgreSQL (`job_queue`) and an in-process `QueueWorker` (`src/infra/queue`).
 
 ### 1. Key Principles
-- **PostgreSQL Single Source of Truth**: All tasks and units are transactionally committed to DB prior to execution.
-- **Leases and Fencing**: Claims use `SELECT ... FOR UPDATE SKIP LOCKED`, database-clock leases, and fencing tokens so stale workers cannot commit queue state.
-- **At-Least-Once Execution**: A worker can crash after producing an external side effect but before committing its result, so handlers must make business side effects idempotent.
-- **Automatic Recovery**: The sweeper reclaims expired unit leases, resumes discovery through a separate fenced lease, and reconciles unfinished terminal transitions.
+- **Reconcile, not replay**: writers report which aspect of a subject changed (`markChanged`) in the same transaction; each pipeline reads the subject's current state and brings its outputs up to date. One row per queue and subject, so repeated changes merge.
+- **Leases and fencing**: claims use `FOR NO KEY UPDATE SKIP LOCKED` with database-clock leases renewed by a heartbeat. Results are written before the queue row is fenced, so a worker that lost its lease cannot commit.
+- **At-least-once execution**: a run can repeat after a crash, so handlers must be idempotent.
+- **Self-healing**: expired leases are reclaimed by the next claim, and an hourly patrol scans every library for work no writer reported.
 
-> 📖 **Task Engine & Cover Reconciliation Specification**: For architecture details, task engine rules, and cover generation/reconciliation policies (`COVER_RECONCILE`, multi-quality coexistence and overwriting), refer to the [System Design Document](../../docs/system_design.md#64-cover-generation--reconciliation-specification) and [Task Engine Extension Guide](../../docs/task_engine_extension.md).
+> 📖 **Specification**: see [System Design, section 6](../../docs/system_design.md#6-background-job-queue) for the queue and cover rules, and section 11 of [async_task_improvements.zh-Hans.md](../../docs/async_task_improvements.zh-Hans.md) for the full design.
 
 ---
 

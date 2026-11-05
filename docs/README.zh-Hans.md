@@ -40,7 +40,7 @@
 - 🎬 **统一 DASH 分片流播**：针对音视频分离的多轨媒体源，在后台解析 `sidx` 索引块范围并生成 SegmentBase 元数据，通过 `dash.js` 实现免转码、低延迟流播。
 - 🏷️ **多租户媒体库与标签管理**：基于 Library 的物理隔离，支持 RBAC 细粒度授权（`VIEWER` / `EDITOR` / `ADMIN`），提供标签别名映射与规范化审核流。
 - 🔍 **AI 混合检索与富化**：结合 SQL Trigram 模糊匹配、Gemini 文本向量 (`text-embedding-004`) 与视觉向量 (`multimodal-embedding-004`)，使用倒数排序融合 (RRF) 算法实现精准检索与 AI 标注。
-- ⚡ **自研持久化任务引擎**：基于 PostgreSQL 的任务队列引擎，利用 `SKIP LOCKED` 原子租约锁、指数退避重试与 `JobSweeper` 清扫机制，零依赖高可靠运行。
+- ⚡ **自研持久化任务队列**：基于 PostgreSQL 的调和队列，利用 `SKIP LOCKED` 租约与 fencing、指数退避重试，以及每小时补漏的巡检，零依赖高可靠运行。
 
 ---
 
@@ -173,13 +173,12 @@ kubectl apply -f deploy/argocd/application.yaml
 
 [`docs/`](./) 目录下包含完整的系统架构与技术设计文档：
 
-- 📐 **[系统设计与数据库规范说明](./system_design.zh-Hans.md)** - 数据模型、软删除与生命周期、JobRunner 任务引擎规范。
+- 📐 **[系统设计与数据库规范说明](./system_design.zh-Hans.md)** - 数据模型、软删除与生命周期、后台任务队列。
 - 🧭 **[Media / Track 数据架构改进任务书](./media_track_improvement_tasks.zh-Hans.md)** - Media、Track、File 身份、生命周期、应用层一致性与迁移任务。
 - 🔌 **[媒体元数据同步工作流 & API 契约](./external_api.contract.zh-Hans.md)** - 客户端对接规范、`external_id` 生成逻辑与 API 结构。
 - 🔄 **[Metadata 物理保存与清理流程详细说明](./save_metadata_flow.zh-Hans.md)** - `saveMetadata` 执行流程、差异检测与 S3 软删除清扫。
 - 🔍 **[多空间 AI 混合检索架构规范](./ai_hybrid_search.zh-Hans.md)** - 向量空间隔离、pgvector HNSW 索引与 RRF 排序融合。
 - ⚖️ **[系统架构设计取舍与 Trade-offs](./trade-offs.zh-Hans.md)** - Multi-Track 设计与 DASH 分片解析的取舍考量。
-- 🛠️ **[任务执行引擎接入指南：新增任务类型](./task_engine_extension.zh-Hans.md)** - 基于策略模式扩展后台异步任务处理器的指南。
 - 📜 **[TypeScript 编写规范与避坑指南](./code.rule.zh-Hans.md)** - Temporal API、Web API Streams 和 `bun:File` 强制编码规范。
 
 ---
