@@ -10,11 +10,8 @@ export default defineNuxtConfig({
             link: [{ rel: "icon", type: "image/svg+xml", href: "/logo.svg" }],
         },
     },
-    future: {
-        compatibilityVersion: 5,
-    },
     experimental: {
-        // compatibilityVersion 5 drops Nitro's built-in auto-imports, but @nuxtjs/i18n's server runtime
+        // Nuxt 5 drops Nitro's built-in auto-imports, but @nuxtjs/i18n's server runtime
         // still imports useRuntimeConfig from "#imports".
         nitroAutoImports: true,
     },

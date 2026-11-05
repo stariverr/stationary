@@ -21,7 +21,7 @@ export const useSafeEnv = () => {
     } catch (e) {
         console.error("Invalid environment variables:", e);
         // In development, we want to know immediately
-        if (process.dev) {
+        if (import.meta.dev) {
             throw e;
         }
         // Fallback or handle error gracefully in production
