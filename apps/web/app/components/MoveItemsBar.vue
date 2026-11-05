@@ -2,6 +2,7 @@
 import type { AcceptableValue } from "reka-ui";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { toast } from "vue-sonner";
 import { useLibraryStore } from "@/stores/library";
 import { CheckSquare, Loader2, MoveRight, X, FileImage, RefreshCw, Sparkles, Link } from "@lucide/vue";

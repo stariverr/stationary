@@ -140,7 +140,7 @@ const scrollNext = () => swiperInstance.value?.slideNext();
                     class="flex items-center justify-center bg-transparent"
                 >
                     <div class="w-full h-full flex items-center justify-center relative cursor-pointer" @click="handleMediaClick">
-                        <VideoPlayer
+                        <MediaVideoPlayer
                             v-if="media.type === 'VIDEO'"
                             :src="media.url || ''"
                             :poster="media.thumbnail || media.poster || ''"
@@ -219,7 +219,7 @@ const scrollNext = () => swiperInstance.value?.slideNext();
                 class="bg-transparent flex items-center justify-center"
             >
                 <div class="w-full h-full flex items-center justify-center relative cursor-pointer" @click="handleMediaClick">
-                    <VideoPlayer
+                    <MediaVideoPlayer
                         v-if="media.type === 'VIDEO'"
                         :src="media.url || ''"
                         :poster="media.thumbnail || media.poster || ''"

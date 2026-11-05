@@ -652,7 +652,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                         >
                                             <Loader2 class="w-8 h-8 animate-spin text-zinc-400" />
                                         </div>
-                                        <VideoPlayer
+                                        <MediaVideoPlayer
                                             v-else-if="media.type?.toLowerCase() === 'video'"
                                             :src="media.url || media.media_url || ''"
                                             :tracks="media.tracks"

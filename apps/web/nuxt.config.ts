@@ -1,5 +1,25 @@
 import tailwindcss from "@tailwindcss/vite";
 
+// Video.js elements used by components/MediaVideoPlayer.vue.
+const videoJsElements = new Set([
+    "video-player",
+    "media-container",
+    "media-controls",
+    "media-controls-group",
+    "media-play-button",
+    "media-pip-button",
+    "media-fullscreen-button",
+    "media-time",
+    "media-time-slider",
+    "media-slider-track",
+    "media-slider-buffer",
+    "media-slider-fill",
+    "media-slider-thumb",
+    "media-gesture",
+    "media-hotkey",
+    "dash-video",
+]);
+
 const backendApiBaseUrl = process.env.NUXT_API_BASE_URL || "http://127.0.0.1:9400/api";
 
 export default defineNuxtConfig({
@@ -19,14 +39,16 @@ export default defineNuxtConfig({
     ssr: true,
     vue: {
         compilerOptions: {
-            isCustomElement: (tag) => tag.startsWith("media-"),
+            isCustomElement: (tag) => videoJsElements.has(tag),
         },
     },
     devtools: { enabled: false },
     devServer: {
         port: 4000,
     },
-    modules: ["@pinia/nuxt", "shadcn-nuxt", "@nuxtjs/i18n"],
+    modules: ["@pinia/nuxt", "@nuxtjs/i18n"],
+    // shadcn-vue components are imported explicitly; keep them out of auto-registration.
+    components: [{ path: "~/components", ignore: ["ui/**"] }],
     i18n: {
         locales: [
             { code: "en-US", file: "en-US.json", name: "English (US)" },
@@ -49,7 +71,7 @@ export default defineNuxtConfig({
     vite: {
         plugins: [tailwindcss()],
         optimizeDeps: {
-            include: ["@vueuse/core", "@tanstack/vue-query", "@lucide/vue", "swiper/vue", "@js-temporal/polyfill", "vidstack"],
+            include: ["@vueuse/core", "@tanstack/vue-query", "@lucide/vue", "swiper/vue", "@js-temporal/polyfill"],
         },
     },
     css: ["@/assets/css/main.css"],
@@ -73,9 +95,5 @@ export default defineNuxtConfig({
             appUrl: process.env.NUXT_PUBLIC_APP_URL || "http://localhost:4000",
             turnstileSiteKey: process.env.NUXT_PUBLIC_TURNSTILE_SITE_KEY || "1x00000000000000000000AA",
         },
-    },
-    shadcn: {
-        prefix: "",
-        componentDir: "@/components/ui",
     },
 });

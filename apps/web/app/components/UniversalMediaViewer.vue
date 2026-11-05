@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch, onUnmounted } from "vue";
 import { Music, FileText, FileImage, ShieldAlert } from "@lucide/vue";
-import VideoPlayer from "./VideoPlayer.vue";
+import MediaVideoPlayer from "./MediaVideoPlayer.vue";
 import LivePhotoPlayer from "./LivePhotoPlayer.vue";
 import HeicImage from "./HeicImage.vue";
 import { isHeic } from "@/utils/heic-decoder";
@@ -554,7 +554,7 @@ onUnmounted(() => {
             <!-- 1. VIDEO -->
             <template v-if="media.type === 'VIDEO'">
                 <div class="w-full h-full max-w-full max-h-full flex items-center justify-center p-0">
-                    <VideoPlayer
+                    <MediaVideoPlayer
                         v-if="defaultVideoSrc"
                         :src="defaultVideoSrc"
                         :poster="defaultPosterUrl"

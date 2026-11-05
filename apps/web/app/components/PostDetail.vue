@@ -406,7 +406,7 @@ const closeDetail = () => {
         idleTimer = null;
     }
     resetZoomRotate();
-    if (route.params.id) navigateTo("/");
+    if ("id" in route.params) navigateTo("/");
 };
 
 const handleResize = () => {
