@@ -53,7 +53,7 @@ Downloads, covers, avatars and AI work run on a reconcile queue kept in PostgreS
 - **At-least-once execution**: a run can repeat after a crash, so handlers must be idempotent.
 - **Self-healing**: expired leases are reclaimed by the next claim, and an hourly patrol scans every library for work no writer reported.
 
-> 📖 **Specification**: see [System Design, section 6](../../docs/system_design.md#6-background-job-queue) for the queue and cover rules, and section 11 of [async_task_improvements.zh-Hans.md](../../docs/async_task_improvements.zh-Hans.md) for the full design.
+> 📖 **Specification**: see [System Design, section 6](../../docs/system_design.md#6-background-job-queue) for the queue and cover rules, and [job_queue.zh-Hans.md](../../docs/job_queue.zh-Hans.md) for the full design.
 
 ---
 

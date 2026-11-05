@@ -116,7 +116,7 @@ The system supports group collaboration using fine-grained permissions. Ownershi
 
 ## 6. Background Job Queue
 
-Background work (downloads, covers, avatars, AI descriptions, search documents and vectors) runs on a reconcile queue kept in PostgreSQL (`job_queue`) and an in-process `QueueWorker`. There is no message broker; Redis is only used to share AI provider rate limits. Code lives in `apps/server/src/infra/queue`; the full design is section 11 of [async_task_improvements.zh-Hans.md](./async_task_improvements.zh-Hans.md).
+Background work (downloads, covers, avatars, AI descriptions, search documents and vectors) runs on a reconcile queue kept in PostgreSQL (`job_queue`) and an in-process `QueueWorker`. There is no message broker; Redis is only used to share AI provider rate limits. Code lives in `apps/server/src/infra/queue`; the full design, its tradeoffs and what is not built yet are in [job_queue.zh-Hans.md](./job_queue.zh-Hans.md) (Chinese).
 
 ```mermaid
 flowchart TD

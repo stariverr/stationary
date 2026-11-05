@@ -175,6 +175,7 @@ kubectl apply -f deploy/argocd/application.yaml
 Detailed specifications and architectural guides are available in the [`docs/`](./docs) directory:
 
 - 📐 **[System Design & Database Specification](./docs/system_design.md)** - Data models, relational schemas, deletion policies, and the background job queue.
+- ⚙️ **[Background Job Queue](./docs/job_queue.zh-Hans.md)** (Chinese) - Design, tradeoffs, what is not built yet, and how to add a pipeline.
 - 🔌 **[Metadata Sync & API Contracts](./docs/external_api.contract.md)** - Integration client schemas, `external_id` deduplication rules, and sync payloads.
 - 🔄 **[Metadata Ingestion Pipeline](./docs/save_metadata_flow.md)** - Execution flow of `saveMetadata`, change detection, and S3 soft-delete lifecycle.
 - 🔍 **[Multi-Space Hybrid Search Spec](./docs/ai_hybrid_search.md)** - Vector space segregation, pgvector HNSW indexing, and RRF rank fusion.

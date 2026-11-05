@@ -72,7 +72,7 @@ const ON_CONFLICT: Record<EnqueueMode, SQL> = {
 
 /**
  * The rows are bound as one array per column, so their number is not limited by the protocol's bind parameters.
- * The NOTIFY is transactional, so workers wake only once the caller's transaction commits.
+ * Workers poll, so the rows are picked up within a second of the caller's transaction committing.
  */
 export async function enqueue(client: DbClient, rows: readonly EnqueueRow[], mode: EnqueueMode = "change"): Promise<void> {
     const unique = new Map<string, EnqueueRow>();

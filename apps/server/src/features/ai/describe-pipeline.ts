@@ -39,7 +39,7 @@ export function describeInputHash(sourceHash: string, target: DescribeTarget): P
     );
 }
 
-/** Deletes the description a media kept from its previous library (§11.13 #2); the new library describes it again. */
+/** Deletes the description a media kept from its previous library; the new library describes it again. */
 async function dropForeignDescription(
     tx: Transaction,
     mediaId: string,

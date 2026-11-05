@@ -117,7 +117,7 @@ erDiagram
 
 ## 6. 后台任务队列 (Background Job Queue)
 
-下载、封面、头像、AI 描述、搜索文档和向量这些后台工作，都跑在 PostgreSQL 里的调和队列（`job_queue`）和进程内的 `QueueWorker` 上。不依赖消息中间件；Redis 只用来在进程之间共享 AI provider 的限流。代码在 `apps/server/src/infra/queue`，完整设计见 [async_task_improvements.zh-Hans.md](./async_task_improvements.zh-Hans.md) 第 11 节。
+下载、封面、头像、AI 描述、搜索文档和向量这些后台工作，都跑在 PostgreSQL 里的调和队列（`job_queue`）和进程内的 `QueueWorker` 上。不依赖消息中间件；Redis 只用来在进程之间共享 AI provider 的限流。代码在 `apps/server/src/infra/queue`，完整设计、取舍和未做的部分见 [job_queue.zh-Hans.md](./job_queue.zh-Hans.md)。
 
 ```mermaid
 flowchart TD

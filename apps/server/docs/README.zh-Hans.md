@@ -53,7 +53,7 @@ bun run db:migrate
 - **至少一次执行**：崩溃后同一次运行可能重复，所以 handler 必须幂等。
 - **自动恢复**：过期租约由下一次认领回收；每小时巡检会扫描每个库，补上写入方漏报的工作。
 
-> 📖 **规范**：队列和封面规则见 [系统设计与数据库规范第 6 节](../../docs/system_design.zh-Hans.md#6-后台任务队列-background-job-queue)，完整设计见 [async_task_improvements.zh-Hans.md](../../docs/async_task_improvements.zh-Hans.md) 第 11 节。
+> 📖 **规范**：队列和封面规则见 [系统设计与数据库规范第 6 节](../../../docs/system_design.zh-Hans.md#6-后台任务队列-background-job-queue)，完整设计见 [job_queue.zh-Hans.md](../../../docs/job_queue.zh-Hans.md)。
 
 ---
 

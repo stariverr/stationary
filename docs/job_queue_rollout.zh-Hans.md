@@ -1,6 +1,6 @@
-# 异步任务重构上线步骤
+# 任务队列重构上线步骤
 
-`refactor/job-queue` 合入 main 后第一次部署时按这里执行。设计见 [async_task_improvements.zh-Hans.md](./async_task_improvements.zh-Hans.md) 第 11 节。
+`refactor/job-queue` 合入 main 后第一次部署时按这里执行。设计见 [job_queue.zh-Hans.md](./job_queue.zh-Hans.md)。
 
 2026-11-04 在一次性数据库上演练过：先推 main 的 schema、写入旧格式的行，再按下面的步骤升级。真实数据量下的耗时没有测过。
 
