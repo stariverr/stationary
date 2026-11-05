@@ -4,9 +4,9 @@ kind: Kustomization
 namespace: stationary
 
 resources:
-  - ../../base
+- ../../base
 
 images:
-  - name: ghcr.io/stariverr/stationary
-    newName: ghcr.io/stariverr/stationary
-    newTag: latest
+- name: ghcr.io/stariverr/stationary
+  newName: ghcr.io/stariverr/stationary
+  newTag: d5b43f2
