@@ -70,6 +70,8 @@ export default defineNuxtConfig({
     },
     vite: {
         plugins: [tailwindcss()],
+        // Module workers, so a worker can import code-split dependencies (libheif in the HEIC decoder).
+        worker: { format: "es" },
         optimizeDeps: {
             include: ["@vueuse/core", "@tanstack/vue-query", "@lucide/vue", "swiper/vue", "@js-temporal/polyfill"],
         },

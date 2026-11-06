@@ -998,7 +998,6 @@
             "zoom_out": "Zoom out",
             "zoom_reset_fit": "Fit to screen",
             "zoom_reset_original": "Original size (1:1)",
-            "rotate_left": "Rotate counterclockwise",
             "rotate_right": "Rotate clockwise",
             "player": {
                 "play": "Play",
@@ -1033,7 +1032,9 @@
                 "audio_tracks": "Audio Tracks",
                 "default_audio": "Default Track",
                 "default_subtitle": "Default Subtitle"
-            }
+            },
+            "download": "Download",
+            "open_original": "Open original in new tab"
         },
         "toasts": {
             "copy_success": "Post link copied",
@@ -1050,7 +1051,8 @@
             "update_success": "Post details updated",
             "update_failed": "Could not update post details",
             "add_tag_failed": "Could not add tag",
-            "remove_tag_failed": "Could not remove tag"
+            "remove_tag_failed": "Could not remove tag",
+            "download_failed": "Download failed"
         }
     },
     "jobs": {

@@ -998,7 +998,6 @@
             "zoom_out": "缩小",
             "zoom_reset_fit": "适应屏幕",
             "zoom_reset_original": "原始尺寸 (1:1)",
-            "rotate_left": "逆时针旋转",
             "rotate_right": "顺时针旋转",
             "player": {
                 "play": "播放",
@@ -1033,7 +1032,9 @@
                 "audio_tracks": "音轨",
                 "default_audio": "默认音轨",
                 "default_subtitle": "默认字幕"
-            }
+            },
+            "download": "下载",
+            "open_original": "在新标签页打开原文件"
         },
         "toasts": {
             "copy_success": "帖子链接已复制",
@@ -1050,7 +1051,8 @@
             "update_success": "帖子详情已更新",
             "update_failed": "无法更新帖子详情",
             "add_tag_failed": "无法添加标签",
-            "remove_tag_failed": "无法移除标签"
+            "remove_tag_failed": "无法移除标签",
+            "download_failed": "下载失败"
         }
     },
     "jobs": {

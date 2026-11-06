@@ -1,17 +1,15 @@
 <script setup lang="ts">
 import {
-    Airplay,
-    ArrowLeft,
     ChevronLeft,
     ChevronRight,
     Gauge,
     Loader2,
     Maximize,
     Minimize,
-    MoreHorizontal,
     Pause,
     PictureInPicture2,
     Play,
+    Settings,
     SlidersHorizontal,
     Subtitles,
     Volume2,
@@ -26,6 +24,7 @@ import "@videojs/html/ui/container";
 import "@videojs/html/ui/controls";
 import "@videojs/html/ui/controls-group";
 import "@videojs/html/ui/play-button";
+import "@videojs/html/ui/mute-button";
 import "@videojs/html/ui/pip-button";
 import "@videojs/html/ui/fullscreen-button";
 import "@videojs/html/ui/time";
@@ -67,9 +66,6 @@ interface Props {
     width?: number | string;
     height?: number | string;
     autoplay?: boolean;
-    title?: string;
-    showBack?: boolean;
-    hideTopControls?: boolean;
 }
 
 interface ProgressiveVariant {
@@ -112,43 +108,14 @@ const props = withDefaults(defineProps<Props>(), {
     width: undefined,
     height: undefined,
     autoplay: true,
-    title: "",
-    showBack: false,
-    hideTopControls: false,
 });
 
 const emit = defineEmits<{
-    (e: "back"): void;
-    (e: "click-player"): void;
-    (e: "controls-change", visible: boolean): void;
-    (e: "user-activity"): void;
     (e: "play"): void;
     (e: "pause"): void;
 }>();
 
 const { t } = useI18n();
-
-let lastPointerDownTime = 0;
-let lastPointerDownX = 0;
-let lastPointerDownY = 0;
-
-const handlePlayerPointerDown = (event: PointerEvent) => {
-    lastPointerDownTime = performance.now();
-    lastPointerDownX = event.clientX;
-    lastPointerDownY = event.clientY;
-    emit("user-activity");
-};
-
-const handlePlayerPointerUp = (event: PointerEvent) => {
-    emit("user-activity");
-    const elapsed = performance.now() - lastPointerDownTime;
-    const dist = Math.hypot(event.clientX - lastPointerDownX, event.clientY - lastPointerDownY);
-    const target = event.target as HTMLElement | null;
-    const isInteractive = target?.closest("button, input, [role='button'], media-time-slider, .video-settings-drawer");
-    if (!isInteractive && elapsed < 350 && dist < 12) {
-        emit("click-player");
-    }
-};
 
 // Player state comes from the Video.js store; every store change re-syncs this snapshot.
 const playerRef = ref<VideoPlayerElement | null>(null);
@@ -174,9 +141,6 @@ const isMuted = computed(() => Boolean(playerState.value?.muted) || playerState.
 const volumeLevel = computed(() => Math.round((playerState.value?.volume ?? 1) * 100));
 const isFullscreen = computed(() => Boolean(playerState.value?.isFullscreen));
 const currentSpeed = computed(() => playerState.value?.playbackRate ?? 1);
-const controlsVisible = computed(() => Boolean(playerState.value?.controlsVisible));
-
-watch(controlsVisible, (visible) => emit("controls-change", visible));
 
 /**
  * The video can report `canplay` before the decoder paints its first frame. The poster overlay stays until
@@ -622,11 +586,7 @@ onBeforeUnmount(() => {
     >
         <ClientOnly>
             <video-player ref="playerRef" class="contents">
-                <media-container
-                    class="player-container relative block h-full w-full"
-                    @pointerdown="handlePlayerPointerDown"
-                    @pointerup="handlePlayerPointerUp"
-                >
+                <media-container class="player-container relative block h-full w-full">
                     <dash-video v-if="isDash" :source.prop="dashSource" class="block h-full w-full">
                         <video
                             ref="videoRef"
@@ -682,7 +642,7 @@ onBeforeUnmount(() => {
                         aria-hidden="true"
                     />
 
-                    <media-gesture type="tap" action="togglePaused" region="center" :disabled="isSettingsOpen" />
+                    <media-gesture type="tap" action="togglePaused" :disabled="isSettingsOpen" />
                     <media-gesture type="doubletap" action="seekStep" value="-10" region="left" :disabled="isSettingsOpen" />
                     <media-gesture type="doubletap" action="seekStep" value="10" region="right" :disabled="isSettingsOpen" />
 
@@ -706,11 +666,8 @@ onBeforeUnmount(() => {
                     </div>
 
                     <media-controls
-                        class="player-controls absolute inset-0 z-30 flex flex-col justify-between box-border pointer-events-none opacity-0 transition-opacity duration-220 pb-[max(12px,env(safe-area-inset-bottom,12px))] bg-gradient-to-t from-black/80 via-transparent to-black/60 data-[visible]:opacity-100"
-                        :class="[
-                            'pt-[max(14px,env(safe-area-inset-top,14px))] px-3.5 sm:px-4 md:px-6',
-                            isSettingsOpen ? '!opacity-100 !pointer-events-auto' : '',
-                        ]"
+                        class="player-controls absolute inset-0 z-30 flex flex-col justify-end box-border pointer-events-none opacity-0 transition-opacity duration-220 px-3.5 sm:px-4 md:px-6 pb-[max(10px,env(safe-area-inset-bottom,10px))] bg-gradient-to-t from-black/70 via-transparent via-25% to-transparent data-[visible]:opacity-100"
+                        :class="isSettingsOpen ? '!opacity-100 !pointer-events-auto' : ''"
                     >
                         <!-- Center play button lives inside the controls so it fades out with them -->
                         <media-play-button
@@ -721,64 +678,10 @@ onBeforeUnmount(() => {
                             <Play class="h-6 w-6 sm:h-7 sm:w-7 translate-x-0.5 fill-current" />
                         </media-play-button>
 
-                        <!-- Top bar: back button, title, PiP, cast, more -->
-                        <media-controls-group
-                            v-if="!props.hideTopControls"
-                            class="top-row pointer-events-auto flex w-full items-center justify-between gap-3 px-0.5 shrink-0"
-                        >
-                            <div class="top-left-cluster flex items-center gap-2 min-w-0">
-                                <button
-                                    v-if="props.showBack"
-                                    type="button"
-                                    class="control-button grid h-8.5 w-8.5 shrink-0 cursor-pointer place-items-center rounded-full bg-zinc-950/80 hover:bg-white/20 border border-white/15 text-white/85 hover:text-white backdrop-blur-xl transition-all duration-140 active:scale-95"
-                                    @click="emit('back')"
-                                >
-                                    <ArrowLeft class="h-4.5 w-4.5" />
-                                </button>
-                                <span
-                                    v-if="props.title"
-                                    class="video-title truncate text-xs sm:text-sm font-medium text-white/95 drop-shadow"
-                                >
-                                    {{ props.title }}
-                                </span>
-                            </div>
-
-                            <div class="top-right-cluster flex items-center gap-1.5 sm:gap-2 shrink-0">
-                                <media-pip-button
-                                    class="control-button relative grid h-8.5 w-8.5 sm:h-9 sm:w-9 md:h-10 md:w-10 shrink-0 cursor-pointer place-items-center rounded-full bg-zinc-950/80 hover:bg-white/20 border border-white/15 text-white/85 hover:text-white backdrop-blur-xl shadow-2xl transition-all duration-150 active:scale-95"
-                                    :aria-label="$t('post_detail.viewer.player.pip')"
-                                >
-                                    <PictureInPicture2 class="h-4 w-4" />
-                                </media-pip-button>
-
-                                <button
-                                    type="button"
-                                    class="control-button grid h-8.5 w-8.5 sm:h-9 sm:w-9 md:h-10 md:w-10 shrink-0 cursor-pointer place-items-center rounded-full bg-zinc-950/80 hover:bg-white/20 border border-white/15 text-white/85 hover:text-white backdrop-blur-xl shadow-2xl transition-all duration-150 active:scale-95"
-                                    :aria-label="$t('post_detail.viewer.player.cast')"
-                                >
-                                    <Airplay class="h-4 w-4" />
-                                </button>
-
-                                <button
-                                    type="button"
-                                    class="control-button grid h-8.5 w-8.5 sm:h-9 sm:w-9 md:h-10 md:w-10 shrink-0 cursor-pointer place-items-center rounded-full border backdrop-blur-xl shadow-2xl transition-all duration-150 active:scale-95"
-                                    :class="
-                                        isSettingsOpen && activeSettingsTab === 'all'
-                                            ? 'border-white/40 bg-white/25 text-white'
-                                            : 'bg-zinc-950/80 hover:bg-white/20 border-white/15 text-white/85 hover:text-white'
-                                    "
-                                    :aria-label="$t('common.more')"
-                                    @click.stop="toggleSettings('all')"
-                                >
-                                    <MoreHorizontal class="h-4.5 w-4.5" />
-                                </button>
-                            </div>
-                        </media-controls-group>
-
                         <!-- Transparent backdrop: click outside closes the drawer -->
                         <div
                             v-if="isSettingsOpen"
-                            class="settings-backdrop pointer-events-auto fixed inset-0 z-45 bg-black/20 max-sm:bg-black/40 backdrop-blur-[1px] sm:backdrop-blur-none cursor-default transition-opacity duration-150"
+                            class="settings-backdrop pointer-events-auto absolute max-sm:fixed inset-0 z-45 bg-black/20 max-sm:bg-black/40 backdrop-blur-[1px] sm:backdrop-blur-none cursor-default transition-opacity duration-150"
                             @click.stop="closeSettings"
                         />
 
@@ -796,7 +699,7 @@ onBeforeUnmount(() => {
                                 class="video-settings-drawer pointer-events-auto absolute z-50 overflow-hidden shadow-2xl backdrop-blur-2xl bg-white/95 text-neutral-900 border border-neutral-200/90 text-xs"
                                 :class="[
                                     'max-sm:fixed max-sm:inset-x-0 max-sm:bottom-0 max-sm:rounded-t-2xl max-sm:max-h-[75vh]',
-                                    'sm:absolute sm:top-[max(56px,calc(env(safe-area-inset-top,0px)+52px))] sm:right-3.5 md:sm:right-6 sm:w-68 sm:rounded-xl sm:max-h-[380px]',
+                                    'sm:absolute sm:bottom-16 sm:right-3.5 md:right-6 sm:w-68 sm:rounded-xl sm:max-h-[380px]',
                                 ]"
                                 @click.stop
                             >
@@ -1114,6 +1017,31 @@ onBeforeUnmount(() => {
                                         <span>{{ formatSpeed(currentSpeed) }}</span>
                                     </button>
 
+                                    <media-mute-button
+                                        class="control-button relative grid h-8 w-8 sm:h-8.5 sm:w-8.5 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 transition-all duration-140 hover:scale-105 hover:bg-white/15 hover:text-white"
+                                        :aria-label="isMuted ? $t('post_detail.viewer.player.unmute') : $t('post_detail.viewer.player.mute')"
+                                    >
+                                        <VolumeX v-if="isMuted" class="h-4 w-4" />
+                                        <Volume2 v-else class="h-4 w-4" />
+                                    </media-mute-button>
+
+                                    <media-pip-button
+                                        class="control-button relative hidden sm:grid h-8 w-8 sm:h-8.5 sm:w-8.5 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 transition-all duration-140 hover:scale-105 hover:bg-white/15 hover:text-white"
+                                        :aria-label="$t('post_detail.viewer.player.pip')"
+                                    >
+                                        <PictureInPicture2 class="h-4 w-4" />
+                                    </media-pip-button>
+
+                                    <button
+                                        type="button"
+                                        class="control-button relative grid h-8 w-8 sm:h-8.5 sm:w-8.5 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 transition-all duration-140 hover:scale-105 hover:bg-white/15 hover:text-white"
+                                        :class="{ 'bg-white/20 text-white': isSettingsOpen && activeSettingsTab === 'all' }"
+                                        :aria-label="$t('common.more')"
+                                        @click.stop="toggleSettings('all')"
+                                    >
+                                        <Settings class="h-4 w-4" />
+                                    </button>
+
                                     <media-fullscreen-button
                                         class="control-button relative grid h-8 w-8 sm:h-8.5 sm:w-8.5 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 transition-all duration-140 hover:scale-105 hover:bg-white/15 hover:text-white"
                                         :aria-label="
@@ -1190,14 +1118,13 @@ onBeforeUnmount(() => {
 }
 
 .player-container:fullscreen .player-controls {
-    padding-top: 36px !important;
     padding-right: max(20px, env(safe-area-inset-right, 20px)) !important;
     padding-bottom: max(18px, env(safe-area-inset-bottom, 18px)) !important;
     padding-left: max(20px, env(safe-area-inset-left, 20px)) !important;
 }
 
 .player-container:fullscreen .video-settings-drawer {
-    bottom: 48px !important;
+    bottom: 72px !important;
     max-height: min(460px, 72vh) !important;
 }
 

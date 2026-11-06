@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch, onUnmounted } from "vue";
+import { useResizeObserver } from "@vueuse/core";
 import { Music, FileText, FileImage, ShieldAlert } from "@lucide/vue";
 import MediaVideoPlayer from "./MediaVideoPlayer.vue";
 import LivePhotoPlayer from "./LivePhotoPlayer.vue";
 import HeicImage from "./HeicImage.vue";
 import { isHeic } from "@/utils/heic-decoder";
-import type { MediaViewerItem, MediaViewerTrack } from "@/types/post";
+import { selectContentTrack, sortTracks } from "@/utils/media";
+import type { MediaViewerItem } from "@/types/post";
 
-type MediaTrack = MediaViewerTrack;
 type MediaItem = MediaViewerItem;
 
 const props = withDefaults(
@@ -18,8 +19,13 @@ const props = withDefaults(
         hideBadge?: boolean;
         zoom?: number;
         rotation?: number;
+        maxZoom?: number;
         autoplay?: boolean;
-        hideTopControls?: boolean;
+        /**
+         * Static stand-in for a neighbouring item: its first frame only, with no player, quality upgrade or gestures.
+         * Turning it off in place makes it the full viewer without repainting what it already shows.
+         */
+        preview?: boolean;
     }>(),
     {
         isLoading: false,
@@ -27,47 +33,20 @@ const props = withDefaults(
         hideBadge: false,
         zoom: 1,
         rotation: 0,
+        maxZoom: 5,
         autoplay: true,
-        hideTopControls: false,
+        preview: false,
     },
 );
 
 const emit = defineEmits<{
     (e: "click-media"): void;
     (e: "zoom-change", zoom: number): void;
-    (e: "controls-change", visible: boolean): void;
-    (e: "user-activity"): void;
+    /** Rendered size of the fitted image relative to its natural pixels; null while unknown. */
+    (e: "fit-scale-change", scale: number | null): void;
     (e: "play"): void;
     (e: "pause"): void;
 }>();
-
-const qualityOrder: Record<string, number> = {
-    HIGH: 3,
-    MEDIUM: 2,
-    LOW: 1,
-};
-
-function sortTracks<T extends { priority?: number; quality?: string }>(tracks: T[]): T[] {
-    return [...tracks].sort((a, b) => {
-        const priorityA = a.priority ?? 999;
-        const priorityB = b.priority ?? 999;
-        if (priorityA !== priorityB) return priorityA - priorityB;
-        const qualA = qualityOrder[a.quality || ""] || 0;
-        const qualB = qualityOrder[b.quality || ""] || 0;
-        return qualB - qualA;
-    });
-}
-
-function selectContentTrack(tracks: MediaTrack[] | undefined, type: string): MediaTrack | undefined {
-    const candidates = sortTracks(
-        (tracks || []).filter((track) => track.type.toUpperCase() === type && track.purpose.toUpperCase() !== "COVER"),
-    );
-    return (
-        candidates.find((track) => track.is_default) ||
-        candidates.find((track) => track.purpose.toUpperCase() === "CONTENT") ||
-        candidates[0]
-    );
-}
 
 // 1. Cover / Poster Track
 const defaultPosterUrl = computed(() => {
@@ -119,23 +98,24 @@ const contentAssetUrl = computed(() => {
 });
 
 /**
- * Persistent 2-Layer Image Quality Cross-Fade Architecture (LQIP / Progressive Loading Best Practice)
+ * Progressive image layers: the low-res cover paints at once and higher-quality sources fade in above it.
  *
- * 1. Base Layer (activeSrcUrl): Always rendered 100% visible (opacity-100) and mounted in DOM.
- *    It NEVER unmounts, resets to opacity-0, or flushes its bitmap when higher-resolution sources arrive.
- * 2. Upgrade Layer (pendingSrcUrl): Preloads incoming high-res image (1440p/4K) in the background
- *    at opacity-0. When native @load event fires, it smoothly cross-fades into view via CSS
- *    transition-opacity duration-350 ease-out over the base layer with ZERO black/blank frames.
+ * Each layer keeps one URL for its whole life, keyed by it, so the element showing an image never changes source and
+ * never decodes it again (HEIC decodes in WASM outside Safari, and a full-size image takes a while to decode either
+ * way). Once a layer has faded in, the layers under it are dropped; the layer itself stays as it is. The drop waits
+ * for the fade's own transitionend, not a timer: a long main-thread task (a HEIC decode) can delay the start of the
+ * fade, and a timer would then remove the layer below while the one above is still transparent.
  */
-const activeSrcUrl = ref<string>("");
-const pendingSrcUrl = ref<string>("");
-const isPendingLoaded = ref<boolean>(false);
-const isCurrentHeic = computed(() => {
-    return isHeic(activeSrcUrl.value) || isHeic(pendingSrcUrl.value) || isHeic(props.media?.url);
-});
+interface ImageLayer {
+    url: string;
+    loaded: boolean;
+}
+const LAYER_FADE_MS = 350;
+const layers = ref<ImageLayer[]>([]);
+/** The blurred backdrop keeps the cover: a full-size decode would only be blurred away. */
+const backdropUrl = computed(() => defaultPosterUrl.value || imageSrcUrl.value);
 const showLoadingSpinner = ref(false);
 let loadingTimer: ReturnType<typeof setTimeout> | null = null;
-let fadeTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const clearLoadingTimer = () => {
     if (loadingTimer) {
@@ -145,15 +125,12 @@ const clearLoadingTimer = () => {
 };
 
 watch(
-    () => [props.media?.id, imageSrcUrl.value, livePhotoImageSrc.value, defaultPosterUrl.value],
+    // A preview that becomes the current item keeps its painted layer and starts the upgrade from there.
+    () => [props.media?.id, imageSrcUrl.value, livePhotoImageSrc.value, defaultPosterUrl.value, props.preview],
     (newValues, oldValues) => {
         const newId = newValues[0];
         const oldId = oldValues?.[0];
         clearLoadingTimer();
-        if (fadeTimeout) {
-            clearTimeout(fadeTimeout);
-            fadeTimeout = null;
-        }
 
         const lowResCoverUrl =
             defaultPosterUrl.value ||
@@ -162,94 +139,100 @@ watch(
             (props.media as any)?.cover_url ||
             "";
         const highResUrl = imageSrcUrl.value || livePhotoImageSrc.value || "";
-
         const baseLayerUrl = lowResCoverUrl || highResUrl;
 
         if (!newId || !baseLayerUrl) {
-            activeSrcUrl.value = "";
-            pendingSrcUrl.value = "";
-            isPendingLoaded.value = false;
+            layers.value = [];
             showLoadingSpinner.value = false;
             return;
         }
 
-        if (newId !== oldId || !activeSrcUrl.value) {
-            // Switched to a different media item or re-entering:
-            // ALWAYS initialize base layer with lowResCoverUrl for instant 0ms painting!
-            activeSrcUrl.value = baseLayerUrl;
-
-            // If highResUrl is present and different from baseLayerUrl, queue highResUrl in pending layer for background loading
-            if (highResUrl && highResUrl !== baseLayerUrl) {
-                pendingSrcUrl.value = highResUrl;
-                isPendingLoaded.value = false;
-            } else {
-                pendingSrcUrl.value = "";
-                isPendingLoaded.value = false;
-            }
-        } else if (highResUrl && activeSrcUrl.value !== highResUrl && pendingSrcUrl.value !== highResUrl) {
-            // Quality upgrade or track URL change while staying on same media
-            pendingSrcUrl.value = highResUrl;
-            isPendingLoaded.value = false;
+        if (newId !== oldId || !layers.value.length) {
+            // A different item: paint the cover at once and queue the full image above it.
+            layers.value = [{ url: baseLayerUrl, loaded: false }];
+            if (highResUrl && highResUrl !== baseLayerUrl && !props.preview) layers.value.push({ url: highResUrl, loaded: false });
+        } else if (!props.preview && highResUrl && !layers.value.some((layer) => layer.url === highResUrl)) {
+            // A quality upgrade or a new track URL for the same item: keep what is shown and fade the new source in.
+            const shown = Math.max(0, layers.value.findLastIndex((layer) => layer.loaded));
+            layers.value = [...layers.value.slice(0, shown + 1), { url: highResUrl, loaded: false }];
         }
 
-        if (newId && (props.media?.type === "IMAGE" || props.media?.type === "LIVE_PHOTO")) {
-            if (!activeSrcUrl.value) {
-                loadingTimer = setTimeout(() => {
-                    if (!activeSrcUrl.value) {
-                        showLoadingSpinner.value = true;
-                    }
-                }, 200);
-            } else {
-                clearLoadingTimer();
-                showLoadingSpinner.value = false;
-            }
-        } else {
-            clearLoadingTimer();
-            showLoadingSpinner.value = false;
-        }
+        showLoadingSpinner.value = false;
     },
     { immediate: true },
 );
 
-const handleBaseLoaded = () => {
+const handleLayerLoaded = async (layer: ImageLayer, event: Event) => {
     clearLoadingTimer();
     showLoadingSpinner.value = false;
+    const image = event.target;
+    if (!(image instanceof HTMLImageElement)) return;
+    // Fade in only once the bitmap is ready, so the fade never starts on an undecoded image.
+    await image.decode().catch(() => {});
+    const index = layers.value.indexOf(layer);
+    if (index < 0) return;
+    layer.loaded = true;
+    // Below the top layer sits only a lower-quality source, whose size is not the image's.
+    if (index === layers.value.length - 1) recordNaturalSize(image);
 };
 
-const handleBaseError = () => {
+/** A layer has faded in over the ones below it, which it now covers for good. */
+const handleLayerShown = (layer: ImageLayer, event: TransitionEvent) => {
+    if (event.propertyName !== "opacity" || !layer.loaded) return;
+    const index = layers.value.indexOf(layer);
+    if (index > 0) layers.value = layers.value.slice(index);
+};
+
+const handleLayerError = (layer: ImageLayer) => {
     clearLoadingTimer();
     showLoadingSpinner.value = false;
+    // Keep showing what loaded before; the base layer stays even if it failed, so the item is never left empty.
+    const index = layers.value.indexOf(layer);
+    if (index > 0) layers.value = layers.value.filter((item) => item !== layer);
 };
 
-const handlePendingLoaded = () => {
-    clearLoadingTimer();
-    showLoadingSpinner.value = false;
-    if (pendingSrcUrl.value) {
-        isPendingLoaded.value = true;
-        fadeTimeout = setTimeout(() => {
-            if (pendingSrcUrl.value) {
-                activeSrcUrl.value = pendingSrcUrl.value;
-                pendingSrcUrl.value = "";
-                isPendingLoaded.value = false;
-            }
-        }, 350);
-    }
-};
+// Fit scale: how large the contained (zoom = 1) image renders relative to its natural pixel size.
+const imageContainerRef = ref<HTMLElement | null>(null);
+const loadedNaturalSize = ref<{ width: number; height: number } | null>(null);
+const containerSize = ref({ width: 0, height: 0 });
 
-const handlePendingError = () => {
-    clearLoadingTimer();
-    showLoadingSpinner.value = false;
-    pendingSrcUrl.value = "";
-    isPendingLoaded.value = false;
-};
+watch(
+    () => props.media?.id,
+    () => {
+        loadedNaturalSize.value = null;
+    },
+);
 
-onUnmounted(() => {
-    clearLoadingTimer();
-    if (fadeTimeout) {
-        clearTimeout(fadeTimeout);
-        fadeTimeout = null;
-    }
+useResizeObserver(imageContainerRef, ([entry]) => {
+    if (!entry) return;
+    containerSize.value = { width: entry.contentRect.width, height: entry.contentRect.height };
 });
+
+const fitScale = computed(() => {
+    const media = props.media;
+    if (!media || (media.type !== "IMAGE" && media.type !== "LIVE_PHOTO")) return null;
+    const natural = media.width && media.height ? { width: media.width, height: media.height } : loadedNaturalSize.value;
+    const { width, height } = containerSize.value;
+    if (!natural || !width || !height) return null;
+    return Math.min(width / natural.width, height / natural.height);
+});
+
+// A preview that becomes the current item reports its scale then.
+watch(
+    [fitScale, () => props.preview],
+    ([scale, preview]) => {
+        if (!preview) emit("fit-scale-change", scale);
+    },
+    { immediate: true },
+);
+
+const recordNaturalSize = (image: HTMLImageElement) => {
+    if (image.naturalWidth && image.naturalHeight) {
+        loadedNaturalSize.value = { width: image.naturalWidth, height: image.naturalHeight };
+    }
+};
+
+onUnmounted(clearLoadingTimer);
 
 // Panning State
 const translateX = ref(0);
@@ -289,7 +272,6 @@ watch(
 );
 
 // Unified Pointer Gesture Controller (Mouse + Touch + Pen)
-const imageContainerRef = ref<HTMLElement | null>(null);
 
 const activePointers = new Map<number, { x: number; y: number }>();
 let pointerDownTime = 0;
@@ -360,7 +342,7 @@ const handlePointerMove = (e: PointerEvent) => {
             const currentDistance = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
             if (initialPinchDistance > 10) {
                 const scaleFactor = currentDistance / initialPinchDistance;
-                let nextZoom = Math.min(5, Math.max(0.1, initialPinchZoom * scaleFactor));
+                let nextZoom = Math.min(props.maxZoom, Math.max(0.1, initialPinchZoom * scaleFactor));
                 emit("zoom-change", parseFloat(nextZoom.toFixed(2)));
             }
         }
@@ -414,13 +396,12 @@ const handleDoubleTap = (clientX: number, clientY: number) => {
 const handlePointerUp = (e: PointerEvent) => {
     if (!activePointers.has(e.pointerId)) return;
 
-    const target = e.currentTarget as HTMLElement;
-    try {
-        target.releasePointerCapture(e.pointerId);
-    } catch {}
-
     const wasPinching = isPinching;
     activePointers.delete(e.pointerId);
+    // After the delete, so the lostpointercapture this fires is a no-op.
+    try {
+        (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {}
 
     if (activePointers.size === 0) {
         isDragging.value = false;
@@ -460,8 +441,9 @@ const handlePointerUp = (e: PointerEvent) => {
     }
 };
 
+// Also bound to lostpointercapture: when the stage claims a swipe, the release never reaches this element.
 const handlePointerCancel = (e: PointerEvent) => {
-    activePointers.delete(e.pointerId);
+    if (!activePointers.delete(e.pointerId)) return;
     if (activePointers.size === 0) {
         isDragging.value = false;
         isPinching = false;
@@ -480,7 +462,7 @@ const handleWheel = (e: WheelEvent) => {
         e.preventDefault();
         const zoomFactor = 1 - e.deltaY * 0.01;
         let nextZoom = props.zoom * zoomFactor;
-        nextZoom = Math.min(5, Math.max(0.1, nextZoom));
+        nextZoom = Math.min(props.maxZoom, Math.max(0.1, nextZoom));
 
         // Zoom towards mouse pointer location
         const target = e.currentTarget as HTMLElement;
@@ -518,11 +500,6 @@ const handleWheel = (e: WheelEvent) => {
 };
 
 onUnmounted(() => {
-    clearLoadingTimer();
-    if (fadeTimeout) {
-        clearTimeout(fadeTimeout);
-        fadeTimeout = null;
-    }
     if (singleTapTimeout) {
         clearTimeout(singleTapTimeout);
         singleTapTimeout = null;
@@ -534,7 +511,7 @@ onUnmounted(() => {
     <div class="relative flex h-full w-full items-center justify-center bg-black select-none" :class="viewerCursorClass">
         <!-- Floating Glassmorphism Loading Indicator (Only shown after 200ms delay for slow loads when no image is visible) -->
         <div
-            v-if="(isLoading && !activeSrcUrl) || showLoadingSpinner"
+            v-if="(isLoading && !layers.length) || showLoadingSpinner"
             class="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-xs z-30 pointer-events-none transition-opacity duration-300"
         >
             <div class="flex items-center gap-2.5 px-4 py-2 rounded-full bg-zinc-950/85 border border-white/15 shadow-2xl backdrop-blur-xl">
@@ -554,8 +531,15 @@ onUnmounted(() => {
             <!-- 1. VIDEO -->
             <template v-if="media.type === 'VIDEO'">
                 <div class="w-full h-full max-w-full max-h-full flex items-center justify-center p-0">
+                    <img
+                        v-if="preview"
+                        :src="defaultPosterUrl || undefined"
+                        class="h-full w-full object-contain select-none pointer-events-none"
+                        draggable="false"
+                        alt=""
+                    />
                     <MediaVideoPlayer
-                        v-if="defaultVideoSrc"
+                        v-else-if="defaultVideoSrc"
                         :src="defaultVideoSrc"
                         :poster="defaultPosterUrl"
                         :tracks="media.tracks"
@@ -564,10 +548,6 @@ onUnmounted(() => {
                         :width="media.width ?? undefined"
                         :height="media.height ?? undefined"
                         :autoplay="props.autoplay"
-                        :hide-top-controls="props.hideTopControls"
-                        @click-player="emit('click-media')"
-                        @controls-change="emit('controls-change', $event)"
-                        @user-activity="emit('user-activity')"
                         @play="emit('play')"
                         @pause="emit('pause')"
                         class="w-full h-full"
@@ -588,6 +568,7 @@ onUnmounted(() => {
                     @pointermove="handlePointerMove"
                     @pointerup="handlePointerUp"
                     @pointercancel="handlePointerCancel"
+                    @lostpointercapture="handlePointerCancel"
                     @wheel="handleWheel"
                 >
                     <!-- Ambient Blur Backdrop -->
@@ -608,7 +589,8 @@ onUnmounted(() => {
                     </template>
                     <LivePhotoPlayer
                         :src="livePhotoImageSrc || defaultPosterUrl"
-                        :live-src="livePhotoVideoSrc"
+                        :placeholder="defaultPosterUrl"
+                        :live-src="preview ? '' : livePhotoVideoSrc"
                         :hide-badge="props.hideBadge"
                         badge-position="top-left-below-header"
                         :width="media.width ?? undefined"
@@ -632,88 +614,37 @@ onUnmounted(() => {
                     @pointermove="handlePointerMove"
                     @pointerup="handlePointerUp"
                     @pointercancel="handlePointerCancel"
+                    @lostpointercapture="handlePointerCancel"
                     @wheel="handleWheel"
                 >
                     <!-- Ambient Blur Backdrop -->
-                    <template v-if="activeSrcUrl || pendingSrcUrl">
-                        <HeicImage
-                            v-if="isCurrentHeic"
-                            :src="(pendingSrcUrl || activeSrcUrl)!"
-                            no-spinner
-                            class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
-                            aria-hidden="true"
-                        />
-                        <img
-                            v-else
-                            :src="(pendingSrcUrl || activeSrcUrl)!"
-                            class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
-                            aria-hidden="true"
-                        />
-                    </template>
-                    <!-- Base Image Layer (Always 100% visible, never unmounts, never becomes opacity-0) -->
-                    <template v-if="activeSrcUrl">
-                        <HeicImage
-                            v-if="isCurrentHeic"
-                            :src="activeSrcUrl"
-                            no-spinner
-                            :alt="media.title || $t('post_detail.viewer.preview')"
-                            class="relative z-10 w-full h-full max-w-full max-h-full object-contain select-none pointer-events-none"
-                            :style="{
-                                transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
-                                transformOrigin: 'center center',
-                                transition: isDragging ? 'none' : 'transform 0.15s ease-out',
-                            }"
-                            @load="handleBaseLoaded"
-                            @error="handleBaseError"
-                            draggable="false"
-                        />
-                        <img
-                            v-else
-                            :src="activeSrcUrl"
-                            :alt="media.title || $t('post_detail.viewer.preview')"
-                            class="relative z-10 w-full h-full max-w-full max-h-full object-contain select-none pointer-events-none"
-                            :style="{
-                                transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
-                                transformOrigin: 'center center',
-                                transition: isDragging ? 'none' : 'transform 0.15s ease-out',
-                            }"
-                            @load="handleBaseLoaded"
-                            @error="handleBaseError"
-                            draggable="false"
-                        />
-                    </template>
-                    <!-- High-Res Upgrade Layer (Smoothly fades in over base layer when loaded) -->
-                    <template v-if="pendingSrcUrl">
-                        <HeicImage
-                            v-if="isCurrentHeic"
-                            :src="pendingSrcUrl"
-                            no-spinner
-                            class="absolute z-20 w-full h-full max-w-full max-h-full object-contain select-none pointer-events-none transition-opacity duration-350 ease-out"
-                            :class="isPendingLoaded ? 'opacity-100' : 'opacity-0'"
-                            :style="{
-                                transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
-                                transformOrigin: 'center center',
-                                transition: isDragging ? 'none' : 'transform 0.15s ease-out, opacity 0.35s ease-out',
-                            }"
-                            @load="handlePendingLoaded"
-                            @error="handlePendingError"
-                            aria-hidden="true"
-                        />
-                        <img
-                            v-else
-                            :src="pendingSrcUrl"
-                            class="absolute z-20 w-full h-full max-w-full max-h-full object-contain select-none pointer-events-none transition-opacity duration-350 ease-out"
-                            :class="isPendingLoaded ? 'opacity-100' : 'opacity-0'"
-                            :style="{
-                                transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
-                                transformOrigin: 'center center',
-                                transition: isDragging ? 'none' : 'transform 0.15s ease-out, opacity 0.35s ease-out',
-                            }"
-                            @load="handlePendingLoaded"
-                            @error="handlePendingError"
-                            aria-hidden="true"
-                        />
-                    </template>
+                    <HeicImage
+                        v-if="backdropUrl"
+                        :src="backdropUrl"
+                        no-spinner
+                        class="absolute inset-0 w-full h-full object-cover filter blur-3xl opacity-25 scale-110 pointer-events-none select-none"
+                        aria-hidden="true"
+                    />
+                    <!-- Image layers, lowest quality first; HeicImage passes other formats straight to <img> -->
+                    <HeicImage
+                        v-for="(layer, index) in layers"
+                        :key="layer.url"
+                        :src="layer.url"
+                        no-spinner
+                        :alt="index === 0 ? media.title || $t('post_detail.viewer.preview') : ''"
+                        :aria-hidden="index > 0 || undefined"
+                        class="absolute inset-0 z-10 w-full h-full object-contain select-none pointer-events-none"
+                        :class="index === 0 || layer.loaded ? 'opacity-100' : 'opacity-0'"
+                        :style="{
+                            transform: `translate(${translateX}px, ${translateY}px) scale(${zoom}) rotate(${rotation}deg)`,
+                            transformOrigin: 'center center',
+                            transition: isDragging ? 'none' : `transform 0.15s ease-out, opacity ${LAYER_FADE_MS}ms ease-out`,
+                        }"
+                        @load="handleLayerLoaded(layer, $event)"
+                        @transitionend="handleLayerShown(layer, $event)"
+                        @error="handleLayerError(layer)"
+                        draggable="false"
+                    />
                 </div>
             </template>
 

@@ -4,26 +4,28 @@ import {
     AlertTriangle,
     ChevronLeft,
     ChevronRight,
+    Download,
+    ExternalLink,
     FileImage,
     Film,
     Layers,
     Link as LinkIcon,
     ListFilter,
+    Loader2,
     Maximize2,
+    Minimize2,
     Music,
     User,
     X,
-    RotateCcw,
     RotateCw,
     ZoomIn,
     ZoomOut,
-    Maximize,
-    CircleDotDashed,
 } from "@lucide/vue";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useQueryClient } from "@tanstack/vue-query";
 import { toast } from "vue-sonner";
 import { usePostMediaQuery } from "@/composables/usePostMediaQuery";
+import { SWIPE_GAP_PX } from "@/composables/useSwipeNavigation";
 import { useApi } from "@/composables/useApi";
 import type { ApiResponse } from "@/types/api";
 import {
@@ -65,91 +67,49 @@ const activeMediaId = ref<string | null>(null);
 const currentIndex = ref(0);
 const activeTab = ref<"details" | "management">("details");
 const isMediaOnly = ref(false);
-const isControlsVisible = ref(true);
 const isMobile = ref(false);
 const isMounted = ref(false);
 
+/**
+ * Stage chrome (header, nav arrows, image toolbar) is always shown in the split view. In immersive mode it
+ * auto-hides only while a video plays, matching the player's own controls; a tap on an image toggles it.
+ */
+const CHROME_IDLE_DELAY = 2500;
+const isChromeHidden = ref(false);
+const isVideoPlaying = ref(false);
+const isChromeVisible = computed(() => !isMediaOnly.value || !isChromeHidden.value);
+
 let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
-const resetIdleTimer = () => {
-    isControlsVisible.value = true;
+const clearIdleTimer = () => {
     if (idleTimer) {
         clearTimeout(idleTimer);
         idleTimer = null;
     }
-    if (isMediaOnly.value) {
+};
+
+const showChrome = () => {
+    isChromeHidden.value = false;
+    clearIdleTimer();
+    if (isMediaOnly.value && isVideoPlaying.value) {
         idleTimer = setTimeout(() => {
-            isControlsVisible.value = false;
-        }, 3500);
+            isChromeHidden.value = true;
+        }, CHROME_IDLE_DELAY);
     }
 };
 
-const handlePointerActivity = () => {
-    if (isMediaOnly.value && isControlsVisible.value) {
-        resetIdleTimer();
-    }
-};
-
-const isVideoPlaying = ref(false);
-
-const handlePlayerControlsChange = (visible: boolean) => {
-    if (!isMediaOnly.value) return;
-    isControlsVisible.value = visible;
-    if (visible) {
-        resetIdleTimer();
-    } else if (idleTimer) {
-        clearTimeout(idleTimer);
-        idleTimer = null;
-    }
+const handleStageActivity = () => {
+    if (isMediaOnly.value && isVideoPlaying.value) showChrome();
 };
 
 const handlePlayerPlay = () => {
     isVideoPlaying.value = true;
-    if (idleTimer) {
-        clearTimeout(idleTimer);
-        idleTimer = null;
-    }
-    // Auto-immerse cleanly shortly after video starts playing
-    idleTimer = setTimeout(() => {
-        isControlsVisible.value = false;
-    }, 1500);
+    showChrome();
 };
 
 const handlePlayerPause = () => {
     isVideoPlaying.value = false;
-    isControlsVisible.value = true;
-    resetIdleTimer();
-};
-
-// Mobile Touch Swipe Gesture for switching media
-let touchStartX = 0;
-let touchStartY = 0;
-let touchStartTime = 0;
-
-const handleStageTouchStart = (e: TouchEvent) => {
-    const touch = e.touches[0];
-    if (touch) {
-        touchStartX = touch.clientX;
-        touchStartY = touch.clientY;
-        touchStartTime = performance.now();
-    }
-};
-
-const handleStageTouchEnd = (e: TouchEvent) => {
-    const touch = e.changedTouches[0];
-    if (touch) {
-        const deltaX = touch.clientX - touchStartX;
-        const deltaY = touch.clientY - touchStartY;
-        const elapsed = performance.now() - touchStartTime;
-
-        if (zoomLevel.value <= 1 && Math.abs(deltaX) > 50 && Math.abs(deltaX) > Math.abs(deltaY) * 1.4 && elapsed < 450) {
-            if (deltaX < 0 && canNext.value) {
-                nextMedia();
-            } else if (deltaX > 0 && canPrevious.value) {
-                previousMedia();
-            }
-        }
-    }
+    showChrome();
 };
 
 const currentMedia = computed<PostMediaSummary | null>(() => {
@@ -170,10 +130,9 @@ const displayMediaTitle = computed(() => {
     }
     return title;
 });
-const canPrevious = computed(() => postMediaList.value.length > 1 || currentIndex.value > 0 || mediaPage.value > 1);
-const canNext = computed(
-    () => postMediaList.value.length > 1 || currentIndex.value < postMediaList.value.length - 1 || mediaPage.value < mediaTotalPages.value,
-);
+// Navigation loops, so either way is open once there is more than one item.
+const canPrevious = computed(() => mediaTotal.value > 1);
+const canNext = computed(() => mediaTotal.value > 1);
 const platformLabel = computed(() => t(`platforms.${selectedPost.value?.platform || "UNKNOWN"}`));
 const isZoomableMedia = computed(() => currentMedia.value?.type === MediaType.IMAGE || currentMedia.value?.type === MediaType.LIVE_PHOTO);
 const formatMediaType = (type?: MediaType | null) => getMediaTypeLabel(type, t);
@@ -191,6 +150,32 @@ const getErrorMessage = (error: unknown): string => {
     return "";
 };
 
+const currentOriginalTrack = computed(() => (currentMedia.value ? selectOriginalTrack(currentMedia.value) : undefined));
+const isDownloading = ref(false);
+
+const downloadCurrentMedia = async () => {
+    const media = currentMedia.value;
+    const track = currentOriginalTrack.value;
+    if (!media || !track || isDownloading.value) return;
+
+    isDownloading.value = true;
+    try {
+        const response = await useApi<ApiResponse<{ url: string }>>(`/media/${media.id}/tracks/${track.id}/download-url`);
+        if (!response.success || !response.data) {
+            throw new Error(response.message || t("post_detail.toasts.download_failed"));
+        }
+        // The URL answers with Content-Disposition: attachment, so the browser saves it without leaving the page.
+        const link = document.createElement("a");
+        link.href = response.data.url;
+        link.rel = "noopener";
+        link.click();
+    } catch (error: unknown) {
+        toast.error(t("post_detail.toasts.download_failed"), { description: getErrorMessage(error) });
+    } finally {
+        isDownloading.value = false;
+    }
+};
+
 const isEditingTracks = ref(false);
 const trackEditMediaId = ref<string | undefined>(undefined);
 const isOrphanPickerOpen = ref(false);
@@ -201,35 +186,39 @@ const zoomLevel = ref(1);
 const rotationAngle = ref(0);
 
 const MIN_ZOOM = 0.1;
-const MAX_ZOOM = 5;
-const ZOOM_STEP = 0.1;
+const MAX_FIT_ZOOM = 5;
+const ZOOM_FACTOR = 1.25;
+
+// Zoom is relative to the fitted image; fitScale converts it to the image's natural pixels.
+const fitScale = ref<number | null>(null);
+const actualSizeZoom = computed(() => (fitScale.value ? 1 / fitScale.value : null));
+const maxZoom = computed(() => Math.max(MAX_FIT_ZOOM, actualSizeZoom.value ?? 0));
+const zoomPercent = computed(() => Math.round(zoomLevel.value * (fitScale.value ?? 1) * 100));
+const isFitZoom = computed(() => zoomLevel.value === 1);
 
 const clampZoom = (level: number): number => {
     if (!Number.isFinite(level)) return 1;
-    return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(level * 100) / 100));
-};
-
-const zoomIn = () => {
-    zoomLevel.value = clampZoom(zoomLevel.value + ZOOM_STEP);
-};
-
-const zoomOut = () => {
-    zoomLevel.value = clampZoom(zoomLevel.value - ZOOM_STEP);
+    return Math.min(maxZoom.value, Math.max(MIN_ZOOM, Math.round(level * 100) / 100));
 };
 
 const zoomTo = (level: number) => {
     zoomLevel.value = clampZoom(level);
 };
 
+const zoomIn = () => zoomTo(zoomLevel.value * ZOOM_FACTOR);
+const zoomOut = () => zoomTo(zoomLevel.value / ZOOM_FACTOR);
+
+// The percentage button switches between fitting the stage and the image's natural pixels.
+const toggleActualSize = () => {
+    if (!isFitZoom.value || !actualSizeZoom.value) zoomTo(1);
+    else zoomTo(actualSizeZoom.value);
+};
+
 const handleZoomChange = (level: number) => {
     zoomTo(level);
 };
 
-const rotateLeft = () => {
-    rotationAngle.value = (rotationAngle.value - 90) % 360;
-};
-
-const rotateRight = () => {
+const rotateClockwise = () => {
     rotationAngle.value = (rotationAngle.value + 90) % 360;
 };
 
@@ -244,6 +233,7 @@ watch(
     () => {
         isVideoPlaying.value = false;
         resetZoomRotate();
+        showChrome();
     },
 );
 
@@ -265,11 +255,6 @@ const resetViewState = () => {
     activeMediaId.value = null;
     activeTab.value = "details";
     isMediaOnly.value = false;
-    isControlsVisible.value = true;
-    if (idleTimer) {
-        clearTimeout(idleTimer);
-        idleTimer = null;
-    }
 };
 
 watch(
@@ -280,17 +265,7 @@ watch(
     { immediate: true },
 );
 
-watch(isMediaOnly, (val) => {
-    if (val) {
-        resetIdleTimer();
-    } else {
-        if (idleTimer) {
-            clearTimeout(idleTimer);
-            idleTimer = null;
-        }
-        isControlsVisible.value = true;
-    }
-});
+watch(isMediaOnly, showChrome);
 
 watch(postMediaList, (newList) => {
     if (newList.length === 0) {
@@ -333,8 +308,9 @@ const previousMedia = async () => {
         return;
     }
 
-    // Loop back to the last item
-    if (postMediaList.value.length > 1) {
+    // Before the first item: loop to the last one.
+    if (mediaTotal.value > 1) {
+        if (mediaPage.value !== mediaTotalPages.value) await fetchPage({ page: mediaTotalPages.value });
         const last = postMediaList.value[postMediaList.value.length - 1];
         if (last) selectMedia(last.id);
     }
@@ -356,42 +332,68 @@ const nextMedia = async () => {
         return;
     }
 
-    // Loop back to the first item
-    if (postMediaList.value.length > 1) {
+    // Past the last item: loop to the first one.
+    if (mediaTotal.value > 1) {
+        if (mediaPage.value !== 1) await fetchPage({ page: 1 });
         const first = postMediaList.value[0];
         if (first) selectMedia(first.id);
     }
 };
 
+/**
+ * The swipe strip: the current item with its neighbours beside it. Slots are keyed by media, so after a swipe the
+ * neighbour that slid in becomes the current viewer in place and keeps what it already painted. Within one page the
+ * strip wraps around like the navigation; across a page boundary it shows the gap until that page loads.
+ */
+const stripSlots = computed(() => {
+    const list = postMediaList.value;
+    const current = currentMedia.value;
+    const index = list.findIndex((media) => media.id === current?.id);
+    // No item yet: a single current slot shows the loading or empty state.
+    if (!current || index < 0) return [{ key: "current", media: current, position: 0 }];
+
+    const wraps = mediaTotalPages.value === 1;
+    const at = (i: number) => (wraps ? list[(i + list.length) % list.length] : list[i]);
+    const previous = at(index - 1);
+    const next = at(index + 1);
+    const slots = [{ key: current.id, media: current, position: 0 }];
+    if (previous && previous.id === next?.id) {
+        // Two items: the other one waits on whichever side the swipe pulls from.
+        if (previous.id !== current.id) {
+            slots.push({ key: previous.id, media: previous, position: swipeDirection.value === "previous" ? -1 : 1 });
+        }
+        return slots;
+    }
+    if (previous && previous.id !== current.id) slots.unshift({ key: previous.id, media: previous, position: -1 });
+    if (next && next.id !== current.id) slots.push({ key: next.id, media: next, position: 1 });
+    return slots;
+});
+
+const swipeAreaRef = ref<HTMLElement | null>(null);
+const { style: swipeStyle, isDragging: isSwiping, direction: swipeDirection } = useSwipeNavigation(swipeAreaRef, {
+    // A zoomed-in image pans under drags instead.
+    enabled: () => zoomLevel.value <= 1 && !isLoadingMediaList.value,
+    canPrevious: () => canPrevious.value,
+    canNext: () => canNext.value,
+    navigate: (direction) => (direction === "next" ? nextMedia() : previousMedia()),
+});
+
 const enterMediaOnly = () => {
     if (currentMedia.value) isMediaOnly.value = true;
 };
 
+// Only images and live photos emit this; a tap on a video belongs to the player (play / pause).
 const handleMediaClick = () => {
     if (!isMediaOnly.value) {
         isMediaOnly.value = true;
-    } else {
-        if (currentMedia.value?.type === "VIDEO") {
-            resetIdleTimer();
-        } else {
-            isControlsVisible.value = !isControlsVisible.value;
-            if (isControlsVisible.value) {
-                resetIdleTimer();
-            } else if (idleTimer) {
-                clearTimeout(idleTimer);
-                idleTimer = null;
-            }
-        }
+        return;
     }
+    clearIdleTimer();
+    isChromeHidden.value = !isChromeHidden.value;
 };
 
 const leaveMediaOnly = () => {
     isMediaOnly.value = false;
-    isControlsVisible.value = true;
-    if (idleTimer) {
-        clearTimeout(idleTimer);
-        idleTimer = null;
-    }
 };
 
 const closeDetail = () => {
@@ -400,11 +402,6 @@ const closeDetail = () => {
     }
     selectedPostId.value = null;
     isMediaOnly.value = false;
-    isControlsVisible.value = true;
-    if (idleTimer) {
-        clearTimeout(idleTimer);
-        idleTimer = null;
-    }
     resetZoomRotate();
     if ("id" in route.params) navigateTo("/");
 };
@@ -414,7 +411,7 @@ const handleResize = () => {
 };
 
 const handleKeydown = (event: KeyboardEvent) => {
-    resetIdleTimer();
+    handleStageActivity();
     if (event.defaultPrevented || isEditingTracks.value || isOrphanPickerOpen.value || isCreateMediaOpen.value) return;
     const target = event.target;
     if (
@@ -441,17 +438,12 @@ onMounted(() => {
     handleResize();
     window.addEventListener("resize", handleResize);
     window.addEventListener("keydown", handleKeydown);
-    window.addEventListener("mousemove", handlePointerActivity);
 });
 
 onUnmounted(() => {
     window.removeEventListener("resize", handleResize);
     window.removeEventListener("keydown", handleKeydown);
-    window.removeEventListener("mousemove", handlePointerActivity);
-    if (idleTimer) {
-        clearTimeout(idleTimer);
-        idleTimer = null;
-    }
+    clearIdleTimer();
 });
 
 const copyLink = async () => {
@@ -680,100 +672,129 @@ const confirmTrashMedia = async () => {
             </div>
         </header>
 
-        <!-- Full-screen / Split-view media stage -->
+        <!-- Media stage: split view, or immersive when the details inspector is hidden -->
         <section
-            class="relative flex min-w-0 flex-1 flex-col bg-zinc-950 group/fullscreen overflow-hidden select-none"
+            class="relative flex min-w-0 flex-1 flex-col bg-zinc-950 group/stage overflow-hidden select-none"
             :class="[!isMediaOnly ? 'h-[42vh] shrink-0 md:h-full md:flex-1' : 'h-full flex-1']"
+            @pointermove="handleStageActivity"
+            @pointerdown="handleStageActivity"
         >
-            <!-- Media Viewport: Truly full-screen, p-0, zero black bars reserved -->
+            <!-- The swipe surface stays put while only the content inside it slides, so it keeps every event of a gesture -->
             <div
-                class="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-0"
-                @touchstart="handleStageTouchStart"
-                @touchend="handleStageTouchEnd"
+                ref="swipeAreaRef"
+                class="relative flex min-h-0 flex-1 overflow-hidden touch-pan-y"
+                :class="{ 'cursor-grabbing **:cursor-grabbing': isSwiping }"
             >
-                <!-- Floating Nav Arrows (Visible on both mobile & desktop when multiple media exist) -->
-                <button
-                    v-if="postMediaList.length > 1 && canPrevious && !isVideoPlaying"
-                    type="button"
-                    @pointerdown.stop="resetIdleTimer"
-                    @click.stop="previousMedia"
-                    class="absolute left-2 md:left-5 top-1/2 -translate-y-1/2 flex h-8 w-8 md:h-11 md:w-11 items-center justify-center rounded-full bg-black/50 text-white/90 hover:text-white border border-white/15 backdrop-blur-md hover:bg-black/75 hover:scale-105 active:scale-95 transition-all duration-200 z-30 cursor-pointer shadow-lg"
-                    :class="[!isControlsVisible ? 'opacity-0 pointer-events-none' : 'opacity-80 md:opacity-70 hover:opacity-100']"
-                    :title="$t('post_detail.previous_media')"
-                >
-                    <ChevronLeft class="h-4 w-4 md:h-5 md:w-5" />
-                </button>
-                <button
-                    v-if="postMediaList.length > 1 && canNext && !isVideoPlaying"
-                    type="button"
-                    @pointerdown.stop="resetIdleTimer"
-                    @click.stop="nextMedia"
-                    class="absolute right-2 md:right-5 top-1/2 -translate-y-1/2 flex h-8 w-8 md:h-11 md:w-11 items-center justify-center rounded-full bg-black/50 text-white/90 hover:text-white border border-white/15 backdrop-blur-md hover:bg-black/75 hover:scale-105 active:scale-95 transition-all duration-200 z-30 cursor-pointer shadow-lg"
-                    :class="[!isControlsVisible ? 'opacity-0 pointer-events-none' : 'opacity-80 md:opacity-70 hover:opacity-100']"
-                    :title="$t('post_detail.next_media')"
-                >
-                    <ChevronRight class="h-4 w-4 md:h-5 md:w-5" />
-                </button>
-
-                <!-- Floating Media Counter Pill (When not in fullscreen media-only, centered) -->
-                <div
-                    v-if="!isMediaOnly && mediaTotal > 1"
-                    class="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-xs font-mono font-medium text-white/90 backdrop-blur-md border border-white/10 pointer-events-none select-none shadow-md"
-                >
-                    <span>{{ currentPosition + 1 }}</span>
-                    <span class="opacity-40">/</span>
-                    <span>{{ mediaTotal }}</span>
+                <div class="absolute inset-0" :style="swipeStyle">
+                    <!-- Each slot positions its own wrapper: the viewer's root is relative and would win over a passed class -->
+                    <div
+                        v-for="slot in stripSlots"
+                        :key="slot.key"
+                        class="absolute inset-0"
+                        :style="slot.position ? { transform: `translateX(calc(${slot.position * 100}% + ${slot.position * SWIPE_GAP_PX}px))` } : undefined"
+                        :inert="slot.position !== 0"
+                        :aria-hidden="slot.position !== 0 || undefined"
+                    >
+                        <!-- Previews emit nothing: they have no player, no gestures, and report their fit scale once current -->
+                        <UniversalMediaViewer
+                            :media="slot.media"
+                            :preview="slot.position !== 0"
+                            :is-loading="slot.position === 0 && isLoadingMediaList"
+                            :interactive="slot.position === 0 && isZoomableMedia"
+                            :hide-badge="false"
+                            :zoom="slot.position === 0 ? zoomLevel : 1"
+                            :rotation="slot.position === 0 ? rotationAngle : 0"
+                            :max-zoom="maxZoom"
+                            @zoom-change="handleZoomChange"
+                            @fit-scale-change="fitScale = $event"
+                            @click-media="handleMediaClick"
+                            @play="handlePlayerPlay"
+                            @pause="handlePlayerPause"
+                        />
+                    </div>
                 </div>
-
-                <UniversalMediaViewer
-                    :media="currentMedia"
-                    :is-loading="isLoadingMediaList"
-                    :interactive="isZoomableMedia"
-                    :hide-badge="false"
-                    :zoom="zoomLevel"
-                    :rotation="rotationAngle"
-                    @zoom-change="handleZoomChange"
-                    @click-media="handleMediaClick"
-                    @controls-change="handlePlayerControlsChange"
-                    @user-activity="resetIdleTimer"
-                    @play="handlePlayerPlay"
-                    @pause="handlePlayerPause"
-                    class="h-full w-full"
-                />
             </div>
 
-            <!-- Fullscreen Top Header (Left-aligned </X, Centered Counter, Clean Canvas) -->
-            <header
-                v-if="isMediaOnly"
-                class="absolute top-0 inset-x-0 z-40 flex items-center justify-between pointer-events-none select-none transition-all duration-300 ease-out pt-[max(16px,env(safe-area-inset-top))] px-4 md:px-6"
-                :class="isControlsVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'"
-                @mouseenter="resetIdleTimer"
-                @pointerdown.stop="resetIdleTimer"
+            <!-- Item navigation sits above every media type, so it never depends on the current viewer's state -->
+            <button
+                v-if="canPrevious"
+                type="button"
+                class="absolute top-1/2 z-30 flex h-9 w-9 md:h-10 md:w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white/90 backdrop-blur-md shadow-lg transition-[opacity,background-color,scale] duration-200 hover:bg-black/70 hover:text-white active:scale-95 cursor-pointer left-3 md:left-4 pointer-coarse:hidden"
+                :class="isChromeVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'"
+                :title="$t('post_detail.previous_media')"
+                :aria-label="$t('post_detail.previous_media')"
+                @click="previousMedia"
             >
-                <!-- Left: Exit Fullscreen / Back button (</X) -->
-                <div class="flex items-center pointer-events-auto">
+                <ChevronLeft class="h-5 w-5 -translate-x-px" />
+            </button>
+            <button
+                v-if="canNext"
+                type="button"
+                class="absolute top-1/2 z-30 flex h-9 w-9 md:h-10 md:w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/45 text-white/90 backdrop-blur-md shadow-lg transition-[opacity,background-color,scale] duration-200 hover:bg-black/70 hover:text-white active:scale-95 cursor-pointer right-3 md:right-4 pointer-coarse:hidden"
+                :class="isChromeVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'"
+                :title="$t('post_detail.next_media')"
+                :aria-label="$t('post_detail.next_media')"
+                @click="nextMedia"
+            >
+                <ChevronRight class="h-5 w-5 translate-x-px" />
+            </button>
+
+            <!-- Stage title bar, shared by every media type. Type-specific tools live at the bottom. -->
+            <header
+                class="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-center justify-between gap-3 px-3 md:px-4 pt-[max(12px,env(safe-area-inset-top))] transition-all duration-300 ease-out"
+                :class="isChromeVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-3'"
+            >
+                <!-- The split view already shows the post beside the stage, so the title only appears when immersive -->
+                <div v-if="isMediaOnly" class="flex min-w-0 items-center gap-2">
                     <button
                         type="button"
-                        class="flex h-9 w-9 md:h-10 md:w-10 items-center justify-center rounded-full bg-zinc-950/80 hover:bg-white/20 border border-white/15 text-white/80 hover:text-white backdrop-blur-xl shadow-2xl transition-all duration-150 cursor-pointer active:scale-95"
+                        class="pointer-events-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/45 text-white/90 backdrop-blur-md transition hover:bg-black/70 hover:text-white active:scale-95 cursor-pointer"
                         :title="$t('post_detail.exit_fullscreen')"
                         :aria-label="$t('post_detail.exit_fullscreen')"
                         @click="leaveMediaOnly"
                     >
-                        <ChevronLeft class="h-5 w-5 -translate-x-px" />
+                        <Minimize2 class="h-4 w-4" />
                     </button>
+                    <div
+                        v-if="currentMedia"
+                        class="flex h-9 min-w-0 items-center gap-2 rounded-full bg-black/45 px-3.5 text-xs text-white/90 backdrop-blur-md"
+                    >
+                        <span class="truncate font-medium">{{ displayMediaTitle }}</span>
+                        <span class="shrink-0 text-white/55">{{ formatMediaType(currentMedia.type) }}</span>
+                    </div>
                 </div>
+                <span v-else />
 
-                <!-- Center: Counter Pill (Title removed for pure content immersion) -->
                 <div
-                    v-if="mediaTotal > 1"
-                    class="pointer-events-auto flex h-8 md:h-9 items-center justify-center rounded-full border border-white/15 bg-zinc-950/80 px-3 md:px-3.5 backdrop-blur-xl shadow-2xl font-mono text-xs font-bold tabular-nums text-white/90 select-none"
+                    v-if="mediaTotal > 1 || currentOriginalTrack"
+                    class="pointer-events-auto flex h-9 shrink-0 items-center rounded-full bg-black/45 px-1 text-white/90 backdrop-blur-md"
                 >
-                    {{ mediaCounter }}
+                    <span v-if="mediaTotal > 1" class="px-2.5 font-mono text-xs font-medium tabular-nums">{{ mediaCounter }}</span>
+                    <template v-if="currentOriginalTrack">
+                        <span v-if="mediaTotal > 1" class="h-4 w-px bg-white/20" />
+                        <a
+                            :href="currentOriginalTrack.url"
+                            target="_blank"
+                            rel="noopener"
+                            class="flex h-7 w-7 items-center justify-center rounded-full transition hover:bg-white/15 hover:text-white"
+                            :title="$t('post_detail.viewer.open_original')"
+                            :aria-label="$t('post_detail.viewer.open_original')"
+                        >
+                            <ExternalLink class="h-4 w-4" />
+                        </a>
+                        <button
+                            type="button"
+                            class="flex h-7 w-7 items-center justify-center rounded-full transition hover:bg-white/15 hover:text-white disabled:opacity-50 cursor-pointer disabled:cursor-default"
+                            :disabled="isDownloading"
+                            :title="$t('post_detail.viewer.download')"
+                            :aria-label="$t('post_detail.viewer.download')"
+                            @click="downloadCurrentMedia"
+                        >
+                            <Loader2 v-if="isDownloading" class="h-4 w-4 animate-spin" />
+                            <Download v-else class="h-4 w-4" />
+                        </button>
+                    </template>
                 </div>
-                <div v-else class="w-9 md:w-10 pointer-events-none"></div>
-
-                <!-- Right: Balanced spacer so center counter stays optically centered -->
-                <div class="w-9 md:w-10 pointer-events-none"></div>
             </header>
 
             <!-- Bottom Action Toolbar (Desktop only; mobile uses native pinch & double-tap gestures) -->
@@ -782,41 +803,15 @@ const confirmTrashMedia = async () => {
                 class="absolute bottom-0 inset-x-0 z-40 pb-[max(20px,env(safe-area-inset-bottom))] hidden md:flex items-center justify-center pointer-events-none select-none transition-all duration-300 ease-out"
                 :class="
                     isMediaOnly
-                        ? isControlsVisible
+                        ? isChromeVisible
                             ? 'opacity-100 translate-y-0'
                             : 'opacity-0 translate-y-4'
-                        : 'opacity-0 group-hover/fullscreen:opacity-100 translate-y-0'
+                        : 'opacity-0 group-hover/stage:opacity-100 translate-y-0'
                 "
-                @mouseenter="resetIdleTimer"
-                @pointerdown.stop="resetIdleTimer"
             >
                 <div
                     class="flex h-10 items-center gap-1 rounded-full border border-white/15 bg-zinc-950/80 px-3 backdrop-blur-xl shadow-2xl pointer-events-auto"
                 >
-                    <!-- Rotate Left -->
-                    <button
-                        type="button"
-                        @click="rotateLeft"
-                        class="flex h-8 w-8 items-center justify-center rounded-full text-white/75 hover:bg-white/15 hover:text-white transition-all cursor-pointer active:scale-95"
-                        :title="$t('post_detail.viewer.rotate_left')"
-                        :aria-label="$t('post_detail.viewer.rotate_left')"
-                    >
-                        <RotateCcw class="h-4 w-4" />
-                    </button>
-                    <!-- Rotate Right -->
-                    <button
-                        type="button"
-                        @click="rotateRight"
-                        class="flex h-8 w-8 items-center justify-center rounded-full text-white/75 hover:bg-white/15 hover:text-white transition-all cursor-pointer active:scale-95"
-                        :title="$t('post_detail.viewer.rotate_right')"
-                        :aria-label="$t('post_detail.viewer.rotate_right')"
-                    >
-                        <RotateCw class="h-4 w-4" />
-                    </button>
-
-                    <span class="h-4 w-px bg-white/15 mx-1"></span>
-
-                    <!-- Zoom Out -->
                     <button
                         type="button"
                         @click="zoomOut"
@@ -827,22 +822,18 @@ const confirmTrashMedia = async () => {
                     >
                         <ZoomOut class="h-4 w-4" />
                     </button>
-
-                    <!-- Zoom Slider -->
-                    <input
-                        type="range"
-                        :min="MIN_ZOOM"
-                        :max="MAX_ZOOM"
-                        step="0.05"
-                        v-model.number="zoomLevel"
-                        class="w-20 md:w-28 h-1 rounded-full appearance-none cursor-pointer focus:outline-none mx-1.5 bg-white/20 hover:bg-white/30 transition-colors [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md [&::-moz-range-thumb]:w-3 [&::-moz-range-thumb]:h-3 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-none [&::-moz-range-thumb]:cursor-pointer [&::-moz-range-thumb]:shadow-md"
-                    />
-
-                    <!-- Zoom In -->
+                    <button
+                        type="button"
+                        @click="toggleActualSize"
+                        class="h-8 min-w-14 px-2 flex items-center justify-center rounded-full font-mono text-xs font-semibold tabular-nums text-white/85 hover:bg-white/15 hover:text-white transition-all cursor-pointer active:scale-95"
+                        :title="isFitZoom && actualSizeZoom ? $t('post_detail.viewer.zoom_reset_original') : $t('post_detail.viewer.zoom_reset_fit')"
+                    >
+                        {{ zoomPercent }}%
+                    </button>
                     <button
                         type="button"
                         @click="zoomIn"
-                        :disabled="zoomLevel >= MAX_ZOOM"
+                        :disabled="zoomLevel >= maxZoom"
                         class="flex h-8 w-8 items-center justify-center rounded-full text-white/75 hover:bg-white/15 hover:text-white disabled:opacity-20 disabled:cursor-default disabled:hover:bg-transparent transition-all cursor-pointer active:scale-95"
                         :title="$t('post_detail.viewer.zoom_in')"
                         :aria-label="$t('post_detail.viewer.zoom_in')"
@@ -852,24 +843,14 @@ const confirmTrashMedia = async () => {
 
                     <span class="h-4 w-px bg-white/15 mx-1"></span>
 
-                    <!-- 1:1 Size -->
                     <button
                         type="button"
-                        @click="zoomTo(1)"
-                        class="h-8 px-2.5 flex items-center justify-center rounded-full text-xs font-mono font-bold text-white/75 hover:bg-white/15 hover:text-white transition-all cursor-pointer active:scale-95"
-                        :title="$t('post_detail.viewer.zoom_reset_original')"
-                    >
-                        1:1
-                    </button>
-                    <!-- Fit Size -->
-                    <button
-                        type="button"
-                        @click="resetZoomRotate"
+                        @click="rotateClockwise"
                         class="flex h-8 w-8 items-center justify-center rounded-full text-white/75 hover:bg-white/15 hover:text-white transition-all cursor-pointer active:scale-95"
-                        :title="$t('post_detail.viewer.zoom_reset_fit')"
-                        :aria-label="$t('post_detail.viewer.zoom_reset_fit')"
+                        :title="$t('post_detail.viewer.rotate_right')"
+                        :aria-label="$t('post_detail.viewer.rotate_right')"
                     >
-                        <Maximize class="h-4 w-4" />
+                        <RotateCw class="h-4 w-4" />
                     </button>
                 </div>
             </footer>

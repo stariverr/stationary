@@ -9,6 +9,8 @@ defineOptions({
 const props = withDefaults(
     defineProps<{
         src: string;
+        /** Low-res stand-in shown until `src` is decoded. */
+        placeholder?: string;
         liveSrc: string;
         mimeType?: string;
         width?: number | string;
@@ -222,6 +224,7 @@ const innerContainerClass = computed(() => {
             <!-- We keep the static image at opacity-100 always to prevent transparency gaps/flashes during cross-fades -->
             <HeicImage
                 :src="props.src"
+                :placeholder="props.placeholder"
                 :mime-type="props.mimeType"
                 :alt="props.alt"
                 class="select-none opacity-100 block live-photo-image max-w-full max-h-full"

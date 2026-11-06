@@ -34,10 +34,17 @@ const s3Client = new S3Client({
 
 class S3 {
     /** Access from Private Network (internal usage only) */
-    public async getPresignedUrl(key: string, options: { bucket: string; expiresInSeconds?: number }): Promise<string> {
+    /** With `downloadName`, the URL serves the object as an attachment under that file name. */
+    public async getPresignedUrl(
+        key: string,
+        options: { bucket: string; expiresInSeconds?: number; downloadName?: string },
+    ): Promise<string> {
         const command = new GetObjectCommand({
             Bucket: options.bucket,
             Key: key.startsWith("/") ? key.slice(1) : key,
+            ResponseContentDisposition: options.downloadName
+                ? `attachment; filename*=UTF-8''${encodeURIComponent(options.downloadName)}`
+                : undefined,
         });
         return getSignedUrl(s3Client, command, {
             expiresIn: options.expiresInSeconds ?? 900,

@@ -1,4 +1,44 @@
-import { TrackPurpose, type PostMediaSummary } from "@/types/post";
+import { MediaType, TrackPurpose, TrackType, type PostMediaSummary } from "@/types/post";
+
+interface SelectableTrack {
+    type: string;
+    purpose: string;
+    is_default?: boolean;
+    is_original?: boolean;
+    priority?: number;
+    quality?: string;
+}
+
+const qualityRank: Record<string, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
+
+/** Orders tracks by ascending priority, then by descending quality. */
+export function sortTracks<T extends SelectableTrack>(tracks: T[]): T[] {
+    return [...tracks].sort((a, b) => {
+        const priorityA = a.priority ?? 999;
+        const priorityB = b.priority ?? 999;
+        if (priorityA !== priorityB) return priorityA - priorityB;
+        return (qualityRank[b.quality || ""] || 0) - (qualityRank[a.quality || ""] || 0);
+    });
+}
+
+/** Picks the track a viewer plays or shows for a track type, skipping covers. */
+export function selectContentTrack<T extends SelectableTrack>(tracks: T[] | undefined, type: string): T | undefined {
+    const candidates = sortTracks((tracks || []).filter((track) => track.type.toUpperCase() === type && track.purpose.toUpperCase() !== "COVER"));
+    return (
+        candidates.find((track) => track.is_default) ||
+        candidates.find((track) => track.purpose.toUpperCase() === TrackPurpose.CONTENT) ||
+        candidates[0]
+    );
+}
+
+/** The file behind a media item that a viewer downloads or opens: its original content track when it has one. */
+export function selectOriginalTrack<T extends SelectableTrack>(media: { type: MediaType; tracks?: T[] }): T | undefined {
+    const trackType = media.type === MediaType.LIVE_PHOTO ? TrackType.IMAGE : media.type;
+    const original = (media.tracks || []).find(
+        (track) => track.is_original && track.type.toUpperCase() === trackType && track.purpose.toUpperCase() === TrackPurpose.CONTENT,
+    );
+    return original ?? selectContentTrack(media.tracks, trackType);
+}
 
 /**
  * Helper function to translate media type codes into localized labels using a switch statement.

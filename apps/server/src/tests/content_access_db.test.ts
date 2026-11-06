@@ -181,6 +181,7 @@ describe.skipIf(process.env.RUN_CONTENT_DB_TESTS !== "1")("Content access contro
         [postRouter, `/${postId}/media`],
         [mediaRouter, `/detail/${mediaId}`],
         [mediaRouter, `/${mediaId}/tracks`],
+        [mediaRouter, `/${mediaId}/tracks/018f0000-0000-7000-8000-000000000000/download-url`],
         [mediaRouter, `/${mediaId}/regenerate-cover`, "POST"],
         [tagRouter, "/update", "POST", { id: tagId, name: "stolen" }],
         [tagRouter, `/delete/${tagId}`, "POST"],

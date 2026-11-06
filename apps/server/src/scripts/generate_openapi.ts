@@ -1140,6 +1140,18 @@ const routes: RouteItem[] = [
         responseSchema: makeUnifiedSuccessResponse({ type: "array", items: trackResponseOpenApiSchema }),
     },
     {
+        path: "/api/media/:id/tracks/:trackId/download-url",
+        method: "get",
+        summary: "Get a short-lived URL that downloads a track file as an attachment",
+        tags: ["Media"],
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), trackId: v.pipe(v.string(), v.uuid()) }),
+        requiresAuth: true,
+        responseSchema: makeUnifiedSuccessResponse({
+            type: "object",
+            properties: { url: { type: "string", format: "uri" } },
+        }),
+    },
+    {
         path: "/api/media/:id/tracks/presign-upload",
         method: "post",
         summary: "Get S3 presigned URL for uploading track",

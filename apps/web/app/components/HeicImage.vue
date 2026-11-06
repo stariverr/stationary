@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, useAttrs } from "vue";
+import { ref, watch, useAttrs } from "vue";
 import { isHeic, supportsHeicNatively, decodeHeicToBlobUrl } from "@/utils/heic-decoder";
 
 const props = defineProps<{
@@ -9,6 +9,8 @@ const props = defineProps<{
     sizes?: string;
     mimeType?: string;
     noSpinner?: boolean;
+    /** A quick low-res image (e.g. the cover) to show until `src` is ready, instead of nothing. */
+    placeholder?: string;
 }>();
 
 const emit = defineEmits<{
@@ -18,19 +20,19 @@ const emit = defineEmits<{
 
 const attrs = useAttrs();
 
-const decodedUrl = ref<string | null>(null);
+const TRANSPARENT_PIXEL = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+
+/**
+ * What the <img> shows. A HEIC outside Safari is decoded to a blob URL first, and until it is ready the previous image
+ * stays up, so a source change (a low-res cover upgrading to the original) never blanks the element. Before the first
+ * decode the placeholder stands in, or a transparent pixel instead of a broken-image icon.
+ */
+const displaySrc = ref(props.placeholder || TRANSPARENT_PIXEL);
+/** Whether the <img> shows a stand-in rather than an image of `src`. */
+const isStandIn = () => displaySrc.value === TRANSPARENT_PIXEL || (displaySrc.value === props.placeholder && props.placeholder !== props.src);
 const isLoading = ref(false);
 const error = ref<string | null>(null);
 const nativeFailed = ref(false);
-
-const displaySrc = computed(() => {
-    if (decodedUrl.value) return decodedUrl.value;
-    if (isHeic(props.src, props.mimeType) && !supportsHeicNatively()) {
-        // While decoding in non-Safari, show transparent placeholder to prevent broken-image icon
-        return "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-    }
-    return props.src;
-});
 
 const performDecode = async (url: string) => {
     isLoading.value = true;
@@ -38,13 +40,15 @@ const performDecode = async (url: string) => {
 
     try {
         const blobUrl = await decodeHeicToBlobUrl(url);
-        decodedUrl.value = blobUrl;
+        // A newer source may have arrived while this one decoded.
+        if (url === props.src) displaySrc.value = blobUrl;
     } catch (err: unknown) {
+        if (url !== props.src) return;
         console.error("HEIC WASM decode error:", err);
         error.value = err instanceof Error ? err.message : "Decode failed";
         emit("error", err);
     } finally {
-        isLoading.value = false;
+        if (url === props.src) isLoading.value = false;
     }
 };
 
@@ -55,18 +59,12 @@ watch(
         nativeFailed.value = false;
         error.value = null;
 
-        if (isHeic(newSrc, newMime)) {
-            if (supportsHeicNatively()) {
-                // Safari prefers native hardware-accelerated HEIC decoding
-                decodedUrl.value = null;
-                isLoading.value = false;
-            } else {
-                // Non-Safari browsers (Chrome, Edge, Firefox) decode via libheif-js WASM
-                performDecode(newSrc);
-            }
+        if (isHeic(newSrc, newMime) && !supportsHeicNatively()) {
+            // Non-Safari browsers (Chrome, Edge, Firefox) decode via libheif-js WASM
+            performDecode(newSrc);
         } else {
-            // Standard image format
-            decodedUrl.value = null;
+            // Safari decodes HEIC natively; other formats need no decoding
+            displaySrc.value = newSrc;
             isLoading.value = false;
         }
     },
@@ -74,14 +72,14 @@ watch(
 );
 
 const handleImgLoad = (event: Event) => {
-    if (displaySrc.value.startsWith("data:image/gif;base64")) return;
+    if (isStandIn()) return;
     emit("load", event);
 };
 
 const handleImgError = (event: Event) => {
     // If native Safari HEIC rendering fails (e.g. S3 missing image/heic content-type),
     // silently fallback to WASM libheif-js decoding
-    if (isHeic(props.src, props.mimeType) && supportsHeicNatively() && !nativeFailed.value && !decodedUrl.value) {
+    if (isHeic(props.src, props.mimeType) && supportsHeicNatively() && !nativeFailed.value && displaySrc.value === props.src) {
         console.warn("Safari native HEIC rendering failed; silently falling back to libheif-js WASM:", props.src);
         nativeFailed.value = true;
         performDecode(props.src);
@@ -93,7 +91,7 @@ const handleImgError = (event: Event) => {
 </script>
 
 <template>
-    <div v-if="isLoading && !props.noSpinner" class="flex items-center justify-center w-full h-full min-h-[100px]">
+    <div v-if="isLoading && !props.noSpinner && displaySrc === TRANSPARENT_PIXEL" class="flex items-center justify-center w-full h-full min-h-[100px]">
         <slot name="loading">
             <div class="flex flex-col items-center gap-2 text-gray-400">
                 <svg class="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
@@ -121,8 +119,8 @@ const handleImgError = (event: Event) => {
         v-bind="attrs"
         :src="displaySrc"
         :alt="props.alt"
-        :srcset="decodedUrl ? undefined : props.srcset"
-        :sizes="decodedUrl ? undefined : props.sizes"
+        :srcset="displaySrc === props.src ? props.srcset : undefined"
+        :sizes="displaySrc === props.src ? props.sizes : undefined"
         @load="handleImgLoad"
         @error="handleImgError"
     />

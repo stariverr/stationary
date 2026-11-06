@@ -600,6 +600,29 @@ router.get("/:id/tracks", requireAuth, async (c) => {
     return c.json(success(Code.SUCCESS, result));
 });
 
+const DOWNLOAD_URL_TTL_SECONDS = 300;
+
+router.get("/:id/tracks/:trackId/download-url", requireAuth, async (c) => {
+    const id = c.req.param("id")!;
+    const trackId = c.req.param("trackId")!;
+    const access = await checkMediaAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+    const media = access.media!;
+
+    const file = (await TrackService.listTracks(id)).find((row) => row.track.id === trackId)?.file;
+    if (!file) return c.json(error(Code.NOT_FOUND, "Track file not found"), 404);
+
+    const extension = file.extension || getFileExtension(file.path);
+    const baseName = media.title?.trim() || media.id;
+    const downloadName = extension && !baseName.toLowerCase().endsWith(`.${extension}`) ? `${baseName}.${extension}` : baseName;
+    const url = await s3.getPresignedUrl(file.path, {
+        bucket: file.bucket,
+        expiresInSeconds: DOWNLOAD_URL_TTL_SECONDS,
+        downloadName,
+    });
+    return c.json(success(Code.SUCCESS, { url }));
+});
+
 const PresignUploadSchema = v.object({
     type: v.enum(TrackType),
     purpose: v.enum(TrackPurpose),
