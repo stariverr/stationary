@@ -175,6 +175,7 @@ kubectl apply -f deploy/argocd/application.yaml
 
 - 📐 **[系统设计与数据库规范说明](./system_design.zh-Hans.md)** - 数据模型、软删除与生命周期、后台任务队列。
 - ⚙️ **[后台任务队列](./job_queue.zh-Hans.md)** - reconcile 队列的设计、取舍、未做的部分和新增流水线的步骤；上线步骤见 [job_queue_rollout.zh-Hans.md](./job_queue_rollout.zh-Hans.md)。
+- 🎬 **[媒体存储与播放重构方案](./media_refactor.zh-Hans.md)** - 原件、封面与预览图、音视频流信息、字幕与歌词、HLS 与 DASH 播放，取代 Track 表。
 - 🧭 **[Media / Track 数据架构改进任务书](./media_track_improvement_tasks.zh-Hans.md)** - Media、Track、File 身份、生命周期、应用层一致性与迁移任务。
 - 🔌 **[媒体元数据同步工作流 & API 契约](./external_api.contract.zh-Hans.md)** - 客户端对接规范、`external_id` 生成逻辑与 API 结构。
 - 🔄 **[Metadata 物理保存与清理流程详细说明](./save_metadata_flow.zh-Hans.md)** - `saveMetadata` 执行流程、差异检测与 S3 软删除清扫。
