@@ -45,23 +45,51 @@ export const escapeXml = (value: string | number) =>
         return "&quot;";
     });
 
-const segmentBaseXml = (segmentBase: DashSegmentBase, indentation: string) => {
+/** An exact time in seconds, `value / timescale`. */
+interface Rational {
+    value: bigint;
+    timescale: bigint;
+}
+
+/** DASH defaults a missing SegmentBase@timescale to 1. */
+const segmentTimescale = (segmentBase: DashSegmentBase) => BigInt(segmentBase.timescale ?? 1);
+
+const earliestPresentationTime = (segmentBase: DashSegmentBase): Rational => ({
+    value: BigInt(segmentBase.earliest_presentation_time ?? "0"),
+    timescale: segmentTimescale(segmentBase),
+});
+
+/**
+ * The Period-wide offset: the smallest EPT across every Representation. Zeroing each file on its
+ * own would erase the offset between streams (B-frame delay, AAC priming) and desync audio and video.
+ */
+const periodOffset = (segmentBases: DashSegmentBase[]): Rational =>
+    segmentBases.map(earliestPresentationTime).reduce<Rational | null>(
+        // a/b < c/d  <=>  a*d < c*b, all positive
+        (min, time) => (min === null || time.value * min.timescale < min.value * time.timescale ? time : min),
+        null,
+    ) ?? { value: 0n, timescale: 1n };
+
+/** The Period offset expressed in this Representation's timescale, rounded down so no media is cut off. */
+const presentationTimeOffset = (offset: Rational, segmentBase: DashSegmentBase) =>
+    (offset.value * segmentTimescale(segmentBase)) / offset.timescale;
+
+const segmentBaseXml = (segmentBase: DashSegmentBase, offset: Rational, indentation: string) => {
     const attributes = [`indexRange="${escapeXml(segmentBase.index_range)}"`];
     if (segmentBase.timescale != null) attributes.push(`timescale="${escapeXml(segmentBase.timescale)}"`);
-    if (segmentBase.earliest_presentation_time != null) {
-        attributes.push(`presentationTimeOffset="${escapeXml(segmentBase.earliest_presentation_time)}"`);
-    }
+    const pto = presentationTimeOffset(offset, segmentBase);
+    if (pto > 0n) attributes.push(`presentationTimeOffset="${pto}"`);
 
     return `${indentation}<SegmentBase ${attributes.join(" ")}>
 ${indentation}  <Initialization range="${escapeXml(segmentBase.initialization)}" />
 ${indentation}</SegmentBase>`;
 };
 
-const videoRepresentationXml = (representation: DashVideoRepresentation) => {
+const videoRepresentationXml = (representation: DashVideoRepresentation, offset: Rational) => {
     const frameRate = representation.frame_rate ? ` frameRate="${escapeXml(representation.frame_rate)}"` : "";
     return `      <Representation id="${escapeXml(representation.id)}" codecs="${escapeXml(representation.codec)}" bandwidth="${escapeXml(representation.bandwidth)}" width="${escapeXml(representation.width)}" height="${escapeXml(representation.height)}"${frameRate}>
         <BaseURL>${escapeXml(representation.url)}</BaseURL>
-${segmentBaseXml(representation.segment_base, "        ")}
+${segmentBaseXml(representation.segment_base, offset, "        ")}
       </Representation>`;
 };
 
@@ -80,7 +108,7 @@ const groupAudioRepresentations = (representations: DashAudioRepresentation[]) =
     return [...groups.values()];
 };
 
-const audioAdaptationSetXml = (representations: DashAudioRepresentation[], index: number) => {
+const audioAdaptationSetXml = (representations: DashAudioRepresentation[], index: number, offset: Rational) => {
     const first = representations[0]!;
     const language = first.language ? ` lang="${escapeXml(first.language)}"` : "";
     const representationXml = representations
@@ -89,7 +117,7 @@ const audioAdaptationSetXml = (representations: DashAudioRepresentation[], index
             return `      <Representation id="${escapeXml(representation.id)}" codecs="${escapeXml(representation.codec)}" bandwidth="${escapeXml(representation.bandwidth)}"${sampleRate}>
         <BaseURL>${escapeXml(representation.url)}</BaseURL>
         <AudioChannelConfiguration schemeIdUri="urn:mpeg:dash:23001:3:audio_channel_configuration:2011" value="${escapeXml(representation.channels)}" />
-${segmentBaseXml(representation.segment_base, "        ")}
+${segmentBaseXml(representation.segment_base, offset, "        ")}
       </Representation>`;
         })
         .join("\n");
@@ -103,8 +131,11 @@ ${representationXml}
 
 export function buildDashManifest(input: DashManifestInput) {
     const duration = Number.isFinite(input.duration) && input.duration > 0 ? input.duration : 0;
-    const video = input.video.map(videoRepresentationXml).join("\n");
-    const audio = groupAudioRepresentations(input.audio).map(audioAdaptationSetXml).join("\n");
+    const offset = periodOffset([...input.video, ...input.audio].map((representation) => representation.segment_base));
+    const video = input.video.map((representation) => videoRepresentationXml(representation, offset)).join("\n");
+    const audio = groupAudioRepresentations(input.audio)
+        .map((group, index) => audioAdaptationSetXml(group, index, offset))
+        .join("\n");
     const audioSection = audio ? `\n${audio}` : "";
 
     return `<?xml version="1.0" encoding="utf-8"?>

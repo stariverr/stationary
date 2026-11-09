@@ -16,12 +16,16 @@ import {
 } from "@/lib/utils/dash-manifest";
 import {
     buildHlsMasterManifest,
+    buildHlsSubtitleManifest,
     buildHlsVariantManifest,
     type HlsVideoVariant,
     type HlsAudioVariant,
     type HlsSubtitleVariant,
 } from "@/lib/utils/hls-manifest";
 import { isDashCompatibleFormat } from "@/lib/utils/track-format";
+import { parseSidx, type Mp4Segment } from "@/lib/utils/mp4-segment";
+import { s3 } from "@/global/s3";
+import { createPromiseCache } from "@/features/ai/promise-cache";
 
 export interface VideoItem {
     url: string | null;
@@ -31,6 +35,27 @@ export interface VideoItem {
 
 const buildUrl = (bucket: string | null | undefined, path: string | null | undefined) =>
     bucket && path ? buildCdnUrl(bucket, path) : null;
+
+/** Parses an inclusive `start-end` byte range. */
+const parseByteRange = (range: string | undefined) => {
+    const match = range ? /^(\d+)-(\d+)$/.exec(range) : null;
+    if (!match) return null;
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+    return end >= start ? { start, end } : null;
+};
+
+/** A sidx is 12 bytes per segment; 1 MiB covers far more segments than any real file has. */
+const SIDX_MAX_BYTES = 1024 * 1024;
+/** A file's bytes never change under the same id, so its segment list can be cached for a long time. */
+const segmentListCache = createPromiseCache<Mp4Segment[]>(24 * 60 * 60 * 1000, 1000);
+
+/** Reads the sidx at `indexRange` with one S3 range request and expands it into the file's segments. */
+const readSegmentList = (file: { id: string; bucket: string; path: string }, indexRange: { start: number; end: number }) =>
+    segmentListCache.getOrCreate(file.id, async () => {
+        const bytes = await s3.read(file.path, { bucket: file.bucket, maxBytes: SIDX_MAX_BYTES, range: indexRange });
+        return parseSidx(bytes, indexRange.start);
+    });
 
 export const MediaService = {
     /**
@@ -473,35 +498,25 @@ export const MediaService = {
         const fileUrl = buildCdnUrl(row.file.bucket, row.file.path);
         if (!fileUrl) return null;
 
-        const segmentBase = row.track.metadata?.segment_base;
-        let initRange: string | null = null;
-        let mediaRange: string | null = null;
-
-        if (segmentBase?.initialization) {
-            const [initStartStr, initEndStr] = segmentBase.initialization.split("-");
-            const initStart = Number(initStartStr || 0);
-            const initEnd = Number(initEndStr || 0);
-            const initLength = initEnd - initStart + 1;
-            initRange = `${initLength}@${initStart}`;
-
-            let mediaStart = initEnd + 1;
-            if (segmentBase.index_range) {
-                const [, indexEndStr] = segmentBase.index_range.split("-");
-                mediaStart = Number(indexEndStr || initEnd) + 1;
-            }
-
-            const fileSize = row.file.size || 0;
-            const mediaLength = fileSize > mediaStart ? fileSize - mediaStart : 0;
-            if (mediaLength > 0) {
-                mediaRange = `${mediaLength}@${mediaStart}`;
-            }
+        if (row.track.type === TrackType.SUBTITLE) {
+            return buildHlsSubtitleManifest({
+                file_url: fileUrl,
+                duration: row.track.duration || 0,
+                query_suffix: querySuffix,
+            });
         }
+
+        const segmentBase = row.track.metadata?.segment_base;
+        const init = parseByteRange(segmentBase?.initialization);
+        const indexRange = parseByteRange(segmentBase?.index_range);
+        if (!init || !indexRange) return null;
+
+        const segments = await readSegmentList({ id: row.file.id, bucket: row.file.bucket, path: row.file.path }, indexRange);
 
         return buildHlsVariantManifest({
             file_url: fileUrl,
-            init_range: initRange,
-            media_range: mediaRange,
-            duration: row.track.duration || 10,
+            init: { offset: init.start, length: init.end - init.start + 1 },
+            segments,
             query_suffix: querySuffix,
         });
     },
