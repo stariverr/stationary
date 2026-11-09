@@ -132,12 +132,7 @@ const subtitleText = computed(() => {
 
 const totalPages = computed(() => Math.ceil((trashStore.total || 0) / (trashStore.count || 20)));
 
-const getItemCover = (item: TrashItem): string | null => {
-    if (item.item_type === "post") {
-        return item.covers?.[0]?.thumbnail || item.covers?.[0]?.url || null;
-    }
-    return item.covers?.[0]?.thumbnail || item.covers?.[0]?.url || item.url || null;
-};
+const getItemCover = (item: TrashItem): string | null => previewThumbnailUrl(item.previews);
 
 // Single Item Actions
 const handleSingleRestore = async (item: TrashItem) => {

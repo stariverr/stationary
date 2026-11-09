@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import MediaCoverPanel from "@/components/MediaCoverPanel.vue";
 
 interface Props {
     mediaId: string;
@@ -55,7 +56,7 @@ const newTrackParams = ref({
     } as Record<string, any>,
 });
 
-// Watch purpose to enforce constraints, defaults and force type to IMAGE when purpose is COVER or THUMBNAIL
+// Watch purpose to enforce constraints, defaults and force type to IMAGE when purpose is THUMBNAIL
 watch(
     () => newTrackParams.value.purpose,
     (newPurpose) => {
@@ -63,7 +64,7 @@ watch(
             newTrackParams.value.type = "";
             newTrackParams.value.quality = "";
         } else {
-            if (newPurpose === "COVER" || newPurpose === "THUMBNAIL") {
+            if (newPurpose === "THUMBNAIL") {
                 newTrackParams.value.type = "IMAGE";
             } else if (!newTrackParams.value.type || newTrackParams.value.type === "IMAGE") {
                 newTrackParams.value.type = "VIDEO";
@@ -143,7 +144,7 @@ const groupedTracks = computed(() => {
     const groups = {
         images: [] as any[],
         videos: [] as any[],
-        covers: [] as any[],
+        thumbnails: [] as any[],
         audios: [] as any[],
         subtitles: [] as any[],
         others: [] as any[],
@@ -154,8 +155,8 @@ const groupedTracks = computed(() => {
             groups.images.push(item);
         } else if (item.type === "VIDEO" && item.purpose === "CONTENT") {
             groups.videos.push(item);
-        } else if (item.purpose === "COVER" || item.purpose === "THUMBNAIL") {
-            groups.covers.push(item);
+        } else if (item.purpose === "THUMBNAIL") {
+            groups.thumbnails.push(item);
         } else if (item.type === "AUDIO") {
             groups.audios.push(item);
         } else if (item.type === "SUBTITLE") {
@@ -500,6 +501,8 @@ const handleVideoMouseLeave = (e: Event) => {
     <div class="flex flex-col h-full overflow-hidden" :class="isDark ? 'bg-[#0b0c0e] text-zinc-300' : 'bg-white text-zinc-800'">
         <!-- Scrollable Tracks Section -->
         <div class="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar">
+            <MediaCoverPanel :media-id="mediaId" :is-dark="isDark" @changed="store.refetchMedia()" />
+
             <div
                 v-if="isLoadingTracks"
                 class="flex flex-col items-center justify-center py-16 text-xs gap-1.5"
@@ -520,7 +523,7 @@ const handleVideoMouseLeave = (e: Event) => {
                     v-for="group in [
                         { name: $t('media.tracks.group_images'), icon: ImageIcon, items: groupedTracks.images },
                         { name: $t('media.tracks.group_videos'), icon: VideoIcon, items: groupedTracks.videos },
-                        { name: $t('media.tracks.group_covers'), icon: FileImage, items: groupedTracks.covers },
+                        { name: $t('media.tracks.group_thumbnails'), icon: FileImage, items: groupedTracks.thumbnails },
                         { name: $t('media.tracks.group_audios'), icon: Music, items: groupedTracks.audios },
                         { name: $t('media.tracks.group_subtitles'), icon: FileText, items: groupedTracks.subtitles },
                         { name: $t('media.tracks.group_others'), icon: Layers, items: groupedTracks.others },
@@ -821,7 +824,6 @@ const handleVideoMouseLeave = (e: Event) => {
                                                     "
                                                 >
                                                     <SelectItem value="CONTENT">{{ $t("media.purposes.CONTENT") }}</SelectItem>
-                                                    <SelectItem value="COVER">{{ $t("media.purposes.COVER") }}</SelectItem>
                                                     <SelectItem value="THUMBNAIL">{{ $t("media.purposes.THUMBNAIL") }}</SelectItem>
                                                     <SelectItem value="PREVIEW">{{ $t("media.purposes.PREVIEW") }}</SelectItem>
                                                 </SelectContent>
@@ -1082,7 +1084,6 @@ const handleVideoMouseLeave = (e: Event) => {
                             :class="isDark ? 'bg-zinc-900 border-zinc-800 text-white' : 'bg-white border-zinc-200 text-zinc-800'"
                         >
                             <SelectItem value="CONTENT">{{ $t("media.purposes.CONTENT") }}</SelectItem>
-                            <SelectItem value="COVER">{{ $t("media.purposes.COVER") }}</SelectItem>
                             <SelectItem value="THUMBNAIL">{{ $t("media.purposes.THUMBNAIL") }}</SelectItem>
                             <SelectItem value="PREVIEW">{{ $t("media.purposes.PREVIEW") }}</SelectItem>
                         </SelectContent>
@@ -1110,17 +1111,15 @@ const handleVideoMouseLeave = (e: Event) => {
                             :class="isDark ? 'bg-zinc-900 border-zinc-800 text-white' : 'bg-white border-zinc-200 text-zinc-800'"
                         >
                             <SelectItem value="IMAGE">{{ $t("media.track_types.IMAGE") }}</SelectItem>
-                            <SelectItem v-if="newTrackParams.purpose !== 'COVER' && newTrackParams.purpose !== 'THUMBNAIL'" value="VIDEO">{{
+                            <SelectItem v-if="newTrackParams.purpose !== 'THUMBNAIL'" value="VIDEO">{{
                                 $t("media.track_types.VIDEO")
                             }}</SelectItem>
-                            <SelectItem v-if="newTrackParams.purpose !== 'COVER' && newTrackParams.purpose !== 'THUMBNAIL'" value="AUDIO">{{
+                            <SelectItem v-if="newTrackParams.purpose !== 'THUMBNAIL'" value="AUDIO">{{
                                 $t("media.track_types.AUDIO")
                             }}</SelectItem>
-                            <SelectItem
-                                v-if="newTrackParams.purpose !== 'COVER' && newTrackParams.purpose !== 'THUMBNAIL'"
-                                value="SUBTITLE"
-                                >{{ $t("media.track_types.SUBTITLE") }}</SelectItem
-                            >
+                            <SelectItem v-if="newTrackParams.purpose !== 'THUMBNAIL'" value="SUBTITLE">{{
+                                $t("media.track_types.SUBTITLE")
+                            }}</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>

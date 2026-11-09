@@ -1,7 +1,8 @@
 import { defineStore } from "pinia";
 import { Temporal } from "@js-temporal/polyfill";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/vue-query";
-import { type Post, type Platform, type ApiPostListItem, type ApiPostDetail, TrackQuality } from "@/types/post";
+import { type Post, type Platform, type ApiPostListItem, type ApiPostDetail } from "@/types/post";
+import { previewLargestUrl, previewPosterUrl, previewSrcset, previewThumbnailUrl } from "@/utils/media";
 
 import { useLibraryStore } from "@/stores/library";
 
@@ -227,34 +228,8 @@ export const usePostStore = defineStore("posts", () => {
         const displayTime = apiPost.published_time ?? apiPost.create_time;
 
         const uiMedia = apiPost.media.map((m) => {
-            const coversList = m.covers || [];
-            const videosList = m.videos || [];
-
-            const lowCover = coversList.find((c) => c.quality === "LOW")?.url || null;
-            const mediumCover = coversList.find((c) => c.quality === "MEDIUM")?.url || null;
-            const highCover = coversList.find((c) => c.quality === "HIGH")?.url || null;
-
-            const fallbackVideo = videosList[0]?.url || null;
-
-            const srcsetParts: string[] = [];
-            for (const c of coversList) {
-                if (c.url) {
-                    if (c.quality === TrackQuality.LOW) srcsetParts.push(`${c.url} 360w`);
-                    else if (c.quality === TrackQuality.MEDIUM) srcsetParts.push(`${c.url} 720w`);
-                    else if (c.quality === TrackQuality.HIGH) srcsetParts.push(`${c.url} 1440w`);
-                }
-            }
-            const srcset = srcsetParts.length > 0 ? srcsetParts.join(", ") : null;
-
-            let url: string | null = null;
-            if (m.type === "VIDEO") {
-                url = fallbackVideo;
-            } else {
-                url = highCover || mediumCover || lowCover;
-            }
-
-            const thumbnail = lowCover || mediumCover || highCover;
-            const poster = mediumCover || highCover || lowCover;
+            const fallbackVideo = m.videos?.[0]?.url || null;
+            const url = m.type === "VIDEO" ? fallbackVideo : previewLargestUrl(m.previews);
             const live_url = m.type === "LIVE_PHOTO" ? fallbackVideo : null;
 
             return {
@@ -262,15 +237,15 @@ export const usePostStore = defineStore("posts", () => {
                 type: m.type,
                 url: url,
                 mime_type: null,
-                thumbnail: thumbnail,
+                thumbnail: previewThumbnailUrl(m.previews),
                 live_url: live_url,
-                poster: poster,
+                poster: previewPosterUrl(m.previews),
                 sync_status: m.sync_status || "PENDING",
                 last_error: m.last_error || null,
                 ai_status: m.ai_status || "PENDING",
                 ai_error: m.ai_error || null,
                 subtitles: [],
-                srcset: srcset,
+                srcset: previewSrcset(m.previews),
             };
         });
 
@@ -397,8 +372,6 @@ export const usePostStore = defineStore("posts", () => {
                 const detail = response.data;
                 const displayTime = detail.published_time ?? detail.create_time;
 
-                const listPost = postsData.value?.list.find((p) => p.id == detail.id);
-
                 const uiMedia =
                     detail.media?.map((m) => {
                         const primaryTrack = m.tracks.find(
@@ -407,14 +380,9 @@ export const usePostStore = defineStore("posts", () => {
                                 t.priority === 0 &&
                                 (m.type === "VIDEO" ? t.type === "VIDEO" : t.type === "IMAGE"),
                         );
-                        const coverTrack = m.tracks.find((t) => t.purpose === "COVER");
                         const liveTrack =
                             m.type === "LIVE_PHOTO" ? m.tracks.find((t) => t.type === "VIDEO" && t.purpose === "CONTENT") : null;
                         const subtitleTracks = m.tracks.filter((t) => t.type === "SUBTITLE");
-
-                        const listMedia = listPost?.media?.find((lm) => lm.id == m.id);
-                        const fallbackCover =
-                            coverTrack?.url || m.cover_url || listMedia?.thumbnail || listMedia?.poster || listMedia?.cover_url || null;
 
                         let url = m.url || primaryTrack?.url || null;
 
@@ -423,10 +391,9 @@ export const usePostStore = defineStore("posts", () => {
                             type: m.type as "VIDEO" | "IMAGE" | "LIVE_PHOTO" | "AUDIO" | "PDF",
                             url: url,
                             mime_type: primaryTrack?.mime_type || null,
-                            cover_url: fallbackCover,
-                            thumbnail: fallbackCover,
+                            thumbnail: previewThumbnailUrl(m.previews),
                             live_url: liveTrack?.url || null,
-                            poster: fallbackCover,
+                            poster: previewPosterUrl(m.previews),
                             sync_status: m.sync_status || "PENDING",
                             last_error: m.last_error || null,
                             ai_status: m.ai_status || "PENDING",

@@ -219,7 +219,7 @@ function applyLibrarySelection() {
             type: media?.type || "IMAGE",
             source: "existing" as const,
             existingId: id,
-            thumbnail: media ? media.cover_url || media.url || null : null,
+            thumbnail: media ? previewThumbnailUrl(media.previews) : null,
         };
     });
 
@@ -258,16 +258,8 @@ function getStagedItemThumbnail(item: StagedItem): string | null {
 }
 
 function handleMediaDraftCreated(draft: any) {
-    let thumbnail: string | null = null;
-    const coverTrack = draft.tracks?.find((t: any) => t.purpose === "COVER");
-    if (coverTrack) {
-        const file = draft._files?.find((f: any) => f.id === coverTrack.draft_file_id);
-        if (file?.url) thumbnail = file.url;
-    }
-    if (!thumbnail) {
-        const firstImage = draft._files?.find((f: any) => f.mime_type.startsWith("image/"));
-        if (firstImage?.url) thumbnail = firstImage.url;
-    }
+    const firstImage = draft._files?.find((f: any) => f.mime_type.startsWith("image/"));
+    const thumbnail: string | null = firstImage?.url || null;
 
     const existingIndex = stagedItems.value.findIndex((item) => item.id === draft.temp_id);
     const updatedItem: StagedItem = {
@@ -790,8 +782,8 @@ async function handleSubmit() {
                                     class="shrink-0 w-10 h-10 bg-slate-100 dark:bg-zinc-900 border dark:border-zinc-800 rounded overflow-hidden flex items-center justify-center"
                                 >
                                     <img
-                                        v-if="media.cover_url || (media.type === 'IMAGE' && media.url)"
-                                        :src="media.cover_url || media.url || ''"
+                                        v-if="previewThumbnailUrl(media.previews)"
+                                        :src="previewThumbnailUrl(media.previews)!"
                                         class="w-full h-full object-cover"
                                     />
                                     <Video v-else-if="media.type === 'VIDEO'" class="w-4 h-4 text-slate-400 dark:text-zinc-500" />

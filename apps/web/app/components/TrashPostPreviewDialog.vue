@@ -18,9 +18,9 @@ import { Button } from "@/components/ui/button";
 import HeicImage from "./HeicImage.vue";
 import { isHeic } from "@/utils/heic-decoder";
 import type { TrashItem, TrashPostItem } from "@/stores/trash";
-import type { MediaType, PostMediaSummary } from "@/types/post";
+import type { MediaPreviews, MediaType, PostMediaSummary } from "@/types/post";
 import { useApi } from "@/composables/useApi";
-import { getMediaTypeLabel } from "@/utils/media";
+import { getMediaTypeLabel, previewLargestUrl, previewPosterUrl, previewThumbnailUrl } from "@/utils/media";
 import { Temporal } from "@js-temporal/polyfill";
 
 const props = defineProps<{
@@ -76,7 +76,7 @@ interface PreviewMediaItem {
     type: MediaType | string;
     title: string | null;
     url: string | null;
-    cover_url: string | null;
+    previews: MediaPreviews;
     tracks?: Array<{ url: string; purpose?: string; type?: string }>;
 }
 
@@ -128,16 +128,7 @@ const getMediaDisplayUrl = (media: PreviewMediaItem | null): string => {
         const contentTrack = media.tracks.find((t) => t.purpose === "CONTENT");
         if (contentTrack?.url) return contentTrack.url;
     }
-    return media.cover_url || "";
-};
-
-const getThumbUrl = (media: PreviewMediaItem): string => {
-    if (media.cover_url) return media.cover_url;
-    if (media.tracks && media.tracks.length > 0) {
-        const coverTrack = media.tracks.find((t) => t.purpose === "COVER");
-        if (coverTrack?.url) return coverTrack.url;
-    }
-    return media.url || "";
+    return "";
 };
 
 const fetchPostMedia = async (postId: string) => {
@@ -159,7 +150,7 @@ const fetchPostMedia = async (postId: string) => {
                 type: m.type,
                 title: m.title || null,
                 url: m.url || null,
-                cover_url: m.cover_url || null,
+                previews: m.previews,
                 tracks: m.tracks || [],
             }));
         }
@@ -182,17 +173,16 @@ watch(
         currentIndex.value = 0;
 
         if (item.item_type === "post") {
-            // Seed first cover as placeholder for instant feedback
-            const firstCover = item.covers?.[0];
-            const initialCover = firstCover?.url || firstCover?.thumbnail || null;
-            if (initialCover && firstCover) {
+            // Seed the post's preview as a placeholder for instant feedback
+            const initialPreview = previewLargestUrl(item.previews);
+            if (initialPreview) {
                 mediaList.value = [
                     {
-                        id: firstCover.id || "initial-cover",
+                        id: "initial-preview",
                         type: "IMAGE",
                         title: item.title,
-                        url: initialCover,
-                        cover_url: initialCover,
+                        url: initialPreview,
+                        previews: item.previews,
                     },
                 ];
             } else {
@@ -202,15 +192,13 @@ watch(
             void fetchPostMedia(item.id);
         } else {
             // Standalone media item
-            const firstCover = item.covers?.[0];
-            const mediaUrl = item.url || firstCover?.url || firstCover?.thumbnail || null;
             mediaList.value = [
                 {
                     id: item.id,
                     type: item.type,
                     title: item.title || item.description || null,
-                    url: mediaUrl,
-                    cover_url: firstCover?.thumbnail || firstCover?.url || mediaUrl,
+                    url: item.url,
+                    previews: item.previews,
                 },
             ];
             isLoading.value = false;
@@ -387,22 +375,16 @@ onUnmounted(() => {
                         playsinline
                         autoplay
                         :src="getMediaDisplayUrl(currentMedia)"
-                        :poster="currentMedia.cover_url || undefined"
+                        :poster="previewPosterUrl(currentMedia.previews) || undefined"
                         class="max-w-full max-h-[calc(100vh-160px)] rounded-lg shadow-2xl ring-1 ring-white/10 bg-black"
                     ></video>
                 </div>
 
                 <!-- Fallback Media View -->
                 <div v-else class="relative max-w-full max-h-full flex items-center justify-center">
-                    <HeicImage
-                        v-if="getMediaDisplayUrl(currentMedia) && isHeic(getMediaDisplayUrl(currentMedia))"
-                        :src="getMediaDisplayUrl(currentMedia)"
-                        :alt="currentMedia.title || $t('trash.preview.media_alt')"
-                        class="max-w-full max-h-[calc(100vh-160px)] object-contain rounded-lg shadow-2xl ring-1 ring-white/10"
-                    />
                     <img
-                        v-else-if="getMediaDisplayUrl(currentMedia)"
-                        :src="getMediaDisplayUrl(currentMedia)"
+                        v-if="previewLargestUrl(currentMedia.previews)"
+                        :src="previewLargestUrl(currentMedia.previews)!"
                         :alt="currentMedia.title || $t('trash.preview.media_alt')"
                         class="max-w-full max-h-[calc(100vh-160px)] object-contain rounded-lg shadow-2xl ring-1 ring-white/10"
                     />
@@ -446,7 +428,8 @@ onUnmounted(() => {
                     :title="m.title || $t('trash.preview.media_item_title', { index: idx + 1 })"
                 >
                     <img
-                        :src="getThumbUrl(m)"
+                        v-if="previewThumbnailUrl(m.previews)"
+                        :src="previewThumbnailUrl(m.previews)!"
                         :alt="m.title || $t('trash.preview.thumb_alt')"
                         class="w-full h-full object-cover"
                         loading="lazy"

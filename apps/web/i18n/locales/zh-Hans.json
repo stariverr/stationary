@@ -120,19 +120,7 @@
             "language_desc": "选择您的首选语言。",
             "other_title": "系统工具",
             "other_desc": "维护和恢复系统状态的辅助工具。",
-            "other_empty": "当前没有其他设置可用。",
-            "video_cover_recovery": "重新扫描与补全封面",
-            "video_cover_recovery_desc": "一键检查并重新生成媒体库中缺失或未更新的封面（支持图片、Live Photo 和视频）。",
-            "video_cover_recovery_btn": "重新扫描并生成封面",
-            "video_cover_recovery_loading": "正在扫描并生成中...",
-            "video_cover_recovery_success": "已开始在后台重新扫描并生成封面！",
-            "video_cover_recovery_error": "启动封面扫描与生成失败。",
-            "cover_qualities_title": "封面清晰度配置",
-            "cover_qualities_desc": "设置系统为媒体自动生成的封面清晰度（可选择 1 ~ 3 档）。修改设置后，系统将在后台自动更新所有已有的封面。",
-            "cover_low": "LOW (360px 缩略图)",
-            "cover_medium": "MEDIUM (720px 常规卡片)",
-            "cover_high": "HIGH (1440px 高清预览)",
-            "cover_qualities_min_err": "至少必须选择 1 档封面清晰度"
+            "other_empty": "当前没有其他设置可用。"
         },
         "appearance": {
             "title": "外观设置",
@@ -189,24 +177,20 @@
         },
         "library_config": {
             "title": "媒体库设置",
-            "desc": "为单个媒体库配置封面档位与 AI 模型。",
+            "desc": "为单个媒体库管理预览图与 AI 模型。",
             "library_select": "选择媒体库",
-            "quality_low_desc": "网格列表与快速预览",
-            "quality_medium_desc": "标准屏幕与详情页",
-            "quality_high_desc": "4K 高分屏与大屏",
-            "badge_recommended": "推荐",
-            "badge_sharp": "高清",
-            "quality_save": "保存",
-            "quality_saved": "封面清晰度已保存",
-            "quality_saved_rebuilding": "封面规格已更新，媒体库的封面正在后台更新",
-            "quality_save_failed": "保存封面清晰度失败",
-            "quality_changed_notice": "清晰度已改动。保存后会重新扫描全库并更新封面。",
-            "cover_counting": "正在统计…",
-            "cover_progress": "剩余 {queued} 个封面 · {running} 个生成中",
-            "cover_failed": "{count} 个封面生成失败",
-            "cover_retry": "重试",
-            "cover_retry_done": "已将 {count} 个封面加入重试",
-            "cover_retry_error": "重试封面失败"
+            "preview_regenerate_title": "补全预览图",
+            "preview_regenerate_desc": "扫描媒体库中缺少预览图的媒体，并在后台生成。",
+            "preview_regenerate_btn": "扫描并生成",
+            "preview_regenerate_loading": "正在生成…",
+            "preview_regenerate_success": "已开始在后台生成预览图",
+            "preview_regenerate_error": "启动预览图生成失败",
+            "preview_counting": "正在统计…",
+            "preview_progress": "剩余 {queued} 个媒体 · {running} 个生成中",
+            "preview_failed": "{count} 个媒体生成失败",
+            "preview_retry": "重试",
+            "preview_retry_done": "已将 {count} 个媒体加入重试",
+            "preview_retry_error": "重试预览图失败"
         },
         "ai_config": {
             "coverage_empty": "媒体库中还没有媒体",
@@ -430,21 +414,41 @@
             "low": "低"
         },
         "actions": {
-            "regenerate_cover": "重新生成封面",
-            "regenerate_covers": "批量重新生成封面",
+            "regenerate_previews": "重新生成预览图",
             "cancel": "取消",
             "discard": "舍弃",
             "create": "创建媒体",
             "add": "添加媒体"
         },
         "cover": {
-            "queued": "封面重新生成任务已加入队列。",
-            "batch_queued": "已将 {queued} 个封面重新生成任务加入队列，跳过 {skipped} 个。",
-            "already_pending": "该封面已在生成队列中。",
-            "external_exists": "该媒体已有外部封面，未覆盖。",
-            "select_video_required": "请至少选择一个媒体素材。",
-            "failed": "封面重新生成任务加入队列失败。",
-            "loading": "正在请求..."
+            "title": "封面",
+            "desc": "原始封面。有封面时，预览图由它生成。",
+            "empty": "没有封面",
+            "upload": "上传封面",
+            "replace": "替换",
+            "delete": "删除",
+            "delete_confirm": "删除这个封面？预览图会在没有封面的情况下重新生成。",
+            "uploaded": "封面已更新，预览图正在重新生成。",
+            "upload_failed": "上传封面失败",
+            "deleted": "封面已删除，预览图正在重新生成。",
+            "delete_failed": "删除封面失败"
+        },
+        "previews": {
+            "title": "预览图",
+            "desc": "由系统自动生成，不能编辑。",
+            "sizes": {
+                "small": "小",
+                "medium": "中",
+                "large": "大"
+            },
+            "missing": "未生成",
+            "requesting": "正在请求…",
+            "queued": "预览图重新生成任务已加入队列。",
+            "failed": "预览图重新生成任务加入队列失败。",
+            "batch_queued": "已为 {count} 个媒体加入预览图重新生成任务。",
+            "select_media_required": "请至少选择一个媒体。",
+            "multiple_libraries_error": "所选项目属于不同的媒体库，请只选择同一个媒体库中的项目。",
+            "library_required": "无法确定所选项目所在的媒体库。"
         },
         "create_title": "创建媒体",
         "create_btn": "创建媒体",
@@ -496,7 +500,7 @@
         "tracks": {
             "group_images": "图片主体",
             "group_videos": "视频主体",
-            "group_covers": "封面与缩略图",
+            "group_thumbnails": "缩略图",
             "group_audios": "独立音轨",
             "group_subtitles": "字幕与歌词",
             "group_others": "其他轨道",
@@ -548,6 +552,7 @@
             "cannot_be_used_as_type": "{name} 不能用作 {type} 轨道。",
             "cannot_use_purpose_in_media": "{type} 轨道不能在 {mediaType} 媒体中使用 {purpose} 用途。",
             "only_one_default_allowed": "只允许有一个默认的 {type} {purpose} 轨道。",
+            "only_one_cover_allowed": "只能有一张图片作为封面。",
             "requires_default_content_track": "{mediaType} 媒体需要一个默认的 {requiredType} CONTENT 轨道。"
         },
         "toast_create_success": "媒体已创建",
@@ -1066,7 +1071,7 @@
             "names": {
                 "download": "下载",
                 "avatar": "头像",
-                "cover": "封面",
+                "preview": "预览图",
                 "ai": {
                     "describe": "AI 描述",
                     "index": "搜索索引",

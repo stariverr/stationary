@@ -100,7 +100,7 @@ const fallbackTitle = (position: number) => t("post_detail.media_item", { number
 const mediaListWithPreview = computed(() =>
     props.list.map((item) => ({
         ...item,
-        previewUrl: getMediaPreviewUrl(item),
+        previewUrl: previewThumbnailUrl(item.previews),
     })),
 );
 </script>

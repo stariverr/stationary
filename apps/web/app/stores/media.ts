@@ -2,8 +2,10 @@ import { defineStore } from "pinia";
 import { Temporal } from "@js-temporal/polyfill";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/vue-query";
 import { useLibraryStore } from "@/stores/library";
+import { previewPosterUrl, previewSrcset, previewThumbnailUrl } from "@/utils/media";
 
 import * as v from "valibot";
+import { MediaPreviewsSchema, type MediaPreviews } from "@/types/post";
 
 export const MediaListResponseBodySchema = v.object({
     id: v.string(),
@@ -18,25 +20,7 @@ export const MediaListResponseBodySchema = v.object({
     media_count: v.number(),
     url: v.nullable(v.string()),
     mime_type: v.optional(v.nullable(v.string())),
-    cover_url: v.optional(v.nullable(v.string())),
-    covers: v.optional(
-        v.array(
-            v.object({
-                url: v.nullable(v.string()),
-                quality: v.string(),
-                codec: v.optional(v.nullable(v.string())),
-            }),
-        ),
-    ),
-    videos: v.optional(
-        v.array(
-            v.object({
-                url: v.nullable(v.string()),
-                quality: v.string(),
-                codec: v.optional(v.nullable(v.string())),
-            }),
-        ),
-    ),
+    previews: MediaPreviewsSchema,
     sync_status: v.optional(v.nullable(v.string())),
     last_error: v.optional(v.nullable(v.string())),
     ai_status: v.optional(v.nullable(v.string())),
@@ -81,13 +65,10 @@ export interface MappedMediaItem {
     media_count: number;
     url: string | null;
     mime_type: string | null;
-    cover_url?: string | null;
-    cover?: string | null;
-    thumbnail?: string | null;
+    previews: MediaPreviews;
+    thumbnail: string | null;
     poster: string | null;
-    srcset?: string | null;
-    covers?: Array<{ url: string | null; quality: string; codec?: string | null }>;
-    videos?: Array<{ url: string | null; quality: string; codec?: string | null }>;
+    srcset: string | null;
     sync_status: string;
     last_error: string | null;
     ai_status: string;
@@ -262,46 +243,12 @@ export const useMediaStore = defineStore("media", () => {
 
     const mapApiMediaToUiMedia = (apiMedia: MediaListItem): MappedMediaItem => {
         const displayTime = apiMedia.published_time ?? apiMedia.create_time;
-        const coversList = apiMedia.covers || [];
-        const videosList = apiMedia.videos || [];
-
-        const lowCover = coversList.find((c) => c.quality === "LOW")?.url || null;
-        const mediumCover = coversList.find((c) => c.quality === "MEDIUM")?.url || null;
-        const highCover = coversList.find((c) => c.quality === "HIGH")?.url || null;
-
-        const fallbackVideo = videosList[0]?.url || null;
-
-        const srcsetParts: string[] = [];
-        for (const c of coversList) {
-            if (c.url) {
-                if (c.quality === "LOW") srcsetParts.push(`${c.url} 360w`);
-                else if (c.quality === "MEDIUM") srcsetParts.push(`${c.url} 720w`);
-                else if (c.quality === "HIGH") srcsetParts.push(`${c.url} 1440w`);
-            }
-        }
-        const srcset = srcsetParts.length > 0 ? srcsetParts.join(", ") : null;
-
-        let url: string | null = null;
-        if (apiMedia.type?.toUpperCase() === "VIDEO") {
-            url = fallbackVideo || apiMedia.url || null;
-        } else {
-            url = highCover || mediumCover || lowCover || apiMedia.url || null;
-        }
-
-        const thumbnail = lowCover || mediumCover || highCover || apiMedia.cover_url || url;
-        const poster = mediumCover || highCover || lowCover || apiMedia.cover_url || null;
-
         return {
             ...apiMedia,
-            url: url,
             mime_type: apiMedia.mime_type || null,
-            cover_url: apiMedia.cover_url || mediumCover || lowCover || highCover || null,
-            cover: apiMedia.cover_url || mediumCover || lowCover || highCover || null,
-            thumbnail: thumbnail,
-            poster: poster,
-            srcset: srcset,
-            covers: coversList,
-            videos: videosList,
+            thumbnail: previewThumbnailUrl(apiMedia.previews),
+            poster: previewPosterUrl(apiMedia.previews),
+            srcset: previewSrcset(apiMedia.previews),
             sync_status: apiMedia.sync_status || "PENDING",
             last_error: apiMedia.last_error || null,
             ai_status: apiMedia.ai_status || "PENDING",
@@ -328,8 +275,7 @@ export const useMediaStore = defineStore("media", () => {
         published_time?: string | null;
         media_url?: string | null;
         url?: string | null;
-        cover_url?: string | null;
-        cover?: string | null;
+        previews: MediaPreviews;
         sync_status?: string | null;
         last_error?: string | null;
         ai_status?: string | null;
@@ -385,8 +331,7 @@ export const useMediaStore = defineStore("media", () => {
                 if (response && response.success && response.data) {
                     const mappedList: MappedMediaItem[] = response.data.list.map((item) => {
                         const displayTime = item.published_time ?? item.create_time;
-                        const coverUrl = item.cover_url || item.cover || null;
-                        const mediaUrl = item.media_url || item.url || coverUrl || null;
+                        const mediaUrl = item.media_url || item.url || null;
                         return {
                             id: item.id,
                             eid: "",
@@ -400,11 +345,10 @@ export const useMediaStore = defineStore("media", () => {
                             media_count: 1,
                             url: mediaUrl,
                             mime_type: null,
-                            cover: coverUrl,
-                            cover_url: coverUrl,
-                            thumbnail: coverUrl || mediaUrl,
-                            poster: coverUrl,
-                            srcset: null,
+                            previews: item.previews,
+                            thumbnail: previewThumbnailUrl(item.previews),
+                            poster: previewPosterUrl(item.previews),
+                            srcset: previewSrcset(item.previews),
                             sync_status: item.sync_status || "PENDING",
                             last_error: item.last_error || null,
                             ai_status: item.ai_status || "PENDING",

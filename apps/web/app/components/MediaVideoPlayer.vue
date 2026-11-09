@@ -260,7 +260,7 @@ const progressiveVariants = computed<ProgressiveVariant[]>(() => {
     if (variants.length > 0) return variants;
 
     const trackSources = props.tracks
-        .filter((track) => track.type.toUpperCase() === "VIDEO" && track.purpose?.toUpperCase() !== "COVER" && track.url)
+        .filter((track) => track.type.toUpperCase() === "VIDEO" && track.url)
         .map((track, index) => ({
             id: track.id || `track-${index}`,
             src: resolveUrl(track.url),

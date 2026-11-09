@@ -233,7 +233,7 @@ const innerContainerClass = computed(() => {
                 @error="emit('error')"
             />
 
-            <!-- Live Video Element overlaid (pixel-perfectly covers the static image) -->
+            <!-- Live Video Element overlaid pixel-perfectly on the static image -->
             <video
                 v-if="props.liveSrc"
                 v-show="isVideoVisible"

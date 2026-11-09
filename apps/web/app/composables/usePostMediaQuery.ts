@@ -28,9 +28,7 @@ export function usePostMediaQuery(
         const media = initialPostGetter?.()?.media;
         if (!Array.isArray(media) || media.length === 0) return "";
 
-        return media
-            .map((item: any) => [item.id, item.cover_url, item.poster, item.thumbnail, item.url].map((value) => value || "").join(":"))
-            .join("|");
+        return media.map((item: any) => [item.id, item.poster, item.thumbnail, item.url].map((value) => value || "").join(":")).join("|");
     };
 
     async function fetchPage(options: PostMediaQueryOptions = {}) {
@@ -116,7 +114,7 @@ export function usePostMediaQuery(
                     title: m.title || null,
                     sort_order: index,
                     position: index,
-                    cover_url: m.cover_url || m.poster || m.thumbnail || "",
+                    previews: m.previews,
                     url: m.url || null,
                     playback: m.playback || null,
                     subtitles: m.subtitles || [],

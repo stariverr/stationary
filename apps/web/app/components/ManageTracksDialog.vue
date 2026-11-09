@@ -3,6 +3,7 @@ import { ref, watch } from "vue";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Layers } from "@lucide/vue";
 import MediaVariantsManager from "@/components/MediaVariantsManager.vue";
+import type { MediaPreviews } from "@/types/post";
 
 const props = defineProps<{
     open: boolean;
@@ -37,19 +38,7 @@ watch(
 
 const { t } = useI18n();
 const formatMediaType = (type?: string | null) => getMediaTypeLabel(type, t);
-const getMediaThumb = (med: any) => {
-    if (!med) return null;
-    return (
-        med.cover_url ||
-        med.thumbnail_url ||
-        med.url ||
-        med.preview_url ||
-        med.tracks?.[0]?.url ||
-        med.tracks?.[0]?.file?.url ||
-        med.file?.url ||
-        null
-    );
-};
+const getMediaThumb = (med: { previews?: MediaPreviews }) => previewThumbnailUrl(med.previews);
 </script>
 
 <template>
@@ -88,7 +77,7 @@ const getMediaThumb = (med: any) => {
                     >
                         <img
                             v-if="getMediaThumb(med)"
-                            :src="getMediaThumb(med)"
+                            :src="getMediaThumb(med)!"
                             class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
                         />
                         <div

@@ -21,7 +21,8 @@ import {
     Video as VideoIcon,
 } from "@lucide/vue";
 import { useMediaStore, type MediaListItem, type MappedMediaItem, type MatchedDetails } from "@/stores/media";
-import { type ApiPostDetail, type ApiPostMedia, type PostMediaSummary, type Track } from "@/types/post";
+import { type ApiPostDetail, type ApiPostMedia, type MediaPreviews, type PostMediaSummary, type Track } from "@/types/post";
+import { previewLargestUrl, previewPosterUrl, previewThumbnailUrl } from "@/utils/media";
 import { toast } from "vue-sonner";
 import { storeToRefs } from "pinia";
 import { Swiper, SwiperSlide } from "swiper/vue";
@@ -34,43 +35,23 @@ const { selectedMediaId, selectedMedia, medias, displayMode } = storeToRefs(stor
 
 const { t } = useI18n();
 const formatMediaType = (type?: string | null) => getMediaTypeLabel(type, t);
-const regeneratingCoverMediaId = ref<string | null>(null);
+const regeneratingPreviewsMediaId = ref<string | null>(null);
 const isSidebarOpen = ref(true);
 
-interface CoverRegenData {
-    status: string;
-    reason?: string;
-}
-
-const handleRegenerateCover = async (mediaId: string) => {
+const handleRegeneratePreviews = async (mediaId: string) => {
     if (!mediaId) return;
-    regeneratingCoverMediaId.value = mediaId;
+    regeneratingPreviewsMediaId.value = mediaId;
     try {
-        const response = await useApi<{ success: boolean; message?: string; data: CoverRegenData }>(`/media/${mediaId}/regenerate-cover`, {
+        const response = await useApi<{ success: boolean; message?: string }>(`/media/${mediaId}/regenerate-previews`, {
             method: "POST",
         });
-        if (response && response.success && response.data) {
-            const status = response.data.status;
-            if (status === "queued") {
-                toast.success(t("media.cover.queued", "Video cover regeneration has been queued."));
-            } else if (status === "already_pending") {
-                toast.info(t("media.cover.already_pending", "A cover generation task is already pending."));
-            } else if (status === "skipped") {
-                const reason = response.data.reason;
-                if (reason === "external_cover_exists") {
-                    toast.warning(t("media.cover.external_exists", "This video already has an external cover and it was not overwritten."));
-                } else {
-                    toast.warning(reason || t("media.cover.failed", "Skipped cover generation."));
-                }
-            }
-        } else {
-            throw new Error(response?.message || "Failed to request cover generation");
-        }
+        if (!response?.success) throw new Error(response?.message || "Failed to request preview generation");
+        toast.success(t("media.previews.queued"));
     } catch (err: unknown) {
-        console.error("Failed to regenerate cover:", err);
-        toast.error(t("media.cover.failed", "Failed to queue cover regeneration."));
+        console.error("Failed to regenerate previews:", err);
+        toast.error(t("media.previews.failed"));
     } finally {
-        regeneratingCoverMediaId.value = null;
+        regeneratingPreviewsMediaId.value = null;
     }
 };
 
@@ -100,6 +81,7 @@ interface MappedSiblingMedia {
     mimeType?: string | null;
     width?: number;
     height?: number;
+    previews?: MediaPreviews;
     poster?: string | null;
     thumbnail?: string | null;
     subtitles?: Array<{
@@ -244,7 +226,9 @@ watch(selectedMediaId, async (newId) => {
                             id: m.id,
                             type: m.type,
                             url: m.url || null,
-                            thumbnail: m.cover_url || null,
+                            previews: m.previews,
+                            thumbnail: previewThumbnailUrl(m.previews),
+                            poster: previewPosterUrl(m.previews),
                             width: m.width ?? undefined,
                             height: m.height ?? undefined,
                             title: m.title,
@@ -362,10 +346,6 @@ const currentPublishedTime = computed(() => {
 });
 
 const isVideo = computed(() => currentMediaItem.value?.type?.toLowerCase() === "video");
-const isCoverable = computed(() => {
-    const t = currentMediaItem.value?.type?.toLowerCase() || "";
-    return ["image", "live_photo", "video"].includes(t);
-});
 
 const formatDate = (dateStr: string) => {
     if (!dateStr) return "Unknown";
@@ -452,7 +432,7 @@ const saveEditingMedia = async () => {
             const mediaResponse = await useApi<{
                 success: boolean;
                 data: {
-                    list: any[];
+                    list: PostMediaSummary[];
                 };
             }>(`/post/${selectedMedia.value.post_id}/media`, {
                 query: {
@@ -466,14 +446,18 @@ const saveEditingMedia = async () => {
                         ({
                             id: m.id,
                             type: m.type,
-                            url: m.preview_url || m.thumbnail_url || null,
-                            thumbnail: m.thumbnail_url || null,
-                            width: m.width,
-                            height: m.height,
+                            url: m.url || null,
+                            previews: m.previews,
+                            thumbnail: previewThumbnailUrl(m.previews),
+                            poster: previewPosterUrl(m.previews),
+                            width: m.width ?? undefined,
+                            height: m.height ?? undefined,
                             title: m.title,
                             sort_order: m.sort_order,
-                            duration: m.duration,
-                            page_count: m.page_count,
+                            tracks: m.tracks || [],
+                            playback: m.playback || null,
+                            audio_tracks: m.audio_tracks || [],
+                            subtitle_tracks: m.subtitle_tracks || [],
                             subtitles: m.subtitles || [],
                         }) as unknown as MappedSiblingMedia,
                 );
@@ -655,6 +639,7 @@ const handleAddTag = async (tagToAdd: string) => {
                                         <MediaVideoPlayer
                                             v-else-if="media.type?.toLowerCase() === 'video'"
                                             :src="media.url || media.media_url || ''"
+                                            :poster="media.poster || undefined"
                                             :tracks="media.tracks"
                                             :playback="media.playback"
                                             :subtitles="media.subtitles?.length ? media.subtitles : media.playback?.subtitle_tracks"
@@ -674,11 +659,21 @@ const handleAddTag = async (tagToAdd: string) => {
                                             class="max-h-full max-w-full object-contain rounded-sm"
                                         />
                                         <HeicImage
-                                            v-else
+                                            v-else-if="media.type?.toLowerCase() === 'image'"
                                             :src="media.url || media.media_url || ''"
                                             :mime-type="media.mime_type || media.mimeType || undefined"
                                             class="max-h-full max-w-full object-contain rounded-sm"
                                         />
+                                        <img
+                                            v-else-if="previewLargestUrl(media.previews)"
+                                            :src="previewLargestUrl(media.previews)!"
+                                            :alt="media.title || ''"
+                                            class="max-h-full max-w-full object-contain rounded-sm"
+                                        />
+                                        <div v-else class="flex flex-col items-center gap-2 text-zinc-500">
+                                            <FileImage class="w-10 h-10" />
+                                            <span class="text-xs">{{ formatMediaType(media.type) }}</span>
+                                        </div>
                                     </div>
                                 </swiper-slide>
                             </swiper>
@@ -722,17 +717,12 @@ const handleAddTag = async (tagToAdd: string) => {
                                 <div v-if="media.isPlaceholder" class="w-full h-full bg-zinc-900 flex items-center justify-center">
                                     <Loader2 class="w-3 h-3 animate-spin text-zinc-500" />
                                 </div>
-                                <HeicImage
-                                    v-else-if="media.type?.toLowerCase() !== 'video'"
-                                    :src="media.url || media.media_url || ''"
-                                    :mime-type="media.mime_type || media.mimeType || undefined"
-                                    class="w-full h-full object-cover"
-                                />
+                                <img v-else-if="media.thumbnail" :src="media.thumbnail" alt="" class="w-full h-full object-cover" />
                                 <div
                                     v-else
                                     class="w-full h-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300 text-xs font-bold"
                                 >
-                                    VIDEO
+                                    {{ formatMediaType(media.type) }}
                                 </div>
                             </div>
                         </div>
@@ -991,33 +981,33 @@ const handleAddTag = async (tagToAdd: string) => {
 
                             <hr class="border-zinc-900" />
 
-                            <!-- Actions (Regenerate Cover) -->
-                            <div v-if="isCoverable" class="space-y-3">
+                            <!-- Actions (Regenerate Previews) -->
+                            <div class="space-y-3">
                                 <label class="text-xs uppercase text-zinc-500 font-bold tracking-wider flex items-center gap-1.5">
                                     <Info class="w-3.5 h-3.5" />
-                                    {{ $t("media.actions.regenerate_cover", "Regenerate Cover") }}
+                                    {{ $t("media.actions.regenerate_previews") }}
                                 </label>
                                 <button
-                                    :disabled="!currentMediaItem || regeneratingCoverMediaId === currentMediaItem.id"
-                                    @click="currentMediaItem && handleRegenerateCover(currentMediaItem.id)"
+                                    :disabled="!currentMediaItem || regeneratingPreviewsMediaId === currentMediaItem.id"
+                                    @click="currentMediaItem && handleRegeneratePreviews(currentMediaItem.id)"
                                     class="w-full flex items-center justify-center gap-2 px-4 py-2 border border-zinc-800 rounded-xl text-sm font-semibold text-zinc-300 bg-zinc-900/50 hover:bg-zinc-800 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed select-none cursor-pointer"
                                 >
                                     <Loader2
-                                        v-if="currentMediaItem && regeneratingCoverMediaId === currentMediaItem.id"
+                                        v-if="currentMediaItem && regeneratingPreviewsMediaId === currentMediaItem.id"
                                         class="w-4 h-4 animate-spin text-zinc-400"
                                     />
                                     <FileImage v-else class="w-4 h-4 text-zinc-400" />
                                     <span>
                                         {{
-                                            currentMediaItem && regeneratingCoverMediaId === currentMediaItem.id
-                                                ? $t("media.cover.loading", "Requesting...")
-                                                : $t("media.actions.regenerate_cover", "Regenerate Cover")
+                                            currentMediaItem && regeneratingPreviewsMediaId === currentMediaItem.id
+                                                ? $t("media.previews.requesting")
+                                                : $t("media.actions.regenerate_previews")
                                         }}
                                     </span>
                                 </button>
                             </div>
 
-                            <hr v-if="isCoverable" class="border-zinc-900" />
+                            <hr class="border-zinc-900" />
 
                             <!-- Provenance / Part of Post (The Wormhole) -->
                             <div v-if="postDetail || isLoadingPost" class="space-y-3">

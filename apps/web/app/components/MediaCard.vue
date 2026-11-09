@@ -60,21 +60,21 @@ interface ApiResponse {
     success: boolean;
 }
 
-const handleRegenerateCover = async () => {
+const handleRegeneratePreviews = async () => {
     if (!media.id) return;
 
     isRegenerating.value = true;
     try {
-        const response = await useApi<ApiResponse>(`/media/${media.id}/regenerate-cover`, {
+        const response = await useApi<ApiResponse>(`/media/${media.id}/regenerate-previews`, {
             method: "POST",
         });
         if (response && response.success) {
-            toast.success(t("toasts.cover_regeneration_queued", "Cover regeneration queued."));
+            toast.success(t("media.previews.queued"));
         } else {
             throw new Error();
         }
     } catch {
-        toast.error(t("toasts.cover_regeneration_failed", "Unable to queue cover regeneration. Try again."));
+        toast.error(t("media.previews.failed"));
     } finally {
         isRegenerating.value = false;
     }
@@ -161,8 +161,8 @@ const handleQueueAi = async () => {
 
                     <!-- Image Card -->
                     <img
-                        v-if="media.type?.toLowerCase() === 'image' || media.type?.toLowerCase() === 'live_photo' || !media.type"
-                        :src="media.thumbnail || media.url || ''"
+                        v-if="media.type?.toLowerCase() !== 'video' && media.thumbnail"
+                        :src="media.thumbnail"
                         :srcset="media.srcset ?? undefined"
                         sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                         :alt="media.title || 'Image'"
@@ -170,8 +170,16 @@ const handleQueueAi = async () => {
                         loading="lazy"
                     />
 
+                    <!-- No preview yet -->
+                    <div
+                        v-else-if="media.type?.toLowerCase() !== 'video'"
+                        class="w-full h-full flex items-center justify-center text-gray-300"
+                    >
+                        <FileImage class="w-8 h-8" />
+                    </div>
+
                     <!-- Video Card -->
-                    <div v-else-if="media.type?.toLowerCase() === 'video'" class="w-full h-full relative bg-gray-900">
+                    <div v-else class="w-full h-full relative bg-gray-900">
                         <video
                             v-if="isHovered"
                             ref="videoRef"
@@ -300,15 +308,10 @@ const handleQueueAi = async () => {
             </div>
         </ContextMenuTrigger>
         <ContextMenuContent class="w-52">
-            <ContextMenuItem
-                v-if="['image', 'live_photo', 'video'].includes(media.type?.toLowerCase() || '')"
-                :disabled="isRegenerating"
-                class="flex items-center gap-2"
-                @click.stop="handleRegenerateCover"
-            >
+            <ContextMenuItem :disabled="isRegenerating" class="flex items-center gap-2" @click.stop="handleRegeneratePreviews">
                 <Loader2 v-if="isRegenerating" class="w-4 h-4 animate-spin" />
                 <FileImage v-else class="w-4 h-4" />
-                <span>{{ $t("media.actions.regenerate_cover", "Regenerate Cover") }}</span>
+                <span>{{ $t("media.actions.regenerate_previews") }}</span>
             </ContextMenuItem>
             <ContextMenuItem
                 v-if="media.sync_status === 'FAILED'"
