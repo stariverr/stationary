@@ -51,11 +51,18 @@ class S3 {
         });
     }
 
-    /** Reads a whole object through the S3 endpoint, rejecting objects over `maxBytes` before downloading them. */
-    public async read(key: string, options: { bucket: string; maxBytes: number; signal?: AbortSignal }): Promise<Uint8Array> {
+    /**
+     * Reads an object, or with `range` only the inclusive byte range `start-end`, through the S3 endpoint,
+     * rejecting responses over `maxBytes` before downloading them.
+     */
+    public async read(
+        key: string,
+        options: { bucket: string; maxBytes: number; range?: { start: number; end: number }; signal?: AbortSignal },
+    ): Promise<Uint8Array> {
         const command = new GetObjectCommand({
             Bucket: options.bucket,
             Key: key.startsWith("/") ? key.slice(1) : key,
+            Range: options.range ? `bytes=${options.range.start}-${options.range.end}` : undefined,
         });
         // The signal stays attached until the body is consumed, so it also aborts the download.
         const response = await s3Client.send(command, { abortSignal: options.signal });

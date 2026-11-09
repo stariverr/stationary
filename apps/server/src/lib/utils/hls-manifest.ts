@@ -1,4 +1,5 @@
 import { createMediaSignature } from "./media-signer";
+import type { Mp4Segment } from "./mp4-segment";
 
 export interface HlsVideoVariant {
     track_id: string;
@@ -40,6 +41,9 @@ export interface HlsMasterInput {
     query_suffix?: string;
 }
 
+/** Exactly one rendition per group is DEFAULT=YES: the first one marked default, else the first one. */
+const defaultIndex = (renditions: { is_default?: boolean }[]) => Math.max(0, renditions.findIndex((r) => r.is_default));
+
 export function buildHlsMasterManifest(input: HlsMasterInput): string {
     const lines: string[] = [
         "#EXTM3U",
@@ -67,11 +71,12 @@ export function buildHlsMasterManifest(input: HlsMasterInput): string {
 
     // 1. Audio Media Group
     if (hasAudio) {
+        const defaultAudio = defaultIndex(input.audio);
         for (let i = 0; i < input.audio.length; i++) {
             const a = input.audio[i];
             const suffix = appendSigIfNeeded(a.track_id, input.query_suffix);
             const uri = `hls/${a.track_id}/manifest.m3u8${suffix}`;
-            const isDefault = a.is_default || i === 0 ? "YES" : "NO";
+            const isDefault = i === defaultAudio ? "YES" : "NO";
             const langAttr = a.language ? `,LANGUAGE="${a.language}"` : "";
             lines.push(
                 `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",NAME="${a.label}"${langAttr},DEFAULT=${isDefault},AUTOSELECT=YES,URI="${uri}"`,
@@ -82,11 +87,12 @@ export function buildHlsMasterManifest(input: HlsMasterInput): string {
 
     // 2. Subtitle Media Group
     if (hasSubtitles && input.subtitle) {
+        const defaultSubtitle = defaultIndex(input.subtitle);
         for (let i = 0; i < input.subtitle.length; i++) {
             const s = input.subtitle[i];
             const suffix = appendSigIfNeeded(s.track_id, input.query_suffix);
             const uri = `hls/${s.track_id}/manifest.m3u8${suffix}`;
-            const isDefault = s.is_default || i === 0 ? "YES" : "NO";
+            const isDefault = i === defaultSubtitle ? "YES" : "NO";
             const langAttr = s.language ? `,LANGUAGE="${s.language}"` : "";
             lines.push(
                 `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitles",NAME="${s.label}"${langAttr},DEFAULT=${isDefault},AUTOSELECT=YES,URI="${uri}"`,
@@ -114,27 +120,25 @@ export function buildHlsMasterManifest(input: HlsMasterInput): string {
     return lines.join("\n");
 }
 
-export interface HlsVariantSegment {
+const withQuery = (url: string, querySuffix?: string) => {
+    const query = (querySuffix || "").replace(/^\?/, "");
+    if (!query) return url;
+    return url.includes("?") ? `${url}&${query}` : `${url}?${query}`;
+};
+
+export interface HlsVariantInput {
     file_url: string;
-    init_range?: string | null;
-    media_range?: string | null;
-    duration: number;
+    /** The init segment (ftyp + moov) as a byte range of the file. */
+    init: { offset: number; length: number };
+    /** The media segments listed by the file's sidx, in order. */
+    segments: Mp4Segment[];
     query_suffix?: string;
 }
 
-export function buildHlsVariantManifest(segment: HlsVariantSegment): string {
-    const targetDuration = Math.max(1, Math.ceil(segment.duration || 10));
-    const suffix = segment.query_suffix || "";
-    let fileUrlWithQuery = segment.file_url;
-
-    if (suffix) {
-        const cleanSuffix = suffix.replace(/^\?/, "");
-        if (cleanSuffix) {
-            fileUrlWithQuery = segment.file_url.includes("?")
-                ? `${segment.file_url}&${cleanSuffix}`
-                : `${segment.file_url}?${cleanSuffix}`;
-        }
-    }
+/** A media playlist that addresses each fMP4 fragment of one file by byte range. */
+export function buildHlsVariantManifest(input: HlsVariantInput): string {
+    const url = withQuery(input.file_url, input.query_suffix);
+    const targetDuration = Math.max(1, Math.ceil(Math.max(0, ...input.segments.map((segment) => segment.duration))));
 
     const lines: string[] = [
         "#EXTM3U",
@@ -142,20 +146,34 @@ export function buildHlsVariantManifest(segment: HlsVariantSegment): string {
         `#EXT-X-TARGETDURATION:${targetDuration}`,
         "#EXT-X-MEDIA-SEQUENCE:0",
         "#EXT-X-PLAYLIST-TYPE:VOD",
+        `#EXT-X-MAP:URI="${url}",BYTERANGE="${input.init.length}@${input.init.offset}"`,
     ];
-
-    if (segment.init_range) {
-        lines.push(`#EXT-X-MAP:URI="${fileUrlWithQuery}",BYTERANGE="${segment.init_range}"`);
+    for (const segment of input.segments) {
+        lines.push(`#EXTINF:${segment.duration.toFixed(6)},`);
+        lines.push(`#EXT-X-BYTERANGE:${segment.length}@${segment.offset}`);
+        lines.push(url);
     }
-
-    lines.push(`#EXTINF:${(segment.duration || 0).toFixed(3)},`);
-
-    if (segment.media_range) {
-        lines.push(`#EXT-X-BYTERANGE:${segment.media_range}`);
-    }
-
-    lines.push(fileUrlWithQuery);
     lines.push("#EXT-X-ENDLIST");
-
     return lines.join("\n");
+}
+
+export interface HlsSubtitleInput {
+    file_url: string;
+    duration: number;
+    query_suffix?: string;
+}
+
+/** A media playlist whose single segment is the whole WebVTT file. */
+export function buildHlsSubtitleManifest(input: HlsSubtitleInput): string {
+    const duration = Number.isFinite(input.duration) && input.duration > 0 ? input.duration : 0;
+    return [
+        "#EXTM3U",
+        "#EXT-X-VERSION:6",
+        `#EXT-X-TARGETDURATION:${Math.max(1, Math.ceil(duration))}`,
+        "#EXT-X-MEDIA-SEQUENCE:0",
+        "#EXT-X-PLAYLIST-TYPE:VOD",
+        `#EXTINF:${duration.toFixed(6)},`,
+        withQuery(input.file_url, input.query_suffix),
+        "#EXT-X-ENDLIST",
+    ].join("\n");
 }
