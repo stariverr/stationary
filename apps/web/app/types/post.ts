@@ -141,6 +141,8 @@ export const MediaPlaybackSchema = v.object({
     url: v.nullish(v.string()),
     mime_type: v.nullish(v.string()),
     protocol: v.nullish(v.picklist(["DASH", "PROGRESSIVE"])),
+    hls_url: v.nullish(v.string()),
+    dash_url: v.nullish(v.string()),
     track_id: v.nullish(v.string()),
     variants: v.array(PlaybackVariantSchema),
     capabilities: v.object({

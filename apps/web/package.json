@@ -18,6 +18,7 @@
         "@tailwindcss/vite": "^4.3.4",
         "@tanstack/vue-query": "^5.106.1",
         "@videojs/dash-video": "10.3.0",
+        "@videojs/hlsjs-video": "10.3.0",
         "@videojs/html": "10.3.0",
         "@vueuse/core": "^15.0.0",
         "better-auth": "^1.7.17",

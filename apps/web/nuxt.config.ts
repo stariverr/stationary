@@ -18,6 +18,7 @@ const videoJsElements = new Set([
     "media-gesture",
     "media-hotkey",
     "dash-video",
+    "hlsjs-video",
 ]);
 
 const backendApiBaseUrl = process.env.NUXT_API_BASE_URL || "http://127.0.0.1:9400/api";
