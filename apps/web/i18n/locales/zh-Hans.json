@@ -1036,7 +1036,8 @@
                 "subtitle_bg_box": "半透明底框",
                 "audio_tracks": "音轨",
                 "default_audio": "默认音轨",
-                "default_subtitle": "默认字幕"
+                "default_subtitle": "默认字幕",
+                "protocol": "播放协议"
             },
             "download": "下载",
             "open_original": "在新标签页打开原文件"

@@ -6,6 +6,7 @@ import {
     Loader2,
     Maximize,
     Minimize,
+    Network,
     Pause,
     PictureInPicture2,
     Play,
@@ -16,7 +17,8 @@ import {
     VolumeX,
     X,
 } from "@lucide/vue";
-import type { DashSource } from "@videojs/html/media/dash-video";
+import type { DashSource, DashVideoElement } from "@videojs/html/media/dash-video";
+import type { HlsSource } from "@videojs/html/media/hlsjs-video";
 import type { VideoPlayerElement } from "@videojs/html/video";
 
 import "@videojs/html/video/player";
@@ -36,7 +38,10 @@ import "@videojs/html/ui/slider-thumb";
 import "@videojs/html/ui/gesture";
 import "@videojs/html/ui/hotkey";
 import "@videojs/html/media/dash-video";
+import "@videojs/html/media/hlsjs-video";
+import { useStorage } from "@vueuse/core";
 import type { MediaPlayback } from "@/types/post";
+import { bridgeDashAudioTracks } from "@/utils/dash-audio-tracks";
 
 interface Subtitle {
     url?: string | null;
@@ -95,7 +100,8 @@ interface SettingsOption {
 type PlayerState = VideoPlayerElement["store"]["state"];
 type PlayerAudioTrack = PlayerState["audioTrackList"][number];
 type PlayerTextTrack = PlayerState["textTrackList"][number];
-type SettingsTab = "all" | "volume" | "quality" | "speed" | "subtitles" | "audio";
+type SettingsTab = "all" | "volume" | "quality" | "speed" | "subtitles" | "audio" | "protocol";
+type StreamingProtocol = "HLS" | "DASH";
 type SubtitleFontSize = "small" | "normal" | "large" | "xlarge";
 type SubtitleBgStyle = "shadow" | "box";
 
@@ -211,6 +217,8 @@ const settingsTitle = computed(() => {
             return t("post_detail.viewer.player.subtitles");
         case "audio":
             return t("media.tracks.group_audios");
+        case "protocol":
+            return t("post_detail.viewer.player.protocol");
         default:
             return t("common.more");
     }
@@ -236,16 +244,56 @@ const resolveUrl = (url: string) => {
     return import.meta.client ? new URL(url, window.location.origin).toString() : url;
 };
 
-const isDash = computed(() => props.playback?.protocol === "DASH" || /\.mpd($|\?)/i.test(props.src) || props.src.includes("manifest.mpd"));
+// Adaptive media is served as both an HLS and a DASH manifest; progressive media is a plain file per quality.
+const isAdaptive = computed(
+    () => props.playback?.protocol === "DASH" || /\.mpd($|\?)/i.test(props.src) || props.src.includes("manifest.mpd"),
+);
+
+const hlsUrl = computed(() => (props.playback?.hls_url ? resolveUrl(props.playback.hls_url) : ""));
+const dashUrl = computed(() => resolveUrl(props.playback?.dash_url || props.playback?.url || props.src));
+
+// HLS plays through hls.js everywhere (Safari included); the other protocol is chosen from the player settings. A
+// protocol that fails to play is not swapped for the other one automatically.
+// TODO: default to HLS once the server lists HLS segments from the sidx; until then an HLS variant is a single
+// whole-file segment that hls.js downloads completely before the first frame.
+const DEFAULT_PROTOCOL: StreamingProtocol = "DASH";
+// Only an explicit choice is stored, so a later change of the default reaches everyone who never picked one.
+const storedProtocol = useStorage<StreamingProtocol>("stationary-player-protocol", DEFAULT_PROTOCOL, undefined, {
+    writeDefaults: false,
+});
+const preferredProtocol = computed<StreamingProtocol>({
+    get: () => (storedProtocol.value === "HLS" || storedProtocol.value === "DASH" ? storedProtocol.value : DEFAULT_PROTOCOL),
+    set: (protocol) => {
+        storedProtocol.value = protocol;
+    },
+});
+
+// Without an HLS manifest (a bare .mpd source) DASH is the only choice.
+const canChooseProtocol = computed(() => isAdaptive.value && Boolean(hlsUrl.value));
+const activeProtocol = computed<StreamingProtocol>(() => (canChooseProtocol.value ? preferredProtocol.value : "DASH"));
+
+const hlsSource = computed<HlsSource>(() => ({
+    src: hlsUrl.value,
+    type: "application/x-mpegURL",
+    preferPlayback: "mse",
+    // Subtitles come from the <track> elements both protocols share, so hls.js skips the manifest's subtitle group.
+    engine: { hlsJs: { enableWebVTT: false, enableIMSC1: false } },
+}));
 
 const dashSource = computed<DashSource>(() => ({
-    src: resolveUrl(props.playback?.url || props.src),
+    src: dashUrl.value,
     engine: { dashJs: { streaming: { cmcd: { enabled: false } } } },
 }));
 
+const engineRef = ref<HTMLElement | null>(null);
+
+watch(engineRef, (engine, _previous, onCleanup) => {
+    if (engine?.localName === "dash-video") onCleanup(bridgeDashAudioTracks(engine as DashVideoElement));
+});
+
 // Progressive files have no adaptive engine: each quality is its own file, switched by swapping the src.
 const progressiveVariants = computed<ProgressiveVariant[]>(() => {
-    if (isDash.value) return [];
+    if (isAdaptive.value) return [];
 
     const playbackVariants = props.playback?.protocol === "PROGRESSIVE" ? props.playback.variants : [];
     const variants = playbackVariants
@@ -282,19 +330,25 @@ const activeVariant = computed(
     () => progressiveVariants.value.find((variant) => variant.id === selectedVariantId.value) ?? progressiveVariants.value[0],
 );
 
-let pendingVariantRestore: { time: number; paused: boolean; rate: number } | null = null;
+// Swapping the source (a progressive quality or the streaming protocol) resumes where the old one was.
+let pendingSourceRestore: { time: number; paused: boolean; rate: number } | null = null;
+
+const rememberPlaybackPosition = () => {
+    const video = videoRef.value;
+    if (video) pendingSourceRestore = { time: video.currentTime, paused: video.paused, rate: video.playbackRate };
+};
 
 const selectProgressiveVariant = (id: string) => {
     const video = videoRef.value;
     if (!video || id === activeVariant.value?.id) return;
-    pendingVariantRestore = { time: video.currentTime, paused: video.paused, rate: video.playbackRate };
+    rememberPlaybackPosition();
     selectedVariantId.value = id;
 };
 
 const handleLoadedMetadata = () => {
     const video = videoRef.value;
-    const restore = pendingVariantRestore;
-    pendingVariantRestore = null;
+    const restore = pendingSourceRestore;
+    pendingSourceRestore = null;
     if (!video || !restore) return;
     video.currentTime = restore.time;
     video.playbackRate = restore.rate;
@@ -430,12 +484,12 @@ const formatBitrate = (bitsPerSecond?: number) => {
 };
 
 const selectQuality = (id: string) => {
-    if (isDash.value) playerRef.value?.store.selectVideoRendition(id);
+    if (isAdaptive.value) playerRef.value?.store.selectVideoRendition(id);
     else selectProgressiveVariant(id);
 };
 
 const qualityOptions = computed<SettingsOption[]>(() => {
-    if (isDash.value) {
+    if (isAdaptive.value) {
         return [...(playerState.value?.videoRenditionList ?? [])]
             .sort((a, b) => (b.height ?? 0) - (a.height ?? 0))
             .map((rendition, index) => ({
@@ -455,8 +509,8 @@ const qualityOptions = computed<SettingsOption[]>(() => {
     }));
 });
 
-// A DASH player is on automatic (ABR) quality when no rendition is pinned.
-const isAutoQuality = computed(() => isDash.value && !qualityOptions.value.some((option) => option.selected));
+// An adaptive player is on automatic (ABR) quality when no rendition is pinned.
+const isAutoQuality = computed(() => isAdaptive.value && !qualityOptions.value.some((option) => option.selected));
 
 const displayQualityLabel = computed(() => {
     const autoLabel = t("post_detail.viewer.player.auto_quality");
@@ -504,6 +558,21 @@ const subtitleOptions = computed<SettingsOption[]>(() => {
         }));
 });
 
+const selectProtocol = (protocol: StreamingProtocol) => {
+    if (protocol === activeProtocol.value) return;
+    rememberPlaybackPosition();
+    preferredProtocol.value = protocol;
+};
+
+const protocolOptions = computed<SettingsOption[]>(() =>
+    (["HLS", "DASH"] as const).map((protocol) => ({
+        key: protocol,
+        label: protocol,
+        selected: activeProtocol.value === protocol,
+        select: () => selectProtocol(protocol),
+    })),
+);
+
 const speedOptions = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 const formatSpeed = (rate: number) => (rate === 1 ? "1.0x" : `${rate}x`);
@@ -521,7 +590,7 @@ const settingsOptions = computed<SettingsOption[] | null>(() => {
     switch (activeSettingsTab.value) {
         case "quality":
             if (!qualityAvailable.value) return null;
-            if (!isDash.value) return qualityOptions.value;
+            if (!isAdaptive.value) return qualityOptions.value;
             return [
                 {
                     key: "auto",
@@ -546,6 +615,8 @@ const settingsOptions = computed<SettingsOption[] | null>(() => {
             ];
         case "speed":
             return speedSettingsOptions.value;
+        case "protocol":
+            return canChooseProtocol.value ? protocolOptions.value : null;
         default:
             return null;
     }
@@ -587,7 +658,15 @@ onBeforeUnmount(() => {
         <ClientOnly>
             <video-player ref="playerRef" class="contents">
                 <media-container class="player-container relative block h-full w-full">
-                    <dash-video v-if="isDash" :source.prop="dashSource" class="block h-full w-full">
+                    <!-- Keyed by protocol so switching tears down one engine before the other attaches -->
+                    <component
+                        :is="activeProtocol === 'HLS' ? 'hlsjs-video' : 'dash-video'"
+                        v-if="isAdaptive"
+                        :key="activeProtocol"
+                        ref="engineRef"
+                        :source.prop="activeProtocol === 'HLS' ? hlsSource : dashSource"
+                        class="block h-full w-full"
+                    >
                         <video
                             ref="videoRef"
                             slot="media"
@@ -598,6 +677,7 @@ onBeforeUnmount(() => {
                             @pause="handleMediaPause"
                             @playing="handleMediaPlaying"
                             @timeupdate="handleMediaTimeUpdate"
+                            @loadedmetadata="handleLoadedMetadata"
                         >
                             <track
                                 v-for="subtitle in processedSubtitles"
@@ -609,7 +689,7 @@ onBeforeUnmount(() => {
                                 :default="subtitle.default"
                             />
                         </video>
-                    </dash-video>
+                    </component>
                     <video
                         v-else
                         ref="videoRef"
@@ -801,6 +881,22 @@ onBeforeUnmount(() => {
                                                 <span>{{ $t("media.tracks.group_audios") }}</span>
                                             </span>
                                             <span class="flex items-center gap-1 text-neutral-500 font-semibold text-xs">
+                                                <ChevronRight class="h-4 w-4" />
+                                            </span>
+                                        </button>
+
+                                        <button
+                                            v-if="canChooseProtocol"
+                                            type="button"
+                                            class="flex w-full items-center justify-between rounded-xl bg-neutral-100/80 px-3.5 py-2.5 text-xs font-medium text-neutral-800 transition-all hover:bg-neutral-200/80 hover:text-neutral-900"
+                                            @click.stop="activeSettingsTab = 'protocol'"
+                                        >
+                                            <span class="flex items-center gap-2">
+                                                <Network class="h-4 w-4 text-neutral-500" />
+                                                <span>{{ $t("post_detail.viewer.player.protocol") }}</span>
+                                            </span>
+                                            <span class="flex items-center gap-1 text-neutral-500 font-semibold text-xs">
+                                                <span>{{ activeProtocol }}</span>
                                                 <ChevronRight class="h-4 w-4" />
                                             </span>
                                         </button>
