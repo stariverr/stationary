@@ -147,7 +147,7 @@ class _MediaLightboxState extends State<MediaLightbox> {
                     return Center(
                       child: PremiumVideoPlayer(
                         videoUrl: item.playback?.url ?? item.url!,
-                        coverUrl: item.coverUrl ?? item.url,
+                        posterUrl: item.previews.poster?.url,
                         autoPlay: index == _currentIndex,
                         tracks: item.tracks,
                         playback: item.playback,

@@ -16,12 +16,12 @@ import 'premium_image.dart';
 /// 1. **Native GPU Texture Handoff (`_isVideoReadyToPaint`)**: Native video engines
 ///    (`AVPlayerLayer` / `MediaCodec`) take 16-50ms after initialization to present
 ///    the first decoded video frame onto Flutter's `Texture(textureId: id)` surface.
-/// 2. **Seamless Cover Dissolve**: Keeps the cover image [coverUrl] rendered at 100% opacity
+/// 2. **Seamless Cover Dissolve**: Keeps the cover image [posterUrl] rendered at 100% opacity
 ///    until `_isVideoReadyToPaint` confirms active video frame output, then smoothly
 ///    dissolves the cover via [AnimatedOpacity] (250ms `Curves.easeOut`), eliminating black flashes.
 class PremiumVideoPlayer extends StatefulWidget {
   final String videoUrl;
-  final String? coverUrl;
+  final String? posterUrl;
   final double? width;
   final double? height;
   final VoidCallback? onFullscreen;
@@ -34,7 +34,7 @@ class PremiumVideoPlayer extends StatefulWidget {
   const PremiumVideoPlayer({
     super.key,
     required this.videoUrl,
-    this.coverUrl,
+    this.posterUrl,
     this.width,
     this.height,
     this.onFullscreen,
@@ -1401,9 +1401,9 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (widget.coverUrl != null && widget.coverUrl!.isNotEmpty)
+            if (widget.posterUrl != null && widget.posterUrl!.isNotEmpty)
               PremiumImage(
-                imageUrl: widget.coverUrl!,
+                imageUrl: widget.posterUrl!,
                 fit: BoxFit.contain,
               ),
             const Center(
@@ -1437,15 +1437,15 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                       aspectRatio: controller.value.aspectRatio,
                       child: VideoPlayer(controller),
                     )
-                  : (widget.coverUrl != null && widget.coverUrl!.isNotEmpty
+                  : (widget.posterUrl != null && widget.posterUrl!.isNotEmpty
                       ? PremiumImage(
-                          imageUrl: widget.coverUrl!,
+                          imageUrl: widget.posterUrl!,
                           fit: BoxFit.contain,
                         )
                       : Container(color: Colors.black)),
             ),
 
-            if (widget.coverUrl != null && widget.coverUrl!.isNotEmpty)
+            if (widget.posterUrl != null && widget.posterUrl!.isNotEmpty)
               Positioned.fill(
                 child: AnimatedOpacity(
                   opacity: showCoverOverlay ? 1.0 : 0.0,
@@ -1454,7 +1454,7 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                   child: IgnorePointer(
                     ignoring: !showCoverOverlay,
                     child: PremiumImage(
-                      imageUrl: widget.coverUrl!,
+                      imageUrl: widget.posterUrl!,
                       fit: BoxFit.contain,
                     ),
                   ),

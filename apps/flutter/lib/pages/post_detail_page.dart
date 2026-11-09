@@ -10,7 +10,7 @@ import 'media_lightbox.dart';
 class PostDetailPage extends StatefulWidget {
   final String postId;
   final Post? initialPost;
-  final String? initialCoverUrl;
+  final String? initialPreviewUrl;
 
   static final Map<String, Post> detailCache = {};
 
@@ -18,7 +18,7 @@ class PostDetailPage extends StatefulWidget {
     super.key,
     required this.postId,
     this.initialPost,
-    this.initialCoverUrl,
+    this.initialPreviewUrl,
   });
 
   @override
@@ -376,11 +376,11 @@ class _PostDetailPageState extends State<PostDetailPage> {
                             color: const Color(0xFF09090B),
                             borderRadius: BorderRadius.circular(4),
                           ),
-                          child: item.coverUrl != null || item.url != null
+                          child: item.previews.thumbnail != null
                               ? ClipRRect(
                                   borderRadius: BorderRadius.circular(4),
                                   child: Image.network(
-                                    item.coverUrl ?? item.url!,
+                                    item.previews.thumbnail!.url,
                                     fit: BoxFit.cover,
                                     filterQuality: FilterQuality.medium,
                                     errorBuilder: (context, error, stackTrace) => Icon(
@@ -787,17 +787,19 @@ class _PostDetailPageState extends State<PostDetailPage> {
                 }
               }
               
-              final double screenWidth = MediaQuery.of(context).size.width;
-              final double dpr = MediaQuery.of(context).devicePixelRatio;
-              final initialCover = (idx == 0 && widget.initialCoverUrl != null && widget.initialCoverUrl!.isNotEmpty)
-                  ? widget.initialCoverUrl!
-                  : item.getInitialCoverUrl(width: screenWidth, devicePixelRatio: dpr);
+              final String? posterUrl = item.previews.poster?.url;
+              // The first item reuses the grid card's preview so the hero
+              // transition paints from a cached image.
+              final String? placeholderUrl =
+                  (idx == 0 && widget.initialPreviewUrl != null)
+                      ? widget.initialPreviewUrl
+                      : posterUrl;
               Widget mediaContent;
 
               if (item.type == 'VIDEO' && (item.playback?.url != null || item.url != null)) {
                 mediaContent = PremiumVideoPlayer(
                   videoUrl: item.playback?.url ?? item.url!,
-                  coverUrl: initialCover,
+                  posterUrl: posterUrl,
                   autoPlay: idx == _swiperIndex,
                   tracks: item.tracks,
                   playback: item.playback,
@@ -830,16 +832,18 @@ class _PostDetailPageState extends State<PostDetailPage> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      if (item.type == 'LIVE_PHOTO' && item.url != null)
+                      if (item.type == 'LIVE_PHOTO' && posterUrl != null)
                         PremiumLivePhotoPlayer(
-                          imageUrl: initialCover,
+                          imageUrl: posterUrl,
                           videoUrl: liveTrack?.url,
                           fit: BoxFit.contain,
                         )
-                      else if (item.url != null)
+                      else if (item.url != null || placeholderUrl != null)
+                        // Before the detail request returns, a list item only
+                        // carries its previews.
                         PremiumImage(
-                          imageUrl: item.url!,
-                          placeholderUrl: initialCover,
+                          imageUrl: item.url ?? placeholderUrl!,
+                          placeholderUrl: placeholderUrl,
                           fit: BoxFit.contain,
                           filterQuality: FilterQuality.high,
                         )
