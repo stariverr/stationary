@@ -991,8 +991,17 @@ export const JobQueue = pgTable(
         cursor: text("cursor"),
         lease_token: uuid("lease_token"),
         lease_expires_at: temporal("lease_expires_at"),
+        /**
+         * Claims since the input last changed, so whether the subject is still worth trying. Counted at claim, so a run
+         * that dies counts too; a postponed run gives its claim back. A run that fails with this at the limit gives up.
+         */
         attempts: integer("attempts").default(0).notNull(),
-        /** Runs in a row that died without settling. A run that fails normally starts the count over. */
+        /**
+         * Runs in a row that died without settling (crashed, killed or stuck until the lease expired), so whether running
+         * the subject takes the worker down. A run that fails normally starts the count over; at the limit the subject
+         * is given up before it runs. Kept apart from attempts so one crash after ordinary failures is not taken for a
+         * poison pill.
+         */
         interruptions: integer("interruptions").default(0).notNull(),
     },
     (table) => [
