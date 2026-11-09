@@ -1,4 +1,4 @@
-import { MediaType, TrackPurpose, TrackType, type PostMediaSummary } from "@/types/post";
+import { MediaType, TrackPurpose, TrackType, type MediaPreviews } from "@/types/post";
 
 interface SelectableTrack {
     type: string;
@@ -21,9 +21,9 @@ export function sortTracks<T extends SelectableTrack>(tracks: T[]): T[] {
     });
 }
 
-/** Picks the track a viewer plays or shows for a track type, skipping covers. */
+/** Picks the track a viewer plays or shows for a track type. */
 export function selectContentTrack<T extends SelectableTrack>(tracks: T[] | undefined, type: string): T | undefined {
-    const candidates = sortTracks((tracks || []).filter((track) => track.type.toUpperCase() === type && track.purpose.toUpperCase() !== "COVER"));
+    const candidates = sortTracks((tracks || []).filter((track) => track.type.toUpperCase() === type));
     return (
         candidates.find((track) => track.is_default) ||
         candidates.find((track) => track.purpose.toUpperCase() === TrackPurpose.CONTENT) ||
@@ -60,22 +60,34 @@ export function getMediaTypeLabel(type: string | null | undefined, t: (key: stri
     }
 }
 
-/**
- * Resolves the thumbnail/preview URL for a PostMediaSummary item.
- *
- * **Identity Stabilization Best Practice**:
- * Always prioritizes explicit `cover_url` or primary `url` before track fallbacks.
- * This guarantees the returned URL string is 100% identical before and after async API detail hydration,
- * preventing browser image bitmap flushes and eliminating thumbnail list flickering.
- */
-export function getMediaPreviewUrl(media: PostMediaSummary): string | undefined {
-    if (media.cover_url) return media.cover_url;
-    if (media.url && (media.type === "IMAGE" || media.type === "LIVE_PHOTO")) return media.url;
+/** Only VIDEO, AUDIO and PDF can carry an original cover; images and live photos are their own preview source. */
+export function canHaveCover(type: string | null | undefined): boolean {
+    const upper = type?.toUpperCase();
+    return upper === MediaType.VIDEO || upper === MediaType.AUDIO || upper === MediaType.PDF;
+}
 
-    const coverTrack = media.tracks.find((track) => track.purpose === TrackPurpose.COVER);
-    if (coverTrack?.url) return coverTrack.url;
+/** The smallest generated preview, for thumbnails and grid cards. */
+export function previewThumbnailUrl(previews: MediaPreviews | null | undefined): string | null {
+    return previews?.small?.url ?? previews?.medium?.url ?? previews?.large?.url ?? null;
+}
 
-    return media.tracks.find((track) => track.purpose === TrackPurpose.CONTENT)?.url ?? media.url ?? undefined;
+/** The preview a video player shows before playback starts. */
+export function previewPosterUrl(previews: MediaPreviews | null | undefined): string | null {
+    return previews?.large?.url ?? previews?.medium?.url ?? null;
+}
+
+/** The largest generated preview, for views that fill most of the screen. */
+export function previewLargestUrl(previews: MediaPreviews | null | undefined): string | null {
+    return previews?.large?.url ?? previews?.medium?.url ?? previews?.small?.url ?? null;
+}
+
+/** A `srcset` over every generated preview, described by its real width. */
+export function previewSrcset(previews: MediaPreviews | null | undefined): string | null {
+    if (!previews) return null;
+    const parts = [previews.small, previews.medium, previews.large]
+        .filter((preview) => !!preview)
+        .map((preview) => `${preview.url} ${preview.width}w`);
+    return parts.length > 0 ? parts.join(", ") : null;
 }
 
 /**

@@ -4,17 +4,9 @@ import { Temporal } from "@js-temporal/polyfill";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/vue-query";
 import { useLibraryStore } from "@/stores/library";
 import { useApi } from "@/composables/useApi";
+import type { MediaPreviews } from "@/types/post";
 
 export type TrashType = "all" | "post" | "media";
-
-export interface TrashPreviewItem {
-    id: string;
-    url: string;
-    thumbnail?: string | null;
-    mime_type?: string | null;
-    width?: number | null;
-    height?: number | null;
-}
 
 export interface TrashPostItem {
     item_type: "post";
@@ -30,7 +22,7 @@ export interface TrashPostItem {
     published_time: string | null;
     recycle_time: string | null;
     media_count: number;
-    covers: TrashPreviewItem[];
+    previews: MediaPreviews;
     tags: string[];
     formatted_recycle_time: string;
 }
@@ -47,7 +39,7 @@ export interface TrashMediaItem {
     create_time: string | null;
     published_time: string | null;
     recycle_time: string | null;
-    covers: TrashPreviewItem[];
+    previews: MediaPreviews;
     url: string | null;
     formatted_recycle_time: string;
 }

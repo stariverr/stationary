@@ -6,7 +6,7 @@ import MediaVideoPlayer from "./MediaVideoPlayer.vue";
 import LivePhotoPlayer from "./LivePhotoPlayer.vue";
 import HeicImage from "./HeicImage.vue";
 import { isHeic } from "@/utils/heic-decoder";
-import { selectContentTrack, sortTracks } from "@/utils/media";
+import { previewPosterUrl, selectContentTrack } from "@/utils/media";
 import type { MediaViewerItem } from "@/types/post";
 
 type MediaItem = MediaViewerItem;
@@ -48,16 +48,12 @@ const emit = defineEmits<{
     (e: "pause"): void;
 }>();
 
-// 1. Cover / Poster Track
-const defaultPosterUrl = computed(() => {
-    if (!props.media) return "";
-    if (props.media.cover_url) return props.media.cover_url;
-    if ((props.media as any).poster) return (props.media as any).poster;
-    if ((props.media as any).thumbnail) return (props.media as any).thumbnail;
-
-    const coverTracks = (props.media.tracks || []).filter((track) => track.purpose.toUpperCase() === "COVER");
-    const sorted = sortTracks(coverTracks);
-    return sorted[0]?.url || "";
+// 1. Preview images
+const defaultPosterUrl = computed(() => previewPosterUrl(props.media?.previews) ?? "");
+/** The preview painted first under a full image: small enough to decode at once. */
+const lowResPreviewUrl = computed(() => {
+    const previews = props.media?.previews;
+    return previews?.medium?.url ?? previews?.small?.url ?? previews?.large?.url ?? "";
 });
 
 // 2. VIDEO
@@ -98,7 +94,7 @@ const contentAssetUrl = computed(() => {
 });
 
 /**
- * Progressive image layers: the low-res cover paints at once and higher-quality sources fade in above it.
+ * Progressive image layers: a low-res preview paints at once and higher-quality sources fade in above it.
  *
  * Each layer keeps one URL for its whole life, keyed by it, so the element showing an image never changes source and
  * never decodes it again (HEIC decodes in WASM outside Safari, and a full-size image takes a while to decode either
@@ -112,8 +108,8 @@ interface ImageLayer {
 }
 const LAYER_FADE_MS = 350;
 const layers = ref<ImageLayer[]>([]);
-/** The blurred backdrop keeps the cover: a full-size decode would only be blurred away. */
-const backdropUrl = computed(() => defaultPosterUrl.value || imageSrcUrl.value);
+/** The blurred backdrop keeps the preview: a full-size decode would only be blurred away. */
+const backdropUrl = computed(() => lowResPreviewUrl.value || imageSrcUrl.value);
 const showLoadingSpinner = ref(false);
 let loadingTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -126,20 +122,14 @@ const clearLoadingTimer = () => {
 
 watch(
     // A preview that becomes the current item keeps its painted layer and starts the upgrade from there.
-    () => [props.media?.id, imageSrcUrl.value, livePhotoImageSrc.value, defaultPosterUrl.value, props.preview],
+    () => [props.media?.id, imageSrcUrl.value, livePhotoImageSrc.value, lowResPreviewUrl.value, props.preview],
     (newValues, oldValues) => {
         const newId = newValues[0];
         const oldId = oldValues?.[0];
         clearLoadingTimer();
 
-        const lowResCoverUrl =
-            defaultPosterUrl.value ||
-            (props.media as any)?.poster ||
-            (props.media as any)?.thumbnail ||
-            (props.media as any)?.cover_url ||
-            "";
         const highResUrl = imageSrcUrl.value || livePhotoImageSrc.value || "";
-        const baseLayerUrl = lowResCoverUrl || highResUrl;
+        const baseLayerUrl = lowResPreviewUrl.value || highResUrl;
 
         if (!newId || !baseLayerUrl) {
             layers.value = [];
@@ -148,7 +138,7 @@ watch(
         }
 
         if (newId !== oldId || !layers.value.length) {
-            // A different item: paint the cover at once and queue the full image above it.
+            // A different item: paint the preview at once and queue the full image above it.
             layers.value = [{ url: baseLayerUrl, loaded: false }];
             if (highResUrl && highResUrl !== baseLayerUrl && !props.preview) layers.value.push({ url: highResUrl, loaded: false });
         } else if (!props.preview && highResUrl && !layers.value.some((layer) => layer.url === highResUrl)) {

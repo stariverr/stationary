@@ -140,7 +140,7 @@ const formatMediaType = (type?: MediaType | null) => getMediaTypeLabel(type, t);
 const postMediaListWithPreview = computed(() =>
     postMediaList.value.map((item) => ({
         ...item,
-        previewUrl: getMediaPreviewUrl(item),
+        previewUrl: previewThumbnailUrl(item.previews),
     })),
 );
 

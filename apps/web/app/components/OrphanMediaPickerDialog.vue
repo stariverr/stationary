@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2 } from "@lucide/vue";
 import { useApi } from "@/composables/useApi";
+import type { MediaListItem } from "@/stores/media";
 import { toast } from "vue-sonner";
 const { t } = useI18n();
 const formatMediaType = (type?: string | null) => getMediaTypeLabel(type, t);
@@ -18,7 +19,7 @@ const emit = defineEmits<{
     (e: "attach", mediaIds: string[]): void;
 }>();
 
-const orphanMediaList = ref<any[]>([]);
+const orphanMediaList = ref<MediaListItem[]>([]);
 const selectedOrphanIds = ref<string[]>([]);
 const isLoadingOrphans = ref(false);
 const isAttaching = ref(false);
@@ -27,7 +28,7 @@ const loadOrphans = async () => {
     if (!props.libraryId) return;
     isLoadingOrphans.value = true;
     try {
-        const res = await useApi<{ success: boolean; data: { list: any[] } }>(
+        const res = await useApi<{ success: boolean; data: { list: MediaListItem[] } }>(
             `/media/list?library_id=${props.libraryId}&has_no_post=true&count=100`,
         );
         if (res && res.success) {
@@ -92,8 +93,8 @@ const handleAttachOrphans = async () => {
                             />
                             <div class="w-10 h-10 bg-zinc-100 rounded-md overflow-hidden shrink-0 flex items-center justify-center">
                                 <img
-                                    v-if="orphan.cover_url || orphan.url"
-                                    :src="orphan.cover_url || orphan.url"
+                                    v-if="previewThumbnailUrl(orphan.previews)"
+                                    :src="previewThumbnailUrl(orphan.previews)!"
                                     class="w-full h-full object-cover"
                                 />
                             </div>

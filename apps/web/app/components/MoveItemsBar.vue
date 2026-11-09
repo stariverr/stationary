@@ -156,73 +156,52 @@ const handleBatchQueueAi = async () => {
 
 type MediaItemLike = MappedMediaItem | PostMedia;
 
-const isCoverableType = (type?: string | null) => {
-    if (!type) return false;
-    const lower = type.toLowerCase();
-    return lower === "image" || lower === "live_photo" || lower === "video";
-};
-
-const selectedCoverableMedia = computed<MediaItemLike[]>(() => {
-    const directMedia = mediaStore.medias.filter((m: MappedMediaItem) => props.mediaIds.includes(String(m.id)) && isCoverableType(m.type));
+const selectedMediaItems = computed<MediaItemLike[]>(() => {
+    const directMedia = mediaStore.medias.filter((m: MappedMediaItem) => props.mediaIds.includes(String(m.id)));
 
     const postMedia: PostMedia[] = [];
     if (props.postIds && props.postIds.length > 0) {
         const selectedPosts = postStore.posts.filter((p: Post) => props.postIds.includes(String(p.id)));
         for (const post of selectedPosts) {
-            if (post.media) {
-                for (const media of post.media) {
-                    if (isCoverableType(media.type)) {
-                        postMedia.push(media);
-                    }
-                }
-            }
+            postMedia.push(...(post.media ?? []));
         }
     }
 
-    const combined: MediaItemLike[] = [...directMedia, ...postMedia];
     const uniqueMap = new Map<string, MediaItemLike>();
-    for (const v of combined) {
+    for (const v of [...directMedia, ...postMedia]) {
         uniqueMap.set(String(v.id), v);
     }
     return Array.from(uniqueMap.values());
 });
 
-const hasSelectedVideos = computed(() => selectedCoverableMedia.value.length > 0);
+const hasSelectedMedia = computed(() => selectedMediaItems.value.length > 0);
 
 const handleBatchRegenerate = async () => {
-    const mediaIds = selectedCoverableMedia.value.map((v: MediaItemLike) => v.id);
-    if (mediaIds.length === 0) {
-        toast.warning(t("media.cover.select_coverable_required", "Please select at least one media item."));
+    if (selectedMediaItems.value.length === 0) {
+        toast.warning(t("media.previews.select_media_required"));
         return;
     }
 
     const libIds = Array.from(
         new Set(
-            selectedCoverableMedia.value
-                .map((v: any) => v.library_id)
-                .filter((id): id is string => typeof id === "string" && id.length > 0),
+            selectedMediaItems.value.map((v: any) => v.library_id).filter((id): id is string => typeof id === "string" && id.length > 0),
         ),
     );
 
     if (libIds.length > 1) {
-        toast.warning(
-            t(
-                "media.cover.multiple_libraries_error",
-                "Selected items belong to different libraries. Please select items from a single library.",
-            ),
-        );
+        toast.warning(t("media.previews.multiple_libraries_error"));
         return;
     }
 
     const currentLibId = libraryStore.activeLibraryId || libIds[0];
     if (!currentLibId) {
-        toast.warning(t("media.cover.library_required", "Unable to determine library for selected items."));
+        toast.warning(t("media.previews.library_required"));
         return;
     }
 
     try {
         isRegenerating.value = true;
-        const payloadBody: Record<string, any> = {
+        const payloadBody: { library_id: string; media_ids?: string[]; post_ids?: string[] } = {
             library_id: currentLibId,
         };
         if (props.mediaIds && props.mediaIds.length > 0) {
@@ -234,35 +213,21 @@ const handleBatchRegenerate = async () => {
 
         const response = await useApi<{
             success: boolean;
-            data: {
-                queued_media_count?: number;
-                job_id?: string;
-                queuedCount?: number;
-                skippedCount?: number;
-                queued?: number;
-                skipped?: number;
-            };
+            data: { queued_media_count: number };
             message?: string;
-        }>("/media/regenerate-covers", {
+        }>("/media/regenerate-previews", {
             method: "POST",
             body: payloadBody,
         });
         if (response && response.success && response.data) {
-            const queued = response.data.queued_media_count ?? response.data.queuedCount ?? response.data.queued ?? mediaIds.length;
-            const skipped = response.data.skippedCount ?? response.data.skipped ?? 0;
-            toast.success(
-                t("media.cover.batch_queued", {
-                    queued,
-                    skipped,
-                }),
-            );
+            toast.success(t("media.previews.batch_queued", { count: response.data.queued_media_count }));
             emit("cancel");
         } else {
-            throw new Error(response?.message || "Failed to batch request cover generation");
+            throw new Error(response?.message || "Failed to batch request preview generation");
         }
     } catch (err: unknown) {
-        console.error("Failed to batch regenerate covers:", err);
-        toast.error(t("media.cover.failed", "Failed to queue cover regeneration."));
+        console.error("Failed to batch regenerate previews:", err);
+        toast.error(t("media.previews.failed"));
     } finally {
         isRegenerating.value = false;
     }
@@ -402,7 +367,7 @@ const handleMove = async () => {
                     {{ $t("common.link_to_post", "Link to Post") }}
                 </Button>
                 <Button
-                    v-if="hasSelectedVideos"
+                    v-if="hasSelectedMedia"
                     type="button"
                     variant="outline"
                     size="sm"
@@ -411,7 +376,7 @@ const handleMove = async () => {
                 >
                     <Loader2 v-if="isRegenerating" class="animate-spin" />
                     <FileImage v-else />
-                    {{ $t("media.actions.regenerate_covers", "Regenerate Covers") }}
+                    {{ $t("media.actions.regenerate_previews") }}
                 </Button>
                 <Button
                     v-if="hasSelectedFailedSync"

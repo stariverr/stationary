@@ -29,6 +29,7 @@ export enum MediaType {
 
 export enum TrackPurpose {
     CONTENT = "CONTENT",
+    /** Draft tracks only: the image becomes the media cover when the draft is committed, never a stored track. */
     COVER = "COVER",
     THUMBNAIL = "THUMBNAIL",
     PREVIEW = "PREVIEW",
@@ -154,19 +155,27 @@ export const MediaPlaybackSchema = v.object({
 });
 export type MediaPlayback = v.InferOutput<typeof MediaPlaybackSchema>;
 
-export const CoverVariantSchema = v.object({
-    track_id: v.string(),
+/** One system-generated preview image. */
+export const PreviewImageSchema = v.object({
     url: v.string(),
-    width: v.nullable(v.number()),
-    height: v.nullable(v.number()),
-    status: v.picklist(["READY", "STALE"]),
+    width: v.number(),
+    height: v.number(),
 });
+export type PreviewImage = v.InferOutput<typeof PreviewImageSchema>;
 
-export const CoverSourceSchema = v.object({
-    track_id: v.string(),
-    url: v.string(),
-    quality: v.enum(TrackQuality),
+/** The three preview sizes of a media item; a size is null until generated, after a failure, or when the media has no preview source. */
+export const MediaPreviewsSchema = v.object({
+    small: v.nullable(PreviewImageSchema),
+    medium: v.nullable(PreviewImageSchema),
+    large: v.nullable(PreviewImageSchema),
 });
+export type MediaPreviews = v.InferOutput<typeof MediaPreviewsSchema>;
+
+/** The original cover of a VIDEO, AUDIO or PDF item: uploaded by the user or imported from the platform. */
+export const MediaCoverSchema = v.object({
+    url: v.string(),
+});
+export type MediaCover = v.InferOutput<typeof MediaCoverSchema>;
 
 export const ApiPostMediaSchema = v.object({
     id: v.pipe(v.string(), v.uuid()),
@@ -184,8 +193,7 @@ export const ApiPostMediaSchema = v.object({
     ai_status: v.optional(v.nullable(v.string())),
     ai_error: v.optional(v.nullable(v.string())),
     url: v.optional(v.nullable(v.string())),
-    cover_url: v.optional(v.nullable(v.string())),
-    cover_variants: v.optional(v.record(v.string(), CoverVariantSchema)),
+    previews: MediaPreviewsSchema,
     playback: v.optional(v.nullable(MediaPlaybackSchema)),
     width: v.optional(v.nullable(v.number())),
     height: v.optional(v.nullable(v.number())),
@@ -241,8 +249,7 @@ export interface MediaViewerItem {
     type: MediaType;
     title?: string | null;
     url?: string | null;
-    cover_url?: string | null;
-    covers?: PreviewItem[];
+    previews?: MediaPreviews;
     live_url?: string | null;
     tracks?: MediaViewerTrack[];
     playback?: MediaPlayback | null;
@@ -270,8 +277,7 @@ export const ApiPostListItemMediaSchema = v.object({
     last_error: v.optional(v.nullable(v.string())),
     ai_status: v.optional(v.nullable(v.string())),
     ai_error: v.optional(v.nullable(v.string())),
-    cover_variants: v.optional(v.record(v.string(), CoverVariantSchema)),
-    covers: v.array(PreviewItemSchema),
+    previews: MediaPreviewsSchema,
     videos: v.nullish(v.array(PreviewItemSchema)),
     audios: v.nullish(v.array(PreviewItemSchema)),
 });
@@ -334,7 +340,7 @@ export const PostMediaSchema = v.object({
     last_error: v.optional(v.nullable(v.string())),
     ai_status: v.optional(v.nullable(v.string())),
     ai_error: v.optional(v.nullable(v.string())),
-    cover_url: v.optional(v.nullable(v.string())),
+    previews: MediaPreviewsSchema,
     tracks: v.optional(v.array(TrackSchema)),
     playback: v.optional(v.nullable(MediaPlaybackSchema)),
     audio_tracks: v.optional(v.array(PlaybackAudioTrackSchema)),
@@ -391,7 +397,7 @@ export const PostMediaSummarySchema = v.object({
     title: v.nullish(v.string()),
     sort_order: v.number(),
     position: v.number(),
-    cover_url: v.string(),
+    previews: MediaPreviewsSchema,
     url: v.optional(v.nullable(v.string())),
     playback: v.optional(v.nullable(MediaPlaybackSchema)),
     audio_tracks: v.optional(v.array(PlaybackAudioTrackSchema)),

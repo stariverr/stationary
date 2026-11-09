@@ -120,19 +120,7 @@
             "language_desc": "Select your preferred language.",
             "other_title": "System Tools",
             "other_desc": "System maintenance and recovery utilities.",
-            "other_empty": "No other settings currently available.",
-            "video_cover_recovery": "Scan & Regenerate Covers",
-            "video_cover_recovery_desc": "Check media library for missing or outdated covers (images, live photos, and videos) and process them in the background.",
-            "video_cover_recovery_btn": "Scan & Regenerate Covers",
-            "video_cover_recovery_loading": "Scanning and generating...",
-            "video_cover_recovery_success": "Started scanning and generating covers in the background!",
-            "video_cover_recovery_error": "Failed to start cover generation.",
-            "cover_qualities_title": "Cover Photo Quality",
-            "cover_qualities_desc": "Configure resolution options for auto-generated cover images (select 1 to 3 options). Changes will automatically update covers for existing media in the background.",
-            "cover_low": "LOW (360px Thumbnail)",
-            "cover_medium": "MEDIUM (720px Standard)",
-            "cover_high": "HIGH (1440px High-Res)",
-            "cover_qualities_min_err": "At least 1 cover quality tier must be selected"
+            "other_empty": "No other settings currently available."
         },
         "appearance": {
             "title": "Appearance",
@@ -189,24 +177,20 @@
         },
         "library_config": {
             "title": "Library settings",
-            "desc": "Configure cover tiers and AI models for a single library.",
+            "desc": "Manage previews and AI models for a single library.",
             "library_select": "Select library",
-            "quality_low_desc": "Grid lists and quick previews",
-            "quality_medium_desc": "Standard screens and detail views",
-            "quality_high_desc": "4K and large displays",
-            "badge_recommended": "Recommended",
-            "badge_sharp": "Sharp",
-            "quality_save": "Save",
-            "quality_saved": "Cover quality saved",
-            "quality_saved_rebuilding": "Cover quality updated; the library's covers are being updated in the background",
-            "quality_save_failed": "Failed to save cover quality",
-            "quality_changed_notice": "Quality changed. Saving rescans the whole library and updates its covers.",
-            "cover_counting": "Checking library media…",
-            "cover_progress": "{queued} covers left · {running} rendering",
-            "cover_failed": "{count} covers failed",
-            "cover_retry": "Retry",
-            "cover_retry_done": "Queued {count} covers to retry",
-            "cover_retry_error": "Failed to retry covers"
+            "preview_regenerate_title": "Generate missing previews",
+            "preview_regenerate_desc": "Scan this library for media without previews and generate them in the background.",
+            "preview_regenerate_btn": "Scan & generate",
+            "preview_regenerate_loading": "Generating…",
+            "preview_regenerate_success": "Started generating previews in the background",
+            "preview_regenerate_error": "Failed to start preview generation",
+            "preview_counting": "Checking library media…",
+            "preview_progress": "{queued} media left · {running} rendering",
+            "preview_failed": "{count} media failed",
+            "preview_retry": "Retry",
+            "preview_retry_done": "Queued {count} media to retry",
+            "preview_retry_error": "Failed to retry previews"
         },
         "ai_config": {
             "coverage_empty": "This library has no media yet",
@@ -430,21 +414,41 @@
             "low": "Low"
         },
         "actions": {
-            "regenerate_cover": "Regenerate cover",
-            "regenerate_covers": "Regenerate covers",
+            "regenerate_previews": "Regenerate previews",
             "cancel": "Cancel",
             "discard": "Discard",
             "create": "Create Media",
             "add": "Add Media"
         },
         "cover": {
-            "queued": "Cover regeneration has been queued.",
-            "batch_queued": "Queued {queued} cover regeneration tasks. Skipped {skipped}.",
-            "already_pending": "A cover generation task is already pending.",
-            "external_exists": "This media already has an external cover and it was not overwritten.",
-            "select_video_required": "Please select at least one media asset.",
-            "failed": "Failed to queue cover regeneration.",
-            "loading": "Requesting..."
+            "title": "Cover",
+            "desc": "The original cover. Previews are generated from it when present.",
+            "empty": "No cover",
+            "upload": "Upload cover",
+            "replace": "Replace",
+            "delete": "Delete",
+            "delete_confirm": "Delete this cover? Previews will be regenerated without it.",
+            "uploaded": "Cover updated. Previews are being regenerated.",
+            "upload_failed": "Failed to upload the cover",
+            "deleted": "Cover deleted. Previews are being regenerated.",
+            "delete_failed": "Failed to delete the cover"
+        },
+        "previews": {
+            "title": "Previews",
+            "desc": "Generated automatically; they cannot be edited.",
+            "sizes": {
+                "small": "Small",
+                "medium": "Medium",
+                "large": "Large"
+            },
+            "missing": "Not generated",
+            "requesting": "Requesting…",
+            "queued": "Preview regeneration queued.",
+            "failed": "Failed to queue preview regeneration.",
+            "batch_queued": "Queued preview regeneration for {count} media.",
+            "select_media_required": "Select at least one media item.",
+            "multiple_libraries_error": "The selected items belong to different libraries. Select items from one library.",
+            "library_required": "Unable to determine the library of the selected items."
         },
         "create_title": "Create Media",
         "create_btn": "Create Media",
@@ -496,7 +500,7 @@
         "tracks": {
             "group_images": "Images",
             "group_videos": "Videos",
-            "group_covers": "Covers & Thumbnails",
+            "group_thumbnails": "Thumbnails",
             "group_audios": "Audio Tracks",
             "group_subtitles": "Subtitles & Lyrics",
             "group_others": "Other Tracks",
@@ -548,6 +552,7 @@
             "cannot_be_used_as_type": "{name} cannot be used as a {type} track.",
             "cannot_use_purpose_in_media": "{type} tracks cannot use the {purpose} purpose in {mediaType} media.",
             "only_one_default_allowed": "Only one default {type} {purpose} track is allowed.",
+            "only_one_cover_allowed": "Only one image can be the cover.",
             "requires_default_content_track": "{mediaType} media requires a default {requiredType} CONTENT track."
         },
         "toast_create_success": "Media created",
@@ -1066,7 +1071,7 @@
             "names": {
                 "download": "Downloads",
                 "avatar": "Avatars",
-                "cover": "Covers",
+                "preview": "Previews",
                 "ai": {
                     "describe": "AI descriptions",
                     "index": "Search index",

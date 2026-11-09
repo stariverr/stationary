@@ -65,11 +65,13 @@ export { getAllowedFileTrackTypes as getAllowedTrackTypesForFile };
 
 /**
  * NOTE: The allowed track types, purposes, and composition requirements for each media type.
- * Source Of Truth: apps/server/src/lib/validation/media-composition.ts
+ * COVER is a draft-only purpose: only VIDEO, AUDIO and PDF media take one, at most one image, and it becomes the
+ * media cover on commit instead of a track.
+ * Source Of Truth: apps/server/src/lib/validation/media-composition.ts (validateMediaComposition / validateDraftCover)
  */
 const mediaTrackPurposes: Record<MediaType, Partial<Record<TrackType, readonly TrackPurpose[]>>> = {
     [MediaType.IMAGE]: {
-        [TrackType.IMAGE]: [TrackPurpose.CONTENT, TrackPurpose.COVER, TrackPurpose.THUMBNAIL, TrackPurpose.PREVIEW],
+        [TrackType.IMAGE]: [TrackPurpose.CONTENT, TrackPurpose.THUMBNAIL, TrackPurpose.PREVIEW],
     },
     [MediaType.VIDEO]: {
         [TrackType.IMAGE]: [TrackPurpose.COVER, TrackPurpose.THUMBNAIL, TrackPurpose.PREVIEW],
@@ -78,7 +80,7 @@ const mediaTrackPurposes: Record<MediaType, Partial<Record<TrackType, readonly T
         [TrackType.SUBTITLE]: [TrackPurpose.CONTENT],
     },
     [MediaType.LIVE_PHOTO]: {
-        [TrackType.IMAGE]: [TrackPurpose.CONTENT, TrackPurpose.COVER, TrackPurpose.THUMBNAIL, TrackPurpose.PREVIEW],
+        [TrackType.IMAGE]: [TrackPurpose.CONTENT, TrackPurpose.THUMBNAIL, TrackPurpose.PREVIEW],
         [TrackType.VIDEO]: [TrackPurpose.CONTENT, TrackPurpose.PREVIEW],
         [TrackType.AUDIO]: [TrackPurpose.CONTENT, TrackPurpose.PREVIEW],
         [TrackType.SUBTITLE]: [TrackPurpose.CONTENT],
@@ -182,11 +184,10 @@ export function normalizeDraftTracksForMedia<T extends DraftTrackConfigBase>(med
             track.purpose = TrackPurpose.CONTENT;
             track.is_default = true;
         } else if (!allowedPurposes.includes(track.purpose)) {
+            const coverTaken = nextTracks.some((other) => other !== track && other.purpose === TrackPurpose.COVER);
             track.purpose = allowedPurposes.includes(TrackPurpose.CONTENT)
                 ? TrackPurpose.CONTENT
-                : track.type === TrackType.IMAGE && allowedPurposes.includes(TrackPurpose.COVER)
-                  ? TrackPurpose.COVER
-                  : (allowedPurposes[0] ?? TrackPurpose.CONTENT);
+                : (allowedPurposes.find((purpose) => purpose !== TrackPurpose.COVER || !coverTaken) ?? TrackPurpose.CONTENT);
         }
     });
 
@@ -237,6 +238,10 @@ export function getDraftCompositionError(mediaType: MediaType, tracks: DraftTrac
                 params: { type: track.type, purpose: track.purpose, mediaType },
             };
         }
+    }
+
+    if (tracks.filter((track) => track.purpose === TrackPurpose.COVER).length > 1) {
+        return { key: "media.errors.only_one_cover_allowed" };
     }
 
     const defaultGroups = new Set<string>();

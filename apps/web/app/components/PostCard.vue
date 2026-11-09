@@ -63,22 +63,22 @@ interface ApiResponse {
     success: boolean;
 }
 
-const handleRegenerateCover = async () => {
-    const videoMedia = post.media?.[0];
-    if (!videoMedia || !videoMedia.id) return;
+const handleRegeneratePreviews = async () => {
+    const firstMedia = post.media?.[0];
+    if (!firstMedia || !firstMedia.id) return;
 
     isRegenerating.value = true;
     try {
-        const response = await useApi<ApiResponse>(`/media/${videoMedia.id}/regenerate-cover`, {
+        const response = await useApi<ApiResponse>(`/media/${firstMedia.id}/regenerate-previews`, {
             method: "POST",
         });
         if (response && response.success) {
-            toast.success(t("toasts.cover_regeneration_queued", "Cover regeneration queued."));
+            toast.success(t("media.previews.queued"));
         } else {
             throw new Error();
         }
     } catch {
-        toast.error(t("toasts.cover_regeneration_failed", "Unable to queue cover regeneration. Try again."));
+        toast.error(t("media.previews.failed"));
     } finally {
         isRegenerating.value = false;
     }
@@ -214,14 +214,22 @@ const getPlatformBadgeClass = (platform: string) => {
 
                     <!-- Image Card -->
                     <img
-                        v-else-if="post.type === 'MULTI_MEDIA' && post.media?.[0]?.type !== 'VIDEO'"
-                        :src="post.media?.[0]?.thumbnail || post.media?.[0]?.url || ''"
+                        v-else-if="post.type === 'MULTI_MEDIA' && post.media?.[0]?.type !== 'VIDEO' && post.media?.[0]?.thumbnail"
+                        :src="post.media[0].thumbnail"
                         :srcset="post.media?.[0]?.srcset ?? undefined"
                         sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                         :alt="post.title"
                         class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                         loading="lazy"
                     />
+
+                    <!-- No preview yet -->
+                    <div
+                        v-else-if="post.type === 'MULTI_MEDIA' && post.media?.[0]?.type !== 'VIDEO'"
+                        class="w-full h-full flex items-center justify-center bg-gray-50 text-gray-300"
+                    >
+                        <FileImage class="w-8 h-8" />
+                    </div>
 
                     <!-- Video Card -->
                     <div
@@ -378,14 +386,14 @@ const getPlatformBadgeClass = (platform: string) => {
         </ContextMenuTrigger>
         <ContextMenuContent class="w-52">
             <ContextMenuItem
-                v-if="post.type === 'MULTI_MEDIA' && post.media?.[0]?.type === 'VIDEO'"
+                v-if="post.type === 'MULTI_MEDIA' && post.media?.[0]"
                 :disabled="isRegenerating"
                 class="flex items-center gap-2"
-                @click.stop="handleRegenerateCover"
+                @click.stop="handleRegeneratePreviews"
             >
                 <Loader2 v-if="isRegenerating" class="w-4 h-4 animate-spin" />
                 <FileImage v-else class="w-4 h-4" />
-                <span>{{ $t("media.actions.regenerate_cover", "Regenerate Cover") }}</span>
+                <span>{{ $t("media.actions.regenerate_previews") }}</span>
             </ContextMenuItem>
             <ContextMenuItem
                 v-if="post.sync_status === 'FAILED' || hasFailedMedia"
