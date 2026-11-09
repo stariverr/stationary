@@ -211,8 +211,6 @@ export const Library = pgTable("library", {
         describe?: { modelId: string } | null;
         rerank?: { modelId: string } | null;
     }>(),
-    /** Cover Qualities: cover qualities for the library */
-    cover_qualities: jsonb("cover_qualities").$type<Quality[]>().default([Quality.LOW, Quality.MEDIUM]).notNull(),
     /** Background work is on hold: the job queue claims none of the library's rows until this is cleared. */
     jobs_paused: boolean("jobs_paused").default(false).notNull(),
     create_time: temporal("create_time")
@@ -457,9 +455,6 @@ export interface MediaStream {
 export type Stream = MediaStream;
 
 export interface TrackMetadata {
-    source_file_id?: string;
-    /** Generated tracks: the source file `last_error` was recorded for; a scan does not retry the same source. */
-    error_source_file_id?: string;
     /** DASH / fMP4 segment index info */
     segment_base?: {
         initialization?: string;
@@ -467,12 +462,6 @@ export interface TrackMetadata {
         timescale?: number;
         earliest_presentation_time?: string;
     };
-    recipe_version?: number;
-    generation_mode?: "REUSE" | "TRANSCODE" | "VIDEO_FRAME";
-    seek_seconds?: number;
-    generated_width?: number;
-    generated_height?: number;
-
     frame_rate?: number;
     label?: string;
     role?: string;
@@ -545,6 +534,84 @@ export const Track = pgTable(
         uniqueIndex("track_media_primary_active_unique")
             .on(table.media_id)
             .where(sql`is_primary = true AND delete_status = 'ACTIVE'`),
+    ],
+);
+
+/**
+ * The original cover of a media (docs/media_refactor.zh-Hans.md, 3.4): a user upload, or a platform cover that the
+ * download pipeline fetches from `source_url`. At most one per media, and only VIDEO, AUDIO and PDF media have one.
+ * - [Hard Delete] The row goes when the cover is removed or replaced; its file is soft deleted.
+ */
+export const MediaCover = pgTable(
+    "media_cover",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        media_id: uuid("media_id").notNull(),
+        file_id: uuid("file_id"),
+        /** Where an imported cover is downloaded from; null for a user upload. */
+        source_url: text("source_url"),
+        status: SyncStatusEnum("status").notNull(),
+        last_error: text("last_error"),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        update_time: temporal("update_time")
+            .default(sql`now()`)
+            .notNull(),
+    },
+    (table) => [
+        uniqueIndex("media_cover_media_unique").on(table.media_id),
+        check("media_cover_file_when_completed", sql`(${table.status} = 'COMPLETED') = (${table.file_id} IS NOT NULL)`),
+        check("media_cover_source_or_file", sql`${table.source_url} IS NOT NULL OR ${table.file_id} IS NOT NULL`),
+    ],
+);
+
+export enum PreviewSize {
+    SMALL = "SMALL",
+    MEDIUM = "MEDIUM",
+    LARGE = "LARGE",
+}
+export const PreviewSizeEnum = pgEnum("preview_size", [PreviewSize.SMALL, PreviewSize.MEDIUM, PreviewSize.LARGE]);
+
+/**
+ * A preview image the `preview` pipeline renders for a media (docs/media_refactor.zh-Hans.md, 3.5). A row is either
+ * a result (file and size) or the final failure (`last_error`), both for `source_file_id` at `recipe_version`. It is
+ * current while those match the media's current preview source and the current recipe.
+ * - [Hard Delete] Replaced in place; a superseded file is soft deleted.
+ */
+export const MediaPreview = pgTable(
+    "media_preview",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        media_id: uuid("media_id").notNull(),
+        size: PreviewSizeEnum("size").notNull(),
+        /** The cover or content file the preview was rendered from (or failed on). */
+        source_file_id: uuid("source_file_id").notNull(),
+        recipe_version: integer("recipe_version").notNull(),
+        file_id: uuid("file_id"),
+        width: integer("width"),
+        height: integer("height"),
+        last_error: text("last_error"),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        update_time: temporal("update_time")
+            .default(sql`now()`)
+            .notNull(),
+    },
+    (table) => [
+        uniqueIndex("media_preview_media_size_unique").on(table.media_id, table.size),
+        check("media_preview_result_or_failure", sql`(${table.file_id} IS NOT NULL) <> (${table.last_error} IS NOT NULL)`),
+        check(
+            "media_preview_size_with_file",
+            sql`(${table.file_id} IS NULL) = (${table.width} IS NULL) AND (${table.file_id} IS NULL) = (${table.height} IS NULL)`,
+        ),
     ],
 );
 

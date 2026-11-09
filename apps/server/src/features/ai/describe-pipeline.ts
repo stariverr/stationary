@@ -5,7 +5,7 @@ import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
 import type { ReconcileContext, SubjectPipelineHandler } from "@/infra/queue/types";
 import { aiErrorResult } from "./pipeline-result";
-import { aiSourceHash, loadAiImageSources, readAiSourceImage, resolveAiImageSource } from "./image-source";
+import { loadAiImageSources, readAiSourceImage, resolveAiImageSource } from "./image-source";
 import { AiService, providerBlockedMs } from "./service";
 import type { DescribeTarget } from "./types";
 import { computeSha256 } from "./utils";
@@ -63,8 +63,8 @@ const failedDescriptions = (libraryIds: readonly string[]) =>
     );
 
 /**
- * `ai.describe`: describes the media's best image (a current cover, else image content) with the library's describe
- * model, in the library's language. Waits while the cover pipeline still has the media queued.
+ * `ai.describe`: describes the media's largest preview with the library's describe model, in the library's language.
+ * Waits while the preview pipeline still has the media queued.
  */
 export const describePipeline: SubjectPipelineHandler = {
     async reconcile(ctx) {
@@ -91,10 +91,10 @@ export const describePipeline: SubjectPipelineHandler = {
         const target = service?.describeTarget;
         if (!service || !target) return { kind: "done" };
 
-        const { source, waitingForCover } = await resolveAiImageSource(media.id);
-        // No image to describe: coverage counts the media as having no image work.
-        if (!source || waitingForCover) return { kind: "done" };
-        const sourceHash = aiSourceHash(source.file);
+        const { source } = await resolveAiImageSource(media.id);
+        // No image to describe (yet): coverage counts the media as having no image work.
+        if (!source) return { kind: "done" };
+        const sourceHash = source.hash;
         if (canReuseDescription(stored, sourceHash, target)) return { kind: "done" };
 
         let described;
@@ -150,7 +150,7 @@ export const describePipeline: SubjectPipelineHandler = {
         const failure = {
             last_error: error,
             error_kind: errorKind,
-            error_input_hash: await describeInputHash(aiSourceHash(source.file), target),
+            error_input_hash: await describeInputHash(source.hash, target),
         };
         await tx
             .insert(AssetAiMetadata)
@@ -196,7 +196,7 @@ export const describePipeline: SubjectPipelineHandler = {
             }
             const source = sources.get(id);
             if (!source) continue;
-            const sourceHash = aiSourceHash(source.file);
+            const sourceHash = source.hash;
             if (canReuseDescription(stored, sourceHash, target)) continue;
             if (stored?.error_input_hash && stored.error_input_hash === (await describeInputHash(sourceHash, target))) continue;
             subjectIds.push(id);

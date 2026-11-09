@@ -281,7 +281,7 @@ export async function moveLibraryItems(input: LibraryMoveItemsInput, auth: Libra
             }
         }
 
-        // Queued work follows its subjects into the target library, which may render covers differently.
+        // Queued work follows its subjects into the target library.
         await relocate(tx, movedMediaIds, input.target_library_id);
         await markChanged(tx, Aspect.MEDIA_LIBRARY, movedMediaIds);
 

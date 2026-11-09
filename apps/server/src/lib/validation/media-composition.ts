@@ -47,6 +47,9 @@ export interface PrioritizedTrack {
     priority: number;
 }
 
+/** Media types that can have a cover: one image, uploaded or imported, that their previews are rendered from. */
+export const COVER_MEDIA_TYPES: ReadonlySet<MediaType> = new Set([MediaType.VIDEO, MediaType.AUDIO, MediaType.PDF]);
+
 const allowedContentTrackTypes: Partial<Record<MediaType, TrackType[]>> = {
     [MediaType.IMAGE]: [TrackType.IMAGE],
     [MediaType.VIDEO]: [TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE],
@@ -69,11 +72,13 @@ export function validateMediaComposition(mediaType: MediaType, tracks: MediaComp
         return `${mediaType} media cannot be created from draft tracks`;
     }
 
-    const invalidCover = tracks.find(
-        (track) => (track.purpose === TrackPurpose.COVER || track.purpose === TrackPurpose.THUMBNAIL) && track.type !== TrackType.IMAGE,
-    );
-    if (invalidCover) {
-        return `${invalidCover.purpose} tracks must use the IMAGE type`;
+    if (tracks.some((track) => track.purpose === TrackPurpose.COVER)) {
+        return "A cover is not a track; set it as the media cover";
+    }
+
+    const invalidThumbnail = tracks.find((track) => track.purpose === TrackPurpose.THUMBNAIL && track.type !== TrackType.IMAGE);
+    if (invalidThumbnail) {
+        return "THUMBNAIL tracks must use the IMAGE type";
     }
 
     const contentOnlyTrack = tracks.find(
@@ -156,12 +161,27 @@ export function validateDraftTrackFileTypes(
     return null;
 }
 
+/** A draft media may carry one image as its cover, which becomes the media cover rather than a track. */
+export function validateDraftCover(mediaType: MediaType, tracks: MediaCompositionTrack[]): string | null {
+    const covers = tracks.filter((track) => track.purpose === TrackPurpose.COVER);
+    if (covers.length === 0) return null;
+    if (!COVER_MEDIA_TYPES.has(mediaType)) return `${mediaType} media cannot have a cover`;
+    if (covers.length > 1) return "A media has at most one cover";
+    if (covers[0]!.type !== TrackType.IMAGE) return "A cover must be an image";
+    return null;
+}
+
 export function validateDraftMediaGroups(groups: DraftMediaComposition[]): string | null {
     const draftIdError = validateNoDuplicateDraftFileIds(groups.flatMap((group) => group.tracks));
     if (draftIdError) return draftIdError;
 
     for (const group of groups) {
-        const compositionError = validateMediaComposition(group.type, group.tracks);
+        const compositionError =
+            validateDraftCover(group.type, group.tracks) ??
+            validateMediaComposition(
+                group.type,
+                group.tracks.filter((track) => track.purpose !== TrackPurpose.COVER),
+            );
         if (compositionError) {
             const groupName = group.title?.trim() || "Untitled media";
             return `${groupName}: ${compositionError}`;

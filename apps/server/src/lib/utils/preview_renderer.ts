@@ -1,8 +1,7 @@
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { MediaType } from "@/db/schema";
-import { Quality } from "@/lib/types";
-import { COVER_PROFILES, type CoverProfile } from "@/lib/utils/cover_profiles";
+import { MediaType, PreviewSize } from "@/db/schema";
+import { PREVIEW_PROFILES, type PreviewProfile } from "@/lib/utils/preview_profiles";
 
 const DEFAULT_USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -18,7 +17,7 @@ export class UndecodableSourceError extends Error {
     }
 }
 
-export interface RenderedCoverResult {
+export interface RenderedPreview {
     buffer: Uint8Array;
     width: number;
     height: number;
@@ -83,23 +82,19 @@ export function detectFormatStrategy(sourceUrl: string, mediaType: MediaType): M
 }
 
 /**
- * Renders an AVIF cover image for an IMAGE, LIVE_PHOTO, or VIDEO media item,
- * enforcing aspect-ratio-preserving max-edge bounds for both landscape and portrait orientations.
+ * Renders an AVIF preview of an image or of a video frame, scaled to the size's longest edge with the aspect ratio
+ * kept. The output carries no metadata (EXIF, GPS, XMP), so a preview never leaks what the original holds.
  */
-export async function renderCoverFrame(
+export async function renderPreview(
     sourceUrl: string,
     mediaType: MediaType,
-    targetQuality: Quality,
+    size: PreviewSize,
     signal?: AbortSignal,
     timeoutMs = 45000,
-): Promise<RenderedCoverResult> {
-    const profile = COVER_PROFILES[targetQuality];
-    if (!profile) {
-        throw new Error(`Unsupported cover quality: ${targetQuality}`);
-    }
-
+): Promise<RenderedPreview> {
+    const profile = PREVIEW_PROFILES[size];
     const strategy = detectFormatStrategy(sourceUrl, mediaType);
-    const tempFilePath = join(tmpdir(), `cover-${targetQuality.toLowerCase()}-${crypto.randomUUID()}.avif`);
+    const tempFilePath = join(tmpdir(), `preview-${size.toLowerCase()}-${crypto.randomUUID()}.avif`);
     let tempSourcePath: string | null = null;
 
     try {
@@ -114,7 +109,7 @@ export async function renderCoverFrame(
 
         // 1. Direct ImageMagick / HEIC CLI rendering for static image formats (HEIC, HEIF, JPEG, PNG, WEBP, AVIF, GIF)
         if (strategy.category === "HEIF_IMAGE" || strategy.category === "STANDARD_IMAGE") {
-            const ok = await tryImageMagickCover(effectiveSource, profile, tempFilePath, signal);
+            const ok = await tryImageMagickPreview(effectiveSource, profile, tempFilePath, signal);
             signal?.throwIfAborted();
             if (ok) {
                 const buffer = await readAndValidateAvif(tempFilePath);
@@ -131,7 +126,7 @@ export async function renderCoverFrame(
             signal?.throwIfAborted();
             if (isRemoteUrl && !tempSourcePath) {
                 console.warn(
-                    `[COVER_RENDERER] Direct remote FFmpeg execution failed for ${strategy.category} (${redactUrl(sourceUrl)}), downloading local temp file fallback...`,
+                    `[PREVIEW_RENDERER] Direct remote FFmpeg execution failed for ${strategy.category} (${redactUrl(sourceUrl)}), downloading local temp file fallback...`,
                 );
                 tempSourcePath = await downloadRemoteToTempFile(sourceUrl, signal);
                 const cmd = buildFFmpegCommand(tempSourcePath, strategy, profile, tempFilePath);
@@ -159,16 +154,14 @@ export async function renderCoverFrame(
 }
 
 /**
- * Attempts to render a resized AVIF cover image directly from a static image file (HEIC, JPEG, PNG, WEBP, etc.)
- * using ImageMagick (`magick` / `convert`) or `heif-enc`.
- * Handles EXIF auto-rotation (-auto-orient) and aspect-ratio bounds directly.
+ * Attempts to render a resized AVIF preview directly from a static image file (HEIC, JPEG, PNG, WEBP, etc.)
+ * using ImageMagick. Applies the EXIF orientation, then strips all metadata. (`heif-enc` is not a fallback: it
+ * copies EXIF, GPS included, into its output and ignores the orientation.)
  */
-async function tryImageMagickCover(inputPath: string, profile: CoverProfile, outputPath: string, signal?: AbortSignal): Promise<boolean> {
+async function tryImageMagickPreview(inputPath: string, profile: PreviewProfile, outputPath: string, signal?: AbortSignal): Promise<boolean> {
     const maxDim = `${profile.maxEdge}x${profile.maxEdge}>`;
     const cliCandidates = [
-        ["magick", inputPath, "-auto-orient", "-resize", maxDim, "-quality", String(profile.quality), outputPath],
-        ["heif-enc", inputPath, "-t", String(profile.maxEdge), "-q", String(profile.quality), "-o", outputPath],
-        ["heif-enc", inputPath, "-q", String(profile.quality), "-o", outputPath],
+        ["magick", inputPath, "-auto-orient", "-strip", "-resize", maxDim, "-quality", String(profile.quality), outputPath],
     ];
 
     for (const cmd of cliCandidates) {
@@ -191,7 +184,7 @@ async function tryImageMagickCover(inputPath: string, profile: CoverProfile, out
             if (e instanceof Error) {
                 console.error("[Magick]: " + e.message);
             }
-            console.error("[Magick]: failed to generate cover using ImageMagick");
+            console.error("[Magick]: failed to generate preview using ImageMagick");
             // Binary not installed or failed, try next candidate
         }
     }
@@ -212,7 +205,7 @@ async function downloadRemoteToTempFile(url: string, signal?: AbortSignal): Prom
         signal,
     });
     if (!response.ok) {
-        throw new Error(`Failed to download remote media for cover rendering: HTTP ${response.status} ${response.statusText}`);
+        throw new Error(`Failed to download remote media for preview rendering: HTTP ${response.status} ${response.statusText}`);
     }
     const arrayBuffer = await response.arrayBuffer();
     await Bun.write(tempPath, arrayBuffer);
@@ -240,7 +233,7 @@ function extractExtensionFromUrl(url: string): string {
 /**
  * Constructs structured FFmpeg command-line arguments grouped by format strategy logic.
  */
-function buildFFmpegCommand(sourcePath: string, strategy: MediaFormatStrategy, profile: CoverProfile, outputPath: string): string[] {
+function buildFFmpegCommand(sourcePath: string, strategy: MediaFormatStrategy, profile: PreviewProfile, outputPath: string): string[] {
     const isRemoteUrl = sourcePath.startsWith("http://") || sourcePath.startsWith("https://");
 
     // 1. Global options: Executable name, suppress banners, log errors only, disable stdin interaction
@@ -263,7 +256,7 @@ function buildFFmpegCommand(sourcePath: string, strategy: MediaFormatStrategy, p
     const filterOptions = ["-filter_complex", `[0:v]${buildScaleFilter(profile.maxEdge)}[outv]`, "-map", "[outv]"];
 
     // 6. Encoder settings: Capture a single frame using SVT-AV1 still-picture mode
-    const encoderOptions = ["-frames:v", "1", "-c:v", "libsvtav1", "-crf", String(profile.crf), "-f", "avif"];
+    const encoderOptions = ["-frames:v", "1", "-map_metadata", "-1", "-c:v", "libsvtav1", "-crf", String(profile.crf), "-f", "avif"];
 
     // 7. Output file target: Overwrite output path
     const outputOptions = ["-y", outputPath];
@@ -304,7 +297,7 @@ async function executeFFmpeg(cmd: string[], timeoutMs: number, sourceUrl: string
         });
     } catch (spawnErr) {
         throw new Error(
-            `Failed to spawn FFmpeg process for cover rendering. Error: ${spawnErr instanceof Error ? spawnErr.message : String(spawnErr)}`,
+            `Failed to spawn FFmpeg process for preview rendering. Error: ${spawnErr instanceof Error ? spawnErr.message : String(spawnErr)}`,
         );
     }
 
@@ -312,7 +305,7 @@ async function executeFFmpeg(cmd: string[], timeoutMs: number, sourceUrl: string
     signal?.throwIfAborted();
 
     if (process.signalCode !== null) {
-        throw new Error(`FFmpeg cover rendering timed out after ${timeoutMs}ms for URL: ${redactUrl(sourceUrl)}`);
+        throw new Error(`FFmpeg preview rendering timed out after ${timeoutMs}ms for URL: ${redactUrl(sourceUrl)}`);
     }
 
     if (exitCode !== 0) {
@@ -331,12 +324,12 @@ async function executeFFmpeg(cmd: string[], timeoutMs: number, sourceUrl: string
 async function readAndValidateAvif(filePath: string): Promise<Uint8Array> {
     const file = Bun.file(filePath);
     if (!(await file.exists())) {
-        throw new Error("FFmpeg completed successfully but output AVIF cover file was missing.");
+        throw new Error("FFmpeg completed successfully but output AVIF preview file was missing.");
     }
 
     const bytes = await file.bytes();
     if (bytes.byteLength === 0) {
-        throw new Error("FFmpeg generated an empty AVIF cover file.");
+        throw new Error("FFmpeg generated an empty AVIF preview file.");
     }
 
     if (!isValidAvifSignature(bytes)) {
@@ -347,7 +340,7 @@ async function readAndValidateAvif(filePath: string): Promise<Uint8Array> {
 }
 
 /**
- * Probes the width and height of the generated cover file via ffprobe.
+ * Probes the width and height of the generated preview file via ffprobe.
  */
 async function probeImageDimensions(filePath: string): Promise<{ width: number; height: number }> {
     try {
@@ -376,7 +369,7 @@ async function probeImageDimensions(filePath: string): Promise<{ width: number; 
             return { width, height };
         }
     } catch (e) {
-        console.warn(`[COVER_RENDERER] Could not probe dimensions via ffprobe:`, e);
+        console.warn(`[PREVIEW_RENDERER] Could not probe dimensions via ffprobe:`, e);
     }
     return { width: 0, height: 0 };
 }
@@ -391,7 +384,7 @@ async function safeDeleteFile(filePath: string): Promise<void> {
             await file.delete();
         }
     } catch (err) {
-        console.error(`[COVER_RENDERER] Failed to clean up temp file ${filePath}:`, err);
+        console.error(`[PREVIEW_RENDERER] Failed to clean up temp file ${filePath}:`, err);
     }
 }
 

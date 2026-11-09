@@ -1,8 +1,9 @@
 import * as v from "valibot";
 import { v7 as uuidv7 } from "uuid";
-import { Media, PostSource, SyncStatus } from "@/db/schema";
+import { Media, PostSource, SyncStatus, TrackPurpose } from "@/db/schema";
 import type { Transaction } from "@/global/db";
 import { consumeDraftFile } from "@/features/import/draft-file";
+import { CoverService } from "./cover";
 import { TrackService } from "./track";
 import { assignTrackPriorities, MediaDraftSchema } from "@/lib/validation/media-composition";
 import { replaceMediaTagsTx } from "./tags";
@@ -38,7 +39,12 @@ export async function createMediaFromDraft({ tx, libraryId, draft, sortOrder, no
         update_time: now,
     });
 
-    for (const track of assignTrackPriorities(draft.tracks)) {
+    const cover = draft.tracks.find((track) => track.purpose === TrackPurpose.COVER);
+    if (cover) {
+        await CoverService.setFile(tx, { id: mediaId, type: draft.type }, await consumeDraftFile(tx, cover.draft_file_id, libraryId));
+    }
+
+    for (const track of assignTrackPriorities(draft.tracks.filter((track) => track.purpose !== TrackPurpose.COVER))) {
         const fileId = await consumeDraftFile(tx, track.draft_file_id, libraryId);
 
         await TrackService.upsertTrack(

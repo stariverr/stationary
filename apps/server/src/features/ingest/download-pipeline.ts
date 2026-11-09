@@ -1,5 +1,5 @@
-import { and, asc, desc, eq, exists, gt, inArray, isNull, ne, sql, type SQL } from "drizzle-orm";
-import { DeleteStatus, File, Media, SyncStatus, Track, TrackPurpose, TrackType } from "@/db/schema";
+import { and, asc, desc, eq, exists, gt, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { DeleteStatus, File, Media, MediaCover, SyncStatus, Track, TrackPurpose, TrackType } from "@/db/schema";
 import { db, type Transaction } from "@/global/db";
 import { env } from "@/global/env";
 import { getMediaCompletionError, refreshPostSyncStatus } from "@/features/media/composition";
@@ -13,6 +13,7 @@ import { deriveTrackFormat } from "@/lib/utils/track-format";
 
 type MediaRow = typeof Media.$inferSelect;
 type TrackRow = typeof Track.$inferSelect;
+type CoverRow = typeof MediaCover.$inferSelect;
 
 const activeMedia = (mediaId: string) =>
     and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time));
@@ -27,18 +28,47 @@ const pendingSourceTrack = (failedToo: boolean): SQL =>
         failedToo ? ne(Track.sync_status, SyncStatus.COMPLETED) : inArray(Track.sync_status, [SyncStatus.PENDING, SyncStatus.IN_PROGRESS]),
     )!;
 
+/** A cover still waiting for its imported source; like tracks, FAILED ones run only when the media is requeued. */
+const pendingCover = (failedToo: boolean): SQL =>
+    and(
+        isNotNull(MediaCover.source_url),
+        failedToo ? ne(MediaCover.status, SyncStatus.COMPLETED) : eq(MediaCover.status, SyncStatus.PENDING),
+    )!;
+
+function mediaStoragePath(media: MediaRow, name: string): string {
+    return media.post_id
+        ? `v2/p/${media.post_id.slice(-2)}/${media.post_id}/media_${media.id}/${name}`
+        : `v2/m/${media.id.slice(-2)}/${media.id}/${name}`;
+}
+
 function storagePath(media: MediaRow, track: TrackRow, ext: string): string {
     let prefix: string;
     if (track.type === TrackType.VIDEO && track.purpose === TrackPurpose.CONTENT) prefix = `video_${track.variant_key}`;
     else if (track.type === TrackType.AUDIO && track.purpose === TrackPurpose.CONTENT) prefix = `audio_${track.variant_key}`;
-    else if (track.purpose === TrackPurpose.COVER) prefix = "cover";
     else if (track.type === TrackType.SUBTITLE && track.purpose === TrackPurpose.CONTENT) prefix = `subtitle_${track.variant_key}`;
     else if (track.type === TrackType.IMAGE && track.purpose === TrackPurpose.CONTENT) prefix = `image_${track.variant_key}`;
     else prefix = `track_${track.variant_key}`;
+    return mediaStoragePath(media, `${prefix}.${ext}`);
+}
 
-    return media.post_id
-        ? `v2/p/${media.post_id.slice(-2)}/${media.post_id}/media_${media.id}/${prefix}.${ext}`
-        : `v2/m/${media.id.slice(-2)}/${media.id}/${prefix}.${ext}`;
+/** Inserts the file at `path`, or revives the row a previous download of the same object left there. */
+async function upsertFile(tx: Transaction, values: { path: string; mime_type: string; extension: string; size: number | null }) {
+    const [file] = await tx
+        .insert(File)
+        .values({ ...values, bucket: env.S3_BUCKET })
+        .onConflictDoUpdate({
+            target: File.path,
+            set: { mime_type: values.mime_type, extension: values.extension, size: values.size, delete_status: DeleteStatus.ACTIVE, delete_time: null },
+        })
+        .returning({ id: File.id });
+    return file!;
+}
+
+async function softDeleteFile(tx: Transaction, fileId: string) {
+    await tx
+        .update(File)
+        .set({ delete_status: DeleteStatus.DELETED, delete_time: Temporal.Now.instant() })
+        .where(and(eq(File.id, fileId), eq(File.delete_status, DeleteStatus.ACTIVE)));
 }
 
 /** Downloads one track's source into storage and points the track at the new file. */
@@ -73,20 +103,7 @@ async function downloadTrack(ctx: ReconcileContext, media: MediaRow, track: Trac
         const [current] = await tx.select({ file_id: Track.file_id }).from(Track).where(activeTrack(track)).limit(1);
         if (!current) return;
 
-        const [file] = await tx
-            .insert(File)
-            .values({ path, mime_type: contentType || "application/octet-stream", extension: ext, bucket: env.S3_BUCKET, size })
-            .onConflictDoUpdate({
-                target: File.path,
-                set: {
-                    mime_type: contentType || "application/octet-stream",
-                    extension: ext,
-                    size,
-                    delete_status: DeleteStatus.ACTIVE,
-                    delete_time: null,
-                },
-            })
-            .returning({ id: File.id });
+        const file = await upsertFile(tx, { path, mime_type: contentType || "application/octet-stream", extension: ext, size });
 
         const metadata = segmentBase ? { ...track.metadata, segment_base: segmentBase } : { ...track.metadata };
         const format = deriveTrackFormat({
@@ -104,7 +121,7 @@ async function downloadTrack(ctx: ReconcileContext, media: MediaRow, track: Trac
         await tx
             .update(Track)
             .set({
-                file_id: file!.id,
+                file_id: file.id,
                 sync_status: SyncStatus.COMPLETED,
                 last_error: null,
                 metadata,
@@ -118,12 +135,48 @@ async function downloadTrack(ctx: ReconcileContext, media: MediaRow, track: Trac
             })
             .where(activeTrack(track));
 
-        if (current.file_id && current.file_id !== file!.id) {
-            await tx
-                .update(File)
-                .set({ delete_status: DeleteStatus.DELETED, delete_time: Temporal.Now.instant() })
-                .where(and(eq(File.id, current.file_id), eq(File.delete_status, DeleteStatus.ACTIVE)));
-        }
+        if (current.file_id && current.file_id !== file.id) await softDeleteFile(tx, current.file_id);
+        await ctx.fence(tx);
+    });
+}
+
+/**
+ * Downloads the imported cover into storage and completes it, unless the import replaced its source meanwhile. The
+ * object is named after its source URL, so a new cover never overwrites one a CDN may still serve.
+ */
+async function downloadCover(ctx: ReconcileContext, media: MediaRow, cover: CoverRow): Promise<void> {
+    const sourceUrl = cover.source_url!;
+    const response = await downloadStream(sourceUrl, { signal: ctx.signal });
+    if (!response?.body) throw new Error(`Download of ${sourceUrl} returned no body`);
+    ctx.signal.throwIfAborted();
+
+    const contentType = response.headers.get("Content-Type") || "application/octet-stream";
+    const size = getBodyLength(response) ?? null;
+    const ext = getExtensionFromContentType(contentType, sourceUrl);
+    const sourceKey = new Bun.CryptoHasher("sha256").update(sourceUrl).digest("hex").slice(0, 16);
+    const path = mediaStoragePath(media, `cover_${sourceKey}.${ext}`);
+    await uploadToS3(path, response.body, contentType, env.S3_BUCKET, size ?? undefined, ctx.signal);
+    ctx.signal.throwIfAborted();
+
+    await db.transaction(async (tx) => {
+        const file = await upsertFile(tx, { path, mime_type: contentType, extension: ext, size });
+        const completed = await tx
+            .update(MediaCover)
+            .set({ file_id: file.id, status: SyncStatus.COMPLETED, last_error: null, update_time: Temporal.Now.instant() })
+            .where(and(eq(MediaCover.id, cover.id), eq(MediaCover.source_url, sourceUrl)))
+            .returning({ id: MediaCover.id });
+        if (completed.length === 0) return;
+        await ctx.fence(tx);
+        await markChanged(tx, Aspect.MEDIA_COVER, [media.id]);
+    });
+}
+
+async function recordCoverError(ctx: ReconcileContext, cover: CoverRow, status: SyncStatus, error: string) {
+    await db.transaction(async (tx) => {
+        await tx
+            .update(MediaCover)
+            .set({ status, last_error: error, update_time: Temporal.Now.instant() })
+            .where(and(eq(MediaCover.id, cover.id), eq(MediaCover.source_url, cover.source_url!), ne(MediaCover.status, SyncStatus.COMPLETED)));
         await ctx.fence(tx);
     });
 }
@@ -143,8 +196,9 @@ const failedMedia = (libraryIds: readonly string[]) =>
     );
 
 /**
- * `download`: fetches the remote sources of a media's content tracks into storage. Once every required track has a
- * file, the media is complete and its content is reported as changed (which queues the cover).
+ * `download`: fetches the remote sources of a media's content tracks and imported cover into storage. Once every
+ * required track has a file, the media is complete and its content is reported as changed; a downloaded cover is
+ * reported on its own. Both queue the previews.
  */
 export const downloadPipeline: SubjectPipelineHandler = {
     // A large source takes a long time on a slow link; one that stalls fails the idle read timeout long before this.
@@ -192,6 +246,23 @@ export const downloadPipeline: SubjectPipelineHandler = {
                 if (!failure || !rejected) failure = { kind: rejected ? "rejected" : "retry", error: message };
             }
         }
+
+        const [cover] = await db
+            .select()
+            .from(MediaCover)
+            .where(and(eq(MediaCover.media_id, media.id), pendingCover(true)))
+            .limit(1);
+        if (cover) {
+            try {
+                await downloadCover(ctx, media, cover);
+            } catch (error) {
+                if (ctx.signal.aborted) throw error;
+                const rejected = error instanceof DownloadStatusError && error.rejected;
+                const message = getErrorMessage(error);
+                await recordCoverError(ctx, cover, rejected ? SyncStatus.FAILED : SyncStatus.PENDING, message);
+                if (!failure || !rejected) failure = { kind: rejected ? "rejected" : "retry", error: message };
+            }
+        }
         if (failure) return failure;
 
         await db.transaction(async (tx) => {
@@ -222,6 +293,10 @@ export const downloadPipeline: SubjectPipelineHandler = {
             .update(Track)
             .set({ sync_status: SyncStatus.FAILED, update_time: Temporal.Now.instant() })
             .where(and(eq(Track.media_id, mediaId), pendingSourceTrack(false)));
+        await tx
+            .update(MediaCover)
+            .set({ status: SyncStatus.FAILED, update_time: Temporal.Now.instant() })
+            .where(and(eq(MediaCover.media_id, mediaId), pendingCover(false)));
         await setMediaFailed(tx, media, error);
     },
 
@@ -245,11 +320,19 @@ export const downloadPipeline: SubjectPipelineHandler = {
                         Media.id,
                         page.map((media) => media.id),
                     ),
-                    exists(
-                        db
-                            .select({ id: Track.id })
-                            .from(Track)
-                            .where(and(eq(Track.media_id, Media.id), pendingSourceTrack(false))),
+                    or(
+                        exists(
+                            db
+                                .select({ id: Track.id })
+                                .from(Track)
+                                .where(and(eq(Track.media_id, Media.id), pendingSourceTrack(false))),
+                        ),
+                        exists(
+                            db
+                                .select({ id: MediaCover.id })
+                                .from(MediaCover)
+                                .where(and(eq(MediaCover.media_id, Media.id), pendingCover(false))),
+                        ),
                     ),
                 ),
             );

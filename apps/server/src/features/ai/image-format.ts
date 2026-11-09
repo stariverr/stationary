@@ -12,7 +12,7 @@ export const MAX_IMAGE_EDGE = 1536;
 export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
 /**
- * Transcoding targets for models that do not take the source format (covers are AVIF), smallest
+ * Transcoding targets for models that do not take the source format (previews are AVIF), smallest
  * output first. PNG is only a last resort for models that accept neither JPEG nor WebP.
  */
 const ENCODE_TARGETS = ["image/jpeg", "image/webp", "image/png"] as const;
@@ -29,7 +29,7 @@ export function supportsImageFormat(mimeType: string, formats?: readonly ImageFo
 /**
  * Returns image bytes a model accepts: within MAX_IMAGE_EDGE and MAX_IMAGE_BYTES and in one of
  * `formats`. Accepted images that are already small enough pass through unchanged — generated
- * covers are AVIF of at most 1440 px, so a model declaring `image/avif` gets them untouched.
+ * previews are AVIF of at most 1440 px, so a model declaring `image/avif` gets them untouched.
  * Everything else is decoded, EXIF-rotated, shrunk to fit and re-encoded.
  */
 export async function prepareImageForModel(

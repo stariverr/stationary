@@ -2728,78 +2728,87 @@
                                   ]
                                 }
                               },
-                              "cover_url": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "cover_variants": {
+                              "previews": {
                                 "type": "object",
-                                "propertyNames": {
-                                  "type": "string"
+                                "properties": {
+                                  "small": {
+                                    "type": "object",
+                                    "properties": {
+                                      "url": {
+                                        "type": "string"
+                                      },
+                                      "width": {
+                                        "type": "number"
+                                      },
+                                      "height": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": [
+                                      "url",
+                                      "width",
+                                      "height"
+                                    ],
+                                    "nullable": true
+                                  },
+                                  "medium": {
+                                    "type": "object",
+                                    "properties": {
+                                      "url": {
+                                        "type": "string"
+                                      },
+                                      "width": {
+                                        "type": "number"
+                                      },
+                                      "height": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": [
+                                      "url",
+                                      "width",
+                                      "height"
+                                    ],
+                                    "nullable": true
+                                  },
+                                  "large": {
+                                    "type": "object",
+                                    "properties": {
+                                      "url": {
+                                        "type": "string"
+                                      },
+                                      "width": {
+                                        "type": "number"
+                                      },
+                                      "height": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "required": [
+                                      "url",
+                                      "width",
+                                      "height"
+                                    ],
+                                    "nullable": true
+                                  }
                                 },
-                                "additionalProperties": {
-                                  "type": "object",
-                                  "properties": {
-                                    "track_id": {
-                                      "type": "string"
-                                    },
-                                    "url": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "width": {
-                                      "type": "number",
-                                      "nullable": true
-                                    },
-                                    "height": {
-                                      "type": "number",
-                                      "nullable": true
-                                    },
-                                    "status": {
-                                      "enum": [
-                                        "READY",
-                                        "STALE"
-                                      ],
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "track_id",
-                                    "url",
-                                    "width",
-                                    "height",
-                                    "status"
-                                  ]
-                                }
+                                "required": [
+                                  "small",
+                                  "medium",
+                                  "large"
+                                ]
                               },
-                              "covers": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "url": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "quality": {
-                                      "enum": [
-                                        "LOW",
-                                        "MEDIUM",
-                                        "HIGH"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "codec": {
-                                      "type": "string",
-                                      "nullable": true
-                                    }
-                                  },
-                                  "required": [
-                                    "url",
-                                    "quality",
-                                    "codec"
-                                  ]
-                                }
+                              "cover": {
+                                "type": "object",
+                                "properties": {
+                                  "url": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "url"
+                                ],
+                                "nullable": true
                               },
                               "width": {
                                 "type": "number",
@@ -3143,9 +3152,7 @@
                               "audio_tracks",
                               "subtitle_tracks",
                               "subtitles",
-                              "cover_url",
-                              "cover_variants",
-                              "covers",
+                              "previews",
                               "width",
                               "height",
                               "tracks"
@@ -4668,78 +4675,87 @@
                             ]
                           }
                         },
-                        "cover_url": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "cover_variants": {
+                        "previews": {
                           "type": "object",
-                          "propertyNames": {
-                            "type": "string"
+                          "properties": {
+                            "small": {
+                              "type": "object",
+                              "properties": {
+                                "url": {
+                                  "type": "string"
+                                },
+                                "width": {
+                                  "type": "number"
+                                },
+                                "height": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "url",
+                                "width",
+                                "height"
+                              ],
+                              "nullable": true
+                            },
+                            "medium": {
+                              "type": "object",
+                              "properties": {
+                                "url": {
+                                  "type": "string"
+                                },
+                                "width": {
+                                  "type": "number"
+                                },
+                                "height": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "url",
+                                "width",
+                                "height"
+                              ],
+                              "nullable": true
+                            },
+                            "large": {
+                              "type": "object",
+                              "properties": {
+                                "url": {
+                                  "type": "string"
+                                },
+                                "width": {
+                                  "type": "number"
+                                },
+                                "height": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "url",
+                                "width",
+                                "height"
+                              ],
+                              "nullable": true
+                            }
                           },
-                          "additionalProperties": {
-                            "type": "object",
-                            "properties": {
-                              "track_id": {
-                                "type": "string"
-                              },
-                              "url": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "width": {
-                                "type": "number",
-                                "nullable": true
-                              },
-                              "height": {
-                                "type": "number",
-                                "nullable": true
-                              },
-                              "status": {
-                                "enum": [
-                                  "READY",
-                                  "STALE"
-                                ],
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "track_id",
-                              "url",
-                              "width",
-                              "height",
-                              "status"
-                            ]
-                          }
+                          "required": [
+                            "small",
+                            "medium",
+                            "large"
+                          ]
                         },
-                        "covers": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "url": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "quality": {
-                                "enum": [
-                                  "LOW",
-                                  "MEDIUM",
-                                  "HIGH"
-                                ],
-                                "type": "string"
-                              },
-                              "codec": {
-                                "type": "string",
-                                "nullable": true
-                              }
-                            },
-                            "required": [
-                              "url",
-                              "quality",
-                              "codec"
-                            ]
-                          }
+                        "cover": {
+                          "type": "object",
+                          "properties": {
+                            "url": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "url"
+                          ],
+                          "nullable": true
                         },
                         "width": {
                           "type": "number",
@@ -5083,9 +5099,7 @@
                         "audio_tracks",
                         "subtitle_tracks",
                         "subtitles",
-                        "cover_url",
-                        "cover_variants",
-                        "covers",
+                        "previews",
                         "width",
                         "height",
                         "tracks"
@@ -5387,9 +5401,9 @@
         ]
       }
     },
-    "/api/media/{id}/regenerate-cover": {
+    "/api/media/{id}/regenerate-previews": {
       "post": {
-        "summary": "Regenerate cover for video Media",
+        "summary": "Render the previews of a Media again",
         "tags": [
           "Media"
         ],
@@ -5461,28 +5475,12 @@
               "type": "string"
             }
           }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "replace_external_cover": {
-                    "type": "boolean"
-                  }
-                },
-                "required": []
-              }
-            }
-          }
-        }
+        ]
       }
     },
-    "/api/media/regenerate-covers": {
+    "/api/media/regenerate-previews": {
       "post": {
-        "summary": "Batch regenerate video covers",
+        "summary": "Render the previews of several Media again",
         "tags": [
           "Media"
         ],
@@ -5569,9 +5567,6 @@
                       "type": "string",
                       "format": "uuid"
                     }
-                  },
-                  "replace_external_cover": {
-                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -5581,6 +5576,314 @@
             }
           }
         }
+      }
+    },
+    "/api/media/{id}/cover/presign-upload": {
+      "post": {
+        "summary": "Presign the upload of a cover image (VIDEO, AUDIO and PDF media)",
+        "tags": [
+          "Media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "Status code, 0 indicates success"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "Status description"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "url": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string"
+                        },
+                        "bucket": {
+                          "type": "string"
+                        },
+                        "mime_type": {
+                          "type": "string"
+                        },
+                        "extension": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized / Not logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 40101
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fileName": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "fileName"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/{id}/cover": {
+      "post": {
+        "summary": "Set the cover of a Media to an uploaded image",
+        "tags": [
+          "Media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "Status code, 0 indicates success"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "Status description"
+                    },
+                    "data": {
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized / Not logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 40101
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "bucket": {
+                        "type": "string"
+                      },
+                      "mime_type": {
+                        "type": "string"
+                      },
+                      "extension": {
+                        "type": "string"
+                      },
+                      "size": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "bucket",
+                      "mime_type",
+                      "extension",
+                      "size"
+                    ]
+                  }
+                },
+                "required": [
+                  "file"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/{id}/cover/delete": {
+      "post": {
+        "summary": "Remove the cover of a Media",
+        "tags": [
+          "Media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "Status code, 0 indicates success"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "Status description"
+                    },
+                    "data": {
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized / Not logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 40101
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/api/media/{id}/manifest.mpd": {
@@ -7971,45 +8274,6 @@
                 "required": [
                   "library_id"
                 ]
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/task/scan-missing-covers": {
-      "post": {
-        "summary": "Scan videos with missing covers and re-enqueue",
-        "tags": [
-          "Task"
-        ],
-        "responses": {
-          "200": {
-            "description": "Success response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 0,
-                      "description": "Status code, 0 indicates success"
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "success",
-                      "description": "Status description"
-                    },
-                    "data": {
-                      "type": "object"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
               }
             }
           }

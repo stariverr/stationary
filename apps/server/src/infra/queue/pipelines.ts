@@ -11,8 +11,10 @@ export const Aspect = {
     MEDIA_CONTENT: "media.content",
     /** A media moved to another library. */
     MEDIA_LIBRARY: "media.library",
-    /** Generated cover tracks of a media changed. */
+    /** The original cover of a media (a user upload or a downloaded platform cover) was set, replaced or removed. */
     MEDIA_COVER: "media.cover",
+    /** The preview images of a media changed. */
+    MEDIA_PREVIEW: "media.preview",
     /** Title, description or tags of a media, of its post, or of a tag group it carries. */
     MEDIA_META: "media.meta",
     /** The stored AI description of a media. */
@@ -21,8 +23,6 @@ export const Aspect = {
     MEDIA_SEARCH_DOC: "media.search_doc",
     /** Where an author's avatar should come from. */
     AUTHOR_AVATAR_SOURCE: "author.avatar_source",
-    /** Cover qualities of a library. */
-    LIBRARY_COVER_CONFIG: "library.cover_config",
     /** Description model, language or prompt of a library, or a request to re-describe. */
     LIBRARY_AI_CONFIG: "library.ai_config",
     /** Embedding spaces a library writes (ACTIVE and BUILDING). */
@@ -48,17 +48,13 @@ export interface PipelineDeclaration {
 }
 
 export const PIPELINES = {
-    download: { subject: "media", inputs: [Aspect.MEDIA_SOURCE], outputs: [Aspect.MEDIA_CONTENT] },
+    download: { subject: "media", inputs: [Aspect.MEDIA_SOURCE], outputs: [Aspect.MEDIA_CONTENT, Aspect.MEDIA_COVER] },
     avatar: { subject: "author", inputs: [Aspect.AUTHOR_AVATAR_SOURCE], outputs: [] },
-    cover: {
-        subject: "media",
-        inputs: [Aspect.MEDIA_CONTENT, Aspect.MEDIA_LIBRARY, Aspect.LIBRARY_COVER_CONFIG],
-        outputs: [Aspect.MEDIA_COVER],
-    },
+    preview: { subject: "media", inputs: [Aspect.MEDIA_CONTENT, Aspect.MEDIA_COVER], outputs: [Aspect.MEDIA_PREVIEW] },
     "ai.describe": {
         subject: "media",
-        // Content too: an image without generated covers is described from its content.
-        inputs: [Aspect.MEDIA_CONTENT, Aspect.MEDIA_COVER, Aspect.MEDIA_LIBRARY, Aspect.LIBRARY_AI_CONFIG],
+        // AI looks at the large preview, never at the content or the cover directly.
+        inputs: [Aspect.MEDIA_PREVIEW, Aspect.MEDIA_LIBRARY, Aspect.LIBRARY_AI_CONFIG],
         outputs: [Aspect.MEDIA_DESCRIPTION],
     },
     "ai.index": {
@@ -75,7 +71,7 @@ export const PIPELINES = {
     "ai.image": {
         subject: "media",
         perSpace: "imageEmbedding",
-        inputs: [Aspect.MEDIA_CONTENT, Aspect.MEDIA_COVER, Aspect.MEDIA_LIBRARY, Aspect.LIBRARY_SPACES],
+        inputs: [Aspect.MEDIA_PREVIEW, Aspect.MEDIA_LIBRARY, Aspect.LIBRARY_SPACES],
         outputs: [],
     },
 } as const satisfies Record<string, PipelineDeclaration>;

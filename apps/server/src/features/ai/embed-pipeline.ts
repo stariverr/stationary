@@ -15,7 +15,7 @@ import { LeaseLostError } from "@/infra/queue/store";
 import type { BatchPipelineHandler, ReconcileResult } from "@/infra/queue/types";
 import { AiProviderError } from "./errors";
 import { dropExpiredRetiredSpaces, EMBEDDING_ROLE_FOR, promoteBuiltSpaces, promoteIfBuilt } from "./embedding-spaces";
-import { aiSourceHash, loadAiEmbeddingImage, loadAiImageSources, resolveAiImageSource, type AiImageSource } from "./image-source";
+import { loadAiEmbeddingImage, loadAiImageSources, resolveAiImageSource, type AiImageSource } from "./image-source";
 import { aiErrorResult } from "./pipeline-result";
 import { AiService, providerBlockedMs } from "./service";
 import type { EmbedImageParams, EmbeddingBindingRole, EmbeddingResult, TextEmbeddingProvider, VisualEmbeddingProvider } from "./types";
@@ -24,7 +24,7 @@ type SpaceRow = typeof LibraryEmbeddingSpace.$inferSelect;
 
 /** What a media's vector in a space is made from. */
 type EmbeddingInput =
-    /** Wait: the media is gone, or its input is still being produced (search document, cover). */
+    /** Wait: the media is gone, or its input is still being produced (search document, previews). */
     | { kind: "wait" }
     /** Nothing to embed (empty document, no image): the media has no vector in the space. */
     | { kind: "none" }
@@ -88,14 +88,14 @@ async function loadInputs(space: SpaceRow, mediaIds: readonly string[], forScan:
         const sources = await loadAiImageSources(ids);
         for (const id of ids) {
             const source = sources.get(id);
-            inputs.set(id, source ? { kind: "image", hash: aiSourceHash(source.file), source } : { kind: "none" });
+            inputs.set(id, source ? { kind: "image", hash: source.hash, source } : { kind: "none" });
         }
         return inputs;
     }
     for (const id of ids) {
-        const { source, waitingForCover } = await resolveAiImageSource(id);
-        if (waitingForCover) inputs.set(id, { kind: "wait" });
-        else inputs.set(id, source ? { kind: "image", hash: aiSourceHash(source.file), source } : { kind: "none" });
+        const { source, waiting } = await resolveAiImageSource(id);
+        if (waiting) inputs.set(id, { kind: "wait" });
+        else inputs.set(id, source ? { kind: "image", hash: source.hash, source } : { kind: "none" });
     }
     return inputs;
 }
@@ -170,18 +170,11 @@ async function embedImages(
     items: Array<{ id: string; input: Extract<EmbeddingInput, { kind: "image" }> }>,
     signal: AbortSignal,
 ): Promise<Embedded> {
-    const fileIds = items.map((item) => item.input.source.file.id);
-    const tracks = await db
-        .select({ fileId: Track.file_id, width: Track.width, height: Track.height })
-        .from(Track)
-        .where(and(inArray(Track.file_id, fileIds), isNotNull(Track.width), isNotNull(Track.height)));
     // Each source is loaded on its own: one unreadable file fails only its own media.
     const loaded = await Promise.allSettled(
-        items.map((item) => {
-            const track = tracks.find((row) => row.fileId === item.input.source.file.id);
-            const dimensions = track ? { width: track.width!, height: track.height! } : undefined;
-            return loadAiEmbeddingImage(item.input.source.file, dimensions, provider, signal);
-        }),
+        items.map(({ input: { source } }) =>
+            loadAiEmbeddingImage(source.file, { width: source.width, height: source.height }, provider, signal),
+        ),
     );
     const failures = new Map<string, ReconcileResult>();
     const ready: Array<{ id: string; image: EmbedImageParams }> = [];
@@ -296,7 +289,7 @@ function embeddingPipeline(role: EmbeddingBindingRole): BatchPipelineHandler {
                     dimension: vector.dimension,
                     embedding: vector.embedding,
                     content_hash: item.input.hash,
-                    source_file_id: item.input.kind === "image" ? item.input.source.file.id : null,
+                    source_file_id: item.input.kind === "image" ? item.input.source.sourceFileId : null,
                     last_error: null,
                     error_kind: null,
                     error_input_hash: null,

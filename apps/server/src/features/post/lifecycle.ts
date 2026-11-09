@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull, isNotNull } from "drizzle-orm";
+import { deleteMediaImages } from "@/features/media/cover";
 import { db } from "@/global/db";
 import { DeleteStatus, File, Media, MediaTag, Post, PostTag, Track } from "@/db/schema";
 import { deleteMediaAiData } from "@/features/ai/cleanup";
@@ -179,6 +180,7 @@ export async function batchDeletePost(postIds: string[]): Promise<{
                     .returning({ id: Media.id });
                 mediaUpdated = updatedMedias.length;
                 await deleteMediaAiData(tx, mediaIds);
+                await deleteMediaImages(tx, mediaIds);
 
                 await tx
                     .update(Track)

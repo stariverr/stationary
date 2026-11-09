@@ -4,8 +4,8 @@ import { Aspect } from "@/infra/queue/pipelines";
 
 /**
  * Media restored from the recycle bin re-enter the pipelines, which skip recycled media: downloads that were still
- * pending resume, covers are reconciled against the library's current configuration, and AI results are checked
- * against the media's current data.
+ * pending resume, previews are reconciled against the current cover and content, and AI results are checked against
+ * the media's current data.
  */
 export async function markRestored(client: DbClient, mediaIds: readonly string[]): Promise<void> {
     await markChanged(client, Aspect.MEDIA_SOURCE, mediaIds);

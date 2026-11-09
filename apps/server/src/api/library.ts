@@ -5,13 +5,11 @@ import { validate } from "@/lib/validation/validator";
 import { success, error } from "@/lib/response";
 import { Code } from "@/lib/code";
 import { DeleteStatus, Library, Media } from "@/db/schema";
-import { Quality } from "@/lib/types";
 
 import { and, eq, ilike, SQL, count, sql } from "drizzle-orm";
 import { AuthEnv, ownedLibrary, requireAuth } from "@/lib/auth/middleware";
-import { markCoversStale } from "@/features/media/cover-pipeline";
-import { markChanged, requestScan } from "@/infra/queue/changes";
-import { Aspect } from "@/infra/queue/pipelines";
+import { clearLibraryPreviews } from "@/features/media/preview";
+import { requestScan } from "@/infra/queue/changes";
 import { LibraryMoveItemsBodySchema } from "@/features/library/schema";
 import { LibraryDeleteError, LibraryMoveError } from "@/features/library/errors";
 import { moveLibraryItems } from "@/features/library/move-items";
@@ -55,25 +53,9 @@ export const LibraryUpdateBodySchema = v.strictObject({
     description: v.optional(v.string()),
 });
 
-export const LibraryCoverJobsBodySchema = v.object({
-    /** Render every generated cover again, not only missing or outdated ones. */
+export const LibraryPreviewJobsBodySchema = v.object({
+    /** Render every preview again, not only missing or outdated ones. */
     force: v.optional(v.boolean(), false),
-});
-
-export const LibraryCoverConfigBodySchema = v.object({
-    qualities: v.pipe(
-        v.array(v.enum(Quality)),
-        v.minLength(1, "At least 1 cover quality tier is required"),
-        v.maxLength(3, "At most 3 cover quality tiers are allowed"),
-        v.transform((list) => {
-            const set = new Set(list);
-            const ordered: Quality[] = [];
-            for (const q of [Quality.LOW, Quality.MEDIUM, Quality.HIGH]) {
-                if (set.has(q)) ordered.push(q);
-            }
-            return ordered;
-        }),
-    ),
 });
 
 function maskKey(key: string | null | undefined): string | null {
@@ -208,10 +190,10 @@ router.post("/move-items", requireAuth, validate("json", LibraryMoveItemsBodySch
 });
 
 router.post(
-    "/:id/cover-jobs",
+    "/:id/preview-jobs",
     requireAuth,
     validate("param", LibraryIdParamSchema),
-    validate("json", LibraryCoverJobsBodySchema),
+    validate("json", LibraryPreviewJobsBodySchema),
     async (c) => {
         const user = c.get("user");
         if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
@@ -223,68 +205,11 @@ router.post(
         if (!library) return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
 
         await db.transaction(async (tx) => {
-            if (body.force) await markCoversStale(tx, eq(Media.library_id, library.id));
-            await requestScan(tx, "cover", [library.id]);
+            if (body.force) await clearLibraryPreviews(tx, library.id);
+            await requestScan(tx, "preview", [library.id]);
         });
 
         return c.json(success(Code.SUCCESS, { library_id: library.id }), 202);
-    },
-);
-
-router.get("/:id/cover-config", requireAuth, validate("param", LibraryIdParamSchema), async (c) => {
-    const user = c.get("user");
-    if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
-
-    const { id } = c.req.valid("param");
-
-    const library = await ownedLibrary(c, user.id, id);
-    if (!library) return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
-
-    const rawQualities = library.cover_qualities;
-    const qualities = Array.isArray(rawQualities) ? rawQualities : [Quality.LOW, Quality.MEDIUM];
-
-    return c.json(
-        success(Code.SUCCESS, {
-            library_id: library.id,
-            qualities,
-        }),
-    );
-});
-
-router.put(
-    "/:id/cover-config",
-    requireAuth,
-    validate("param", LibraryIdParamSchema),
-    validate("json", LibraryCoverConfigBodySchema),
-    async (c) => {
-        const user = c.get("user");
-        if (!user) return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
-
-        const { id } = c.req.valid("param");
-        const body = c.req.valid("json");
-
-        const library = await ownedLibrary(c, user.id, id);
-        if (!library) return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
-
-        // Check whether the new qualities are different from the old ones
-        const oldQualities = (library.cover_qualities as Quality[]) || [];
-        const isSame =
-            oldQualities.length === body.qualities.length &&
-            new Set(oldQualities).size === new Set(body.qualities).size &&
-            oldQualities.every((quality) => body.qualities.includes(quality));
-        const isChanged = !isSame;
-
-        if (isChanged) {
-            await db.transaction(async (tx) => {
-                await tx
-                    .update(Library)
-                    .set({ cover_qualities: body.qualities, update_time: Temporal.Now.instant() })
-                    .where(eq(Library.id, id));
-                await markChanged(tx, Aspect.LIBRARY_COVER_CONFIG, [id]);
-            });
-        }
-
-        return c.json(success(Code.SUCCESS, { library_id: id, qualities: body.qualities, is_changed: isChanged }));
     },
 );
 

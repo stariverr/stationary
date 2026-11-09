@@ -1,5 +1,7 @@
 import { type Transaction } from "@/global/db";
 import { Post, Media, Track, Author, File, DeleteStatus, SyncStatus, TrackPurpose, TagSource, TrackType } from "@/db/schema";
+import { CoverService, deleteMediaImages } from "@/features/media/cover";
+import { Quality } from "@/lib/types";
 import { eq, and, ne, inArray } from "drizzle-orm";
 import { avatarOrigin } from "@/features/author/avatar-pipeline";
 import { markChanged } from "@/infra/queue/changes";
@@ -8,6 +10,18 @@ import { Aspect } from "@/infra/queue/pipelines";
 import { normalizeExternalId, assertUniqueExternalIds } from "@/lib/utils/media-identity";
 import { validateMediaComposition } from "@/lib/validation/media-composition";
 import type { PostItemData, MediaItemData } from "./schema";
+
+type IncomingTrack = MediaItemData["tracks"][number];
+
+const COVER_QUALITY_RANK: Record<Quality, number> = { [Quality.HIGH]: 0, [Quality.MEDIUM]: 1, [Quality.LOW]: 2 };
+
+/** Imports still offer covers as COVER tracks; they become the media's cover, the best quality one winning. */
+function splitIncomingCover(tracks: IncomingTrack[]): { coverUrl: string | null; tracks: IncomingTrack[] } {
+    const covers = tracks
+        .filter((track) => track.purpose === TrackPurpose.COVER)
+        .sort((a, b) => COVER_QUALITY_RANK[a.quality] - COVER_QUALITY_RANK[b.quality]);
+    return { coverUrl: covers[0]?.url ?? null, tracks: tracks.filter((track) => track.purpose !== TrackPurpose.COVER) };
+}
 
 import {
     type ExistingTrack,
@@ -32,7 +46,7 @@ export async function syncPreparedTrack(
     const presentationUpdates = existing ? getTrackPresentationUpdates(existing, incoming) : {};
 
     if (!incoming.url) {
-        if (!existing || incoming.purpose === TrackPurpose.COVER) return false;
+        if (!existing) return false;
 
         const oldFileId = existing.file_id;
         await tx
@@ -139,14 +153,18 @@ export async function syncPreparedTrack(
 
 export async function saveIngestMetadata(postData: PostItemData, targetLibraryId: string, workflowRunId: string, tx: Transaction) {
     const postExternalId = normalizeExternalId(postData.external_id, "post.external_id");
-    const mediaItems = postData.media.map((media, index) => ({
-        ...media,
-        external_id: normalizeExternalId(media.external_id, `media[${index}].external_id`),
-    }));
+    const mediaItems = postData.media.map((media, index) => {
+        const { coverUrl, tracks } = splitIncomingCover(media.tracks);
+        return { ...media, tracks, coverUrl, external_id: normalizeExternalId(media.external_id, `media[${index}].external_id`) };
+    });
     assertUniqueExternalIds(
         mediaItems.map((media) => media.external_id),
         `media in post ${postExternalId}`,
     );
+    for (const [index, media] of postData.media.entries()) {
+        const invalidCover = media.tracks.find((track) => track.purpose === TrackPurpose.COVER && track.type !== TrackType.IMAGE);
+        if (invalidCover) throw new Error(`media[${index}] COVER tracks must use the IMAGE type`);
+    }
     for (const [index, media] of mediaItems.entries()) {
         const compositionError = validateMediaComposition(
             media.type,
@@ -318,6 +336,7 @@ export async function saveIngestMetadata(postData: PostItemData, targetLibraryId
                 .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
                 .where(and(inArray(File.id, fileIds), eq(File.delete_status, DeleteStatus.ACTIVE)));
         }
+        await deleteMediaImages(tx, deletedMediaIds);
 
         hasPendingTasks = true;
     }
@@ -406,6 +425,7 @@ export async function saveIngestMetadata(postData: PostItemData, targetLibraryId
         }
 
         mediaIds.push(mediaId);
+        await CoverService.syncImported(tx, { id: mediaId, type: mediaData.type }, mediaData.coverUrl);
         await syncEntityTags(targetLibraryId, "media", mediaId, mediaData.tags || [], TagSource.SCRAPER, "media.tags", tagLookup, tx);
 
         const activeTracks = existingMediaTracks.filter((track) => track.delete_status === DeleteStatus.ACTIVE);

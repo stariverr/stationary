@@ -28,7 +28,9 @@ import { MediaService } from "@/features/media/queries";
 import { TrackService } from "@/features/media/track";
 import { v7 as uuidv7 } from "uuid";
 import { env } from "@/global/env";
-import { markCoversStale } from "@/features/media/cover-pipeline";
+import { CoverNotAllowedError, CoverService } from "@/features/media/cover";
+import { clearPreviews, loadPreviewImages, NO_PREVIEWS } from "@/features/media/preview";
+import { COVER_MEDIA_TYPES } from "@/lib/validation/media-composition";
 import { requeue } from "@/infra/queue/changes";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { FormTimestampSchema, toIsoTimestamp } from "@/lib/utils/time";
@@ -159,8 +161,9 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
         .offset(offset);
 
     const mediaIds = rawMedia.map((m) => m.id);
-    const [coversByMediaId, videosByMediaId] = await Promise.all([
-        MediaService.getCoversMap(mediaIds),
+    const [previewsByMediaId, contentUrls, videosByMediaId] = await Promise.all([
+        loadPreviewImages(mediaIds),
+        MediaService.getContentUrls(mediaIds),
         MediaService.getVideosMap(mediaIds),
     ]);
 
@@ -177,17 +180,8 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
             : [];
 
     const medias = rawMedia.map((m) => {
-        const covers = coversByMediaId.get(m.id) || [];
         const videos = videosByMediaId.get(m.id) || [];
         const aiStatus = summarizeAiStatus(aiRows.find((row) => row.entity_id === m.id));
-
-        const lowCover = covers.find((c) => c.quality === Quality.LOW)?.url || null;
-        const mediumCover = covers.find((c) => c.quality === Quality.MEDIUM)?.url || null;
-        const highCover = covers.find((c) => c.quality === Quality.HIGH)?.url || null;
-        const coverUrl = mediumCover || lowCover || highCover || covers[0]?.url || null;
-
-        const fallbackVideo = videos[0]?.url || null;
-        const mainUrl = m.type === MediaType.VIDEO ? fallbackVideo : highCover || mediumCover || lowCover || covers[0]?.url || null;
 
         return {
             id: m.id,
@@ -204,13 +198,12 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
             last_error: m.last_error,
             ai_status: aiStatus.status,
             ai_error: aiStatus.error,
-            url: mainUrl,
-            cover_url: coverUrl,
+            url: contentUrls.get(m.id) ?? null,
+            previews: previewsByMediaId.get(m.id) ?? NO_PREVIEWS,
             width: null,
             height: null,
             tracks: [],
             media_count: m.post_media_count || 1,
-            covers: covers,
             videos: videos,
         };
     });
@@ -303,48 +296,28 @@ router.post("/delete/:id", requireAuth, async (c) => {
 
     return c.json(success(Code.SUCCESS, result));
 });
-export const SingleRegenerateCoverParamSchema = v.object({
+const MediaIdParamSchema = v.object({
     id: v.pipe(v.string(), v.uuid("Invalid media ID format")),
 });
 
-router.post("/:id/regenerate-cover", requireAuth, validate("param", SingleRegenerateCoverParamSchema), async (c) => {
-    const user = c.get("user");
-    if (!user) {
-        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
-    }
+/** Renders the media's previews again from scratch. */
+router.post("/:id/regenerate-previews", requireAuth, validate("param", MediaIdParamSchema), async (c) => {
     const { id } = c.req.valid("param");
-
     const access = await checkMediaAccess(c, id);
-    if (!access.media || access.errorResponse) return access.errorResponse;
-    const media = access.media;
-
-    if (!media.library_id) {
-        return c.json(error(Code.INVALID_PARAMETER, "Media has no associated library"), 400);
-    }
-
-    if (media.type !== MediaType.IMAGE && media.type !== MediaType.LIVE_PHOTO && media.type !== MediaType.VIDEO) {
-        return c.json(error(Code.INVALID_PARAMETER, "Media type does not support cover photo generation"), 400);
-    }
-
-    const library = await ownedLibrary(c, user.id, media.library_id);
-    if (!library) {
-        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
-    }
+    if (access.errorResponse) return access.errorResponse;
 
     await db.transaction(async (tx) => {
-        await markCoversStale(tx, eq(Media.id, media.id));
-        await requeue(tx, ["cover"], [media.id]);
+        await clearPreviews(tx, [id]);
+        await requeue(tx, ["preview"], [id]);
     });
-
-    return c.json(success(Code.SUCCESS, { mediaId: media.id, status: "queued" }));
+    return c.json(success(Code.SUCCESS, { mediaId: id, status: "queued" }));
 });
 
-export const BatchRegenerateCoversSchema = v.pipe(
+export const BatchRegeneratePreviewsSchema = v.pipe(
     v.object({
         library_id: v.pipe(v.string(), v.uuid("Invalid library_id format")),
         media_ids: v.optional(v.array(v.pipe(v.string(), v.uuid("Invalid media_id format")))),
         post_ids: v.optional(v.array(v.pipe(v.string(), v.uuid("Invalid post_id format")))),
-        replace_external_cover: v.optional(v.boolean()),
     }),
     v.check(
         (data) => (data.media_ids?.length || 0) + (data.post_ids?.length || 0) > 0,
@@ -352,7 +325,7 @@ export const BatchRegenerateCoversSchema = v.pipe(
     ),
 );
 
-router.post("/regenerate-covers", requireAuth, validate("json", BatchRegenerateCoversSchema), async (c) => {
+router.post("/regenerate-previews", requireAuth, validate("json", BatchRegeneratePreviewsSchema), async (c) => {
     const user = c.get("user");
     if (!user) {
         return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
@@ -380,7 +353,7 @@ router.post("/regenerate-covers", requireAuth, validate("json", BatchRegenerateC
     }
 
     const mediaList = await db
-        .select()
+        .select({ id: Media.id })
         .from(Media)
         .where(
             and(eq(Media.library_id, library_id), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time), or(...filters)),
@@ -390,22 +363,87 @@ router.post("/regenerate-covers", requireAuth, validate("json", BatchRegenerateC
         return c.json(error(Code.NOT_FOUND, "No matching media items found in the specified library"), 404);
     }
 
-    // Judge whether all media are found by id
     if (uniqueMediaIds.length > 0) {
         const foundMediaIds = new Set(mediaList.map((m) => m.id));
-        const missingExplicitMedia = uniqueMediaIds.some((id) => !foundMediaIds.has(id));
-        if (missingExplicitMedia) {
+        if (uniqueMediaIds.some((id) => !foundMediaIds.has(id))) {
             return c.json(error(Code.INVALID_PARAMETER, "All specified media items must belong to the specified library"), 400);
         }
     }
 
     const mediaIds = mediaList.map((m) => m.id);
     await db.transaction(async (tx) => {
-        await markCoversStale(tx, inArray(Media.id, mediaIds));
-        await requeue(tx, ["cover"], mediaIds);
+        await clearPreviews(tx, mediaIds);
+        await requeue(tx, ["preview"], mediaIds);
     });
 
     return c.json(success(Code.SUCCESS, { queued_media_count: mediaIds.length }));
+});
+
+const CoverPresignSchema = v.object({
+    fileName: v.pipe(v.string(), v.nonEmpty("fileName is required")),
+});
+
+router.post("/:id/cover/presign-upload", requireAuth, validate("param", MediaIdParamSchema), validate("json", CoverPresignSchema), async (c) => {
+    const { id } = c.req.valid("param");
+    const { fileName } = c.req.valid("json");
+    const access = await checkMediaAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+    const media = access.media!;
+
+    if (!COVER_MEDIA_TYPES.has(media.type)) {
+        return c.json(error(Code.INVALID_PARAMETER, `${media.type} media cannot have a cover`), 400);
+    }
+    if (!getAllowedTrackTypesForFile(fileName).includes(TrackType.IMAGE)) {
+        return c.json(error(Code.INVALID_PARAMETER, `${fileName} is not an image`), 400);
+    }
+
+    const ext = getFileExtension(fileName) || "bin";
+    const name = `${media.id}_cover_${uuidv7()}.${ext}`;
+    const path = media.post_id
+        ? `v2/p/${media.post_id.slice(-2)}/${media.post_id}/${name}`
+        : `v2/l/${media.library_id.slice(-2)}/${media.library_id}/${name}`;
+    const mimeType = getMimeTypeByExt(ext);
+    const url = await s3.getUploadPresignedUrl(path, { bucket: env.S3_BUCKET, contentType: mimeType, expiresInSeconds: 3600 });
+
+    return c.json(success(Code.SUCCESS, { url, path, bucket: env.S3_BUCKET, mime_type: mimeType, extension: ext }));
+});
+
+const SetCoverSchema = v.object({
+    file: v.object({
+        path: v.pipe(v.string(), v.nonEmpty()),
+        bucket: v.pipe(v.string(), v.nonEmpty()),
+        mime_type: v.pipe(v.string(), v.nonEmpty()),
+        extension: v.pipe(v.string(), v.nonEmpty()),
+        size: v.pipe(v.number(), v.integer(), v.minValue(0)),
+    }),
+});
+
+/** Sets the cover to an image uploaded through `cover/presign-upload`. */
+router.post("/:id/cover", requireAuth, validate("param", MediaIdParamSchema), validate("json", SetCoverSchema), async (c) => {
+    const { id } = c.req.valid("param");
+    const { file } = c.req.valid("json");
+    const access = await checkMediaAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+    const media = access.media!;
+
+    try {
+        await db.transaction((tx) => CoverService.setUploaded(tx, media, file));
+    } catch (e) {
+        if (e instanceof CoverNotAllowedError) return c.json(error(Code.INVALID_PARAMETER, e.message), 400);
+        throw e;
+    }
+    const cover = (await CoverService.loadUrls([id])).get(id) ?? null;
+    return c.json(success(Code.SUCCESS, { cover }));
+});
+
+router.post("/:id/cover/delete", requireAuth, validate("param", MediaIdParamSchema), async (c) => {
+    const { id } = c.req.valid("param");
+    const access = await checkMediaAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+
+    const removed = await db.transaction((tx) => CoverService.remove(tx, id));
+    if (!removed) return c.json(error(Code.NOT_FOUND, "Media has no cover"), 404);
+    return c.json(success(Code.SUCCESS, { cover: null }));
 });
 
 const GetMpdRequestSchema = v.object({
@@ -623,9 +661,15 @@ router.get("/:id/tracks/:trackId/download-url", requireAuth, async (c) => {
     return c.json(success(Code.SUCCESS, { url }));
 });
 
+/** Covers are set through the cover routes, never as tracks. */
+const TrackPurposeSchema = v.picklist(
+    Object.values(TrackPurpose).filter((purpose) => purpose !== TrackPurpose.COVER),
+    "A cover is not a track; use the cover routes",
+);
+
 const PresignUploadSchema = v.object({
     type: v.enum(TrackType),
-    purpose: v.enum(TrackPurpose),
+    purpose: TrackPurposeSchema,
     quality: v.enum(Quality),
     priority: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
     fileName: v.pipe(v.string(), v.nonEmpty("fileName is required")),
@@ -675,7 +719,7 @@ router.post("/:id/tracks/presign-upload", requireAuth, validate("json", PresignU
 
 const RegisterTrackSchema = v.object({
     type: v.enum(TrackType),
-    purpose: v.enum(TrackPurpose),
+    purpose: TrackPurposeSchema,
     quality: v.enum(Quality),
     priority: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
     source_url: v.optional(v.string()),

@@ -98,7 +98,7 @@ media_cover  id, media_id (unique), origin (FILE|EMBEDDED), file_id, original_id
 ### 3.5 media_preview
 
 ```text
-media_preview  id, media_id, size (SMALL|MEDIUM|LARGE), recipe_version,
+media_preview  id, media_id, size (SMALL|MEDIUM|LARGE), source_file_id, recipe_version,
                file_id, width, height, last_error
                unique(media_id, size)
                CHECK ((file_id IS NOT NULL) <> (last_error IS NOT NULL))
@@ -108,7 +108,8 @@ media_preview  id, media_id, size (SMALL|MEDIUM|LARGE), recipe_version,
 - 系统生成。尺寸沿用现在 `COVER_PROFILES` 的最长边：SMALL 360、MEDIUM 720、LARGE 1440，输出格式为 AVIF。
 - 每个媒体固定生成三个档位，取代 `Library.cover_qualities` 的按库配置。
 - 一行要么是成功的结果（有 `file_id`、宽高），要么是最终失败（有 `last_error`）。
-- **失败时的输入只看 `recipe_version`。** 封面或原件一变，这个媒体的所有预览图行（包括失败行）都会被删掉（第 10 节），所以只要失败行还在，它就一定是基于当前的封面和原件得出的。scan 跳过 `recipe_version` 等于当前版本的失败行；配方升级、来源变化、用户点"重试失败"（删除失败行），都会让它重新生成。
+- **`source_file_id` 记录这一行由哪个文件生成（封面或原件）。** 一个档位只有在 `source_file_id` 等于当前来源、`recipe_version` 等于当前版本时才算最新，所以写入方改封面或原件时不必删除预览图行，preview pipeline 按当前状态对齐即可（level-triggered）。失败行同理：scan 跳过来源和版本都是当前的失败行；配方升级、来源变化、用户重新生成或重试，都会让它重新生成。
+- AI 读取 LARGE 预览图（缺失时退到 MEDIUM、SMALL），输入哈希取 `source_file_id` 对应文件的哈希，因此配方升级不会触发重新描述和重新嵌入。
 
 ### 3.6 av_file
 

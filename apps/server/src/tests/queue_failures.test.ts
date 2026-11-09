@@ -1,12 +1,11 @@
 import { describe, expect, mock, test } from "bun:test";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MediaType } from "@/db/schema";
+import { MediaType, PreviewSize } from "@/db/schema";
 import { AiProviderError, AiThrottledError } from "@/features/ai/errors";
 import { aiErrorResult } from "@/features/ai/pipeline-result";
 import { createProviderLimiter, type RateLimitStore } from "@/features/ai/rate-limit";
-import { Quality } from "@/lib/types";
-import { UndecodableSourceError, renderCoverFrame } from "@/lib/utils/cover_renderer";
+import { UndecodableSourceError, renderPreview } from "@/lib/utils/preview_renderer";
 import { DownloadStatusError } from "@/lib/utils/media";
 
 describe("aiErrorResult", () => {
@@ -84,11 +83,11 @@ describe("createProviderLimiter", () => {
     });
 });
 
-describe("renderCoverFrame", () => {
+describe("renderPreview", () => {
     test.skipIf(!Bun.which("ffmpeg"))("reports a source FFmpeg cannot decode", async () => {
         const path = join(tmpdir(), `undecodable-${crypto.randomUUID()}.mp4`);
         await Bun.write(path, crypto.getRandomValues(new Uint8Array(4096)));
-        await expect(renderCoverFrame(path, MediaType.VIDEO, Quality.LOW)).rejects.toBeInstanceOf(UndecodableSourceError);
+        await expect(renderPreview(path, MediaType.VIDEO, PreviewSize.SMALL)).rejects.toBeInstanceOf(UndecodableSourceError);
         await Bun.file(path).delete();
     });
 });

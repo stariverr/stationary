@@ -1,8 +1,10 @@
-import { and, eq, inArray, or, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, or, isNull } from "drizzle-orm";
 import { db } from "@/global/db";
 import { Media, Track, File as DbFile, DeleteStatus, SyncStatus, TrackPurpose, TrackType, type TrackMetadata } from "@/db/schema";
 
 import { buildCdnUrl } from "@/lib/utils/cdn";
+import { CoverService } from "./cover";
+import { loadPreviewImages, NO_PREVIEWS } from "./preview";
 import { toIsoTimestamp } from "@/lib/utils/time";
 import { Quality } from "@/lib/types";
 import { resolveMediaPlayback, type PlaybackTrackInput } from "@/lib/utils/media-playback";
@@ -21,7 +23,7 @@ import {
 } from "@/lib/utils/hls-manifest";
 import { isDashCompatibleFormat } from "@/lib/utils/track-format";
 
-export interface PreviewItem {
+export interface VideoItem {
     url: string | null;
     quality: Quality;
     codec: string | null;
@@ -33,11 +35,12 @@ const buildUrl = (bucket: string | null | undefined, path: string | null | undef
 export const MediaService = {
     /**
      * Single-pass batch fetch & DTO hydration for Media Details.
-     * Performs a single SQL query pass for multiple media items and returns full playback, tracks, and covers.
+     * Performs a single SQL query pass for multiple media items and returns full playback, tracks, cover and previews.
      */
     async getDetails(mediaList: Array<typeof Media.$inferSelect>, startPosition = 0) {
         if (!mediaList.length) return [];
         const mediaIds = mediaList.map((m) => m.id);
+        const [previewsByMedia, coversByMedia] = await Promise.all([loadPreviewImages(mediaIds), CoverService.loadUrls(mediaIds)]);
 
         const rows = await db
             .select({
@@ -65,14 +68,6 @@ export const MediaService = {
         return mediaList.map((media, index) => {
             const rawRows = tracksByMedia.get(media.id) || [];
             const sorted = [...rawRows].sort((a, b) => a.track.priority - b.track.priority);
-            const coverRows = sorted.filter((r) => r.track.purpose === TrackPurpose.COVER);
-
-            const covers: PreviewItem[] = coverRows.map(({ track, file }) => ({
-                url: buildUrl(file?.bucket, file?.path),
-                quality: track.quality,
-                codec: track.codec,
-            }));
-
             const primaryRow = sorted.find((r) => r.track.is_primary) || sorted.find((r) => r.track.purpose === TrackPurpose.CONTENT);
 
             // Single-pass direct mapping to playback inputs
@@ -152,8 +147,8 @@ export const MediaService = {
                 last_error: media.last_error,
                 url: mainUrl,
                 playback,
-                cover_url: covers.length ? covers[0].url : null,
-                covers: covers,
+                previews: previewsByMedia.get(media.id) ?? NO_PREVIEWS,
+                cover: coversByMedia.get(media.id) ?? null,
                 width: primaryRow?.track.width || null,
                 height: primaryRow?.track.height || null,
                 tracks,
@@ -168,72 +163,6 @@ export const MediaService = {
     async getDetail(media: typeof Media.$inferSelect) {
         const details = await this.getDetails([media]);
         return details[0];
-    },
-
-    /**
-     * Lightweight Summary DTO for ultra-fast list/feed endpoints.
-     * Performs a single SQL query pass for batch media items, fetching only primary content & cover tracks.
-     * Skips heavy track tree building, multi-quality resolutions, and playback manifest generation.
-     *
-     * @note Use cases: Media gallery thumbnail grid, feed card previews, or search result lists.
-     *       For full detail view pages (e.g., PostDetail), use `getDetails` instead.
-     */
-    async getSummaries(mediaList: Array<typeof Media.$inferSelect>, startPosition = 0) {
-        if (!mediaList.length) return [];
-        const mediaIds = mediaList.map((m) => m.id);
-
-        const rows = await db
-            .select({
-                track: Track,
-                file: DbFile,
-            })
-            .from(Track)
-            .leftJoin(DbFile, and(eq(Track.file_id, DbFile.id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
-            .where(
-                and(
-                    inArray(Track.media_id, mediaIds),
-                    eq(Track.delete_status, DeleteStatus.ACTIVE),
-                    eq(Track.sync_status, SyncStatus.COMPLETED),
-                    or(eq(Track.purpose, TrackPurpose.COVER), eq(Track.purpose, TrackPurpose.CONTENT)),
-                ),
-            );
-
-        const tracksByMedia = new Map<string, Array<{ track: typeof Track.$inferSelect; file: typeof DbFile.$inferSelect | null }>>();
-        for (const row of rows) {
-            if (!row.track.media_id) continue;
-            const list = tracksByMedia.get(row.track.media_id) || [];
-            list.push(row);
-            tracksByMedia.set(row.track.media_id, list);
-        }
-
-        return mediaList.map((media, index) => {
-            const items = tracksByMedia.get(media.id) || [];
-            const covers = items.filter((i) => i.track.purpose === TrackPurpose.COVER);
-            const contentTracks = items.filter((i) => i.track.purpose === TrackPurpose.CONTENT);
-            const primaryContent = contentTracks.find((i) => i.track.is_primary) || contentTracks[0];
-            const coverRow = covers[0];
-
-            return {
-                id: media.id,
-                eid: media.eid,
-                post_id: media.post_id ?? null,
-                source: media.source,
-                title: media.title,
-                description: media.description,
-                type: media.type,
-                sort_order: media.sort_order,
-                create_time: toIsoTimestamp(media.create_time) ?? undefined,
-                published_time: toIsoTimestamp(media.published_time) ?? undefined,
-                sync_status: media.sync_status,
-                last_error: media.last_error,
-                url: buildUrl(primaryContent?.file?.bucket, primaryContent?.file?.path),
-                cover_url: buildUrl(coverRow?.file?.bucket, coverRow?.file?.path),
-                width: primaryContent?.track.width || null,
-                height: primaryContent?.track.height || null,
-                playback: null,
-                position: startPosition + index,
-            };
-        });
     },
 
     /**
@@ -577,60 +506,27 @@ export const MediaService = {
         });
     },
 
-    async getCoversMap(mediaIds: string[]) {
-        const map = new Map<string, PreviewItem[]>();
-        if (!mediaIds.length) return map;
-
+    /** The URL of each media's primary content file (the default, else first by priority). */
+    async getContentUrls(mediaIds: string[]): Promise<Map<string, string>> {
+        if (!mediaIds.length) return new Map();
         const rows = await db
-            .select({ track: Track, file: DbFile })
+            .selectDistinctOn([Track.media_id], { mediaId: Track.media_id, bucket: DbFile.bucket, path: DbFile.path })
             .from(Track)
-            .leftJoin(DbFile, and(eq(Track.file_id, DbFile.id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
+            .innerJoin(DbFile, and(eq(Track.file_id, DbFile.id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
             .where(
                 and(
                     inArray(Track.media_id, mediaIds),
                     eq(Track.delete_status, DeleteStatus.ACTIVE),
                     eq(Track.sync_status, SyncStatus.COMPLETED),
-                    or(
-                        eq(Track.purpose, TrackPurpose.COVER),
-                        and(eq(Track.purpose, TrackPurpose.CONTENT), eq(Track.type, TrackType.IMAGE)),
-                    ),
+                    eq(Track.purpose, TrackPurpose.CONTENT),
                 ),
-            );
-
-        const qualityOrder: Record<Quality, number> = {
-            [Quality.LOW]: 1,
-            [Quality.MEDIUM]: 2,
-            [Quality.HIGH]: 3,
-        };
-
-        const tracksByMedia = new Map<string, Array<{ track: typeof Track.$inferSelect; file: typeof DbFile.$inferSelect | null }>>();
-        for (const row of rows) {
-            if (!row.track.media_id) continue;
-            const list = tracksByMedia.get(row.track.media_id) || [];
-            list.push(row);
-            tracksByMedia.set(row.track.media_id, list);
-        }
-
-        for (const [mediaId, mediaRows] of tracksByMedia.entries()) {
-            const coverRows = mediaRows.filter((r) => r.track.purpose === TrackPurpose.COVER);
-            const targetRows =
-                coverRows.length > 0
-                    ? coverRows
-                    : mediaRows.filter((r) => r.track.purpose === TrackPurpose.CONTENT && r.track.type === TrackType.IMAGE);
-
-            const list: PreviewItem[] = targetRows.map(({ track, file }) => ({
-                url: buildUrl(file?.bucket, file?.path),
-                quality: track.quality,
-                codec: track.codec,
-            }));
-            list.sort((a, b) => (qualityOrder[a.quality] || 99) - (qualityOrder[b.quality] || 99));
-            map.set(mediaId, list);
-        }
-        return map;
+            )
+            .orderBy(Track.media_id, desc(Track.is_primary), asc(Track.priority));
+        return new Map(rows.map((row) => [row.mediaId, buildCdnUrl(row.bucket, row.path)]));
     },
 
     async getVideosMap(mediaIds: string[]) {
-        const map = new Map<string, PreviewItem[]>();
+        const map = new Map<string, VideoItem[]>();
         if (!mediaIds.length) return map;
 
         const rows = await db

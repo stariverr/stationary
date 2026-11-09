@@ -120,35 +120,26 @@ describe("library item movement", () => {
     });
 });
 
-describe("cover config and jobs api", () => {
-    test("validates force option in cover jobs body schema", async () => {
+describe("preview jobs api", () => {
+    test("validates force option in preview jobs body schema", async () => {
         const libraryApi = await import("../src/api/library");
 
-        const defaultParsed = v.parse(libraryApi.LibraryCoverJobsBodySchema, {});
+        const defaultParsed = v.parse(libraryApi.LibraryPreviewJobsBodySchema, {});
         expect(defaultParsed.force).toBe(false);
 
-        const forceParsed = v.parse(libraryApi.LibraryCoverJobsBodySchema, {
+        const forceParsed = v.parse(libraryApi.LibraryPreviewJobsBodySchema, {
             force: true,
         });
         expect(forceParsed.force).toBe(true);
     });
 
-    test("exposes decoupled cover-config and cover-jobs endpoints", async () => {
+    test("exposes preview-jobs and no per-library cover config", async () => {
         const source = await Bun.file(resolveSrc("src/api/library.ts")).text();
         const clean = (str: string) => str.replace(/\s+/g, "");
 
-        expect(clean(source)).toContain(clean('router.get("/:id/cover-config"'));
-        expect(clean(source)).toContain(clean('router.post("/:id/cover-jobs"'));
-        expect(clean(source)).not.toContain(clean('"/:id/cover-jobs/active"'));
-    });
-
-    test("LibraryCoverConfigBodySchema validates and orders qualities correctly", async () => {
-        const libraryApi = await import("../src/api/library");
-        const { Quality } = await import("../src/lib/types");
-
-        const parsed = v.parse(libraryApi.LibraryCoverConfigBodySchema, {
-            qualities: ["MEDIUM", "LOW"],
-        });
-        expect(parsed.qualities).toEqual([Quality.LOW, Quality.MEDIUM]);
+        expect(clean(source)).toContain(clean('"/:id/preview-jobs"'));
+        expect(clean(source)).not.toContain("cover-config");
+        expect(clean(source)).not.toContain("cover-jobs");
     });
 });
+

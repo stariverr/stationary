@@ -168,15 +168,3 @@ export class IngestError extends TaggedError("IngestError")<{
         return 500;
     }
 }
-
-export class CoverRenderError extends TaggedError("CoverRenderError")<{
-    message: string;
-    cause?: unknown;
-}> {
-    get code(): Code {
-        return Code.INTERNAL_SERVER_ERROR;
-    }
-    get httpStatus(): number {
-        return 500;
-    }
-}

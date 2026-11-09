@@ -3,9 +3,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { s3 } from "@/global/s3";
 import { env } from "@/global/env";
-import { MediaType } from "@/db/schema";
-import { Quality } from "@/lib/types";
-import { renderCoverFrame, detectFormatStrategy, type MediaFormatCategory } from "@/lib/utils/cover_renderer";
+import { MediaType, PreviewSize } from "@/db/schema";
+import { renderPreview, detectFormatStrategy, type MediaFormatCategory } from "@/lib/utils/preview_renderer";
 
 const SAMPLE_HEIC = "/Users/kazuha/sec/30143692e0e1844a7eeb371f0e674813393378d204e96dbd4260b313a8223612.heic";
 const SAMPLE_WEBP = "/Users/kazuha/sec/1040g2sg30ujge6cala005pc26jj6dmioftbemho.webp";
@@ -20,8 +19,8 @@ interface FormatTestCase {
     generateLocalFile: () => Promise<string>;
 }
 
-describe("All Cover Media Formats End-to-End S3 Presigned URL Test Suite", () => {
-    const tempDir = join(tmpdir(), `cover-format-tests-${crypto.randomUUID()}`);
+describe("Preview rendering of every media format from S3 presigned URLs", () => {
+    const tempDir = join(tmpdir(), `preview-format-tests-${crypto.randomUUID()}`);
     const createdTempFiles: string[] = [];
     const uploadedS3Keys: string[] = [];
 
@@ -143,7 +142,7 @@ describe("All Cover Media Formats End-to-End S3 Presigned URL Test Suite", () =>
     ];
 
     for (const tc of testCases) {
-        test(`Renders cover successfully from S3 presigned URL for ${tc.name}`, async () => {
+        test(`Renders a preview from an S3 presigned URL for ${tc.name}`, async () => {
             // 1. Prepare local format file
             let localFilePath: string;
             try {
@@ -159,7 +158,7 @@ describe("All Cover Media Formats End-to-End S3 Presigned URL Test Suite", () =>
             }
 
             // 2. Upload to S3
-            const s3Key = `test-cover-formats/${crypto.randomUUID()}/source.${tc.ext}`;
+            const s3Key = `test-preview-formats/${crypto.randomUUID()}/source.${tc.ext}`;
             let fileBytes: Uint8Array;
             try {
                 fileBytes = await localFile.bytes();
@@ -178,8 +177,8 @@ describe("All Cover Media Formats End-to-End S3 Presigned URL Test Suite", () =>
             const strategy = detectFormatStrategy(presignedUrl, tc.mediaType);
             expect(strategy.category).toBe(tc.expectedCategory);
 
-            // 5. Render Cover Frame via S3 Presigned URL
-            const result = await renderCoverFrame(presignedUrl, tc.mediaType, Quality.MEDIUM);
+            // 5. Render the preview via the S3 presigned URL
+            const result = await renderPreview(presignedUrl, tc.mediaType, PreviewSize.MEDIUM);
 
             // 6. Assert result validity
             expect(result.buffer).toBeDefined();

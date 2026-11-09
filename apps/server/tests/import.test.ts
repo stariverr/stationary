@@ -4,6 +4,7 @@ import {
     assignTrackPriorities,
     validateDraftMediaGroups,
     validateDraftTrackFileTypes,
+    validateDraftCover,
     validateMediaComposition,
     type MediaCompositionTrack,
 } from "../src/lib/validation/media-composition";
@@ -52,17 +53,23 @@ describe("manual media composition", () => {
         );
     });
 
-    test.each([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE, TrackType.PDF])(
-        "rejects a %s cover because covers must be images",
-        (type) => {
-            expect(
-                validateMediaComposition(MediaType.VIDEO, [
-                    primaryTrack(TrackType.VIDEO),
-                    { type, purpose: TrackPurpose.COVER, is_default: false },
-                ]),
-            ).toContain("COVER tracks must use the IMAGE type");
-        },
-    );
+    test("a cover is never a track", () => {
+        expect(
+            validateMediaComposition(MediaType.VIDEO, [
+                primaryTrack(TrackType.VIDEO),
+                { type: TrackType.IMAGE, purpose: TrackPurpose.COVER, is_default: false },
+            ]),
+        ).toContain("A cover is not a track");
+    });
+
+    test("a draft carries at most one image cover, on media that can have one", () => {
+        const cover = (type: TrackType) => ({ type, purpose: TrackPurpose.COVER, is_default: false });
+        expect(validateDraftCover(MediaType.VIDEO, [primaryTrack(TrackType.VIDEO), cover(TrackType.IMAGE)])).toBeNull();
+        expect(validateDraftCover(MediaType.AUDIO, [cover(TrackType.IMAGE)])).toBeNull();
+        expect(validateDraftCover(MediaType.IMAGE, [cover(TrackType.IMAGE)])).toContain("IMAGE media cannot have a cover");
+        expect(validateDraftCover(MediaType.VIDEO, [cover(TrackType.IMAGE), cover(TrackType.IMAGE)])).toContain("at most one cover");
+        expect(validateDraftCover(MediaType.VIDEO, [cover(TrackType.VIDEO)])).toContain("must be an image");
+    });
 
     test("rejects PDF tracks outside the content purpose", () => {
         expect(

@@ -18,6 +18,7 @@ import {
 import { and, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { AiService } from "./service";
 import { buildCdnUrl } from "@/lib/utils/cdn";
+import { loadPreviewImages, NO_PREVIEWS, type PreviewImages } from "@/features/media/preview";
 import { toIsoTimestamp } from "@/lib/utils/time";
 import { classifyAiError, type AiErrorClassification } from "./errors";
 import type { AiBindingRole } from "./model-schema";
@@ -56,7 +57,7 @@ export interface SearchResultItem {
     type: string;
     title: string;
     media_url: string | null;
-    cover_url?: string | null;
+    previews: PreviewImages;
     score: number;
     matched_details?: {
         keyword?: { matched: boolean };
@@ -226,7 +227,7 @@ export const HybridSearchService = {
         }
 
         // 4. Fetch additional rich media files and metadata for matching reasons
-        const [tracks, aiMetadatas, mediaDetails] = await Promise.all([
+        const [tracks, aiMetadatas, mediaDetails, previewsByMedia] = await Promise.all([
             db
                 .select({
                     mediaId: Track.media_id,
@@ -241,7 +242,8 @@ export const HybridSearchService = {
                 .where(
                     and(
                         inArray(Track.media_id, candidateMediaIds),
-                        or(and(eq(Track.purpose, TrackPurpose.CONTENT), eq(Track.priority, 0)), eq(Track.purpose, TrackPurpose.COVER)),
+                        eq(Track.purpose, TrackPurpose.CONTENT),
+                        eq(Track.priority, 0),
                         eq(Track.delete_status, DeleteStatus.ACTIVE),
                         eq(File.delete_status, DeleteStatus.ACTIVE),
                     ),
@@ -259,6 +261,7 @@ export const HybridSearchService = {
                 })
                 .from(Media)
                 .where(inArray(Media.id, candidateMediaIds)),
+            loadPreviewImages(candidateMediaIds),
         ]);
 
         // 5. Structure final result payload with matched reasons
@@ -266,7 +269,7 @@ export const HybridSearchService = {
             const mediaId = candidate.mediaId;
             const mediaInfo = mediaDetails.find((m) => m.id === mediaId);
 
-            // Find media url (CONTENT with priority 0) and cover url (COVER)
+            // The media url is its first content track.
             const tracksForMedia = tracks.filter((f) => f.mediaId === mediaId);
             const primaryTrack = tracksForMedia.find(
                 (f) =>
@@ -274,11 +277,7 @@ export const HybridSearchService = {
                     f.priority === 0 &&
                     (mediaInfo?.type === "VIDEO" ? f.type === TrackType.VIDEO : f.type === TrackType.IMAGE),
             );
-            const coverTrack = tracksForMedia.find((f) => f.purpose === TrackPurpose.COVER);
-
             const mediaUrl = primaryTrack ? buildCdnUrl(primaryTrack.fileBucket, primaryTrack.filePath) : null;
-
-            const coverUrl = coverTrack ? buildCdnUrl(coverTrack.fileBucket, coverTrack.filePath) : null;
 
             // Which channels matched; clients render the explanation in the viewer's language.
             const channels = candidate.matchedChannels || [];
@@ -315,7 +314,7 @@ export const HybridSearchService = {
                 type: mediaInfo?.type || "IMAGE",
                 title: candidate.title,
                 media_url: mediaUrl,
-                cover_url: coverUrl,
+                previews: previewsByMedia.get(mediaId) ?? NO_PREVIEWS,
                 score: parseFloat(candidate.score.toFixed(4)),
                 matched_details: matchedDetails,
                 highlights,

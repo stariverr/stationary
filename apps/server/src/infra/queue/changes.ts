@@ -71,7 +71,7 @@ export async function markChanged(client: DbClient, aspect: Aspect, ids: readonl
 
 /**
  * Queues subjects for specific pipelines without reporting a change, for when the user asks to redo or retry a
- * pipeline's own results (regenerate a cover, retry failures).
+ * pipeline's own results (regenerate previews, retry failures).
  */
 export async function requeue(client: DbClient, pipelines: readonly PipelineName[], subjectIds: readonly string[]): Promise<void> {
     if (subjectIds.length === 0) return;

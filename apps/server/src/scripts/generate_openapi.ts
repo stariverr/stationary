@@ -340,6 +340,13 @@ const MediaPlaybackResponseSchema = v.object({
     subtitle_tracks: v.array(PlaybackSubtitleTrackResponseSchema),
 });
 
+const PreviewImageResponseSchema = v.nullable(v.object({ url: v.string(), width: v.number(), height: v.number() }));
+const PreviewImagesResponseSchema = v.object({
+    small: PreviewImageResponseSchema,
+    medium: PreviewImageResponseSchema,
+    large: PreviewImageResponseSchema,
+});
+
 const MediaDetailResponseSchema = v.object({
     id: v.pipe(v.string(), v.uuid()),
     eid: v.string(),
@@ -365,24 +372,8 @@ const MediaDetailResponseSchema = v.object({
             format: v.string(),
         }),
     ),
-    cover_url: v.nullable(v.string()),
-    cover_variants: v.record(
-        v.string(),
-        v.object({
-            track_id: v.string(),
-            url: v.nullable(v.string()),
-            width: v.nullable(v.number()),
-            height: v.nullable(v.number()),
-            status: v.picklist(["READY", "STALE"]),
-        }),
-    ),
-    covers: v.array(
-        v.object({
-            url: v.nullable(v.string()),
-            quality: v.enum(Quality),
-            codec: v.nullable(v.string()),
-        }),
-    ),
+    previews: PreviewImagesResponseSchema,
+    cover: v.optional(v.nullable(v.object({ url: v.string() }))),
     width: v.nullable(v.number()),
     height: v.nullable(v.number()),
     tracks: v.array(TrackResponseSchema),
@@ -1070,26 +1061,70 @@ const routes: RouteItem[] = [
         }),
     },
     {
-        path: "/api/media/:id/regenerate-cover",
+        path: "/api/media/:id/regenerate-previews",
         method: "post",
-        summary: "Regenerate cover for video Media",
+        summary: "Render the previews of a Media again",
         tags: ["Media"],
         paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
-        bodySchema: v.object({ replace_external_cover: v.optional(v.boolean()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
     {
-        path: "/api/media/regenerate-covers",
+        path: "/api/media/regenerate-previews",
         method: "post",
-        summary: "Batch regenerate video covers",
+        summary: "Render the previews of several Media again",
         tags: ["Media"],
         bodySchema: v.object({
             library_id: v.pipe(v.string(), v.uuid()),
             media_ids: v.optional(v.array(v.pipe(v.string(), v.uuid()))),
             post_ids: v.optional(v.array(v.pipe(v.string(), v.uuid()))),
-            replace_external_cover: v.optional(v.boolean()),
         }),
+        requiresAuth: true,
+        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
+    },
+    {
+        path: "/api/media/:id/cover/presign-upload",
+        method: "post",
+        summary: "Presign the upload of a cover image (VIDEO, AUDIO and PDF media)",
+        tags: ["Media"],
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
+        bodySchema: v.object({ fileName: v.string() }),
+        requiresAuth: true,
+        responseSchema: makeUnifiedSuccessResponse({
+            type: "object",
+            properties: {
+                url: { type: "string" },
+                path: { type: "string" },
+                bucket: { type: "string" },
+                mime_type: { type: "string" },
+                extension: { type: "string" },
+            },
+        }),
+    },
+    {
+        path: "/api/media/:id/cover",
+        method: "post",
+        summary: "Set the cover of a Media to an uploaded image",
+        tags: ["Media"],
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
+        bodySchema: v.object({
+            file: v.object({
+                path: v.string(),
+                bucket: v.string(),
+                mime_type: v.string(),
+                extension: v.string(),
+                size: v.pipe(v.number(), v.integer()),
+            }),
+        }),
+        requiresAuth: true,
+        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
+    },
+    {
+        path: "/api/media/:id/cover/delete",
+        method: "post",
+        summary: "Remove the cover of a Media",
+        tags: ["Media"],
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
@@ -1260,14 +1295,6 @@ const routes: RouteItem[] = [
         tags: ["Task"],
         bodySchema: SweepStuckLibrarySchema,
         requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
-    },
-    {
-        path: "/api/task/scan-missing-covers",
-        method: "post",
-        summary: "Scan videos with missing covers and re-enqueue",
-        tags: ["Task"],
-        requiresAuth: false,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
     },
     {

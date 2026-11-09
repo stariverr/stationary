@@ -17,13 +17,16 @@ import {
     LibraryEmbeddingSpace,
     LibraryEmbeddingSpaceStatus,
     Media,
+    MediaPreview,
     MediaType,
+    PreviewSize,
 } from "@/db/schema";
 import { db } from "@/global/db";
 import { kv } from "@/global/kv";
 import { secretBox } from "@/global/secrets";
 import { s3, S3ObjectTooLargeError } from "@/global/s3";
 import { Quality } from "@/lib/types";
+import { RECIPE_VERSION } from "@/lib/utils/preview_profiles";
 import { processLibraryAi } from "@/features/ai/actions";
 import { clearModelBindings, getLibraryBindings, getRolesUsingModel, saveLibraryBindings } from "@/features/ai/bindings";
 import { EMBEDDING_ROLE_FOR } from "@/features/ai/embedding-spaces";
@@ -32,7 +35,7 @@ import { batchDeleteMedia } from "@/features/media/lifecycle";
 import { createRedisRateLimitStore } from "@/features/ai/rate-limit";
 import { HybridSearchService } from "@/features/ai/search";
 import { AiService } from "@/features/ai/service";
-import { coverPipeline } from "@/features/media/cover-pipeline";
+import { previewPipeline } from "@/features/media/preview-pipeline";
 import { markChanged, requestScan, requeue } from "@/infra/queue/changes";
 import { pipelineHandlers } from "@/infra/queue/handlers";
 import { Aspect, queueName } from "@/infra/queue/pipelines";
@@ -363,16 +366,16 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
         expect(await hashOfCat()).toBe(before);
     });
 
-    databaseTest("the end of a cover run wakes what waited for the cover, whether it stored one or not", async () => {
+    databaseTest("the end of a preview run wakes what waited for the previews, whether it stored any or not", async () => {
         const describe = spyOn(pipelineHandlers["ai.describe"] as SubjectPipelineHandler, "reconcile");
         try {
-            // Nothing to render: this media has no content to make a cover from.
-            await requeue(db, ["cover"], [mediaIds.cat]);
+            // Nothing to render: this media has no content to make previews from.
+            await requeue(db, ["preview"], [mediaIds.cat]);
             await drain(libraryId);
             expect(describe).toHaveBeenCalledTimes(1);
 
             await db.transaction((tx) =>
-                coverPipeline.recordFailure(tx, {
+                previewPipeline.recordFailure(tx, {
                     subjectId: mediaIds.cat,
                     space: null,
                     error: "cannot render",
@@ -767,6 +770,7 @@ describe("AI description (PostgreSQL + Redis)", () => {
     const enrichLibraryId = crypto.randomUUID();
     const mediaId = crypto.randomUUID();
     const fileId = crypto.randomUUID();
+    const previewFileId = crypto.randomUUID();
     let enrichProviderId = "";
 
     beforeAll(async () => {
@@ -830,6 +834,23 @@ describe("AI description (PostgreSQL + Redis)", () => {
             variant_key: "original",
             is_primary: true,
         });
+        // AI reads the large preview, which is as unreadable as its source here.
+        await db.insert(DbFile).values({
+            id: previewFileId,
+            size: 80 * 1024 * 1024,
+            mime_type: "image/avif",
+            path: `ai-enrich/${previewFileId}.avif`,
+            bucket: "test",
+        });
+        await db.insert(MediaPreview).values({
+            media_id: mediaId,
+            size: PreviewSize.LARGE,
+            source_file_id: fileId,
+            recipe_version: RECIPE_VERSION,
+            file_id: previewFileId,
+            width: 1440,
+            height: 960,
+        });
     });
 
     afterAll(async () => {
@@ -838,7 +859,8 @@ describe("AI description (PostgreSQL + Redis)", () => {
         await db.delete(AssetAiMetadata).where(eq(AssetAiMetadata.library_id, enrichLibraryId));
         await db.delete(AssetSearchDocument).where(eq(AssetSearchDocument.library_id, enrichLibraryId));
         await db.delete(Track).where(eq(Track.media_id, mediaId));
-        await db.delete(DbFile).where(eq(DbFile.id, fileId));
+        await db.delete(MediaPreview).where(eq(MediaPreview.media_id, mediaId));
+        await db.delete(DbFile).where(inArray(DbFile.id, [fileId, previewFileId]));
         await db.delete(Media).where(eq(Media.id, mediaId));
         await db.delete(Library).where(eq(Library.id, enrichLibraryId));
         await db.delete(AiModel).where(eq(AiModel.provider_id, enrichProviderId));

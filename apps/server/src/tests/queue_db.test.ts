@@ -361,7 +361,7 @@ describe("job_queue store", () => {
         await finish(rerun);
         expect((await rowOf("avatar", id))?.interruptions).toBe(0);
 
-        const scan = scanQueueName("cover");
+        const scan = scanQueueName("preview");
         await db.delete(JobQueue).where(eq(JobQueue.subject_id, id));
         await queue(scan, [libraryId]);
         await claimOurs(1);
@@ -413,12 +413,12 @@ describe("job_queue store", () => {
         await db.delete(JobQueue).where(eq(JobQueue.library_id, otherLibrary));
 
         // None of these exist, so this only proves the lookup of their libraries runs.
-        await requeue(db, ["avatar", "cover"], ids);
+        await requeue(db, ["avatar", "preview"], ids);
         expect(await db.$count(JobQueue, eq(JobQueue.library_id, otherLibrary))).toBe(0);
     });
 
     databaseTest("a library scan keeps its cursor and restarts when the input changes", async () => {
-        const name = scanQueueName("cover");
+        const name = scanQueueName("preview");
         await queue(name, [libraryId]);
         const [first] = await claimOurs(1);
         expect(first?.cursor).toBeNull();
@@ -442,14 +442,14 @@ describe("job_queue store", () => {
         const rollback = new Error("ROLLBACK_QUEUE_TEST");
         await expect(
             db.transaction(async (tx) => {
-                await markChanged(tx, Aspect.LIBRARY_COVER_CONFIG, [libraryId]);
+                await markChanged(tx, Aspect.LIBRARY_AI_CONFIG, [libraryId]);
                 throw rollback;
             }),
         ).rejects.toBe(rollback);
-        expect(await rowOf(scanQueueName("cover"), libraryId)).toBeUndefined();
+        expect(await rowOf(scanQueueName("ai.describe"), libraryId)).toBeUndefined();
 
-        await db.transaction((tx) => markChanged(tx, Aspect.LIBRARY_COVER_CONFIG, [libraryId]));
-        expect(await rowOf(scanQueueName("cover"), libraryId)).toBeDefined();
+        await db.transaction((tx) => markChanged(tx, Aspect.LIBRARY_AI_CONFIG, [libraryId]));
+        expect(await rowOf(scanQueueName("ai.describe"), libraryId)).toBeDefined();
     });
 });
 
@@ -529,7 +529,7 @@ describe("QueueWorker", () => {
         const handlers: PipelineHandlers = {
             download: handler,
             avatar: handler,
-            cover: handler,
+            preview: handler,
             "ai.describe": handler,
             "ai.index": handler,
             "ai.text": handler,
@@ -637,7 +637,7 @@ describe("QueueWorker", () => {
         const [unknown, unknownSpace] = [subject(), subject()];
         await queue("avatar", [known]);
         await queue("ai.future", [unknown]);
-        await queue("cover:space", [unknownSpace]);
+        await queue("preview:space", [unknownSpace]);
         let reconciled = false;
         worker(
             everyPipeline({
@@ -653,7 +653,7 @@ describe("QueueWorker", () => {
         await Bun.sleep(200);
 
         expect(await rowOf("ai.future", unknown)).toMatchObject({ attempts: 0, lease_token: null });
-        expect(await rowOf("cover:space", unknownSpace)).toMatchObject({ attempts: 0, lease_token: null });
+        expect(await rowOf("preview:space", unknownSpace)).toMatchObject({ attempts: 0, lease_token: null });
     });
 
     databaseTest("an interruption after ordinary failures does not blame the input", async () => {
@@ -684,10 +684,10 @@ describe("QueueWorker", () => {
             {
                 ...everyPipeline(idleHandler),
                 avatar: { ...idleHandler, patrol: () => Promise.reject(new Error("upkeep failed")) },
-                cover: {
+                preview: {
                     ...idleHandler,
                     patrol: async () => {
-                        ran.push("cover");
+                        ran.push("preview");
                     },
                 },
             },
@@ -695,7 +695,7 @@ describe("QueueWorker", () => {
         );
         try {
             await patrolling.patrol();
-            expect(ran).toEqual(["cover"]);
+            expect(ran).toEqual(["preview"]);
             expect(await rowOf(scanQueueName("download"), libraryId)).toBeDefined();
         } finally {
             await db.delete(Library).where(eq(Library.id, libraryId));
@@ -704,7 +704,7 @@ describe("QueueWorker", () => {
     });
 
     databaseTest("a scan never gives up: it keeps its place and retries", async () => {
-        const name = scanQueueName("cover");
+        const name = scanQueueName("preview");
         await queue(name, [libraryId]);
         await db.update(JobQueue).set({ attempts: 99, cursor: "page-7" }).where(eq(JobQueue.library_id, libraryId));
         const failures: FailureRecord[] = [];

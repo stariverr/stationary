@@ -10,10 +10,7 @@ import {
     File as DbFile,
     Library,
     Media,
-    SyncStatus,
-    Track,
-    TrackPurpose,
-    TrackType,
+    MediaPreview,
 } from "@/db/schema";
 import { db } from "@/global/db";
 import { parseQueueName } from "@/infra/queue/pipelines";
@@ -45,50 +42,16 @@ export function getCoverageTargets(aiService: AiService | null): CoverageTargets
     return targets.describeLanguage || targets.textSpaceId || targets.imageSpaceId ? targets : null;
 }
 
-const sourceTrack = alias(Track, "ai_source_track");
-const sourceFile = alias(DbFile, "ai_source_file");
-const contentTrack = alias(Track, "ai_content_track");
+const previewFile = alias(DbFile, "ai_preview_file");
 const one = { one: sql`1` };
 
-/** The item has an image to describe and embed; mirrors selectAiImageSource over usable tracks. */
+/** The item has an image to describe and embed; mirrors loadAiImageSources. */
 const hasImageSource = exists(
     db
         .select(one)
-        .from(sourceTrack)
-        .innerJoin(sourceFile, and(eq(sourceFile.id, sourceTrack.file_id), eq(sourceFile.delete_status, DeleteStatus.ACTIVE)))
-        .where(
-            and(
-                eq(sourceTrack.media_id, Media.id),
-                eq(sourceTrack.delete_status, DeleteStatus.ACTIVE),
-                eq(sourceTrack.sync_status, SyncStatus.COMPLETED),
-                eq(sourceTrack.type, TrackType.IMAGE),
-                eq(sourceTrack.is_stale, false),
-                or(
-                    eq(sourceTrack.purpose, TrackPurpose.CONTENT),
-                    and(
-                        eq(sourceTrack.purpose, TrackPurpose.COVER),
-                        or(
-                            eq(sourceTrack.is_generated, false),
-                            // A generated cover counts only while the content it was made from is current.
-                            exists(
-                                db
-                                    .select(one)
-                                    .from(contentTrack)
-                                    .where(
-                                        and(
-                                            eq(contentTrack.media_id, Media.id),
-                                            eq(contentTrack.delete_status, DeleteStatus.ACTIVE),
-                                            eq(contentTrack.sync_status, SyncStatus.COMPLETED),
-                                            eq(contentTrack.purpose, TrackPurpose.CONTENT),
-                                            sql`${contentTrack.file_id}::text = ${sourceTrack.metadata}->>'source_file_id'`,
-                                        ),
-                                    ),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        ),
+        .from(MediaPreview)
+        .innerJoin(previewFile, and(eq(previewFile.id, MediaPreview.file_id), eq(previewFile.delete_status, DeleteStatus.ACTIVE)))
+        .where(eq(MediaPreview.media_id, Media.id)),
 );
 
 const ofItemMetadata = and(eq(AssetAiMetadata.entity_type, EntityType.MEDIA), eq(AssetAiMetadata.entity_id, Media.id));

@@ -13,7 +13,8 @@ import { assertPostAccess, PostAccessError } from "@/features/post/access";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { toIsoTimestamp, FormTimestampSchema } from "@/lib/utils/time";
 import { validate } from "@/lib/validation/validator";
-import { MediaService, type PreviewItem } from "@/features/media/queries";
+import { MediaService, type VideoItem } from "@/features/media/queries";
+import { loadPreviewImages, NO_PREVIEWS, type PreviewImages } from "@/features/media/preview";
 import { CreatePostSchema } from "@/features/post/schema";
 import { CreatePostError, createPost } from "@/features/post/create-post";
 
@@ -151,8 +152,8 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
     const postIds = rawPosts.map((p) => p.id);
 
     type MediaItem = Pick<typeof Media.$inferSelect, "id" | "post_id" | "type" | "sort_order"> & {
-        covers: PreviewItem[];
-        videos: PreviewItem[];
+        previews: PreviewImages;
+        videos: VideoItem[];
     };
     const mediaByPostId = new Map<string, MediaItem[]>();
 
@@ -169,15 +170,15 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
             .orderBy(asc(Media.sort_order));
 
         const allMediaIds = mediaRows.map((mr) => mr.id);
-        const [coversByMediaId, videosByMediaId] = await Promise.all([
-            MediaService.getCoversMap(allMediaIds),
+        const [previewsByMediaId, videosByMediaId] = await Promise.all([
+            loadPreviewImages(allMediaIds),
             MediaService.getVideosMap(allMediaIds),
         ]);
 
         for (const row of mediaRows) {
             if (!row.post_id) continue;
 
-            const covers = coversByMediaId.get(row.id) ?? [];
+            const previews = previewsByMediaId.get(row.id) ?? NO_PREVIEWS;
             const videos = videosByMediaId.get(row.id) ?? [];
 
             let mediaList = mediaByPostId.get(row.post_id);
@@ -191,7 +192,7 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
                 post_id: row.post_id,
                 type: row.type,
                 sort_order: row.sort_order,
-                covers: covers,
+                previews,
                 videos: videos,
             });
         }

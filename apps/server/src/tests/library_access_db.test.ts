@@ -69,9 +69,7 @@ describe.skipIf(process.env.RUN_LIBRARY_DB_TESTS !== "1")("Library access contro
     const libraryRoutes = (id: string): [string, string, unknown?][] => [
         ["/update", "POST", { id, name: "renamed" }],
         [`/delete/${id}`, "POST"],
-        [`/${id}/cover-jobs`, "POST", {}],
-        [`/${id}/cover-config`, "GET"],
-        [`/${id}/cover-config`, "PUT", { qualities: ["HIGH"] }],
+        [`/${id}/preview-jobs`, "POST", {}],
     ];
 
     beforeAll(async () => {
@@ -142,10 +140,10 @@ describe.skipIf(process.env.RUN_LIBRARY_DB_TESTS !== "1")("Library access contro
 
     test("a library-scoped token still works on its own library", async () => {
         const updated = await request(aliceScopedToken, "/update", "POST", { id: aliceLibrary, description: "scoped" });
-        const config = await request(aliceScopedToken, `/${aliceLibrary}/cover-config`);
+        const jobs = await request(aliceScopedToken, `/${aliceLibrary}/preview-jobs`, "POST", {});
 
         expect(updated.status).toBe(200);
-        expect(config.status).toBe(200);
+        expect(jobs.status).toBe(202);
     });
 
     test("the owner can rename and delete a library", async () => {

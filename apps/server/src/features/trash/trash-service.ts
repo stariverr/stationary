@@ -15,7 +15,7 @@ import {
 } from "@/db/schema";
 import { batchDeletePost, batchRestorePost } from "@/features/post/lifecycle";
 import { batchDeleteMedia, batchRestoreMedia } from "@/features/media/lifecycle";
-import { MediaService, type PreviewItem } from "@/features/media/queries";
+import { loadPreviewImages, NO_PREVIEWS, type PreviewImages } from "@/features/media/preview";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { toIsoTimestamp } from "@/lib/utils/time";
 
@@ -45,7 +45,7 @@ export interface TrashPostItem {
     published_time: string | null;
     recycle_time: string | null;
     media_count: number;
-    covers: PreviewItem[];
+    previews: PreviewImages;
     tags: string[];
 }
 
@@ -61,7 +61,7 @@ export interface TrashMediaItem {
     create_time: string | null;
     published_time: string | null;
     recycle_time: string | null;
-    covers: PreviewItem[];
+    previews: PreviewImages;
     url: string | null;
 }
 
@@ -416,7 +416,7 @@ export class TrashService {
     }
 
     /**
-     * Helper to hydrate post items with preview covers and tags.
+     * Helper to hydrate post items with previews and tags.
      */
     private static async hydratePostItems(
         posts: Array<{
@@ -439,7 +439,7 @@ export class TrashService {
 
         const postIds = posts.map((p) => p.id);
 
-        // Fetch cover media for each post
+        // The media of each post, for its previews
         const mediaRows = await db
             .select({
                 id: Media.id,
@@ -452,15 +452,14 @@ export class TrashService {
             .orderBy(asc(Media.sort_order));
 
         const allMediaIds = mediaRows.map((mr) => mr.id);
-        const coversByMediaId = await MediaService.getCoversMap(allMediaIds);
+        const previewsByMediaId = await loadPreviewImages(allMediaIds);
 
-        const coversByPostId = new Map<string, PreviewItem[]>();
+        // A post shows the previews of its first media that has any.
+        const previewsByPostId = new Map<string, PreviewImages>();
         for (const mr of mediaRows) {
-            if (!mr.post_id) continue;
-            const covers = coversByMediaId.get(mr.id) || [];
-            if (covers.length > 0 && !coversByPostId.has(mr.post_id)) {
-                coversByPostId.set(mr.post_id, covers);
-            }
+            if (!mr.post_id || previewsByPostId.has(mr.post_id)) continue;
+            const previews = previewsByMediaId.get(mr.id);
+            if (previews && (previews.small || previews.medium || previews.large)) previewsByPostId.set(mr.post_id, previews);
         }
 
         // Fetch active tags
@@ -498,13 +497,13 @@ export class TrashService {
             published_time: toIsoTimestamp(p.published_time),
             recycle_time: toIsoTimestamp(p.recycle_time),
             media_count: p.media_count,
-            covers: coversByPostId.get(p.id) || [],
+            previews: previewsByPostId.get(p.id) ?? NO_PREVIEWS,
             tags: tagsByPostId.get(p.id) || [],
         }));
     }
 
     /**
-     * Helper to hydrate standalone media items with preview covers.
+     * Helper to hydrate standalone media items with their previews.
      */
     private static async hydrateMediaItems(
         mediaList: Array<{
@@ -523,7 +522,7 @@ export class TrashService {
         if (mediaList.length === 0) return [];
 
         const mediaIds = mediaList.map((m) => m.id);
-        const coversByMediaId = await MediaService.getCoversMap(mediaIds);
+        const previewsByMediaId = await loadPreviewImages(mediaIds);
 
         return mediaList.map((m) => ({
             item_type: "media",
@@ -537,7 +536,7 @@ export class TrashService {
             create_time: toIsoTimestamp(m.create_time),
             published_time: toIsoTimestamp(m.published_time),
             recycle_time: toIsoTimestamp(m.recycle_time),
-            covers: coversByMediaId.get(m.id) || [],
+            previews: previewsByMediaId.get(m.id) ?? NO_PREVIEWS,
             url: null,
         }));
     }

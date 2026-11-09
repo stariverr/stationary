@@ -1,9 +1,9 @@
-import { and, eq, inArray } from "drizzle-orm";
-import { DeleteStatus, File as DbFile, SyncStatus, Track, TrackPurpose, TrackType } from "@/db/schema";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+import { DeleteStatus, File as DbFile, MediaPreview, PreviewSize } from "@/db/schema";
 import { db } from "@/global/db";
 import { isQueued } from "@/infra/queue/store";
 import { s3, S3ObjectTooLargeError } from "@/global/s3";
-import { Quality } from "@/lib/types";
 import { AiProviderError } from "./errors";
 import { supportsImageFormat, withinImageLimits } from "./image-format";
 import type { EmbedImageParams, VisualEmbeddingProvider } from "./types";
@@ -13,107 +13,63 @@ const SOURCE_MAX_BYTES = 50 * 1024 * 1024;
 /** Lifetime of a source URL handed to a model server; it also covers waiting for a rate-limit slot. */
 const SOURCE_URL_TTL_SECONDS = 60 * 60;
 
-type ImageSourceRow = {
-    track: Pick<
-        typeof Track.$inferSelect,
-        | "id"
-        | "file_id"
-        | "type"
-        | "purpose"
-        | "quality"
-        | "priority"
-        | "is_primary"
-        | "is_default"
-        | "is_generated"
-        | "is_stale"
-        | "metadata"
-    >;
-    file: Pick<typeof DbFile.$inferSelect, "id">;
-};
-
-const qualityRank: Record<Quality, number> = {
-    [Quality.LOW]: 1,
-    [Quality.MEDIUM]: 2,
-    [Quality.HIGH]: 3,
-};
+/** The largest preview is what AI reads; a smaller one stands in while it is missing. */
+const PREVIEW_PREFERENCE: readonly PreviewSize[] = [PreviewSize.LARGE, PreviewSize.MEDIUM, PreviewSize.SMALL];
 
 /**
- * Select the best completed cover, regardless of its track priority.
- * A generated cover from a superseded content file is not a usable cover.
- * Only image content can serve as a fallback (never a video file).
+ * The image AI work on a media reads: a rendered preview. `hash` identifies what the preview was rendered from, not the
+ * preview itself, so rendering previews again with a new recipe does not describe or embed the media again.
  */
-export function selectAiImageSource<T extends ImageSourceRow>(rows: T[]): T | null {
-    const currentContentFileIds = new Set(rows.filter(({ track }) => track.purpose === TrackPurpose.CONTENT).map(({ file }) => file.id));
-    const covers = rows
-        .filter(
-            ({ track }) =>
-                track.type === TrackType.IMAGE &&
-                track.purpose === TrackPurpose.COVER &&
-                !track.is_stale &&
-                (!track.is_generated ||
-                    (typeof track.metadata.source_file_id === "string" && currentContentFileIds.has(track.metadata.source_file_id))),
-        )
-        .sort(
-            (a, b) =>
-                qualityRank[b.track.quality] - qualityRank[a.track.quality] ||
-                a.track.priority - b.track.priority ||
-                a.track.id.localeCompare(b.track.id),
-        );
-    if (covers.length > 0) return covers[0]!;
-
-    const images = rows
-        .filter(({ track }) => track.type === TrackType.IMAGE && track.purpose === TrackPurpose.CONTENT && !track.is_stale)
-        .sort(
-            (a, b) =>
-                Number(b.track.is_primary) - Number(a.track.is_primary) ||
-                Number(b.track.is_default) - Number(a.track.is_default) ||
-                a.track.priority - b.track.priority ||
-                a.track.id.localeCompare(b.track.id),
-        );
-    return images[0] ?? null;
-}
-
 export interface AiImageSource {
-    track: typeof Track.$inferSelect;
     file: typeof DbFile.$inferSelect;
+    width: number;
+    height: number;
+    sourceFileId: string;
+    hash: string;
 }
 
-/** The best AI image source of each media (missing for media without one). */
+const sourceFile = alias(DbFile, "ai_preview_source_file");
+
+/** The preview AI reads among a media's rendered previews: the largest one. */
+export function selectAiPreview<T extends { preview: Pick<typeof MediaPreview.$inferSelect, "size"> }>(rows: readonly T[]): T | null {
+    for (const size of PREVIEW_PREFERENCE) {
+        const row = rows.find((candidate) => candidate.preview.size === size);
+        if (row) return row;
+    }
+    return null;
+}
+
+/** The AI image source of each media (missing for media without a preview). */
 export async function loadAiImageSources(mediaIds: readonly string[]): Promise<Map<string, AiImageSource>> {
     if (mediaIds.length === 0) return new Map();
     const rows = await db
-        .select({ track: Track, file: DbFile })
-        .from(Track)
-        .innerJoin(DbFile, and(eq(Track.file_id, DbFile.id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
-        .where(
-            and(
-                inArray(Track.media_id, [...mediaIds]),
-                eq(Track.delete_status, DeleteStatus.ACTIVE),
-                eq(Track.sync_status, SyncStatus.COMPLETED),
-                inArray(Track.purpose, [TrackPurpose.COVER, TrackPurpose.CONTENT]),
-            ),
-        );
-    const byMedia = new Map<string, typeof rows>();
-    for (const row of rows) byMedia.set(row.track.media_id, [...(byMedia.get(row.track.media_id) ?? []), row]);
+        .select({ preview: MediaPreview, file: DbFile, source: { id: sourceFile.id, hash: sourceFile.hash } })
+        .from(MediaPreview)
+        .innerJoin(DbFile, and(eq(DbFile.id, MediaPreview.file_id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
+        .innerJoin(sourceFile, eq(sourceFile.id, MediaPreview.source_file_id))
+        .where(and(inArray(MediaPreview.media_id, [...mediaIds]), isNotNull(MediaPreview.width), isNotNull(MediaPreview.height)));
 
     const sources = new Map<string, AiImageSource>();
-    for (const [mediaId, mediaRows] of byMedia) {
-        const source = selectAiImageSource(mediaRows);
-        if (source) sources.set(mediaId, source);
+    for (const mediaId of new Set(rows.map((row) => row.preview.media_id))) {
+        const row = selectAiPreview(rows.filter((candidate) => candidate.preview.media_id === mediaId))!;
+        sources.set(mediaId, {
+            file: row.file,
+            width: row.preview.width!,
+            height: row.preview.height!,
+            sourceFileId: row.source.id,
+            hash: aiSourceHash(row.source),
+        });
     }
     return sources;
 }
 
 /**
- * The image AI work on a media starts from. `waitingForCover` is set while the cover pipeline still has the media
- * queued and the best source so far is not a cover: the work waits, and the cover's change queues it again.
+ * The image AI work on a media starts from. `waiting` is set while the preview pipeline has the media queued: the work
+ * waits, and the preview run reports its change when it ends, which queues the work again.
  */
-export async function resolveAiImageSource(mediaId: string): Promise<{ source: AiImageSource | null; waitingForCover: boolean }> {
-    // Check before loading tracks: a cover run that finishes while tracks are
-    // being read must still prevent an original-image fallback from racing its cover.
-    const coverPending = await isQueued("cover", mediaId);
-    const source = (await loadAiImageSources([mediaId])).get(mediaId) ?? null;
-    return { source, waitingForCover: coverPending && source?.track.purpose !== TrackPurpose.COVER };
+export async function resolveAiImageSource(mediaId: string): Promise<{ source: AiImageSource | null; waiting: boolean }> {
+    if (await isQueued("preview", mediaId)) return { source: null, waiting: true };
+    return { source: (await loadAiImageSources([mediaId])).get(mediaId) ?? null, waiting: false };
 }
 
 /** What identifies a source image's content: its file hash, or the file itself when it has no hash. */

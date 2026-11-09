@@ -22,13 +22,12 @@ import { Result } from "better-result";
 import { MediaCompositionError, NotFoundError } from "@/lib/errors";
 import { getErrorMessage } from "@/lib/utils/error";
 import { assertMediaComposition, syncMediaAndPostStatus } from "./composition";
-import { markChanged, requeue } from "@/infra/queue/changes";
+import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
 
-/** Content tracks are what covers are rendered from; covers (and content) are what AI describes and embeds. */
+/** Content tracks are what previews are rendered from when the media has no cover. */
 async function markTrackChanged(tx: Transaction, mediaId: string, purpose: TrackPurpose) {
     if (purpose === TrackPurpose.CONTENT) await markChanged(tx, Aspect.MEDIA_CONTENT, [mediaId]);
-    else if (purpose === TrackPurpose.COVER) await markChanged(tx, Aspect.MEDIA_COVER, [mediaId]);
 }
 
 export interface FileData {
@@ -615,9 +614,8 @@ export const TrackService = {
 
             await syncMediaAndPostStatus(mediaId, tx, now);
             await assertMediaComposition(mediaId, tx);
-            // Order, default, primary and staleness decide which cover is rendered and from what.
+            // Order, default, primary and staleness decide which content previews are rendered from.
             await markTrackChanged(tx, mediaId, trackRecord.purpose);
-            if (trackRecord.purpose === TrackPurpose.COVER) await requeue(tx, ["cover"], [mediaId]);
 
             return updated;
         });
