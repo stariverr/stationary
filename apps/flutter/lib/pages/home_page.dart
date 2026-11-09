@@ -2674,14 +2674,9 @@ class _PostCardItemState extends State<PostCardItem> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        String? coverUrl;
-        if (post.media.isNotEmpty) {
-          final dpr = MediaQuery.of(context).devicePixelRatio;
-          coverUrl = post.media.first.getImageUrlForWidth(
-            constraints.maxWidth,
-            devicePixelRatio: dpr,
-          );
-        }
+        final String? previewUrl = post.media.isNotEmpty
+            ? post.media.first.previews.thumbnail?.url
+            : null;
 
         return MouseRegion(
           onEnter: (_) => setState(() => _isHovered = true),
@@ -2694,7 +2689,7 @@ class _PostCardItemState extends State<PostCardItem> {
                   builder: (context) => PostDetailPage(
                     postId: post.id,
                     initialPost: post.toPost(),
-                    initialCoverUrl: coverUrl,
+                    initialPreviewUrl: previewUrl,
                   ),
                 ),
               );
@@ -2717,11 +2712,11 @@ class _PostCardItemState extends State<PostCardItem> {
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          if (coverUrl != null)
+                          if (previewUrl != null)
                             Hero(
                               tag: 'post_media_${post.id}_0',
                               child: Image.network(
-                                coverUrl,
+                                previewUrl,
                                 fit: BoxFit.cover,
                                 filterQuality: FilterQuality.medium,
                                 errorBuilder: (context, error, stackTrace) =>
