@@ -81,14 +81,14 @@
             "actions": "メディア操作",
             "move_up": "上へ移動",
             "move_down": "下へ移動",
-            "manage_tracks": "トラックを管理",
-            "manage_tracks_desc": "このメディアのファイル、字幕、カバー、解像度バリエーションを管理します。",
             "select_media_asset": "メディアを選択",
             "unlink_from_post": "投稿との紐付けを解除",
             "delete_to_trash": "ごみ箱へ移動",
             "untitled_media": "無題のメディア",
             "items_empty": "0 件中 0 件",
-            "items_range": "{total} 件中 {from}-{to} 件"
+            "items_range": "{total} 件中 {from}-{to} 件",
+            "edit_media": "ファイルを編集",
+            "edit_media_desc": "このメディアのオリジナルファイル、字幕、音声トラック、カバーを管理します。"
         },
         "viewer": {
             "loading": "メディアを読み込み中...",
@@ -99,7 +99,10 @@
             "audio_asset": "音声",
             "untitled_pdf": "無題の PDF",
             "pdf_document": "PDF ドキュメント",
-            "open_pdf": "PDF を新しいタブで開く"
+            "open_pdf": "PDF を新しいタブで開く",
+            "player": {
+                "unsupported_codec": "このブラウザではこの動画の形式を再生できません。オリジナルファイルをダウンロードして視聴してください。"
+            }
         },
         "toasts": {
             "copy_success": "投稿リンクをコピーしました",
@@ -198,5 +201,72 @@
             "thumb_alt": "サムネイル",
             "media_alt": "メディアアセット"
         }
+    },
+    "media": {
+        "configure_files": "各ファイルの役割",
+        "headers": {
+            "role": "役割",
+            "label": "ラベル"
+        },
+        "roles": {
+            "original": "オリジナル",
+            "cover": "カバー",
+            "caption": "字幕",
+            "not_allowed": "使用不可"
+        },
+        "errors": {
+            "file_not_allowed": "{name} は {mediaType} メディアに使えません。",
+            "originals_video": "動画には動画ファイル 1 つと、任意の数の音声のみのファイルが必要です。",
+            "originals_audio": "音声には音声ファイルがちょうど 1 つ必要です。",
+            "originals_image": "画像には画像ファイルがちょうど 1 つ必要です。",
+            "originals_pdf": "PDF には PDF ファイルがちょうど 1 つ必要です。",
+            "originals_live_photo": "Live Photo には画像 1 つと動画 1 つが必要です。",
+            "only_one_default_caption": "デフォルトにできる字幕は 1 つだけです。"
+        },
+        "toast_invalid_composition": "これらのファイルではこのメディアを作成できません",
+        "editor": {
+            "tab": "ファイル",
+            "originals": "オリジナルファイル",
+            "add_audio_file": "音声ファイルを追加",
+            "main": "メイン",
+            "replace": "置き換え",
+            "delete": "削除",
+            "original_added": "ファイルを追加しました",
+            "original_replaced": "ファイルを置き換えました",
+            "original_deleted": "ファイルを削除しました",
+            "original_delete_confirm": "このファイルを削除しますか？元に戻せません。",
+            "audio_tracks": "音声トラック",
+            "captions": "字幕",
+            "add_caption": "字幕を追加",
+            "no_captions": "字幕はまだありません。",
+            "caption_added": "字幕を追加しました",
+            "caption_deleted": "字幕を削除しました",
+            "caption_delete_confirm": "この字幕を削除しますか？",
+            "label": "ラベル",
+            "language": "言語",
+            "save": "保存",
+            "saved": "保存しました",
+            "default": "デフォルト",
+            "make_default": "デフォルトにする",
+            "embedded": "埋め込み",
+            "edit_failed": "変更を保存できませんでした",
+            "no_library": "ライブラリが選択されていません。",
+            "kinds": {
+                "video": "動画",
+                "audio": "音声",
+                "image": "画像",
+                "pdf": "PDF",
+                "unknown": "未解析"
+            },
+            "status": {
+                "pending": "待機中",
+                "in_progress": "処理中",
+                "completed": "完了",
+                "failed": "失敗"
+            }
+        }
+    },
+    "draft_box": {
+        "merge_dialog_desc": "選択したファイルを 1 つのメディア（オリジナルファイル、カバー、字幕）にまとめます。"
     }
 }

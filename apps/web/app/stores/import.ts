@@ -1,6 +1,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { useApi } from "@/composables/useApi";
+import type { MediaDraftPayload } from "@/utils/draft-media-rules";
 
 export interface DraftFileItem {
     id: string;
@@ -186,8 +187,8 @@ export const useImportStore = defineStore("import", () => {
         }
     };
 
-    const commitMedia = async (libraryId: string, payload: any) => {
-        const res = await useApi<{ success: boolean; data: any }>("/import/draft/commit-media", {
+    const commitMedia = async (libraryId: string, payload: { media_drafts: MediaDraftPayload[] }) => {
+        const res = await useApi<{ success: boolean; data: { media_ids: string[] } }>("/import/draft/commit-media", {
             method: "POST",
             body: {
                 library_id: libraryId,

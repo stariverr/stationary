@@ -81,14 +81,14 @@
             "actions": "Medienaktionen",
             "move_up": "Nach oben",
             "move_down": "Nach unten",
-            "manage_tracks": "Spuren verwalten",
-            "manage_tracks_desc": "Dateien, Untertitel, Cover und Auflösungsvarianten dieses Mediums verwalten.",
             "select_media_asset": "Medium auswählen",
             "unlink_from_post": "Vom Beitrag trennen",
             "delete_to_trash": "In den Papierkorb verschieben",
             "untitled_media": "Unbenanntes Medium",
             "items_empty": "0 von 0",
-            "items_range": "{from}-{to} von {total}"
+            "items_range": "{from}-{to} von {total}",
+            "edit_media": "Dateien bearbeiten",
+            "edit_media_desc": "Originaldateien, Untertitel, Tonspuren und Cover dieses Mediums verwalten."
         },
         "viewer": {
             "loading": "Medium wird geladen...",
@@ -99,7 +99,10 @@
             "audio_asset": "Audio",
             "untitled_pdf": "Unbenannte PDF",
             "pdf_document": "PDF-Dokument",
-            "open_pdf": "PDF in neuem Tab öffnen"
+            "open_pdf": "PDF in neuem Tab öffnen",
+            "player": {
+                "unsupported_codec": "Dieser Browser kann das Format dieses Videos nicht abspielen. Lade die Originaldatei herunter, um es anzusehen."
+            }
         },
         "toasts": {
             "copy_success": "Beitragslink kopiert",
@@ -198,5 +201,72 @@
             "thumb_alt": "Miniaturansicht",
             "media_alt": "Medienelement"
         }
+    },
+    "media": {
+        "configure_files": "Wozu jede Datei dient",
+        "headers": {
+            "role": "Rolle",
+            "label": "Bezeichnung"
+        },
+        "roles": {
+            "original": "Original",
+            "cover": "Cover",
+            "caption": "Untertitel",
+            "not_allowed": "Nicht erlaubt"
+        },
+        "errors": {
+            "file_not_allowed": "{name} kann nicht Teil eines {mediaType}-Mediums sein.",
+            "originals_video": "Ein Video besteht aus einer Videodatei und beliebig vielen reinen Audiodateien.",
+            "originals_audio": "Ein Audio besteht aus genau einer Audiodatei.",
+            "originals_image": "Ein Bild besteht aus genau einer Bilddatei.",
+            "originals_pdf": "Ein PDF besteht aus genau einer PDF-Datei.",
+            "originals_live_photo": "Ein Live Photo besteht aus einem Bild und einem Video.",
+            "only_one_default_caption": "Nur ein Untertitel kann Standard sein."
+        },
+        "toast_invalid_composition": "Diese Dateien ergeben kein solches Medium",
+        "editor": {
+            "tab": "Dateien",
+            "originals": "Originaldateien",
+            "add_audio_file": "Audiodatei hinzufügen",
+            "main": "Haupt",
+            "replace": "Ersetzen",
+            "delete": "Löschen",
+            "original_added": "Datei hinzugefügt",
+            "original_replaced": "Datei ersetzt",
+            "original_deleted": "Datei gelöscht",
+            "original_delete_confirm": "Diese Datei löschen? Das kann nicht rückgängig gemacht werden.",
+            "audio_tracks": "Tonspuren",
+            "captions": "Untertitel",
+            "add_caption": "Untertitel hinzufügen",
+            "no_captions": "Noch keine Untertitel.",
+            "caption_added": "Untertitel hinzugefügt",
+            "caption_deleted": "Untertitel gelöscht",
+            "caption_delete_confirm": "Diesen Untertitel löschen?",
+            "label": "Bezeichnung",
+            "language": "Sprache",
+            "save": "Speichern",
+            "saved": "Gespeichert",
+            "default": "Standard",
+            "make_default": "Als Standard",
+            "embedded": "Eingebettet",
+            "edit_failed": "Änderung konnte nicht gespeichert werden",
+            "no_library": "Keine Bibliothek ausgewählt.",
+            "kinds": {
+                "video": "Video",
+                "audio": "Audio",
+                "image": "Bild",
+                "pdf": "PDF",
+                "unknown": "Noch nicht analysiert"
+            },
+            "status": {
+                "pending": "Wartend",
+                "in_progress": "In Bearbeitung",
+                "completed": "Bereit",
+                "failed": "Fehlgeschlagen"
+            }
+        }
+    },
+    "draft_box": {
+        "merge_dialog_desc": "Füge die ausgewählten Dateien zu einem Medium zusammen: Originaldateien, Cover und Untertitel."
     }
 }

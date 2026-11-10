@@ -6,7 +6,7 @@ import MediaVideoPlayer from "./MediaVideoPlayer.vue";
 import LivePhotoPlayer from "./LivePhotoPlayer.vue";
 import HeicImage from "./HeicImage.vue";
 import { isHeic } from "@/utils/heic-decoder";
-import { previewPosterUrl, selectContentTrack } from "@/utils/media";
+import { previewPosterUrl } from "@/utils/media";
 import type { MediaViewerItem } from "@/types/post";
 
 type MediaItem = MediaViewerItem;
@@ -56,42 +56,24 @@ const lowResPreviewUrl = computed(() => {
     return previews?.medium?.url ?? previews?.small?.url ?? previews?.large?.url ?? "";
 });
 
-// 2. VIDEO
-const defaultVideoSrc = computed(() => {
-    if (!props.media || props.media.type !== "VIDEO") return "";
-    if (props.media.url) return props.media.url;
-    return selectContentTrack(props.media.tracks, "VIDEO")?.url || "";
-});
-
-// 3. LIVE PHOTO
+// 2. LIVE PHOTO: the image is the main original, the motion is the video original it plays directly.
 const livePhotoImageSrc = computed(() => {
     if (!props.media || props.media.type !== "LIVE_PHOTO") return "";
-    const bestImage = selectContentTrack(props.media.tracks, "IMAGE");
-    if (bestImage?.url) return bestImage.url;
-    if (props.media.url) return props.media.url;
-    return defaultPosterUrl.value;
+    return props.media.url || defaultPosterUrl.value;
 });
 
 const livePhotoVideoSrc = computed(() => {
     if (!props.media || props.media.type !== "LIVE_PHOTO") return "";
-    if (props.media.live_url) return props.media.live_url;
-    return selectContentTrack(props.media.tracks, "VIDEO")?.url || "";
+    return props.media.playback?.direct_url || "";
 });
 
-// 4. IMAGE
+// 3. IMAGE
 const imageSrcUrl = computed(() => {
     if (!props.media || props.media.type !== "IMAGE") return "";
-    const bestImage = selectContentTrack(props.media.tracks, "IMAGE");
-    if (bestImage?.url) return bestImage.url;
-    if (props.media.url) return props.media.url;
-    return defaultPosterUrl.value;
+    return props.media.url || defaultPosterUrl.value;
 });
 
-const contentAssetUrl = computed(() => {
-    if (!props.media) return "";
-    if (props.media.url) return props.media.url;
-    return selectContentTrack(props.media.tracks, props.media.type)?.url || "";
-});
+const contentAssetUrl = computed(() => props.media?.url || "");
 
 /**
  * Progressive image layers: a low-res preview paints at once and higher-quality sources fade in above it.
@@ -143,7 +125,10 @@ watch(
             if (highResUrl && highResUrl !== baseLayerUrl && !props.preview) layers.value.push({ url: highResUrl, loaded: false });
         } else if (!props.preview && highResUrl && !layers.value.some((layer) => layer.url === highResUrl)) {
             // A quality upgrade or a new track URL for the same item: keep what is shown and fade the new source in.
-            const shown = Math.max(0, layers.value.findLastIndex((layer) => layer.loaded));
+            const shown = Math.max(
+                0,
+                layers.value.findLastIndex((layer) => layer.loaded),
+            );
             layers.value = [...layers.value.slice(0, shown + 1), { url: highResUrl, loaded: false }];
         }
 
@@ -521,20 +506,18 @@ onUnmounted(() => {
             <!-- 1. VIDEO -->
             <template v-if="media.type === 'VIDEO'">
                 <div class="w-full h-full max-w-full max-h-full flex items-center justify-center p-0">
+                    <!-- Until its playback arrives (a seeded list item) a video shows its poster -->
                     <img
-                        v-if="preview"
+                        v-if="preview || (!media.playback && defaultPosterUrl)"
                         :src="defaultPosterUrl || undefined"
                         class="h-full w-full object-contain select-none pointer-events-none"
                         draggable="false"
                         alt=""
                     />
                     <MediaVideoPlayer
-                        v-else-if="defaultVideoSrc"
-                        :src="defaultVideoSrc"
+                        v-else-if="media.playback"
                         :poster="defaultPosterUrl"
-                        :tracks="media.tracks"
                         :playback="media.playback"
-                        :subtitles="media.subtitles?.length ? media.subtitles : media.playback?.subtitle_tracks || []"
                         :width="media.width ?? undefined"
                         :height="media.height ?? undefined"
                         :autoplay="props.autoplay"

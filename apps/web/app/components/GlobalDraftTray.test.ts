@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-describe("merge tracks dialog", () => {
+describe("merge files dialog", () => {
     test("uses an explicit wide desktop max width and viewport-safe height", async () => {
         const component = await Bun.file("app/components/DraftMergeDialog.vue").text();
 
@@ -10,13 +10,14 @@ describe("merge tracks dialog", () => {
         expect(component).not.toContain('class="max-w-2xl max-h-[85vh]');
     });
 
-    test("uses separate mobile cards and a stable desktop table", async () => {
-        const component = await Bun.file("app/components/DraftMergeDialog.vue").text();
+    test("lists the files in a table on wide containers and in cards on narrow ones", async () => {
+        const dialog = await Bun.file("app/components/DraftMergeDialog.vue").text();
+        const table = await Bun.file("app/components/DraftFilesTable.vue").text();
 
-        expect(component).toContain("min-w-[900px]");
-        expect(component).toContain("lg:block");
-        expect(component).toContain("lg:hidden");
-        expect(component).toContain("Mobile track cards");
+        expect(dialog).toContain('<DraftFilesTable :media-type="mergeType" :files="mergeFiles" />');
+        expect(table).toContain('class="@container"');
+        expect(table).toContain("@2xl:block");
+        expect(table).toContain("@2xl:hidden");
     });
 
     test("disables commit while the composition is invalid", async () => {

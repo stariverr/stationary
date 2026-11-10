@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Layers } from "@lucide/vue";
-import MediaVariantsManager from "@/components/MediaVariantsManager.vue";
+import { FileStack } from "@lucide/vue";
+import MediaEditor from "@/components/MediaEditor.vue";
 import type { MediaPreviews } from "@/types/post";
 
 const props = defineProps<{
@@ -14,15 +14,17 @@ const props = defineProps<{
 const emit = defineEmits<{
     (e: "update:open", value: boolean): void;
     (e: "change-media", mediaId: string): void;
+    /** A media was edited; what it plays or shows may have changed. */
+    (e: "changed"): void;
 }>();
 
-const trackEditMediaId = ref<string | undefined>(undefined);
+const editingMediaId = ref<string | undefined>(undefined);
 
 watch(
     () => props.open,
     (isOpen) => {
         if (isOpen) {
-            trackEditMediaId.value = props.initialMediaId || props.mediaList[0]?.id;
+            editingMediaId.value = props.initialMediaId || props.mediaList[0]?.id;
         }
     },
 );
@@ -31,7 +33,7 @@ watch(
     () => props.initialMediaId,
     (newId) => {
         if (props.open && newId) {
-            trackEditMediaId.value = newId;
+            editingMediaId.value = newId;
         }
     },
 );
@@ -46,11 +48,11 @@ const getMediaThumb = (med: { previews?: MediaPreviews }) => previewThumbnailUrl
         <DialogContent class="sm:max-w-[800px] max-h-[85vh] overflow-y-auto flex flex-col p-6 bg-white rounded-lg">
             <DialogHeader class="border-b border-zinc-100 pb-3 shrink-0">
                 <DialogTitle class="text-lg font-bold text-zinc-900 flex items-center gap-2">
-                    <Layers class="w-5 h-5 text-blue-600" />
-                    {{ $t("post_detail.manage.manage_tracks") }}
+                    <FileStack class="w-5 h-5 text-blue-600" />
+                    {{ $t("post_detail.manage.edit_media") }}
                 </DialogTitle>
                 <DialogDescription class="text-xs text-zinc-500 mt-1">
-                    {{ $t("post_detail.manage.manage_tracks_desc") }}
+                    {{ $t("post_detail.manage.edit_media_desc") }}
                 </DialogDescription>
             </DialogHeader>
 
@@ -59,7 +61,7 @@ const getMediaThumb = (med: { previews?: MediaPreviews }) => previewThumbnailUrl
                 <div class="flex items-center justify-between text-xs text-zinc-500 font-medium">
                     <span>{{ $t("post_detail.manage.select_media_asset") }}</span>
                     <span class="font-mono text-xs bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded-full">
-                        {{ mediaList.findIndex((m) => m.id === trackEditMediaId) + 1 }} / {{ mediaList.length }}
+                        {{ mediaList.findIndex((m) => m.id === editingMediaId) + 1 }} / {{ mediaList.length }}
                     </span>
                 </div>
                 <div class="flex items-center gap-2 overflow-x-auto py-1 scrollbar-thin">
@@ -67,10 +69,10 @@ const getMediaThumb = (med: { previews?: MediaPreviews }) => previewThumbnailUrl
                         v-for="(med, idx) in mediaList"
                         :key="med.id"
                         type="button"
-                        @click="trackEditMediaId = med.id"
+                        @click="editingMediaId = med.id"
                         class="group relative flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden border-2 bg-zinc-50 transition-all duration-300 ease-out hover:scale-105 active:scale-95 cursor-pointer shadow-xs"
                         :class="
-                            trackEditMediaId === med.id
+                            editingMediaId === med.id
                                 ? 'border-blue-600 ring-4 ring-blue-50/80 shadow-xs'
                                 : 'border-zinc-200 hover:border-zinc-300'
                         "
@@ -93,7 +95,7 @@ const getMediaThumb = (med: { previews?: MediaPreviews }) => previewThumbnailUrl
                             {{ formatMediaType(med.type) }}
                         </div>
                         <div
-                            v-if="trackEditMediaId === med.id"
+                            v-if="editingMediaId === med.id"
                             class="absolute top-1 right-1 w-2 h-2 rounded-full bg-blue-600 ring-2 ring-white"
                         ></div>
                     </button>
@@ -101,7 +103,7 @@ const getMediaThumb = (med: { previews?: MediaPreviews }) => previewThumbnailUrl
             </div>
 
             <div class="flex-1 overflow-y-auto min-h-0 pt-4">
-                <MediaVariantsManager v-if="trackEditMediaId" :media-id="trackEditMediaId" />
+                <MediaEditor v-if="editingMediaId" :media-id="editingMediaId" @changed="emit('changed')" />
             </div>
         </DialogContent>
     </Dialog>

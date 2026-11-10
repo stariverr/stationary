@@ -11,7 +11,7 @@ import {
     PictureInPicture2,
     Play,
     Settings,
-    SlidersHorizontal,
+    ShieldAlert,
     Subtitles,
     Volume2,
     VolumeX,
@@ -42,51 +42,22 @@ import "@videojs/html/media/hlsjs-video";
 import { useStorage } from "@vueuse/core";
 import type { MediaPlayback } from "@/types/post";
 import { bridgeDashAudioTracks } from "@/utils/dash-audio-tracks";
-
-interface Subtitle {
-    url?: string | null;
-    language?: string | null;
-    label?: string;
-    format?: string | null;
-}
-
-interface VideoTrackItem {
-    id?: string;
-    url: string;
-    type: string;
-    purpose?: string;
-    quality?: string;
-    codec?: string | null;
-    mime_type?: string | null;
-    width?: number | null;
-    height?: number | null;
-}
+import { isCodecSupported } from "@/utils/media";
 
 interface Props {
-    src: string;
+    playback: MediaPlayback;
     poster?: string;
-    tracks?: VideoTrackItem[];
-    playback?: MediaPlayback | null;
-    subtitles?: Subtitle[];
     width?: number | string;
     height?: number | string;
     autoplay?: boolean;
 }
 
-interface ProgressiveVariant {
+interface LoadedCaption {
     id: string;
-    src: string;
-    type: string;
-    height?: number;
-    bitrate?: number;
-}
-
-interface ProcessedSubtitle {
     url: string;
     language: string;
     label: string;
     default: boolean;
-    isBlob: boolean;
 }
 
 interface SettingsOption {
@@ -100,17 +71,13 @@ interface SettingsOption {
 type PlayerState = VideoPlayerElement["store"]["state"];
 type PlayerAudioTrack = PlayerState["audioTrackList"][number];
 type PlayerTextTrack = PlayerState["textTrackList"][number];
-type SettingsTab = "all" | "volume" | "quality" | "speed" | "subtitles" | "audio" | "protocol";
+type SettingsTab = "all" | "volume" | "speed" | "subtitles" | "audio" | "protocol";
 type StreamingProtocol = "HLS" | "DASH";
 type SubtitleFontSize = "small" | "normal" | "large" | "xlarge";
 type SubtitleBgStyle = "shadow" | "box";
 
 const props = withDefaults(defineProps<Props>(), {
-    src: "",
     poster: "",
-    tracks: () => [],
-    playback: null,
-    subtitles: () => [],
     width: undefined,
     height: undefined,
     autoplay: true,
@@ -156,7 +123,7 @@ const isFirstFramePainted = ref(false);
 const isAutoplayAttempting = ref(props.autoplay);
 
 watch(
-    () => props.src,
+    () => props.playback.direct_url,
     () => {
         isFirstFramePainted.value = false;
     },
@@ -209,14 +176,12 @@ const settingsTitle = computed(() => {
     switch (activeSettingsTab.value) {
         case "volume":
             return t("post_detail.viewer.player.volume");
-        case "quality":
-            return t("post_detail.viewer.player.quality");
         case "speed":
             return t("post_detail.viewer.player.speed");
         case "subtitles":
             return t("post_detail.viewer.player.subtitles");
         case "audio":
-            return t("media.tracks.group_audios");
+            return t("post_detail.viewer.player.audio_tracks");
         case "protocol":
             return t("post_detail.viewer.player.protocol");
         default:
@@ -244,16 +209,18 @@ const resolveUrl = (url: string) => {
     return import.meta.client ? new URL(url, window.location.origin).toString() : url;
 };
 
-// Adaptive media is served as both an HLS and a DASH manifest; progressive media is a plain file per quality.
-const isAdaptive = computed(
-    () => props.playback?.protocol === "DASH" || /\.mpd($|\?)/i.test(props.src) || props.src.includes("manifest.mpd"),
-);
+// A media that needs a manifest (separate video and audio, or several audio tracks) streams over HLS or DASH;
+// anything else plays its original directly.
+const protocolUrls = computed<Partial<Record<StreamingProtocol, string>>>(() => ({
+    ...(props.playback.hls_url ? { HLS: resolveUrl(props.playback.hls_url) } : {}),
+    ...(props.playback.dash_url ? { DASH: resolveUrl(props.playback.dash_url) } : {}),
+}));
+const availableProtocols = computed(() => (["HLS", "DASH"] as const).filter((protocol) => Boolean(protocolUrls.value[protocol])));
+const isStreaming = computed(() => availableProtocols.value.length > 0);
+const directSrc = computed(() => resolveUrl(props.playback.direct_url));
 
-const hlsUrl = computed(() => (props.playback?.hls_url ? resolveUrl(props.playback.hls_url) : ""));
-const dashUrl = computed(() => resolveUrl(props.playback?.dash_url || props.playback?.url || props.src));
-
-// HLS plays through hls.js everywhere (Safari included); the other protocol is chosen from the player settings. A
-// protocol that fails to play is not swapped for the other one automatically.
+// HLS plays through hls.js everywhere (Safari included); DASH is chosen from the player settings. A protocol that
+// fails to play is not swapped for the other one automatically.
 const DEFAULT_PROTOCOL: StreamingProtocol = "HLS";
 // Only an explicit choice is stored, so a later change of the default reaches everyone who never picked one.
 const storedProtocol = useStorage<StreamingProtocol>("stationary-player-protocol", DEFAULT_PROTOCOL, undefined, {
@@ -266,20 +233,23 @@ const preferredProtocol = computed<StreamingProtocol>({
     },
 });
 
-// Without an HLS manifest (a bare .mpd source) DASH is the only choice.
-const canChooseProtocol = computed(() => isAdaptive.value && Boolean(hlsUrl.value));
-const activeProtocol = computed<StreamingProtocol>(() => (canChooseProtocol.value ? preferredProtocol.value : "DASH"));
+const canChooseProtocol = computed(() => availableProtocols.value.length > 1);
+const activeProtocol = computed<StreamingProtocol>(() =>
+    availableProtocols.value.includes(preferredProtocol.value)
+        ? preferredProtocol.value
+        : (availableProtocols.value[0] ?? DEFAULT_PROTOCOL),
+);
 
 const hlsSource = computed<HlsSource>(() => ({
-    src: hlsUrl.value,
+    src: protocolUrls.value.HLS ?? "",
     type: "application/x-mpegURL",
     preferPlayback: "mse",
-    // Subtitles come from the <track> elements both protocols share, so hls.js skips the manifest's subtitle group.
+    // Captions come from <track> elements under both protocols, so hls.js skips the manifest's subtitle group.
     engine: { hlsJs: { enableWebVTT: false, enableIMSC1: false } },
 }));
 
 const dashSource = computed<DashSource>(() => ({
-    src: dashUrl.value,
+    src: protocolUrls.value.DASH ?? "",
     engine: { dashJs: { streaming: { cmcd: { enabled: false } } } },
 }));
 
@@ -289,58 +259,34 @@ watch(engineRef, (engine, _previous, onCleanup) => {
     if (engine?.localName === "dash-video") onCleanup(bridgeDashAudioTracks(engine as DashVideoElement));
 });
 
-// Progressive files have no adaptive engine: each quality is its own file, switched by swapping the src.
-const progressiveVariants = computed<ProgressiveVariant[]>(() => {
-    if (isAdaptive.value) return [];
-
-    const playbackVariants = props.playback?.protocol === "PROGRESSIVE" ? props.playback.variants : [];
-    const variants = playbackVariants
-        .filter((variant) => Boolean(variant.url))
-        .map((variant) => ({
-            id: variant.track_id,
-            src: resolveUrl(variant.url),
-            type: variant.mime_type || "video/mp4",
-            height: variant.height ?? undefined,
-            bitrate: variant.bandwidth ?? undefined,
-        }));
-    if (variants.length > 0) return variants;
-
-    const trackSources = props.tracks
-        .filter((track) => track.type.toUpperCase() === "VIDEO" && track.url)
-        .map((track, index) => ({
-            id: track.id || `track-${index}`,
-            src: resolveUrl(track.url),
-            type: track.mime_type || "video/mp4",
-            height: track.height ?? undefined,
-        }));
-    if (trackSources.length > 0) return trackSources;
-
-    return [{ id: "source", src: resolveUrl(props.src), type: props.playback?.mime_type || "video/mp4" }];
+// The server reports every stream's codec and leaves support to the client. A video stream this browser cannot
+// decode is not played at all; audio tracks it cannot decode are left out of the audio menu.
+const isVideoSupported = computed(() => {
+    const { video, audio_tracks } = props.playback;
+    if (video) return isCodecSupported("video", video.codec_string);
+    return audio_tracks.length === 0 || audio_tracks.some((track) => isCodecSupported("audio", track.codec_string));
 });
 
-const selectedVariantId = ref<string | null>(null);
+/** The label each audio track carries in the manifests (apps/server/src/features/playback/manifests.ts). */
+const manifestAudioLabel = (track: MediaPlayback["audio_tracks"][number], index: number) =>
+    track.label || track.language || `Audio ${index + 1}`;
 
-watch(progressiveVariants, () => {
-    selectedVariantId.value = null;
-});
-
-const activeVariant = computed(
-    () => progressiveVariants.value.find((variant) => variant.id === selectedVariantId.value) ?? progressiveVariants.value[0],
+const supportedAudioLabels = computed(
+    () =>
+        new Set(
+            props.playback.audio_tracks
+                .map((track, index) => ({ track, label: manifestAudioLabel(track, index) }))
+                .filter(({ track }) => isCodecSupported("audio", track.codec_string))
+                .map(({ label }) => label),
+        ),
 );
 
-// Swapping the source (a progressive quality or the streaming protocol) resumes where the old one was.
+// Switching the streaming protocol resumes where the old engine was.
 let pendingSourceRestore: { time: number; paused: boolean; rate: number } | null = null;
 
 const rememberPlaybackPosition = () => {
     const video = videoRef.value;
     if (video) pendingSourceRestore = { time: video.currentTime, paused: video.paused, rate: video.playbackRate };
-};
-
-const selectProgressiveVariant = (id: string) => {
-    const video = videoRef.value;
-    if (!video || id === activeVariant.value?.id) return;
-    rememberPlaybackPosition();
-    selectedVariantId.value = id;
 };
 
 const handleLoadedMetadata = () => {
@@ -390,145 +336,62 @@ const formatLanguageLabel = (lang?: string | null, label?: string | null): strin
     );
 };
 
-const canonicalSubtitles = computed<Subtitle[]>(() => {
-    if (props.subtitles && props.subtitles.length > 0) return props.subtitles;
+// Captions load into same-origin blob URLs: a native <track> needs CORS mode on the video for a cross-origin file.
+const loadedCaptions = ref<LoadedCaption[]>([]);
+let captionLoadVersion = 0;
 
-    const playbackSubs = (props.playback?.subtitle_tracks || [])
-        .filter((track) => track.selectable && Boolean(track.url))
-        .map((track) => ({
-            url: track.url!,
-            language: track.language || "und",
-            label: formatLanguageLabel(track.language, track.label),
-            format: track.format || "vtt",
-        }));
-    if (playbackSubs.length > 0) return playbackSubs;
-
-    return (props.tracks || [])
-        .filter((track) => track.type?.toUpperCase() === "SUBTITLE" && Boolean(track.url))
-        .map((track) => ({
-            url: track.url!,
-            language: (track as any).metadata?.language || track.purpose || "und",
-            label: formatLanguageLabel(
-                (track as any).metadata?.language || track.purpose,
-                (track as any).display_name || (track as any).metadata?.label || (track as any).metadata?.language || track.purpose,
-            ),
-            format: (track as any).metadata?.format === "json" ? "vtt" : (track as any).metadata?.format || "vtt",
-        }));
-});
-
-const processedSubtitles = ref<ProcessedSubtitle[]>([]);
-let subtitleLoadVersion = 0;
-
-const revokeProcessedSubtitles = (subtitles = processedSubtitles.value) => {
-    for (const subtitle of subtitles) {
-        if (subtitle.isBlob) URL.revokeObjectURL(subtitle.url);
+const revokeCaptions = (captions = loadedCaptions.value) => {
+    for (const caption of captions) {
+        if (caption.url.startsWith("blob:")) URL.revokeObjectURL(caption.url);
     }
 };
 
-const isSrtSubtitle = (subtitle: Subtitle) =>
-    Boolean((subtitle.format && subtitle.format.toLowerCase() === "srt") || (subtitle.url && /\.srt($|\?)/i.test(subtitle.url)));
-
-// Subtitles load into same-origin blob URLs: native <track> elements need CORS mode on the video for cross-origin
-// files, and browsers only render WebVTT, so SRT files are converted on the way.
-const loadSubtitles = async (subtitles: Subtitle[]) => {
-    const loadVersion = ++subtitleLoadVersion;
-    const previous = processedSubtitles.value;
-    processedSubtitles.value = [];
-    if (import.meta.client) revokeProcessedSubtitles(previous);
-
-    const validSubtitles = subtitles.filter((sub): sub is Subtitle & { url: string } => Boolean(sub.url));
+const loadCaptions = async (captions: MediaPlayback["captions"]) => {
+    const loadVersion = ++captionLoadVersion;
+    const previous = loadedCaptions.value;
+    loadedCaptions.value = [];
+    if (!import.meta.client) return;
+    revokeCaptions(previous);
 
     const loaded = await Promise.all(
-        validSubtitles.map(async (subtitle): Promise<ProcessedSubtitle> => {
-            const displayLabel = formatLanguageLabel(subtitle.language, subtitle.label);
-            const fallback = {
-                url: resolveUrl(subtitle.url),
-                language: subtitle.language || "und",
-                label: displayLabel,
-                default: subtitle.language === "zh-CN" || subtitle.language === "zh",
-                isBlob: false,
+        captions.map(async (caption): Promise<LoadedCaption> => {
+            const loadedCaption = {
+                id: caption.id,
+                url: resolveUrl(caption.vtt_url),
+                language: caption.language || "und",
+                label: formatLanguageLabel(caption.language, caption.label),
+                default: caption.is_default,
             };
-            if (!import.meta.client) return fallback;
-
             try {
-                const response = await fetch(fallback.url);
+                const response = await fetch(loadedCaption.url);
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const text = await response.text();
-                const webVtt = isSrtSubtitle(subtitle) ? `WEBVTT\n\n${text.replace(/(\d+:\d{2}:\d{2}),(\d{3})/g, "$1.$2")}` : text;
-                return {
-                    ...fallback,
-                    url: URL.createObjectURL(new Blob([webVtt], { type: "text/vtt" })),
-                    isBlob: true,
-                };
+                const blob = new Blob([await response.text()], { type: "text/vtt" });
+                return { ...loadedCaption, url: URL.createObjectURL(blob) };
             } catch (error) {
-                console.error("Failed to load subtitle:", error);
-                return fallback;
+                console.error("Failed to load caption:", error);
+                return loadedCaption;
             }
         }),
     );
 
-    if (loadVersion !== subtitleLoadVersion) {
-        if (import.meta.client) revokeProcessedSubtitles(loaded);
+    if (loadVersion !== captionLoadVersion) {
+        revokeCaptions(loaded);
         return;
     }
-    processedSubtitles.value = loaded;
+    loadedCaptions.value = loaded;
 };
 
-watch(canonicalSubtitles, (subtitles) => loadSubtitles(subtitles), { deep: true, immediate: true });
-
-const formatBitrate = (bitsPerSecond?: number) => {
-    if (!bitsPerSecond) return "";
-    return bitsPerSecond >= 1_000_000 ? `${(bitsPerSecond / 1_000_000).toFixed(1)} Mbps` : `${Math.round(bitsPerSecond / 1000)} kbps`;
-};
-
-const selectQuality = (id: string) => {
-    if (isAdaptive.value) playerRef.value?.store.selectVideoRendition(id);
-    else selectProgressiveVariant(id);
-};
-
-const qualityOptions = computed<SettingsOption[]>(() => {
-    if (isAdaptive.value) {
-        return [...(playerState.value?.videoRenditionList ?? [])]
-            .sort((a, b) => (b.height ?? 0) - (a.height ?? 0))
-            .map((rendition, index) => ({
-                key: rendition.id,
-                label: rendition.height ? `${rendition.height}P` : `#${index + 1}`,
-                hint: formatBitrate(rendition.bitrate),
-                selected: Boolean(rendition.selected),
-                select: () => selectQuality(rendition.id),
-            }));
-    }
-    return progressiveVariants.value.map((variant, index) => ({
-        key: variant.id,
-        label: variant.height ? `${variant.height}P` : `#${index + 1}`,
-        hint: formatBitrate(variant.bitrate),
-        selected: variant.id === activeVariant.value?.id,
-        select: () => selectQuality(variant.id),
-    }));
-});
-
-// An adaptive player is on automatic (ABR) quality when no rendition is pinned.
-const isAutoQuality = computed(() => isAdaptive.value && !qualityOptions.value.some((option) => option.selected));
-
-const displayQualityLabel = computed(() => {
-    const autoLabel = t("post_detail.viewer.player.auto_quality");
-    if (isAutoQuality.value) {
-        const height = playerState.value?.activeVideoRendition?.height;
-        return height ? `${autoLabel} ${height}P` : autoLabel;
-    }
-    return qualityOptions.value.find((option) => option.selected)?.label ?? t("post_detail.viewer.player.quality");
-});
-
-const qualityAvailable = computed(() => Boolean(props.playback?.capabilities.quality_switching) && qualityOptions.value.length > 1);
+watch(() => props.playback.captions, loadCaptions, { deep: true, immediate: true });
 
 const audioOptions = computed<SettingsOption[]>(() => {
-    const tracks: PlayerAudioTrack[] = playerState.value?.audioTrackList ?? [];
+    const tracks = (playerState.value?.audioTrackList ?? []).filter((track: PlayerAudioTrack) =>
+        supportedAudioLabels.value.has(track.label),
+    );
     const prefix = t("post_detail.viewer.player.audio_tracks");
-    return tracks.map((track, index) => {
-        const hasUniqueLabel =
-            Boolean(track.label) && track.label !== "Audio" && tracks.filter((other) => other.label === track.label).length === 1;
+    return tracks.map((track: PlayerAudioTrack, index: number) => {
         const languageName = track.language ? formatLanguageLabel(track.language) : "";
-        const label = hasUniqueLabel ? track.label : languageName ? `${prefix} ${index + 1} (${languageName})` : `${prefix} ${index + 1}`;
+        const isGenerated = /^Audio \d+$/.test(track.label) || track.label === track.language;
+        const label = !isGenerated ? track.label : languageName ? `${prefix} ${index + 1} (${languageName})` : `${prefix} ${index + 1}`;
         return {
             key: track.id,
             label,
@@ -538,11 +401,7 @@ const audioOptions = computed<SettingsOption[]>(() => {
     });
 });
 
-const audioAvailable = computed(
-    () =>
-        Boolean(props.playback?.capabilities.protocol_supports_switching && props.playback.capabilities.audio_switching) &&
-        audioOptions.value.length > 1,
-);
+const audioAvailable = computed(() => audioOptions.value.length > 1);
 
 const subtitleOptions = computed<SettingsOption[]>(() => {
     const tracks: PlayerTextTrack[] = playerState.value?.textTrackList ?? [];
@@ -586,18 +445,6 @@ const speedSettingsOptions = computed<SettingsOption[]>(() =>
 
 const settingsOptions = computed<SettingsOption[] | null>(() => {
     switch (activeSettingsTab.value) {
-        case "quality":
-            if (!qualityAvailable.value) return null;
-            if (!isAdaptive.value) return qualityOptions.value;
-            return [
-                {
-                    key: "auto",
-                    label: t("post_detail.viewer.player.auto_quality"),
-                    selected: isAutoQuality.value,
-                    select: () => selectQuality("auto"),
-                },
-                ...qualityOptions.value,
-            ];
         case "audio":
             return audioAvailable.value ? audioOptions.value : null;
         case "subtitles":
@@ -643,8 +490,8 @@ watch(
 onBeforeUnmount(() => {
     releaseControlsLock?.();
     releaseControlsLock = null;
-    subtitleLoadVersion += 1;
-    if (import.meta.client) revokeProcessedSubtitles();
+    captionLoadVersion += 1;
+    if (import.meta.client) revokeCaptions();
 });
 </script>
 
@@ -654,12 +501,22 @@ onBeforeUnmount(() => {
         :class="[`sub-size-${subtitleFontSize}`, `sub-bg-${subtitleBgStyle}`]"
     >
         <ClientOnly>
-            <video-player ref="playerRef" class="contents">
+            <div v-if="!isVideoSupported" class="relative grid h-full w-full min-h-[200px] place-items-center overflow-hidden bg-black">
+                <img v-if="props.poster" class="absolute inset-0 h-full w-full object-contain opacity-40" :src="props.poster" alt="" />
+                <div
+                    role="alert"
+                    class="relative mx-4 flex max-w-sm flex-col items-center gap-2 rounded-xl border border-white/14 bg-[rgba(9,9,11,0.82)] px-4 py-3 text-center text-xs text-white/90 backdrop-blur-md"
+                >
+                    <ShieldAlert class="h-5 w-5 text-amber-400" />
+                    <span>{{ $t("post_detail.viewer.player.unsupported_codec") }}</span>
+                </div>
+            </div>
+            <video-player v-else ref="playerRef" class="contents">
                 <media-container class="player-container relative block h-full w-full">
                     <!-- Keyed by protocol so switching tears down one engine before the other attaches -->
                     <component
                         :is="activeProtocol === 'HLS' ? 'hlsjs-video' : 'dash-video'"
-                        v-if="isAdaptive"
+                        v-if="isStreaming"
                         :key="activeProtocol"
                         ref="engineRef"
                         :source.prop="activeProtocol === 'HLS' ? hlsSource : dashSource"
@@ -678,13 +535,13 @@ onBeforeUnmount(() => {
                             @loadedmetadata="handleLoadedMetadata"
                         >
                             <track
-                                v-for="subtitle in processedSubtitles"
-                                :key="`${subtitle.language}:${subtitle.url}`"
+                                v-for="caption in loadedCaptions"
+                                :key="caption.id"
                                 kind="subtitles"
-                                :label="subtitle.label"
-                                :srclang="subtitle.language"
-                                :src="subtitle.url"
-                                :default="subtitle.default"
+                                :label="caption.label"
+                                :srclang="caption.language"
+                                :src="caption.url"
+                                :default="caption.default"
                             />
                         </video>
                     </component>
@@ -693,7 +550,7 @@ onBeforeUnmount(() => {
                         ref="videoRef"
                         class="h-full w-full object-contain"
                         playsinline
-                        :src="activeVariant?.src"
+                        :src="directSrc"
                         :autoplay="props.autoplay"
                         @play="handleMediaPlay"
                         @pause="handleMediaPause"
@@ -702,13 +559,13 @@ onBeforeUnmount(() => {
                         @loadedmetadata="handleLoadedMetadata"
                     >
                         <track
-                            v-for="subtitle in processedSubtitles"
-                            :key="`${subtitle.language}:${subtitle.url}`"
+                            v-for="caption in loadedCaptions"
+                            :key="caption.id"
                             kind="subtitles"
-                            :label="subtitle.label"
-                            :srclang="subtitle.language"
-                            :src="subtitle.url"
-                            :default="subtitle.default"
+                            :label="caption.label"
+                            :srclang="caption.language"
+                            :src="caption.url"
+                            :default="caption.default"
                         />
                     </video>
 
@@ -824,22 +681,6 @@ onBeforeUnmount(() => {
                                         </button>
 
                                         <button
-                                            v-if="qualityAvailable"
-                                            type="button"
-                                            class="flex w-full items-center justify-between rounded-xl bg-neutral-100/80 px-3.5 py-2.5 text-xs font-medium text-neutral-800 transition-all hover:bg-neutral-200/80 hover:text-neutral-900"
-                                            @click.stop="activeSettingsTab = 'quality'"
-                                        >
-                                            <span class="flex items-center gap-2">
-                                                <SlidersHorizontal class="h-4 w-4 text-neutral-500" />
-                                                <span>{{ $t("post_detail.viewer.player.quality") }}</span>
-                                            </span>
-                                            <span class="flex items-center gap-1 text-neutral-500 font-semibold text-xs">
-                                                <span>{{ displayQualityLabel }}</span>
-                                                <ChevronRight class="h-4 w-4" />
-                                            </span>
-                                        </button>
-
-                                        <button
                                             type="button"
                                             class="flex w-full items-center justify-between rounded-xl bg-neutral-100/80 px-3.5 py-2.5 text-xs font-medium text-neutral-800 transition-all hover:bg-neutral-200/80 hover:text-neutral-900"
                                             @click.stop="activeSettingsTab = 'speed'"
@@ -876,7 +717,7 @@ onBeforeUnmount(() => {
                                         >
                                             <span class="flex items-center gap-2">
                                                 <Volume2 class="h-4 w-4 text-neutral-500" />
-                                                <span>{{ $t("media.tracks.group_audios") }}</span>
+                                                <span>{{ $t("post_detail.viewer.player.audio_tracks") }}</span>
                                             </span>
                                             <span class="flex items-center gap-1 text-neutral-500 font-semibold text-xs">
                                                 <ChevronRight class="h-4 w-4" />
@@ -965,7 +806,7 @@ onBeforeUnmount(() => {
                                         </div>
                                     </section>
 
-                                    <!-- Quality / audio / subtitles / speed pages -->
+                                    <!-- Audio / subtitles / speed / protocol pages -->
                                     <template v-else>
                                         <section v-if="settingsOptions" class="settings-section">
                                             <div role="radiogroup" :aria-label="settingsTitle" class="flex w-full flex-col gap-1">
@@ -986,7 +827,7 @@ onBeforeUnmount(() => {
                                         </section>
 
                                         <section v-if="activeSettingsTab === 'subtitles'" class="settings-section">
-                                            <template v-if="processedSubtitles.length > 0">
+                                            <template v-if="loadedCaptions.length > 0">
                                                 <div class="settings-subgroup mt-3 pt-2 border-t border-neutral-200/80">
                                                     <div
                                                         class="settings-subheading px-1 py-1 text-xs font-semibold uppercase tracking-wider text-neutral-400"
@@ -1080,7 +921,7 @@ onBeforeUnmount(() => {
 
                                 <div class="control-cluster flex items-center gap-0.5 sm:gap-1.5 shrink-0">
                                     <button
-                                        v-if="processedSubtitles.length > 0"
+                                        v-if="loadedCaptions.length > 0"
                                         type="button"
                                         class="control-button relative grid h-8 w-8 sm:h-8.5 sm:w-8.5 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 transition-all duration-140 hover:scale-105 hover:bg-white/15 hover:text-white"
                                         :class="{ 'bg-white/20 text-white': isSettingsOpen && activeSettingsTab === 'subtitles' }"
@@ -1088,17 +929,6 @@ onBeforeUnmount(() => {
                                         @click.stop="toggleSettings('subtitles')"
                                     >
                                         <Subtitles class="h-4 w-4" />
-                                    </button>
-
-                                    <button
-                                        v-if="qualityAvailable"
-                                        type="button"
-                                        class="control-button relative hidden sm:flex h-8 px-2 shrink-0 cursor-pointer items-center justify-center rounded-lg text-xs font-semibold text-white/90 transition-all duration-140 hover:bg-white/15 hover:text-white"
-                                        :class="{ 'bg-white/20 text-white font-bold': isSettingsOpen && activeSettingsTab === 'quality' }"
-                                        :aria-label="$t('post_detail.viewer.player.quality')"
-                                        @click.stop="toggleSettings('quality')"
-                                    >
-                                        <span>{{ displayQualityLabel }}</span>
                                     </button>
 
                                     <button
@@ -1113,7 +943,9 @@ onBeforeUnmount(() => {
 
                                     <media-mute-button
                                         class="control-button relative grid h-8 w-8 sm:h-8.5 sm:w-8.5 shrink-0 cursor-pointer place-items-center rounded-lg text-white/85 transition-all duration-140 hover:scale-105 hover:bg-white/15 hover:text-white"
-                                        :aria-label="isMuted ? $t('post_detail.viewer.player.unmute') : $t('post_detail.viewer.player.mute')"
+                                        :aria-label="
+                                            isMuted ? $t('post_detail.viewer.player.unmute') : $t('post_detail.viewer.player.mute')
+                                        "
                                     >
                                         <VolumeX v-if="isMuted" class="h-4 w-4" />
                                         <Volume2 v-else class="h-4 w-4" />

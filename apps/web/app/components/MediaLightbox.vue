@@ -21,7 +21,7 @@ import {
     Video as VideoIcon,
 } from "@lucide/vue";
 import { useMediaStore, type MediaListItem, type MappedMediaItem, type MatchedDetails } from "@/stores/media";
-import { type ApiPostDetail, type ApiPostMedia, type MediaPreviews, type PostMediaSummary, type Track } from "@/types/post";
+import { type ApiPostDetail, type MediaDetail, type MediaPlayback, type MediaPreviews } from "@/types/post";
 import { previewLargestUrl, previewPosterUrl, previewThumbnailUrl } from "@/utils/media";
 import { toast } from "vue-sonner";
 import { storeToRefs } from "pinia";
@@ -29,6 +29,7 @@ import { Swiper, SwiperSlide } from "swiper/vue";
 import "swiper/css";
 import { Temporal } from "@js-temporal/polyfill";
 import { useApi } from "@/composables/useApi";
+import type { MediaAiView } from "@/types/ai";
 
 const store = useMediaStore();
 const { selectedMediaId, selectedMedia, medias, displayMode } = storeToRefs(store);
@@ -74,26 +75,14 @@ interface MappedSiblingMedia {
     description?: string | null;
     type: string;
     url: string | null;
-    live_url?: string | null;
-    media_url?: string | null;
-    primary_file_url?: string | null;
     mime_type?: string | null;
-    mimeType?: string | null;
     width?: number;
     height?: number;
     previews?: MediaPreviews;
     poster?: string | null;
     thumbnail?: string | null;
-    subtitles?: Array<{
-        url: string;
-        language: string;
-        label: string;
-        format: string;
-    }>;
-    tracks?: Track[];
-    playback?: ApiPostMedia["playback"];
-    audio_tracks?: any[];
-    subtitle_tracks?: any[];
+    /** Only post siblings carry it; a library item gets it from its detail once it is the current one. */
+    playback?: MediaPlayback | null;
     matched_details?: MatchedDetails;
     score?: number;
     date?: string;
@@ -101,23 +90,6 @@ interface MappedSiblingMedia {
     published_time?: string | null;
     tags?: string[];
     isPlaceholder?: boolean;
-}
-
-interface MediaInputForSubtitles {
-    id?: string;
-    type?: string;
-    url?: string | null;
-    primary_file_url?: string | null;
-    media_url?: string | null;
-    live_url?: string | null;
-    tracks?: Track[];
-    playback?: ApiPostMedia["playback"];
-    audio_tracks?: any[];
-    subtitle_tracks?: any[];
-    date?: string;
-    create_time?: string;
-    published_time?: string | null;
-    matched_details?: unknown;
 }
 
 interface SwiperInstanceType {
@@ -144,29 +116,24 @@ const onSlideChange = (swiper: unknown) => {
     currentIndex.value = (swiper as { realIndex: number }).realIndex;
 };
 
-const mapMediaWithSubtitles = (m: MediaInputForSubtitles): MappedSiblingMedia | null => {
-    if (!m) return null;
-    const subtitleTracks = (m.tracks || []).filter((t: Track) => t.type === "SUBTITLE");
-    const liveTrack = m.type === "LIVE_PHOTO" ? (m.tracks || []).find((t) => t.type === "VIDEO" && t.purpose === "CONTENT") : null;
-    const imageTrack = (m.tracks || []).find((t) => t.type === "IMAGE" && t.purpose === "CONTENT");
-    return {
-        ...m,
-        id: String(m.id || ""),
-        type: String(m.type || "IMAGE"),
-        url: m.url || m.primary_file_url || m.media_url || imageTrack?.url || null,
-        live_url: m.live_url || liveTrack?.url || null,
-        subtitles: subtitleTracks.map((sub: Track) => ({
-            url: sub.url,
-            language: (sub.metadata?.language as string) || "unknown",
-            label: (sub.metadata?.label as string) || (sub.metadata?.language as string) || "unknown",
-            format: sub.metadata?.format === "json" ? "vtt" : (sub.metadata?.format as string) || "vtt",
-        })),
-        date: typeof m.date === "string" ? m.date : undefined,
-        create_time: typeof m.create_time === "string" ? m.create_time : undefined,
-        published_time: typeof m.published_time === "string" ? m.published_time : null,
-        matched_details: (m.matched_details as MatchedDetails) || undefined,
-    } as unknown as MappedSiblingMedia;
-};
+const toPostSibling = (m: MediaDetail): MappedSiblingMedia => ({
+    id: m.id,
+    type: m.type,
+    url: m.url,
+    previews: m.previews,
+    thumbnail: previewThumbnailUrl(m.previews),
+    poster: previewPosterUrl(m.previews),
+    width: m.width ?? undefined,
+    height: m.height ?? undefined,
+    title: m.title,
+    playback: m.playback,
+});
+
+const mapLibraryMedia = (m: MappedMediaItem): MappedSiblingMedia => ({
+    ...m,
+    matched_details: m.matched_details,
+    score: m.score ?? undefined,
+});
 
 watch(selectedMediaId, async (newId) => {
     if (!newId) {
@@ -182,7 +149,7 @@ watch(selectedMediaId, async (newId) => {
 
         // Optimistically set postSiblings with placeholders, so we can display the first slide immediately
         // and keep the Swiper slides count stable.
-        const initialSibling = selectedMedia.value ? mapMediaWithSubtitles(selectedMedia.value) : null;
+        const initialSibling = selectedMedia.value ? mapLibraryMedia(selectedMedia.value) : null;
         const siblings: MappedSiblingMedia[] = [];
         if (initialSibling) {
             siblings.push(initialSibling);
@@ -211,7 +178,7 @@ watch(selectedMediaId, async (newId) => {
             const mediaResponse = await useApi<{
                 success: boolean;
                 data: {
-                    list: Array<PostMediaSummary & { position: number }>;
+                    list: MediaDetail[];
                 };
             }>(`/post/${selectedMedia.value.post_id}/media`, {
                 query: {
@@ -220,26 +187,7 @@ watch(selectedMediaId, async (newId) => {
             });
 
             if (mediaResponse && mediaResponse.success && mediaResponse.data) {
-                const mapped = mediaResponse.data.list.map(
-                    (m) =>
-                        ({
-                            id: m.id,
-                            type: m.type,
-                            url: m.url || null,
-                            previews: m.previews,
-                            thumbnail: previewThumbnailUrl(m.previews),
-                            poster: previewPosterUrl(m.previews),
-                            width: m.width ?? undefined,
-                            height: m.height ?? undefined,
-                            title: m.title,
-                            sort_order: m.sort_order,
-                            tracks: m.tracks || [],
-                            playback: m.playback || null,
-                            audio_tracks: m.audio_tracks || [],
-                            subtitle_tracks: m.subtitle_tracks || [],
-                            subtitles: m.subtitles || [],
-                        }) as unknown as MappedSiblingMedia,
-                );
+                const mapped = mediaResponse.data.list.map(toPostSibling);
 
                 postSiblings.value = mapped;
                 const index = mapped.findIndex((m) => m.id === newId);
@@ -248,18 +196,18 @@ watch(selectedMediaId, async (newId) => {
                     if (swiperInstance.value) swiperInstance.value.slideToLoop(currentIndex.value, 0);
                 });
             } else {
-                const sibling = selectedMedia.value ? mapMediaWithSubtitles(selectedMedia.value) : null;
+                const sibling = selectedMedia.value ? mapLibraryMedia(selectedMedia.value) : null;
                 postSiblings.value = sibling ? [sibling] : [];
             }
         } catch (e) {
-            const sibling = selectedMedia.value ? mapMediaWithSubtitles(selectedMedia.value) : null;
+            const sibling = selectedMedia.value ? mapLibraryMedia(selectedMedia.value) : null;
             postSiblings.value = sibling ? [sibling] : [];
         } finally {
             isLoadingPost.value = false;
         }
     } else {
         // Flat mode or independent media
-        postSiblings.value = medias.value.map(mapMediaWithSubtitles).filter((m): m is MappedSiblingMedia => !!m);
+        postSiblings.value = medias.value.map(mapLibraryMedia).filter((m): m is MappedSiblingMedia => !!m);
         const index = postSiblings.value.findIndex((m) => m.id === newId);
         currentIndex.value = Math.max(0, index);
         nextTick(() => {
@@ -432,7 +380,7 @@ const saveEditingMedia = async () => {
             const mediaResponse = await useApi<{
                 success: boolean;
                 data: {
-                    list: PostMediaSummary[];
+                    list: MediaDetail[];
                 };
             }>(`/post/${selectedMedia.value.post_id}/media`, {
                 query: {
@@ -441,26 +389,7 @@ const saveEditingMedia = async () => {
             });
 
             if (mediaResponse && mediaResponse.success && mediaResponse.data) {
-                const mapped = mediaResponse.data.list.map(
-                    (m) =>
-                        ({
-                            id: m.id,
-                            type: m.type,
-                            url: m.url || null,
-                            previews: m.previews,
-                            thumbnail: previewThumbnailUrl(m.previews),
-                            poster: previewPosterUrl(m.previews),
-                            width: m.width ?? undefined,
-                            height: m.height ?? undefined,
-                            title: m.title,
-                            sort_order: m.sort_order,
-                            tracks: m.tracks || [],
-                            playback: m.playback || null,
-                            audio_tracks: m.audio_tracks || [],
-                            subtitle_tracks: m.subtitle_tracks || [],
-                            subtitles: m.subtitles || [],
-                        }) as unknown as MappedSiblingMedia,
-                );
+                const mapped = mediaResponse.data.list.map(toPostSibling);
                 postSiblings.value = mapped;
             }
         } else {
@@ -483,7 +412,7 @@ watch(selectedMediaId, () => {
     isEditingMedia.value = false;
 });
 
-const mediaDetails = ref<any>(null);
+const mediaDetails = ref<(MediaDetail & { tags: string[]; ai: MediaAiView | null }) | null>(null);
 const isLoadingMediaDetails = ref(false);
 
 const fetchMediaDetails = async (mediaId: string) => {
@@ -501,7 +430,17 @@ const fetchMediaDetails = async (mediaId: string) => {
     }
 };
 
-const activeTab = ref<"details" | "variants">("details");
+const activeTab = ref<"details" | "files">("details");
+
+/** An edit changes what the media plays and its previews: reload its detail and the list around it. */
+const handleMediaEdited = (mediaId: string) => {
+    void fetchMediaDetails(mediaId);
+    store.refetchMedia();
+};
+
+/** Post siblings carry their playback; a library item takes it from its detail once that has loaded. */
+const playbackOf = (media: MappedSiblingMedia): MediaPlayback | null =>
+    media.playback ?? (mediaDetails.value?.id === media.id ? mediaDetails.value.playback : null);
 watch(
     () => currentMediaItem.value?.id,
     (newId) => {
@@ -637,22 +576,25 @@ const handleAddTag = async (tagToAdd: string) => {
                                             <Loader2 class="w-8 h-8 animate-spin text-zinc-400" />
                                         </div>
                                         <MediaVideoPlayer
-                                            v-else-if="media.type?.toLowerCase() === 'video'"
-                                            :src="media.url || media.media_url || ''"
+                                            v-else-if="media.type?.toLowerCase() === 'video' && playbackOf(media)"
+                                            :playback="playbackOf(media)!"
                                             :poster="media.poster || undefined"
-                                            :tracks="media.tracks"
-                                            :playback="media.playback"
-                                            :subtitles="media.subtitles?.length ? media.subtitles : media.playback?.subtitle_tracks"
                                             :width="media.width"
                                             :height="media.height"
                                             :autoplay="index === currentIndex"
                                             class="max-h-full max-w-full h-full w-auto rounded-sm"
                                         />
+                                        <img
+                                            v-else-if="media.type?.toLowerCase() === 'video' && media.poster"
+                                            :src="media.poster"
+                                            :alt="media.title || ''"
+                                            class="max-h-full max-w-full object-contain rounded-sm"
+                                        />
                                         <LivePhotoPlayer
                                             v-else-if="media.type?.toLowerCase() === 'live_photo'"
-                                            :src="media.url || media.media_url || ''"
-                                            :live-src="media.live_url || ''"
-                                            :mime-type="media.mime_type || media.mimeType || undefined"
+                                            :src="media.url || ''"
+                                            :live-src="playbackOf(media)?.direct_url || ''"
+                                            :mime-type="media.mime_type || undefined"
                                             :width="media.width"
                                             :height="media.height"
                                             badge-position="top-left-below-header"
@@ -660,8 +602,8 @@ const handleAddTag = async (tagToAdd: string) => {
                                         />
                                         <HeicImage
                                             v-else-if="media.type?.toLowerCase() === 'image'"
-                                            :src="media.url || media.media_url || ''"
-                                            :mime-type="media.mime_type || media.mimeType || undefined"
+                                            :src="media.url || ''"
+                                            :mime-type="media.mime_type || undefined"
                                             class="max-h-full max-w-full object-contain rounded-sm"
                                         />
                                         <img
@@ -775,15 +717,13 @@ const handleAddTag = async (tagToAdd: string) => {
                                 {{ $t("common.details", "Details") }}
                             </button>
                             <button
-                                @click="activeTab = 'variants'"
+                                @click="activeTab = 'files'"
                                 class="font-semibold uppercase tracking-wider transition-colors relative h-full flex items-center cursor-pointer"
                                 :class="
-                                    activeTab === 'variants'
-                                        ? 'text-zinc-100 border-b-2 border-blue-500'
-                                        : 'text-zinc-500 hover:text-zinc-300'
+                                    activeTab === 'files' ? 'text-zinc-100 border-b-2 border-blue-500' : 'text-zinc-500 hover:text-zinc-300'
                                 "
                             >
-                                {{ $t("common.variants", "Variants") }}
+                                {{ $t("media.editor.tab") }}
                             </button>
                         </div>
 
@@ -1064,13 +1004,18 @@ const handleAddTag = async (tagToAdd: string) => {
                             </div>
                         </div>
 
-                        <!-- Variants panel -->
+                        <!-- Files panel: originals, captions, audio tracks and cover -->
                         <div
-                            v-if="activeTab === 'variants'"
-                            key="tab-variants"
-                            class="flex-1 flex flex-col overflow-hidden min-h-0 bg-[#0b0c0e]"
+                            v-if="activeTab === 'files'"
+                            key="tab-files"
+                            class="flex-1 overflow-y-auto min-h-0 p-5 custom-scrollbar bg-[#0b0c0e]"
                         >
-                            <MediaVariantsManager v-if="currentMediaItem" :media-id="currentMediaItem.id" :is-dark="true" />
+                            <MediaEditor
+                                v-if="currentMediaItem"
+                                :media-id="currentMediaItem.id"
+                                :is-dark="true"
+                                @changed="handleMediaEdited(currentMediaItem.id)"
+                            />
                         </div>
                     </div>
                 </div>

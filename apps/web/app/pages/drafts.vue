@@ -34,7 +34,15 @@ import {
     Loader2,
     SlidersHorizontal,
 } from "@lucide/vue";
-import { getAllowedFileTrackTypes, TrackType } from "@/utils/draft-media-rules";
+import {
+    buildMediaDraft,
+    FileCategory,
+    getCompatibleMediaTypes,
+    getFileCategories,
+    guessMediaType,
+    toDraftFileConfig,
+} from "@/utils/draft-media-rules";
+import { apiErrorMessage } from "@/composables/useApi";
 import { formatBytes } from "@/utils/media";
 import { toast } from "vue-sonner";
 import { Temporal } from "@js-temporal/polyfill";
@@ -305,52 +313,46 @@ function handleCanvasClick(e: MouseEvent) {
     clearSelection();
 }
 
+/** The media a single draft file makes on its own, titled after the file. */
+function singleFileDraft(draft: DraftFileItem) {
+    const title = draft.name.substring(0, draft.name.lastIndexOf(".")) || draft.name;
+    return buildMediaDraft(title, guessMediaType([draft])!, [toDraftFileConfig(draft)]);
+}
+
+/** Why a file cannot become a media on its own, as a toast; null when it can. */
+function singleFileProblem(draft: DraftFileItem): { title: string; description: string } | null {
+    const categories = getFileCategories(draft.name, draft.mime_type);
+    if (categories.length === 0) {
+        return {
+            title: t("draft_box.toasts.unsupported_file"),
+            description: t("draft_box.toasts.unsupported_file_desc", { name: draft.name }),
+        };
+    }
+    if (categories.includes(FileCategory.SUBTITLE)) {
+        return {
+            title: t("draft_box.toasts.subtitle_cannot_standalone"),
+            description: t("draft_box.toasts.subtitle_cannot_standalone_desc"),
+        };
+    }
+    return null;
+}
+
 // Commit single
 async function handleCommitSingle(draft: DraftFileItem) {
     if (!libraryId.value) return;
-    const allowed = getAllowedFileTrackTypes(draft.name, draft.mime_type);
-    if (allowed.length === 0) {
-        toast.warning(t("draft_box.toasts.unsupported_file"), {
-            description: t("draft_box.toasts.unsupported_file_desc", { name: draft.name }),
-        });
+    const problem = singleFileProblem(draft);
+    if (problem) {
+        toast.warning(problem.title, { description: problem.description });
         return;
     }
-    if (allowed[0] === TrackType.SUBTITLE) {
-        toast.warning(t("draft_box.toasts.subtitle_cannot_standalone"), {
-            description: t("draft_box.toasts.subtitle_cannot_standalone_desc"),
-        });
-        return;
-    }
-
-    const guessedType = allowed[0]!;
-    const payload = {
-        media_drafts: [
-            {
-                temp_id: draft.id,
-                title: draft.name.substring(0, draft.name.lastIndexOf(".")) || draft.name,
-                type: guessedType,
-                tracks: [
-                    {
-                        draft_file_id: draft.id,
-                        type: guessedType,
-                        purpose: "CONTENT",
-                        quality: "HIGH",
-                        is_default: true,
-                        language: null,
-                    },
-                ],
-            },
-        ],
-    };
 
     try {
-        await importStore.commitMedia(libraryId.value, payload);
+        await importStore.commitMedia(libraryId.value, { media_drafts: [singleFileDraft(draft)] });
         selectedFileIds.value = selectedFileIds.value.filter((id) => id !== draft.id);
         toast.success(t("draft_box.toasts.import_success", { count: 1 }));
         queryClient.invalidateQueries({ queryKey: ["media"] });
     } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        toast.error(t("draft_box.toasts.commit_failed"), { description: msg });
+        toast.error(t("draft_box.toasts.commit_failed"), { description: apiErrorMessage(e) });
     }
 }
 
@@ -359,15 +361,15 @@ async function handleCommitSeparate() {
     if (selectedFileIds.value.length === 0 || !libraryId.value) return;
     const drafts = [...selectedDraftFiles.value];
 
-    const unsupported = drafts.find((d) => getAllowedFileTrackTypes(d.name, d.mime_type).length === 0);
-    if (unsupported) {
-        toast.warning(t("draft_box.toasts.unsupported_file"), {
-            description: t("draft_box.toasts.unsupported_file_desc", { name: unsupported.name }),
-        });
-        return;
+    for (const draft of drafts) {
+        const problem = singleFileProblem(draft);
+        if (problem) {
+            toast.warning(problem.title, { description: problem.description });
+            return;
+        }
     }
 
-    const ambiguous = drafts.find((d) => getAllowedFileTrackTypes(d.name, d.mime_type).length > 1);
+    const ambiguous = drafts.find((d) => getCompatibleMediaTypes([d]).length > 1);
     if (ambiguous) {
         toast.warning(t("draft_box.toasts.choose_media_type"), {
             description: t("draft_box.toasts.choose_media_type_desc", { name: ambiguous.name }),
@@ -375,43 +377,13 @@ async function handleCommitSeparate() {
         return;
     }
 
-    const standaloneSubtitles = drafts.filter((d) => getAllowedFileTrackTypes(d.name, d.mime_type)[0] === TrackType.SUBTITLE);
-    if (standaloneSubtitles.length > 0) {
-        toast.warning(t("draft_box.toasts.subtitle_cannot_standalone"), {
-            description: t("draft_box.toasts.subtitle_cannot_standalone_desc"),
-        });
-        return;
-    }
-
-    const payload = {
-        media_drafts: drafts.map((draft) => {
-            const guessedType = getAllowedFileTrackTypes(draft.name, draft.mime_type)[0]!;
-            return {
-                temp_id: draft.id,
-                title: draft.name.substring(0, draft.name.lastIndexOf(".")) || draft.name,
-                type: guessedType,
-                tracks: [
-                    {
-                        draft_file_id: draft.id,
-                        type: guessedType,
-                        purpose: "CONTENT",
-                        quality: "HIGH",
-                        is_default: true,
-                        language: null,
-                    },
-                ],
-            };
-        }),
-    };
-
     try {
-        await importStore.commitMedia(libraryId.value, payload);
+        await importStore.commitMedia(libraryId.value, { media_drafts: drafts.map(singleFileDraft) });
         clearSelection();
         toast.success(t("draft_box.toasts.import_success", { count: drafts.length }));
         queryClient.invalidateQueries({ queryKey: ["media"] });
     } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        toast.error(t("draft_box.toasts.commit_failed"), { description: msg });
+        toast.error(t("draft_box.toasts.commit_failed"), { description: apiErrorMessage(e) });
     }
 }
 

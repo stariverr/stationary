@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import HeicImage from "./HeicImage.vue";
 import { isHeic } from "@/utils/heic-decoder";
 import type { TrashItem, TrashPostItem } from "@/stores/trash";
-import type { MediaPreviews, MediaType, PostMediaSummary } from "@/types/post";
+import type { MediaDetail, MediaPreviews, MediaType } from "@/types/post";
 import { useApi } from "@/composables/useApi";
 import { getMediaTypeLabel, previewLargestUrl, previewPosterUrl, previewThumbnailUrl } from "@/utils/media";
 import { Temporal } from "@js-temporal/polyfill";
@@ -77,7 +77,6 @@ interface PreviewMediaItem {
     title: string | null;
     url: string | null;
     previews: MediaPreviews;
-    tracks?: Array<{ url: string; purpose?: string; type?: string }>;
 }
 
 const isLoading = ref(false);
@@ -123,12 +122,7 @@ const handleDelete = () => {
 
 const getMediaDisplayUrl = (media: PreviewMediaItem | null): string => {
     if (!media) return "";
-    if (media.url) return media.url;
-    if (media.tracks && media.tracks.length > 0) {
-        const contentTrack = media.tracks.find((t) => t.purpose === "CONTENT");
-        if (contentTrack?.url) return contentTrack.url;
-    }
-    return "";
+    return media.url ?? "";
 };
 
 const fetchPostMedia = async (postId: string) => {
@@ -137,7 +131,7 @@ const fetchPostMedia = async (postId: string) => {
         const res = await useApi<{
             success: boolean;
             data: {
-                list: PostMediaSummary[];
+                list: MediaDetail[];
                 total: number;
             };
         }>(`/post/${postId}/media`, {
@@ -151,7 +145,6 @@ const fetchPostMedia = async (postId: string) => {
                 title: m.title || null,
                 url: m.url || null,
                 previews: m.previews,
-                tracks: m.tracks || [],
             }));
         }
     } catch (err) {

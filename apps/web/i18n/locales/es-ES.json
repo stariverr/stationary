@@ -81,14 +81,14 @@
             "actions": "Acciones de contenido",
             "move_up": "Mover arriba",
             "move_down": "Mover abajo",
-            "manage_tracks": "Gestionar pistas",
-            "manage_tracks_desc": "Gestiona archivos, subtítulos, portadas y variantes de resolución de este contenido.",
             "select_media_asset": "Seleccionar contenido",
             "unlink_from_post": "Desvincular de la publicación",
             "delete_to_trash": "Mover a la papelera",
             "untitled_media": "Contenido sin título",
             "items_empty": "0 de 0",
-            "items_range": "{from}-{to} de {total}"
+            "items_range": "{from}-{to} de {total}",
+            "edit_media": "Editar archivos",
+            "edit_media_desc": "Gestiona los archivos originales, subtítulos, pistas de audio y la portada de este contenido."
         },
         "viewer": {
             "loading": "Cargando contenido...",
@@ -99,7 +99,10 @@
             "audio_asset": "Audio",
             "untitled_pdf": "PDF sin título",
             "pdf_document": "Documento PDF",
-            "open_pdf": "Abrir PDF en una pestaña nueva"
+            "open_pdf": "Abrir PDF en una pestaña nueva",
+            "player": {
+                "unsupported_codec": "Este navegador no puede reproducir el formato de este vídeo. Descarga el archivo original para verlo."
+            }
         },
         "toasts": {
             "copy_success": "Enlace de la publicación copiado",
@@ -198,5 +201,72 @@
             "thumb_alt": "Miniatura",
             "media_alt": "Archivo multimedia"
         }
+    },
+    "media": {
+        "configure_files": "Función de cada archivo",
+        "headers": {
+            "role": "Función",
+            "label": "Etiqueta"
+        },
+        "roles": {
+            "original": "Original",
+            "cover": "Portada",
+            "caption": "Subtítulo",
+            "not_allowed": "No permitido"
+        },
+        "errors": {
+            "file_not_allowed": "{name} no puede formar parte de un contenido {mediaType}.",
+            "originals_video": "Un vídeo lleva un archivo de vídeo y cualquier número de archivos solo de audio.",
+            "originals_audio": "Un audio lleva exactamente un archivo de audio.",
+            "originals_image": "Una imagen lleva exactamente un archivo de imagen.",
+            "originals_pdf": "Un PDF lleva exactamente un archivo PDF.",
+            "originals_live_photo": "Una Live Photo lleva una imagen y un vídeo.",
+            "only_one_default_caption": "Solo un subtítulo puede ser el predeterminado."
+        },
+        "toast_invalid_composition": "Estos archivos no forman este contenido",
+        "editor": {
+            "tab": "Archivos",
+            "originals": "Archivos originales",
+            "add_audio_file": "Añadir archivo de audio",
+            "main": "Principal",
+            "replace": "Reemplazar",
+            "delete": "Eliminar",
+            "original_added": "Archivo añadido",
+            "original_replaced": "Archivo reemplazado",
+            "original_deleted": "Archivo eliminado",
+            "original_delete_confirm": "¿Eliminar este archivo? No se puede deshacer.",
+            "audio_tracks": "Pistas de audio",
+            "captions": "Subtítulos",
+            "add_caption": "Añadir subtítulo",
+            "no_captions": "Aún no hay subtítulos.",
+            "caption_added": "Subtítulo añadido",
+            "caption_deleted": "Subtítulo eliminado",
+            "caption_delete_confirm": "¿Eliminar este subtítulo?",
+            "label": "Etiqueta",
+            "language": "Idioma",
+            "save": "Guardar",
+            "saved": "Guardado",
+            "default": "Predeterminado",
+            "make_default": "Hacer predeterminado",
+            "embedded": "Incrustado",
+            "edit_failed": "No se pudo guardar el cambio",
+            "no_library": "No hay ninguna biblioteca seleccionada.",
+            "kinds": {
+                "video": "Vídeo",
+                "audio": "Audio",
+                "image": "Imagen",
+                "pdf": "PDF",
+                "unknown": "Aún sin analizar"
+            },
+            "status": {
+                "pending": "En espera",
+                "in_progress": "Procesando",
+                "completed": "Listo",
+                "failed": "Error"
+            }
+        }
+    },
+    "draft_box": {
+        "merge_dialog_desc": "Combina los archivos seleccionados en un contenido: archivos originales, portada y subtítulos."
     }
 }

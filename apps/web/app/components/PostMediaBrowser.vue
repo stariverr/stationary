@@ -8,7 +8,7 @@ import {
     FileImage,
     FileText,
     Film,
-    Layers,
+    FileStack,
     Link as LinkIcon,
     MoreVertical,
     Music,
@@ -25,13 +25,13 @@ import {
     DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MediaType, TrackPurpose, type PostMediaSummary } from "@/types/post";
+import { MediaType, type MediaDetail } from "@/types/post";
 
 type MediaTypeFilter = MediaType | "";
 type MediaTypeSelection = MediaType | "ALL";
 
 const props = defineProps<{
-    list: PostMediaSummary[];
+    list: MediaDetail[];
     activeMediaId: string | null;
     isLoading: boolean;
     total: number;
@@ -50,7 +50,7 @@ const emit = defineEmits<{
     (event: "shift-media", mediaId: string, direction: "left" | "right"): void;
     (event: "unlink-media", mediaId: string): void;
     (event: "trash-media", mediaId: string): void;
-    (event: "manage-tracks", mediaId: string): void;
+    (event: "edit-media", mediaId: string): void;
 }>();
 
 const { t } = useI18n();
@@ -271,9 +271,9 @@ const mediaListWithPreview = computed(() =>
                                     {{ $t("post_detail.manage.move_down") }}
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem class="cursor-pointer gap-2 py-2 text-xs" @click="emit('manage-tracks', item.id)">
-                                    <Layers class="h-4 w-4 text-zinc-500" />
-                                    {{ $t("post_detail.manage.manage_tracks") }}
+                                <DropdownMenuItem class="cursor-pointer gap-2 py-2 text-xs" @click="emit('edit-media', item.id)">
+                                    <FileStack class="h-4 w-4 text-zinc-500" />
+                                    {{ $t("post_detail.manage.edit_media") }}
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                     class="cursor-pointer gap-2 py-2 text-xs text-amber-700 dark:text-amber-400 focus:bg-amber-50 dark:focus:bg-amber-950/30 focus:text-amber-800 dark:focus:text-amber-300"

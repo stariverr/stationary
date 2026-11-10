@@ -11,14 +11,6 @@ export enum Platform {
     BILIBILI = "BILIBILI",
     UNKNOWN = "UNKNOWN",
 }
-export enum TrackType {
-    IMAGE = "IMAGE",
-    VIDEO = "VIDEO",
-    AUDIO = "AUDIO",
-    SUBTITLE = "SUBTITLE",
-    PDF = "PDF",
-}
-
 export enum MediaType {
     IMAGE = "IMAGE",
     VIDEO = "VIDEO",
@@ -27,135 +19,85 @@ export enum MediaType {
     PDF = "PDF",
 }
 
-export enum TrackPurpose {
-    CONTENT = "CONTENT",
-    /** Draft tracks only: the image becomes the media cover when the draft is committed, never a stored track. */
-    COVER = "COVER",
-    THUMBNAIL = "THUMBNAIL",
-    PREVIEW = "PREVIEW",
+/** What a file can be, judged from its name and MIME type before the server probes it. */
+export enum FileCategory {
+    IMAGE = "IMAGE",
+    VIDEO = "VIDEO",
+    AUDIO = "AUDIO",
+    SUBTITLE = "SUBTITLE",
+    PDF = "PDF",
 }
 
-export enum TrackQuality {
-    HIGH = "HIGH",
-    MEDIUM = "MEDIUM",
-    LOW = "LOW",
-}
+export const SyncStatusSchema = v.picklist(["PENDING", "IN_PROGRESS", "COMPLETED", "FAILED"]);
+export type SyncStatus = v.InferOutput<typeof SyncStatusSchema>;
 
-export enum TrackStreamLayout {
-    SINGLE = "SINGLE",
-    MUXED = "MUXED",
-    VIDEO_ONLY = "VIDEO_ONLY",
-    AUDIO_ONLY = "AUDIO_ONLY",
-    TEXT_ONLY = "TEXT_ONLY",
-}
-
-const TrackStreamSchema = v.object({
-    index: v.number(),
-    id: v.optional(v.nullable(v.string())),
-    type: v.picklist([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
-    codec: v.optional(v.nullable(v.string())),
-    language: v.optional(v.nullable(v.string())),
-    label: v.optional(v.nullable(v.string())),
-    role: v.optional(v.nullable(v.string())),
-    width: v.optional(v.nullable(v.number())),
-    height: v.optional(v.nullable(v.number())),
-    bandwidth: v.optional(v.nullable(v.number())),
-    channels: v.optional(v.nullable(v.number())),
-    sample_rate: v.optional(v.nullable(v.number())),
-    is_default: v.optional(v.boolean()),
-});
-
-export const TrackSchema = v.object({
+export const PlaybackVideoSchema = v.object({
     id: v.string(),
-    file_id: v.nullish(v.string()),
-    url: v.string(),
-    type: v.enum(TrackType),
-    purpose: v.enum(TrackPurpose),
-    is_original: v.boolean(),
-    quality: v.enum(TrackQuality),
-    priority: v.number(),
-    metadata: v.record(v.string(), v.unknown()),
-    mime_type: v.nullish(v.string()),
-    extension: v.optional(v.nullable(v.string())),
-    width: v.optional(v.nullable(v.number())),
-    height: v.optional(v.nullable(v.number())),
-    container: v.optional(v.nullable(v.string())),
-    is_fragmented: v.optional(v.nullable(v.boolean())),
-    stream_layout: v.optional(v.nullable(v.enum(TrackStreamLayout))),
-    has_video: v.optional(v.boolean()),
-    has_audio: v.optional(v.boolean()),
-    streams: v.optional(v.array(TrackStreamSchema)),
-    variant_key: v.optional(v.string()),
-    is_default: v.optional(v.boolean()),
-    is_primary: v.optional(v.boolean()),
-    display_name: v.optional(v.nullable(v.string())),
-    language: v.optional(v.nullable(v.string())),
-    codec: v.optional(v.nullable(v.string())),
-    is_stale: v.optional(v.boolean()),
-});
-export type Track = v.InferOutput<typeof TrackSchema>;
-
-export const PlaybackVariantSchema = v.object({
-    track_id: v.string(),
-    url: v.string(),
-    mime_type: v.nullish(v.string()),
-    quality: v.string(),
-    label: v.string(),
-    codec: v.nullish(v.string()),
-    width: v.nullable(v.number()),
-    height: v.nullable(v.number()),
-    bandwidth: v.nullable(v.number()),
+    codec: v.string(),
+    codec_string: v.nullable(v.string()),
+    width: v.number(),
+    height: v.number(),
+    rotation: v.number(),
     frame_rate: v.nullable(v.number()),
 });
+export type PlaybackVideo = v.InferOutput<typeof PlaybackVideoSchema>;
 
 export const PlaybackAudioTrackSchema = v.object({
     id: v.string(),
-    track_id: v.string(),
-    source: v.picklist(["INTERNAL", "EXTERNAL"]),
-    stream_index: v.nullish(v.number()),
-    url: v.nullish(v.string()),
-    select_url: v.nullish(v.string()),
-    mime_type: v.nullish(v.string()),
-    language: v.nullish(v.string()),
-    label: v.string(),
-    role: v.nullish(v.string()),
-    codec: v.nullish(v.string()),
-    channels: v.nullish(v.number()),
+    codec: v.string(),
+    codec_string: v.nullable(v.string()),
+    language: v.nullable(v.string()),
+    label: v.nullable(v.string()),
     is_default: v.boolean(),
-    selectable: v.boolean(),
+    channels: v.number(),
 });
+export type PlaybackAudioTrack = v.InferOutput<typeof PlaybackAudioTrackSchema>;
 
-export const PlaybackSubtitleTrackSchema = v.object({
+export const PlaybackCaptionSchema = v.object({
     id: v.string(),
-    track_id: v.string(),
-    source: v.picklist(["INTERNAL", "EXTERNAL"]),
-    stream_index: v.nullish(v.number()),
-    url: v.nullish(v.string()),
-    mime_type: v.nullish(v.string()),
-    language: v.nullish(v.string()),
-    label: v.string(),
-    format: v.nullish(v.string()),
-    selectable: v.boolean(),
+    language: v.nullable(v.string()),
+    label: v.nullable(v.string()),
+    is_default: v.boolean(),
+    vtt_url: v.string(),
 });
+export type PlaybackCaption = v.InferOutput<typeof PlaybackCaptionSchema>;
 
+/** How a VIDEO, AUDIO or LIVE_PHOTO media plays. The manifest URLs are relative signed API paths. */
 export const MediaPlaybackSchema = v.object({
-    url: v.nullish(v.string()),
-    mime_type: v.nullish(v.string()),
-    protocol: v.nullish(v.picklist(["DASH", "PROGRESSIVE"])),
-    hls_url: v.nullish(v.string()),
-    dash_url: v.nullish(v.string()),
-    track_id: v.nullish(v.string()),
-    variants: v.array(PlaybackVariantSchema),
-    capabilities: v.object({
-        quality_switching: v.boolean(),
-        audio_switching: v.boolean(),
-        subtitle_switching: v.boolean(),
-        protocol_supports_switching: v.boolean(),
-    }),
+    direct_url: v.string(),
+    direct_mime_type: v.string(),
+    hls_url: v.nullable(v.string()),
+    dash_url: v.nullable(v.string()),
+    duration: v.nullable(v.number()),
+    video: v.nullable(PlaybackVideoSchema),
     audio_tracks: v.array(PlaybackAudioTrackSchema),
-    subtitle_tracks: v.array(PlaybackSubtitleTrackSchema),
+    captions: v.array(PlaybackCaptionSchema),
 });
 export type MediaPlayback = v.InferOutput<typeof MediaPlaybackSchema>;
+
+/** A file of a media as uploaded or imported; `kind` is null until the server has probed it. */
+export const MediaOriginalSchema = v.object({
+    id: v.string(),
+    kind: v.nullable(v.picklist(["IMAGE", "PDF", "VIDEO", "AUDIO"])),
+    url: v.nullable(v.string()),
+    mime_type: v.nullable(v.string()),
+    size: v.nullable(v.number()),
+    status: SyncStatusSchema,
+    last_error: v.nullable(v.string()),
+});
+export type MediaOriginal = v.InferOutput<typeof MediaOriginalSchema>;
+
+export const MediaCaptionSchema = v.object({
+    id: v.string(),
+    origin: v.picklist(["FILE", "EMBEDDED"]),
+    language: v.nullable(v.string()),
+    label: v.nullable(v.string()),
+    is_default: v.boolean(),
+    status: SyncStatusSchema,
+    last_error: v.nullable(v.string()),
+    vtt_url: v.nullable(v.string()),
+});
+export type MediaCaption = v.InferOutput<typeof MediaCaptionSchema>;
 
 /** One system-generated preview image. */
 export const PreviewImageSchema = v.object({
@@ -179,10 +121,11 @@ export const MediaCoverSchema = v.object({
 });
 export type MediaCover = v.InferOutput<typeof MediaCoverSchema>;
 
-export const ApiPostMediaSchema = v.object({
+/** A media with its originals, captions and playback: the items of `/post/:id/media` and `/media/detail/:id`. */
+export const MediaDetailSchema = v.object({
     id: v.pipe(v.string(), v.uuid()),
     eid: v.optional(v.string()),
-    post_id: v.optional(v.nullable(v.pipe(v.string(), v.uuid()))),
+    post_id: v.nullable(v.pipe(v.string(), v.uuid())),
     source: v.optional(v.string()),
     title: v.nullish(v.string()),
     description: v.nullish(v.string()),
@@ -192,96 +135,39 @@ export const ApiPostMediaSchema = v.object({
     published_time: v.optional(v.nullable(v.string())),
     sync_status: v.optional(v.nullable(v.string())),
     last_error: v.optional(v.nullable(v.string())),
-    ai_status: v.optional(v.nullable(v.string())),
-    ai_error: v.optional(v.nullable(v.string())),
-    url: v.optional(v.nullable(v.string())),
-    previews: MediaPreviewsSchema,
-    playback: v.optional(v.nullable(MediaPlaybackSchema)),
-    width: v.optional(v.nullable(v.number())),
-    height: v.optional(v.nullable(v.number())),
-    tracks: v.array(TrackSchema),
-});
-export type ApiPostMedia = v.InferOutput<typeof ApiPostMediaSchema>;
-
-export const PreviewItemSchema = v.object({
+    /** The main original: the image of an IMAGE or LIVE_PHOTO, the video, audio or PDF of the others. */
     url: v.nullable(v.string()),
-    type: v.enum(TrackType),
-    quality: v.enum(TrackQuality),
-    codec: v.nullable(v.string()),
+    /** Displayed size, rotation applied. */
+    width: v.nullable(v.number()),
+    height: v.nullable(v.number()),
+    duration: v.nullable(v.number()),
+    previews: MediaPreviewsSchema,
+    cover: v.nullable(MediaCoverSchema),
+    playback: v.nullable(MediaPlaybackSchema),
+    originals: v.array(MediaOriginalSchema),
+    captions: v.array(MediaCaptionSchema),
+    position: v.number(),
 });
-export type PreviewItem = v.InferOutput<typeof PreviewItemSchema>;
+export type MediaDetail = v.InferOutput<typeof MediaDetailSchema>;
 
-export interface MediaViewerSubtitle {
-    url: string;
-    language: string;
-    label: string;
-    format: string;
-}
-
-export interface MediaViewerTrack {
-    id?: string;
-    url: string;
-    type: string;
-    purpose: string;
-    is_default?: boolean;
-    priority?: number;
-    quality?: string;
-    mime_type?: string | null;
-    container?: string | null;
-    is_fragmented?: boolean | null;
-    stream_layout?: TrackStreamLayout | null;
-    has_video?: boolean;
-    has_audio?: boolean;
-    streams?: Array<{
-        index: number;
-        id?: string | null;
-        type: string;
-        codec?: string | null;
-        language?: string | null;
-        label?: string | null;
-        role?: string | null;
-        is_default?: boolean;
-    }>;
-    codec?: string | null;
-    metadata?: Record<string, unknown>;
-}
-
+/** What the media viewers need to show one item. */
 export interface MediaViewerItem {
     id: string;
     type: MediaType;
     title?: string | null;
     url?: string | null;
     previews?: MediaPreviews;
-    live_url?: string | null;
-    tracks?: MediaViewerTrack[];
     playback?: MediaPlayback | null;
-    /** @deprecated Use playback.audio_tracks. */
-    audio_tracks?: MediaPlayback["audio_tracks"];
-    /** @deprecated Use playback.subtitle_tracks. */
-    subtitle_tracks?: MediaPlayback["subtitle_tracks"];
     width?: number | null;
     height?: number | null;
-    /** @deprecated Use playback.subtitle_tracks. */
-    subtitles?: MediaViewerSubtitle[];
 }
 
 export const ApiPostListItemMediaSchema = v.object({
     id: v.pipe(v.string(), v.uuid()),
-    eid: v.optional(v.string()),
-    source: v.optional(v.string()),
-    title: v.nullish(v.string()),
-    description: v.nullish(v.string()),
     type: v.enum(MediaType),
     sort_order: v.number(),
-    create_time: v.optional(v.string()),
-    published_time: v.optional(v.nullable(v.string())),
-    sync_status: v.optional(v.nullable(v.string())),
-    last_error: v.optional(v.nullable(v.string())),
-    ai_status: v.optional(v.nullable(v.string())),
-    ai_error: v.optional(v.nullable(v.string())),
     previews: MediaPreviewsSchema,
-    videos: v.nullish(v.array(PreviewItemSchema)),
-    audios: v.nullish(v.array(PreviewItemSchema)),
+    url: v.nullable(v.string()),
 });
 export type ApiPostListItemMedia = v.InferOutput<typeof ApiPostListItemMediaSchema>;
 
@@ -319,7 +205,6 @@ export const PostDetailResponseBodySchema = v.object({
     published_time: v.optional(v.nullable(v.string())),
     media_count: v.optional(v.number()),
     url: v.optional(v.nullable(v.string())),
-    media: v.optional(v.array(ApiPostMediaSchema)),
     type: v.picklist(["TEXT", "MULTI_MEDIA"]),
     sync_status: v.optional(v.nullable(v.string())),
     last_error: v.optional(v.nullable(v.string())),
@@ -330,35 +215,22 @@ export type ApiPostDetail = v.InferOutput<typeof PostDetailResponseBodySchema>;
 
 export const PostMediaSchema = v.object({
     id: v.pipe(v.string(), v.uuid()),
-    eid: v.optional(v.string()),
-    source: v.optional(v.string()),
-    title: v.nullish(v.string()),
-    description: v.nullish(v.string()),
     type: v.enum(MediaType),
     sort_order: v.number(),
-    create_time: v.optional(v.string()),
-    published_time: v.optional(v.nullable(v.string())),
+    previews: MediaPreviewsSchema,
+    title: v.nullish(v.string()),
+    // Read by post cards, but `/post/list` items do not carry them.
     sync_status: v.optional(v.nullable(v.string())),
-    last_error: v.optional(v.nullable(v.string())),
     ai_status: v.optional(v.nullable(v.string())),
     ai_error: v.optional(v.nullable(v.string())),
-    previews: MediaPreviewsSchema,
-    tracks: v.optional(v.array(TrackSchema)),
-    playback: v.optional(v.nullable(MediaPlaybackSchema)),
-    audio_tracks: v.optional(v.array(PlaybackAudioTrackSchema)),
-    subtitle_tracks: v.optional(v.array(PlaybackSubtitleTrackSchema)),
-    subtitles: v.optional(v.array(v.object({ url: v.string(), language: v.string(), label: v.string(), format: v.string() }))),
+    width: v.optional(v.number()),
+    height: v.optional(v.number()),
 
     // Mapped fields for UI
     url: v.nullable(v.string()),
-    mime_type: v.optional(v.nullable(v.string())),
-    live_url: v.nullable(v.string()),
     thumbnail: v.nullable(v.string()),
     poster: v.nullable(v.string()),
-    width: v.optional(v.number()),
-    height: v.optional(v.number()),
-    index: v.optional(v.number()),
-    srcset: v.optional(v.nullable(v.string())),
+    srcset: v.nullable(v.string()),
 });
 export type PostMedia = v.InferOutput<typeof PostMediaSchema>;
 
@@ -393,26 +265,8 @@ export const PostSchema = v.object({
 });
 export type Post = v.InferOutput<typeof PostSchema>;
 
-export const PostMediaSummarySchema = v.object({
-    id: v.string(),
-    type: v.enum(MediaType),
-    title: v.nullish(v.string()),
-    sort_order: v.number(),
-    position: v.number(),
-    previews: MediaPreviewsSchema,
-    url: v.optional(v.nullable(v.string())),
-    playback: v.optional(v.nullable(MediaPlaybackSchema)),
-    audio_tracks: v.optional(v.array(PlaybackAudioTrackSchema)),
-    subtitle_tracks: v.optional(v.array(PlaybackSubtitleTrackSchema)),
-    subtitles: v.optional(v.array(v.object({ url: v.string(), language: v.string(), label: v.string(), format: v.string() }))),
-    width: v.optional(v.nullable(v.number())),
-    height: v.optional(v.nullable(v.number())),
-    tracks: v.array(TrackSchema),
-});
-export type PostMediaSummary = v.InferOutput<typeof PostMediaSummarySchema>;
-
 export const PostMediaPageSchema = v.object({
-    list: v.array(PostMediaSummarySchema),
+    list: v.array(MediaDetailSchema),
     page: v.number(),
     limit: v.number(),
     total: v.number(),

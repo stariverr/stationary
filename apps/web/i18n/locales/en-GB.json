@@ -52,7 +52,69 @@
         }
     },
     "media": {
-        "live": "Live"
+        "live": "Live",
+        "configure_files": "What each file becomes",
+        "headers": {
+            "role": "Role",
+            "label": "Label"
+        },
+        "roles": {
+            "original": "Original",
+            "cover": "Cover",
+            "caption": "Caption",
+            "not_allowed": "Not allowed"
+        },
+        "errors": {
+            "file_not_allowed": "{name} cannot be part of {mediaType} media.",
+            "originals_video": "A video takes one video file plus any number of audio-only files.",
+            "originals_audio": "An audio item takes exactly one audio file.",
+            "originals_image": "An image takes exactly one image file.",
+            "originals_pdf": "A PDF takes exactly one PDF file.",
+            "originals_live_photo": "A Live Photo takes one image and one video.",
+            "only_one_default_caption": "Only one caption can be the default."
+        },
+        "toast_invalid_composition": "These files do not make this media",
+        "editor": {
+            "tab": "Files",
+            "originals": "Original files",
+            "add_audio_file": "Add audio file",
+            "main": "Main",
+            "replace": "Replace",
+            "delete": "Delete",
+            "original_added": "File added",
+            "original_replaced": "File replaced",
+            "original_deleted": "File deleted",
+            "original_delete_confirm": "Delete this file? This cannot be undone.",
+            "audio_tracks": "Audio tracks",
+            "captions": "Captions",
+            "add_caption": "Add caption",
+            "no_captions": "No captions yet.",
+            "caption_added": "Caption added",
+            "caption_deleted": "Caption deleted",
+            "caption_delete_confirm": "Delete this caption?",
+            "label": "Label",
+            "language": "Language",
+            "save": "Save",
+            "saved": "Saved",
+            "default": "Default",
+            "make_default": "Make default",
+            "embedded": "Embedded",
+            "edit_failed": "Could not save the change",
+            "no_library": "No library is selected.",
+            "kinds": {
+                "video": "Video",
+                "audio": "Audio",
+                "image": "Image",
+                "pdf": "PDF",
+                "unknown": "Not analysed yet"
+            },
+            "status": {
+                "pending": "Waiting",
+                "in_progress": "Processing",
+                "completed": "Ready",
+                "failed": "Failed"
+            }
+        }
     },
     "post_detail": {
         "title": "Post details",
@@ -91,14 +153,14 @@
             "actions": "Media actions",
             "move_up": "Move up",
             "move_down": "Move down",
-            "manage_tracks": "Manage tracks",
-            "manage_tracks_desc": "Manage files, subtitles, covers, and resolution variants for this media.",
             "select_media_asset": "Select media",
             "unlink_from_post": "Unlink from post",
             "delete_to_trash": "Move to bin",
             "untitled_media": "Untitled media",
             "items_empty": "0 of 0",
-            "items_range": "{from}-{to} of {total}"
+            "items_range": "{from}-{to} of {total}",
+            "edit_media": "Edit files",
+            "edit_media_desc": "Manage the original files, captions, audio tracks and cover of this media."
         },
         "viewer": {
             "loading": "Loading media...",
@@ -109,7 +171,10 @@
             "audio_asset": "Audio",
             "untitled_pdf": "Untitled PDF",
             "pdf_document": "PDF document",
-            "open_pdf": "Open PDF in a new tab"
+            "open_pdf": "Open PDF in a new tab",
+            "player": {
+                "unsupported_codec": "This browser can't play this video's format. Download the original file to watch it."
+            }
         },
         "toasts": {
             "copy_success": "Post link copied",
@@ -208,5 +273,8 @@
             "thumb_alt": "Thumbnail",
             "media_alt": "Media asset"
         }
+    },
+    "draft_box": {
+        "merge_dialog_desc": "Combine the selected files into one media: its original files, a cover and captions."
     }
 }

@@ -1,129 +1,131 @@
 import { describe, expect, test } from "bun:test";
 import {
-    getAllowedFileTrackTypes,
-    getAllowedTrackPurposes,
+    buildMediaDraft,
+    DraftFileRole,
     getCompatibleMediaTypes,
     getDraftCompositionError,
-    normalizeDraftTracksForMedia,
-    type DraftTrackConfigBase,
+    getDraftFileRole,
+    getFileCategories,
+    guessMediaType,
+    toDraftFileConfig,
 } from "./draft-media-rules";
-import { TrackType, TrackPurpose, MediaType } from "../types/post";
+import { FileCategory, MediaType } from "../types/post";
+
+const file = (name: string, mime_type = "application/octet-stream") => ({ name, mime_type });
 
 describe("draft media file classification", () => {
-    const classificationCases: Array<[string, string, TrackType[]]> = [
-        ["song.mp3", "application/octet-stream", [TrackType.AUDIO]],
-        ["song.FLAC", "application/octet-stream", [TrackType.AUDIO]],
-        ["song.ogg", "video/ogg", [TrackType.AUDIO]],
-        ["clip.mov", "application/octet-stream", [TrackType.VIDEO]],
-        ["clip.mp4", "video/mp4", [TrackType.VIDEO, TrackType.AUDIO]],
-        ["segment.m4s", "video/iso.segment", [TrackType.VIDEO, TrackType.AUDIO]],
-        ["cover.avif", "application/octet-stream", [TrackType.IMAGE]],
-        ["cover.jxl", "application/octet-stream", [TrackType.IMAGE]],
-        ["cover.jpeg", "application/octet-stream", [TrackType.IMAGE]],
-        ["caption.vtt", "application/octet-stream", [TrackType.SUBTITLE]],
-        ["caption.srt", "text/plain", [TrackType.SUBTITLE]],
-        ["paper.pdf", "application/octet-stream", [TrackType.PDF]],
+    const classificationCases: Array<[string, string, FileCategory[]]> = [
+        ["song.mp3", "application/octet-stream", [FileCategory.AUDIO]],
+        ["song.FLAC", "application/octet-stream", [FileCategory.AUDIO]],
+        ["song.ogg", "video/ogg", [FileCategory.AUDIO]],
+        ["clip.mov", "application/octet-stream", [FileCategory.VIDEO]],
+        ["clip.mp4", "video/mp4", [FileCategory.VIDEO, FileCategory.AUDIO]],
+        ["segment.m4s", "video/iso.segment", [FileCategory.VIDEO, FileCategory.AUDIO]],
+        ["cover.avif", "application/octet-stream", [FileCategory.IMAGE]],
+        ["cover.jxl", "application/octet-stream", [FileCategory.IMAGE]],
+        ["cover.jpeg", "application/octet-stream", [FileCategory.IMAGE]],
+        ["caption.vtt", "application/octet-stream", [FileCategory.SUBTITLE]],
+        ["caption.srt", "text/plain", [FileCategory.SUBTITLE]],
+        ["paper.pdf", "application/octet-stream", [FileCategory.PDF]],
     ];
 
     test.each(classificationCases)("classifies %s", (name, mimeType, expected) => {
-        expect(getAllowedFileTrackTypes(name, mimeType)).toEqual(expected);
+        expect(getFileCategories(name, mimeType)).toEqual(expected);
     });
 
     test("does not silently treat an unknown file as an image", () => {
-        expect(getAllowedFileTrackTypes("archive.bin", "application/octet-stream")).toEqual([]);
+        expect(getFileCategories("archive.bin", "application/octet-stream")).toEqual([]);
+    });
+});
+
+describe("draft file roles", () => {
+    test("makes an image the cover of video, audio and PDF media and an original of image media", () => {
+        for (const mediaType of [MediaType.VIDEO, MediaType.AUDIO, MediaType.PDF]) {
+            expect(getDraftFileRole(mediaType, file("a.jpg"))).toBe(DraftFileRole.COVER);
+        }
+        for (const mediaType of [MediaType.IMAGE, MediaType.LIVE_PHOTO]) {
+            expect(getDraftFileRole(mediaType, file("a.jpg"))).toBe(DraftFileRole.ORIGINAL);
+        }
+    });
+
+    test("allows captions only on video and audio media", () => {
+        expect(getDraftFileRole(MediaType.VIDEO, file("a.srt"))).toBe(DraftFileRole.CAPTION);
+        expect(getDraftFileRole(MediaType.AUDIO, file("a.vtt"))).toBe(DraftFileRole.CAPTION);
+        expect(getDraftFileRole(MediaType.IMAGE, file("a.vtt"))).toBeNull();
+        expect(getDraftFileRole(MediaType.PDF, file("a.vtt"))).toBeNull();
     });
 });
 
 describe("draft media composition rules", () => {
-    test("only offers Video and Live Photo for a MOV plus JPEG", () => {
-        expect(
-            getCompatibleMediaTypes([
-                { name: "IMG_9211.MOV", mime_type: "video/quicktime" },
-                { name: "IMG_9211.jpeg", mime_type: "image/jpeg" },
-            ]),
-        ).toEqual([MediaType.VIDEO, MediaType.LIVE_PHOTO]);
+    test("offers Video, Live Photo and Audio for a MOV plus JPEG, guessing Video", () => {
+        // Like the server, a video container may hold an audio-only original; probing decides.
+        const files = [file("IMG_9211.MOV", "video/quicktime"), file("IMG_9211.jpeg", "image/jpeg")];
+        expect(getCompatibleMediaTypes(files)).toEqual([MediaType.VIDEO, MediaType.LIVE_PHOTO, MediaType.AUDIO]);
+        expect(guessMediaType(files)).toBe(MediaType.VIDEO);
     });
 
     test("offers Video or Audio for an ambiguous MP4", () => {
-        expect(getCompatibleMediaTypes([{ name: "stream.mp4", mime_type: "video/mp4" }])).toEqual([MediaType.VIDEO, MediaType.AUDIO]);
+        expect(getCompatibleMediaTypes([file("stream.mp4", "video/mp4")])).toEqual([MediaType.VIDEO, MediaType.AUDIO]);
+        expect(guessMediaType([file("stream.mp4", "video/mp4")])).toBe(MediaType.VIDEO);
     });
 
     test("keeps PDF as PDF", () => {
-        expect(getCompatibleMediaTypes([{ name: "paper.pdf", mime_type: "application/pdf" }])).toEqual([MediaType.PDF]);
+        expect(getCompatibleMediaTypes([file("paper.pdf", "application/pdf")])).toEqual([MediaType.PDF]);
     });
 
-    test("allows only images to serve as covers and thumbnails", () => {
-        expect(getAllowedTrackPurposes(MediaType.VIDEO, TrackType.IMAGE)).toContain(TrackPurpose.COVER);
-        expect(getAllowedTrackPurposes(MediaType.VIDEO, TrackType.VIDEO)).not.toContain(TrackPurpose.COVER);
-        expect(getAllowedTrackPurposes(MediaType.VIDEO, TrackType.IMAGE)).toContain(TrackPurpose.THUMBNAIL);
-        expect(getAllowedTrackPurposes(MediaType.VIDEO, TrackType.VIDEO)).not.toContain(TrackPurpose.THUMBNAIL);
-        expect(getAllowedTrackPurposes(MediaType.AUDIO, TrackType.AUDIO)).not.toContain(TrackPurpose.THUMBNAIL);
+    test("lets a video take separate audio files but only one video-only file", () => {
+        expect(getDraftCompositionError(MediaType.VIDEO, [file("v.mp4"), file("en.m4a"), file("ja.m4a")])).toBeNull();
+        expect(getDraftCompositionError(MediaType.VIDEO, [file("v.mp4"), file("a.mp4")])).toBeNull();
+        expect(getDraftCompositionError(MediaType.VIDEO, [file("a.mov"), file("b.mkv")])?.key).toBe("media.errors.originals_video");
+        expect(getDraftCompositionError(MediaType.VIDEO, [file("a.m4a")])?.key).toBe("media.errors.originals_video");
     });
 
-    test("normalizes a MOV plus JPEG into a valid video composition", () => {
-        const tracks: DraftTrackConfigBase[] = [
-            { name: "IMG_9211.MOV", mime_type: "video/quicktime", type: TrackType.VIDEO, purpose: TrackPurpose.CONTENT, is_default: false },
-            { name: "IMG_9211.jpeg", mime_type: "image/jpeg", type: TrackType.IMAGE, purpose: TrackPurpose.CONTENT, is_default: false },
-        ];
-
-        const normalized = normalizeDraftTracksForMedia(MediaType.VIDEO, tracks);
-        expect(normalized[0]).toMatchObject({ type: TrackType.VIDEO, purpose: TrackPurpose.CONTENT, is_default: true });
-        expect(normalized[1]).toMatchObject({ type: TrackType.IMAGE, purpose: TrackPurpose.COVER, is_default: false });
-        expect(getDraftCompositionError(MediaType.VIDEO, normalized)).toBeNull();
+    test("takes exactly one original for audio, image and PDF media", () => {
+        expect(getDraftCompositionError(MediaType.AUDIO, [file("a.mp3"), file("b.mp3")])?.key).toBe("media.errors.originals_audio");
+        expect(getDraftCompositionError(MediaType.IMAGE, [file("a.jpg"), file("b.jpg")])?.key).toBe("media.errors.originals_image");
+        expect(getDraftCompositionError(MediaType.AUDIO, [file("a.mp3"), file("cover.jpg"), file("lyrics.srt")])).toBeNull();
     });
 
-    test("lets only video, audio and PDF media take a cover", () => {
-        for (const mediaType of [MediaType.VIDEO, MediaType.AUDIO, MediaType.PDF]) {
-            expect(getAllowedTrackPurposes(mediaType, TrackType.IMAGE)).toContain(TrackPurpose.COVER);
-        }
-        for (const mediaType of [MediaType.IMAGE, MediaType.LIVE_PHOTO]) {
-            expect(getAllowedTrackPurposes(mediaType, TrackType.IMAGE)).not.toContain(TrackPurpose.COVER);
-        }
-    });
-
-    test("gives the cover to one image and makes the next a thumbnail", () => {
-        const tracks: DraftTrackConfigBase[] = [
-            { name: "song.mp3", mime_type: "audio/mpeg", type: TrackType.AUDIO, purpose: TrackPurpose.CONTENT, is_default: false },
-            { name: "front.jpg", mime_type: "image/jpeg", type: TrackType.IMAGE, purpose: TrackPurpose.CONTENT, is_default: false },
-            { name: "back.jpg", mime_type: "image/jpeg", type: TrackType.IMAGE, purpose: TrackPurpose.CONTENT, is_default: false },
-        ];
-
-        const normalized = normalizeDraftTracksForMedia(MediaType.AUDIO, tracks);
-        expect(normalized[1]).toMatchObject({ purpose: TrackPurpose.COVER });
-        expect(normalized[2]).toMatchObject({ purpose: TrackPurpose.THUMBNAIL });
-        expect(getDraftCompositionError(MediaType.AUDIO, normalized)).toBeNull();
+    test("needs an image and a video for a Live Photo", () => {
+        expect(getDraftCompositionError(MediaType.LIVE_PHOTO, [file("still.jpg"), file("motion.mov")])).toBeNull();
+        expect(getDraftCompositionError(MediaType.LIVE_PHOTO, [file("still.jpg")])?.key).toBe("media.errors.originals_live_photo");
     });
 
     test("rejects more than one cover", () => {
-        const tracks: DraftTrackConfigBase[] = [
-            { name: "clip.mov", mime_type: "video/quicktime", type: TrackType.VIDEO, purpose: TrackPurpose.CONTENT, is_default: true },
-            { name: "a.jpg", mime_type: "image/jpeg", type: TrackType.IMAGE, purpose: TrackPurpose.COVER, is_default: false },
-            { name: "b.jpg", mime_type: "image/jpeg", type: TrackType.IMAGE, purpose: TrackPurpose.COVER, is_default: false },
-        ];
-
-        expect(getDraftCompositionError(MediaType.VIDEO, tracks)).toEqual({ key: "media.errors.only_one_cover_allowed" });
+        expect(getDraftCompositionError(MediaType.VIDEO, [file("clip.mov"), file("a.jpg"), file("b.jpg")])).toEqual({
+            key: "media.errors.only_one_cover_allowed",
+        });
     });
 
-    test("rejects a cover on image media", () => {
-        const tracks: DraftTrackConfigBase[] = [
-            { name: "photo.jpg", mime_type: "image/jpeg", type: TrackType.IMAGE, purpose: TrackPurpose.CONTENT, is_default: true },
-            { name: "cover.jpg", mime_type: "image/jpeg", type: TrackType.IMAGE, purpose: TrackPurpose.COVER, is_default: false },
+    test("rejects more than one default caption", () => {
+        const captions = [
+            { ...file("en.srt"), is_default: true },
+            { ...file("ja.srt"), is_default: true },
         ];
-
-        expect(getDraftCompositionError(MediaType.IMAGE, tracks)?.key).toBe("media.errors.cannot_use_purpose_in_media");
+        expect(getDraftCompositionError(MediaType.VIDEO, [file("clip.mov"), ...captions])?.key).toBe(
+            "media.errors.only_one_default_caption",
+        );
     });
 
-    test("requires distinct default image and video tracks for a Live Photo", () => {
-        const tracks: DraftTrackConfigBase[] = [
-            { name: "still.jpg", mime_type: "image/jpeg", type: TrackType.IMAGE, purpose: TrackPurpose.COVER, is_default: false },
-            { name: "motion.mov", mime_type: "video/quicktime", type: TrackType.VIDEO, purpose: TrackPurpose.CONTENT, is_default: false },
-        ];
+    test("rejects a file that fits no role", () => {
+        expect(getDraftCompositionError(MediaType.PDF, [file("paper.pdf"), file("notes.srt")])?.key).toBe("media.errors.file_not_allowed");
+    });
+});
 
-        const normalized = normalizeDraftTracksForMedia(MediaType.LIVE_PHOTO, tracks);
-        expect(normalized).toEqual([
-            expect.objectContaining({ type: TrackType.IMAGE, purpose: TrackPurpose.CONTENT, is_default: true }),
-            expect.objectContaining({ type: TrackType.VIDEO, purpose: TrackPurpose.CONTENT, is_default: true }),
-        ]);
-        expect(getDraftCompositionError(MediaType.LIVE_PHOTO, normalized)).toBeNull();
+describe("media draft payload", () => {
+    test("splits files into originals, cover and captions", () => {
+        const files = [
+            toDraftFileConfig({ id: "v", name: "clip.mp4", mime_type: "video/mp4" }),
+            toDraftFileConfig({ id: "a", name: "commentary.m4a", mime_type: "audio/mp4" }),
+            toDraftFileConfig({ id: "c", name: "poster.jpg", mime_type: "image/jpeg" }),
+            { ...toDraftFileConfig({ id: "s", name: "en.srt", mime_type: "text/plain" }), language: " en ", is_default: true },
+        ];
+        expect(buildMediaDraft("Clip", MediaType.VIDEO, files)).toEqual({
+            title: "Clip",
+            type: MediaType.VIDEO,
+            originals: ["v", "a"],
+            cover: "c",
+            captions: [{ draft_file_id: "s", language: "en", label: null, is_default: true }],
+        });
     });
 });

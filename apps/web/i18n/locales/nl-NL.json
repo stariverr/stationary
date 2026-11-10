@@ -81,14 +81,14 @@
             "actions": "Media-acties",
             "move_up": "Omhoog verplaatsen",
             "move_down": "Omlaag verplaatsen",
-            "manage_tracks": "Sporen beheren",
-            "manage_tracks_desc": "Beheer bestanden, ondertitels, omslagen en resolutievarianten voor deze media.",
             "select_media_asset": "Media selecteren",
             "unlink_from_post": "Van bericht loskoppelen",
             "delete_to_trash": "Naar prullenbak verplaatsen",
             "untitled_media": "Naamloze media",
             "items_empty": "0 van 0",
-            "items_range": "{from}-{to} van {total}"
+            "items_range": "{from}-{to} van {total}",
+            "edit_media": "Bestanden bewerken",
+            "edit_media_desc": "Beheer de originele bestanden, ondertitels, audiosporen en omslag van dit medium."
         },
         "viewer": {
             "loading": "Media laden...",
@@ -99,7 +99,10 @@
             "audio_asset": "Audio",
             "untitled_pdf": "Naamloze PDF",
             "pdf_document": "PDF-document",
-            "open_pdf": "PDF in een nieuw tabblad openen"
+            "open_pdf": "PDF in een nieuw tabblad openen",
+            "player": {
+                "unsupported_codec": "Deze browser kan het formaat van deze video niet afspelen. Download het originele bestand om hem te bekijken."
+            }
         },
         "toasts": {
             "copy_success": "Berichtlink gekopieerd",
@@ -198,5 +201,72 @@
             "thumb_alt": "Miniatuur",
             "media_alt": "Media-item"
         }
+    },
+    "media": {
+        "configure_files": "Waarvoor elk bestand dient",
+        "headers": {
+            "role": "Rol",
+            "label": "Label"
+        },
+        "roles": {
+            "original": "Origineel",
+            "cover": "Omslag",
+            "caption": "Ondertitel",
+            "not_allowed": "Niet toegestaan"
+        },
+        "errors": {
+            "file_not_allowed": "{name} kan geen deel zijn van {mediaType}-media.",
+            "originals_video": "Een video bestaat uit één videobestand plus willekeurig veel audiobestanden.",
+            "originals_audio": "Een audio-item bestaat uit precies één audiobestand.",
+            "originals_image": "Een afbeelding bestaat uit precies één afbeeldingsbestand.",
+            "originals_pdf": "Een pdf bestaat uit precies één pdf-bestand.",
+            "originals_live_photo": "Een Live Photo bestaat uit één afbeelding en één video.",
+            "only_one_default_caption": "Slechts één ondertitel kan de standaard zijn."
+        },
+        "toast_invalid_composition": "Deze bestanden vormen dit medium niet",
+        "editor": {
+            "tab": "Bestanden",
+            "originals": "Originele bestanden",
+            "add_audio_file": "Audiobestand toevoegen",
+            "main": "Hoofd",
+            "replace": "Vervangen",
+            "delete": "Verwijderen",
+            "original_added": "Bestand toegevoegd",
+            "original_replaced": "Bestand vervangen",
+            "original_deleted": "Bestand verwijderd",
+            "original_delete_confirm": "Dit bestand verwijderen? Dit kan niet ongedaan worden gemaakt.",
+            "audio_tracks": "Audiosporen",
+            "captions": "Ondertitels",
+            "add_caption": "Ondertitel toevoegen",
+            "no_captions": "Nog geen ondertitels.",
+            "caption_added": "Ondertitel toegevoegd",
+            "caption_deleted": "Ondertitel verwijderd",
+            "caption_delete_confirm": "Deze ondertitel verwijderen?",
+            "label": "Label",
+            "language": "Taal",
+            "save": "Opslaan",
+            "saved": "Opgeslagen",
+            "default": "Standaard",
+            "make_default": "Als standaard",
+            "embedded": "Ingebed",
+            "edit_failed": "Wijziging kon niet worden opgeslagen",
+            "no_library": "Geen bibliotheek geselecteerd.",
+            "kinds": {
+                "video": "Video",
+                "audio": "Audio",
+                "image": "Afbeelding",
+                "pdf": "PDF",
+                "unknown": "Nog niet geanalyseerd"
+            },
+            "status": {
+                "pending": "Wachtend",
+                "in_progress": "Bezig",
+                "completed": "Gereed",
+                "failed": "Mislukt"
+            }
+        }
+    },
+    "draft_box": {
+        "merge_dialog_desc": "Combineer de geselecteerde bestanden tot één medium: originele bestanden, omslag en ondertitels."
     }
 }

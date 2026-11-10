@@ -81,14 +81,14 @@
             "actions": "Ações da multimédia",
             "move_up": "Mover para cima",
             "move_down": "Mover para baixo",
-            "manage_tracks": "Gerir faixas",
-            "manage_tracks_desc": "Faça a gestão de ficheiros, legendas, capas e variantes de resolução desta multimédia.",
             "select_media_asset": "Selecionar multimédia",
             "unlink_from_post": "Desassociar da publicação",
             "delete_to_trash": "Mover para o lixo",
             "untitled_media": "Multimédia sem título",
             "items_empty": "0 de 0",
-            "items_range": "{from}-{to} de {total}"
+            "items_range": "{from}-{to} de {total}",
+            "edit_media": "Editar ficheiros",
+            "edit_media_desc": "Faça a gestão dos ficheiros originais, legendas, faixas de áudio e capa desta multimédia."
         },
         "viewer": {
             "loading": "A carregar multimédia...",
@@ -99,7 +99,10 @@
             "audio_asset": "Áudio",
             "untitled_pdf": "PDF sem título",
             "pdf_document": "Documento PDF",
-            "open_pdf": "Abrir PDF num novo separador"
+            "open_pdf": "Abrir PDF num novo separador",
+            "player": {
+                "unsupported_codec": "Este navegador não consegue reproduzir o formato deste vídeo. Transfira o ficheiro original para o ver."
+            }
         },
         "toasts": {
             "copy_success": "Ligação da publicação copiada",
@@ -198,5 +201,72 @@
             "thumb_alt": "Miniatura",
             "media_alt": "Ficheiro multimédia"
         }
+    },
+    "media": {
+        "configure_files": "Função de cada ficheiro",
+        "headers": {
+            "role": "Função",
+            "label": "Etiqueta"
+        },
+        "roles": {
+            "original": "Original",
+            "cover": "Capa",
+            "caption": "Legenda",
+            "not_allowed": "Não permitido"
+        },
+        "errors": {
+            "file_not_allowed": "{name} não pode fazer parte de multimédia {mediaType}.",
+            "originals_video": "Um vídeo leva um ficheiro de vídeo e qualquer número de ficheiros só de áudio.",
+            "originals_audio": "Um áudio leva exatamente um ficheiro de áudio.",
+            "originals_image": "Uma imagem leva exatamente um ficheiro de imagem.",
+            "originals_pdf": "Um PDF leva exatamente um ficheiro PDF.",
+            "originals_live_photo": "Uma Live Photo leva uma imagem e um vídeo.",
+            "only_one_default_caption": "Apenas uma legenda pode ser a predefinida."
+        },
+        "toast_invalid_composition": "Estes ficheiros não formam esta multimédia",
+        "editor": {
+            "tab": "Ficheiros",
+            "originals": "Ficheiros originais",
+            "add_audio_file": "Adicionar ficheiro de áudio",
+            "main": "Principal",
+            "replace": "Substituir",
+            "delete": "Eliminar",
+            "original_added": "Ficheiro adicionado",
+            "original_replaced": "Ficheiro substituído",
+            "original_deleted": "Ficheiro eliminado",
+            "original_delete_confirm": "Eliminar este ficheiro? Não é possível anular.",
+            "audio_tracks": "Faixas de áudio",
+            "captions": "Legendas",
+            "add_caption": "Adicionar legenda",
+            "no_captions": "Ainda sem legendas.",
+            "caption_added": "Legenda adicionada",
+            "caption_deleted": "Legenda eliminada",
+            "caption_delete_confirm": "Eliminar esta legenda?",
+            "label": "Etiqueta",
+            "language": "Idioma",
+            "save": "Guardar",
+            "saved": "Guardado",
+            "default": "Predefinido",
+            "make_default": "Tornar predefinido",
+            "embedded": "Incorporado",
+            "edit_failed": "Não foi possível guardar a alteração",
+            "no_library": "Nenhuma biblioteca selecionada.",
+            "kinds": {
+                "video": "Vídeo",
+                "audio": "Áudio",
+                "image": "Imagem",
+                "pdf": "PDF",
+                "unknown": "Ainda não analisado"
+            },
+            "status": {
+                "pending": "Em espera",
+                "in_progress": "A processar",
+                "completed": "Pronto",
+                "failed": "Falhou"
+            }
+        }
+    },
+    "draft_box": {
+        "merge_dialog_desc": "Combine os ficheiros selecionados numa multimédia: ficheiros originais, capa e legendas."
     }
 }

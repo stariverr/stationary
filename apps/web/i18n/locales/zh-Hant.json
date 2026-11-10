@@ -50,7 +50,6 @@
         "edit": "編輯",
         "save": "儲存",
         "cancel": "取消",
-        "variants": "變體",
         "toggle_sidebar": "切換側邊欄"
     },
     "grid": {
@@ -373,14 +372,7 @@
             "unprocessable": "僅顯示 AI 無法處理的媒體",
             "clear": "顯示全部"
         },
-        "manage_tracks": "管理軌道",
         "live": "實況",
-        "quality_label": "清晰度/保真度",
-        "quality": {
-            "high": "高",
-            "medium": "中",
-            "low": "低"
-        },
         "actions": {
             "regenerate_previews": "重新產生預覽圖",
             "cancel": "取消",
@@ -432,18 +424,13 @@
         "title_label": "標題",
         "title_placeholder": "我的媒體素材",
         "type_label": "媒體類型",
-        "configure_tracks": "配置每個檔案的軌道屬性",
-        "unsupported_track": "不支援",
-        "not_applicable": "不適用",
         "untitled": "未命名媒體",
-        "tracks_count": "{count} 個軌道",
         "headers": {
             "file": "檔案",
-            "track_type": "軌道類型",
-            "purpose": "用途",
-            "quality": "清晰度",
             "default": "預設",
-            "language": "語言"
+            "language": "語言",
+            "role": "用途",
+            "label": "名稱"
         },
         "types": {
             "IMAGE": "圖片集",
@@ -452,34 +439,23 @@
             "AUDIO": "音訊素材",
             "PDF": "PDF 文件"
         },
-        "track_types": {
-            "VIDEO": "影片",
-            "AUDIO": "音訊",
-            "IMAGE": "圖片",
-            "SUBTITLE": "字幕",
-            "PDF": "PDF"
-        },
-        "purposes": {
-            "CONTENT": "內容",
-            "COVER": "封面",
-            "THUMBNAIL": "縮圖",
-            "PREVIEW": "預覽"
-        },
         "errors": {
             "select_at_least_one": "請選擇至少一個草稿檔案。",
-            "not_supported_track": "{name} 不是支援的媒體軌道。",
-            "cannot_be_used_as_type": "{name} 不能用作 {type} 軌道。",
-            "cannot_use_purpose_in_media": "{type} 軌道不能在 {mediaType} 媒體中使用 {purpose} 用途。",
-            "only_one_default_allowed": "只允許有一個預設的 {type} {purpose} 軌道。",
             "only_one_cover_allowed": "只能有一張圖片作為封面。",
-            "requires_default_content_track": "{mediaType} 媒體需要一個預設的 {requiredType} CONTENT 軌道。"
+            "file_not_allowed": "{name} 不能用於 {mediaType} 媒體。",
+            "originals_video": "影片需要一個影片檔案，可另加任意數量的純音訊檔案。",
+            "originals_audio": "音訊需要且只能有一個音訊檔案。",
+            "originals_image": "圖片需要且只能有一個圖片檔案。",
+            "originals_pdf": "PDF 需要且只能有一個 PDF 檔案。",
+            "originals_live_photo": "原況照片需要一張圖片和一段影片。",
+            "only_one_default_caption": "只能有一個預設字幕。"
         },
         "toast_create_success": "媒體已建立",
         "toast_create_success_desc": "「{name}」已成功建立。",
         "toast_create_failed": "建立媒體失敗",
         "toast_upload_failed": "上傳失敗",
         "toast_remove_failed": "刪除檔案失敗",
-        "toast_invalid_composition": "無效的軌道組合",
+        "toast_invalid_composition": "這些檔案無法組成該媒體",
         "ai": {
             "title": "AI 生成",
             "scene": "場景",
@@ -492,6 +468,54 @@
             "copied": "已複製",
             "copy_failed": "複製失敗",
             "search_for": "搜尋「{term}」"
+        },
+        "configure_files": "每個檔案的用途",
+        "roles": {
+            "original": "原始檔案",
+            "cover": "封面",
+            "caption": "字幕",
+            "not_allowed": "不可用"
+        },
+        "editor": {
+            "tab": "檔案",
+            "originals": "原始檔案",
+            "add_audio_file": "新增音訊檔案",
+            "main": "主檔案",
+            "replace": "取代",
+            "delete": "刪除",
+            "original_added": "檔案已新增",
+            "original_replaced": "檔案已取代",
+            "original_deleted": "檔案已刪除",
+            "original_delete_confirm": "刪除此檔案？此操作無法復原。",
+            "audio_tracks": "音軌",
+            "captions": "字幕",
+            "add_caption": "新增字幕",
+            "no_captions": "尚無字幕。",
+            "caption_added": "字幕已新增",
+            "caption_deleted": "字幕已刪除",
+            "caption_delete_confirm": "刪除此字幕？",
+            "label": "名稱",
+            "language": "語言",
+            "save": "儲存",
+            "saved": "已儲存",
+            "default": "預設",
+            "make_default": "設為預設",
+            "embedded": "內嵌",
+            "edit_failed": "無法儲存變更",
+            "no_library": "未選擇資料庫。",
+            "kinds": {
+                "video": "影片",
+                "audio": "音訊",
+                "image": "圖片",
+                "pdf": "PDF",
+                "unknown": "尚未分析"
+            },
+            "status": {
+                "pending": "等待中",
+                "in_progress": "處理中",
+                "completed": "就緒",
+                "failed": "失敗"
+            }
         }
     },
     "search": {
@@ -694,12 +718,11 @@
         "select_all_btn": "全選",
         "add_files_btn": "加入檔案",
         "merge_dialog_title": "合併軌道",
-        "merge_dialog_desc": "將您選擇的已暫存檔案組合為單個媒體資產的多種清晰度解析度、封面圖或字幕軌道。",
+        "merge_dialog_desc": "將所選檔案組合為一個媒體：原始檔案、封面和字幕。",
         "merge_dialog": {
             "title_label": "媒體資產標題",
             "title_placeholder": "我的度假影片",
             "type_label": "資產類型",
-            "configure_tracks": "配置軌道",
             "commit_btn": "提交媒體"
         },
         "toasts": {
@@ -838,14 +861,14 @@
             "actions": "媒體操作",
             "move_up": "上移",
             "move_down": "下移",
-            "manage_tracks": "管理軌道",
-            "manage_tracks_desc": "管理此媒體的檔案、字幕、封面和解析度變體。",
             "select_media_asset": "選擇媒體",
             "unlink_from_post": "解除貼文關聯",
             "delete_to_trash": "移至垃圾桶",
             "untitled_media": "無標題媒體",
             "items_empty": "共 0 項",
-            "items_range": "第 {from}-{to} 項，共 {total} 項"
+            "items_range": "第 {from}-{to} 項，共 {total} 項",
+            "edit_media": "編輯檔案",
+            "edit_media_desc": "管理此媒體的原始檔案、字幕、音軌和封面。"
         },
         "viewer": {
             "loading": "正在載入媒體...",
@@ -856,7 +879,10 @@
             "audio_asset": "音訊",
             "untitled_pdf": "無標題 PDF",
             "pdf_document": "PDF 文件",
-            "open_pdf": "在新分頁中開啟 PDF"
+            "open_pdf": "在新分頁中開啟 PDF",
+            "player": {
+                "unsupported_codec": "此瀏覽器無法播放該影片的格式。請下載原始檔案觀看。"
+            }
         },
         "toasts": {
             "copy_success": "貼文連結已複製",

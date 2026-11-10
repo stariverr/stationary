@@ -1,7 +1,7 @@
 import { ref, watch, toValue, type MaybeRefOrGetter } from "vue";
 import { useApi } from "./useApi";
 import type { ApiResponse } from "@/types/api";
-import type { MediaType, PostMediaPage, PostMediaSummary } from "@/types/post";
+import type { MediaDetail, MediaType, PostMedia, PostMediaPage } from "@/types/post";
 
 export interface PostMediaQueryOptions {
     page?: number;
@@ -12,9 +12,9 @@ export interface PostMediaQueryOptions {
 
 export function usePostMediaQuery(
     postId: MaybeRefOrGetter<string | number | null | undefined>,
-    initialPostGetter?: () => { media?: any[] } | null | undefined,
+    initialPostGetter?: () => { media?: PostMedia[] } | null | undefined,
 ) {
-    const list = ref<PostMediaSummary[]>([]);
+    const list = ref<MediaDetail[]>([]);
     const page = ref(1);
     const limit = ref(50);
     const total = ref(0);
@@ -28,7 +28,7 @@ export function usePostMediaQuery(
         const media = initialPostGetter?.()?.media;
         if (!Array.isArray(media) || media.length === 0) return "";
 
-        return media.map((item: any) => [item.id, item.poster, item.thumbnail, item.url].map((value) => value || "").join(":")).join("|");
+        return media.map((item) => [item.id, item.poster, item.thumbnail, item.url].map((value) => value || "").join(":")).join("|");
     };
 
     async function fetchPage(options: PostMediaQueryOptions = {}) {
@@ -105,25 +105,28 @@ export function usePostMediaQuery(
                 totalPages.value = 0;
             }
 
-            const initialPost = initialPostGetter?.();
-            const postObj = initialPost as any;
-            if (postObj && Array.isArray(postObj.media) && postObj.media.length > 0) {
-                list.value = postObj.media.map((m: any, index: number) => ({
-                    id: String(m.id),
-                    type: m.type as MediaType,
-                    title: m.title || null,
+            // The post list only carries previews, so the full media items replace the seeded list once fetched.
+            const seed = initialPostGetter?.()?.media;
+            if (seed && seed.length > 0) {
+                list.value = seed.map((m, index) => ({
+                    id: m.id,
+                    post_id: String(newId),
+                    type: m.type,
+                    title: m.title ?? null,
                     sort_order: index,
                     position: index,
                     previews: m.previews,
-                    url: m.url || null,
-                    playback: m.playback || null,
-                    subtitles: m.subtitles || [],
-                    width: m.width || null,
-                    height: m.height || null,
-                    tracks: m.tracks || [],
+                    url: m.url,
+                    width: null,
+                    height: null,
+                    duration: null,
+                    cover: null,
+                    playback: null,
+                    originals: [],
+                    captions: [],
                 }));
                 page.value = 1;
-                total.value = postObj.media.length;
+                total.value = seed.length;
                 totalPages.value = 1;
                 isLoading.value = false;
             } else if (list.value.length === 0) {

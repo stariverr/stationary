@@ -9,27 +9,25 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "vue-sonner";
-import { useResizeObserver } from "@vueuse/core";
 import {
-    getAllowedFileTrackTypes,
-    getAllowedTrackPurposes,
+    buildMediaDraft,
     getCompatibleMediaTypes,
     getDraftCompositionError,
-    getRequiredContentTrackTypes,
-    isLanguageTrackType,
-    normalizeDraftTracksForMedia,
+    guessMediaType,
+    toDraftFileConfig,
     MediaType,
-    TrackPurpose,
-    TrackType,
+    type DraftFileConfig,
+    type StagedMediaDraft,
 } from "@/utils/draft-media-rules";
+import DraftFilesTable from "@/components/DraftFilesTable.vue";
+import { apiErrorMessage } from "@/composables/useApi";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Upload, File, Video, Music, X, Loader2, Plus, AlertCircle, Info, ArrowLeft, Search, FolderOpen } from "@lucide/vue";
-import { TrackQuality } from "@/types/post";
 
 const props = withDefaults(
     defineProps<{
         mode?: "standalone" | "draft";
-        initialDraft?: any;
+        initialDraft?: StagedMediaDraft | null;
         initialFiles?: File[];
     }>(),
     {
@@ -42,27 +40,7 @@ const props = withDefaults(
 const emit = defineEmits<{
     cancel: [];
     created: [media: { id: string; title: string; type: string }];
-    "draft-created": [
-        draft: {
-            temp_id: string;
-            title: string;
-            type: string;
-            tracks: {
-                draft_file_id: string;
-                type: string;
-                purpose: string;
-                quality: string;
-                is_default: boolean;
-                language: string | null;
-            }[];
-            _files: {
-                id: string;
-                name: string;
-                mime_type: string;
-                url?: string;
-            }[];
-        },
-    ];
+    "draft-created": [draft: StagedMediaDraft];
 }>();
 
 const importStore = useImportStore();
@@ -70,18 +48,6 @@ const libraryStore = useLibraryStore();
 const queryClient = useQueryClient();
 const libraryId = computed(() => libraryStore.activeLibraryId);
 const { t } = useI18n();
-
-// Container responsive sizing
-const containerRef = ref<HTMLElement | null>(null);
-const isNarrow = ref(false);
-
-useResizeObserver(containerRef, (entries) => {
-    const entry = entries[0];
-    if (entry) {
-        const { width } = entry.contentRect;
-        isNarrow.value = width < 750;
-    }
-});
 
 // Uploaded draft files for this creation session
 const sessionFiles = ref<DraftFileItem[]>([]);
@@ -164,7 +130,7 @@ function confirmDraftSelection() {
     }
 
     sessionFiles.value = newSessionFiles;
-    rebuildTracks();
+    rebuildFiles();
     isDraftSelectOpen.value = false;
 }
 
@@ -186,108 +152,21 @@ function getFileKey(file: File): string {
     return `${file.name}:${file.size}:${file.type}:${file.lastModified}`;
 }
 
-// Track configuration
-type TrackConfig = {
-    draft_file_id: string;
-    name: string;
-    mime_type: string;
-    type: TrackType | null;
-    purpose: TrackPurpose;
-    quality: TrackQuality;
-    is_default: boolean;
-    language: string;
-};
-
+// The files of the media being created, in the order they were added
 const mediaTitle = ref("");
 const mediaType = ref<MediaType>(MediaType.VIDEO);
-const tracksConfig = ref<TrackConfig[]>([]);
+const filesConfig = ref<DraftFileConfig[]>([]);
 
-const mediaTypeLabels: Record<MediaType, string> = {
-    [MediaType.IMAGE]: "Image Gallery",
-    [MediaType.VIDEO]: "Video Asset",
-    [MediaType.LIVE_PHOTO]: "Live Photo",
-    [MediaType.AUDIO]: "Audio Asset",
-    [MediaType.PDF]: "PDF Document",
-};
-
-const compatibleTypes = computed(() => getCompatibleMediaTypes(tracksConfig.value));
+const compatibleTypes = computed(() => getCompatibleMediaTypes(filesConfig.value));
 const compositionError = computed(() => {
-    const err = getDraftCompositionError(mediaType.value, tracksConfig.value);
+    const err = getDraftCompositionError(mediaType.value, filesConfig.value);
     if (!err) return null;
     return err.params ? t(err.key, err.params) : t(err.key);
 });
 
-function getTrackTypeOptions(track: TrackConfig): TrackType[] {
-    return getAllowedFileTrackTypes(track.name, track.mime_type).filter(
-        (trackType) => getAllowedTrackPurposes(mediaType.value, trackType).length > 0,
-    );
-}
-
-function getPurposeOptions(track: TrackConfig): TrackPurpose[] {
-    return getAllowedTrackPurposes(mediaType.value, track.type);
-}
-
-function reconcileDefaultTracks() {
-    const defaultGroups = new Set<string>();
-    for (const track of tracksConfig.value) {
-        if (!track.is_default || !track.type) continue;
-        const key = `${track.type}:${track.purpose}`;
-        if (defaultGroups.has(key)) track.is_default = false;
-        else defaultGroups.add(key);
-    }
-
-    for (const requiredType of getRequiredContentTrackTypes(mediaType.value)) {
-        const contentTracks = tracksConfig.value.filter((track) => track.type === requiredType && track.purpose === TrackPurpose.CONTENT);
-        if (contentTracks.length > 0 && !contentTracks.some((track) => track.is_default)) {
-            contentTracks[0]!.is_default = true;
-        }
-    }
-}
-
-function normalizeTracks(type: MediaType) {
-    tracksConfig.value = normalizeDraftTracksForMedia(type, tracksConfig.value).map((track) => ({
-        ...track,
-        language: isLanguageTrackType(track.type) ? track.language : "",
-    }));
-}
-
 function handleMediaTypeChange(value: unknown) {
     if (typeof value !== "string" || !compatibleTypes.value.includes(value as MediaType)) return;
     mediaType.value = value as MediaType;
-    normalizeTracks(mediaType.value);
-}
-
-function handleTrackTypeChange(track: TrackConfig, value: unknown) {
-    if (typeof value !== "string" || !getTrackTypeOptions(track).includes(value as TrackType)) return;
-    track.type = value as TrackType;
-    const purposes = getPurposeOptions(track);
-    if (!purposes.includes(track.purpose)) {
-        track.purpose = purposes.includes(TrackPurpose.CONTENT) ? TrackPurpose.CONTENT : (purposes[0] ?? TrackPurpose.CONTENT);
-    }
-    if (!isLanguageTrackType(track.type)) track.language = "";
-    reconcileDefaultTracks();
-}
-
-function handleTrackPurposeChange(track: TrackConfig, value: unknown) {
-    if (typeof value !== "string" || !getPurposeOptions(track).includes(value as TrackPurpose)) return;
-    track.purpose = value as TrackPurpose;
-    reconcileDefaultTracks();
-}
-
-function handleDefaultChange(track: TrackConfig, checked: unknown) {
-    if (!track.type) return;
-    const shouldCheck = checked === true;
-    const isRequiredGroup = track.purpose === "CONTENT" && getRequiredContentTrackTypes(mediaType.value).includes(track.type!);
-    if (!shouldCheck && isRequiredGroup && track.is_default) return;
-
-    if (shouldCheck) {
-        for (const candidate of tracksConfig.value) {
-            if (candidate !== track && candidate.type === track.type && candidate.purpose === track.purpose) {
-                candidate.is_default = false;
-            }
-        }
-    }
-    track.is_default = shouldCheck;
 }
 
 // File upload
@@ -357,7 +236,7 @@ async function uploadFiles(files: File[]) {
                 newlyUploadedFileIds.value.push(draft.id);
             }
         }
-        rebuildTracks();
+        rebuildFiles();
     } catch (e: any) {
         toast.error(t("media.toast_upload_failed"), { description: e.message || String(e) });
     } finally {
@@ -367,41 +246,19 @@ async function uploadFiles(files: File[]) {
     }
 }
 
-function rebuildTracks() {
-    const existingIds = new Set(tracksConfig.value.map((t) => t.draft_file_id));
-    for (const draft of sessionFiles.value) {
-        if (!existingIds.has(draft.id)) {
-            const type = getAllowedFileTrackTypes(draft.name, draft.mime_type)[0] ?? null;
-            tracksConfig.value.push({
-                draft_file_id: draft.id,
-                name: draft.name,
-                mime_type: draft.mime_type,
-                type,
-                purpose: TrackPurpose.CONTENT,
-                quality: TrackQuality.HIGH,
-                is_default: false,
-                language: "",
-            });
-        }
-    }
-    const sessionIds = new Set(sessionFiles.value.map((f) => f.id));
-    tracksConfig.value = tracksConfig.value.filter((t) => sessionIds.has(t.draft_file_id));
+function rebuildFiles() {
+    const existing = new Map(filesConfig.value.map((file) => [file.draft_file_id, file]));
+    filesConfig.value = sessionFiles.value.map((draft) => existing.get(draft.id) ?? toDraftFileConfig(draft));
 
     // Auto-select media type & title
-    if (tracksConfig.value.length > 0 && sessionFiles.value.length > 0) {
-        const compatible = getCompatibleMediaTypes(tracksConfig.value);
-        if (!compatible.includes(mediaType.value)) {
-            mediaType.value = compatible.includes(MediaType.VIDEO)
-                ? MediaType.VIDEO
-                : compatible.includes(MediaType.AUDIO)
-                  ? MediaType.AUDIO
-                  : (compatible[0] ?? MediaType.IMAGE);
+    if (filesConfig.value.length > 0) {
+        if (!compatibleTypes.value.includes(mediaType.value)) {
+            mediaType.value = guessMediaType(filesConfig.value) ?? MediaType.IMAGE;
         }
         if (!mediaTitle.value) {
             const first = sessionFiles.value[0]!;
             mediaTitle.value = first.name.substring(0, first.name.lastIndexOf(".")) || first.name;
         }
-        normalizeTracks(mediaType.value);
     }
 }
 
@@ -428,7 +285,7 @@ async function removeFile(id: string) {
         uploadedFileKeys.delete(sessionFileKeys.get(id) ?? "");
         sessionFileKeys.delete(id);
         sessionFiles.value = sessionFiles.value.filter((item) => item.id !== id);
-        rebuildTracks();
+        rebuildFiles();
     } catch (e: any) {
         toast.error(t("media.toast_remove_failed"), { description: e.message || String(e) });
     }
@@ -468,18 +325,11 @@ async function handleCreate() {
     }
 
     if (props.mode === "draft") {
-        const draftGroup = {
+        const draftGroup: StagedMediaDraft = {
             temp_id: props.initialDraft?.temp_id || `draft-media-${Date.now()}`,
             title: mediaTitle.value.trim(),
             type: mediaType.value,
-            tracks: tracksConfig.value.map((t) => ({
-                draft_file_id: t.draft_file_id,
-                type: t.type!,
-                purpose: t.purpose,
-                quality: t.quality,
-                is_default: t.is_default,
-                language: isLanguageTrackType(t.type) ? t.language.trim() || null : null,
-            })),
+            files: filesConfig.value.map((file) => ({ ...file })),
             _files: sessionFiles.value.map((f) => ({
                 id: f.id,
                 name: f.name,
@@ -498,20 +348,7 @@ async function handleCreate() {
     isCommitting.value = true;
     try {
         const result = await importStore.commitMedia(libraryId.value, {
-            media_drafts: [
-                {
-                    title: mediaTitle.value.trim(),
-                    type: mediaType.value,
-                    tracks: tracksConfig.value.map((t) => ({
-                        draft_file_id: t.draft_file_id,
-                        type: t.type!,
-                        purpose: t.purpose,
-                        quality: t.quality,
-                        is_default: t.is_default,
-                        language: isLanguageTrackType(t.type) ? t.language.trim() || null : null,
-                    })),
-                },
-            ],
+            media_drafts: [buildMediaDraft(mediaTitle.value.trim(), mediaType.value, filesConfig.value)],
         });
         const createdId = result?.media_ids?.[0];
         toast.success(t("media.toast_create_success"), {
@@ -527,7 +364,7 @@ async function handleCreate() {
         });
         resetAndClose();
     } catch (e: any) {
-        toast.error(t("media.toast_create_failed"), { description: e.message || String(e) });
+        toast.error(t("media.toast_create_failed"), { description: apiErrorMessage(e) });
     } finally {
         isCommitting.value = false;
     }
@@ -540,7 +377,7 @@ function resetAndClose() {
             importStore.deleteDraftFile(libraryId.value, id).catch(() => undefined);
         }
     }
-    tracksConfig.value = [];
+    filesConfig.value = [];
     mediaTitle.value = "";
     mediaType.value = MediaType.VIDEO;
     sessionFiles.value = [];
@@ -564,27 +401,17 @@ watch(
         if (draft) {
             mediaTitle.value = draft.title;
             mediaType.value = draft.type;
-            sessionFiles.value = draft._files.map((f: any) => ({
+            sessionFiles.value = draft._files.map((f) => ({
                 id: f.id,
+                file_id: "",
                 name: f.name,
                 mime_type: f.mime_type,
-                size: f.size ?? null,
-                url: f.url,
+                size: f.size ?? 0,
+                url: f.url ?? "",
+                create_time: "",
             }));
-            preExistingDraftIds.value = new Set(draft.preExistingDraftFileIds || []);
-            tracksConfig.value = draft.tracks.map((t: any) => {
-                const file = draft._files.find((f: any) => f.id === t.draft_file_id);
-                return {
-                    draft_file_id: t.draft_file_id,
-                    name: file ? file.name : "Unknown File",
-                    mime_type: file ? file.mime_type : "application/octet-stream",
-                    type: t.type,
-                    purpose: t.purpose,
-                    quality: t.quality,
-                    is_default: t.is_default,
-                    language: t.language || "",
-                };
-            });
+            preExistingDraftIds.value = new Set(draft.preExistingDraftFileIds);
+            filesConfig.value = draft.files.map((file) => ({ ...file }));
             newlyUploadedFileIds.value = [];
             pendingDeleteFileIds.value = [];
         } else {
@@ -612,7 +439,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div ref="containerRef" class="flex flex-col h-full overflow-hidden">
+    <div class="flex flex-col h-full overflow-hidden">
         <!-- Header: Only visible in standalone mode -->
         <div v-if="props.mode === 'standalone'" class="shrink-0 border-b px-4 py-4 text-left sm:px-6 flex items-center gap-3">
             <Button variant="ghost" size="icon" class="w-8 h-8 -ml-1 text-slate-500 hover:text-slate-700" @click="handleCancel">
@@ -752,8 +579,8 @@ onUnmounted(() => {
             <!-- Hidden file input -->
             <input type="file" ref="fileInputRef" multiple class="hidden" @change="handleFileSelect" />
 
-            <!-- Track Configuration (shown when files are uploaded) -->
-            <div v-if="tracksConfig.length > 0" class="space-y-4">
+            <!-- File roles (shown when files are uploaded) -->
+            <div v-if="filesConfig.length > 0" class="space-y-4">
                 <!-- Title & Media Type -->
                 <div class="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_16rem]">
                     <div class="space-y-1.5">
@@ -775,176 +602,14 @@ onUnmounted(() => {
                     </div>
                 </div>
 
-                <!-- Track configuration -->
+                <!-- What each file becomes -->
                 <div class="space-y-2">
                     <div class="text-xs font-semibold text-gray-500 dark:text-zinc-400 flex items-center gap-1">
                         <Info class="w-3.5 h-3.5" />
-                        {{ $t("media.configure_tracks") }}
+                        {{ $t("media.configure_files") }}
                     </div>
 
-                    <!-- Container query responsive table layout (shown when container is wide) -->
-                    <div v-if="!isNarrow" class="overflow-x-auto rounded-lg border bg-gray-50/20 dark:bg-zinc-900/30 text-xs">
-                        <table class="w-full table-fixed border-collapse text-left" style="min-width: 680px">
-                            <thead>
-                                <tr
-                                    class="bg-slate-50 dark:bg-zinc-900 text-slate-500 dark:text-zinc-400 font-semibold border-b border-slate-100 dark:border-zinc-800 text-xs uppercase tracking-wider"
-                                >
-                                    <th class="w-[180px] p-3">{{ $t("media.headers.file") }}</th>
-                                    <th class="w-[110px] p-3">{{ $t("media.headers.track_type") }}</th>
-                                    <th class="w-[110px] p-3">{{ $t("media.headers.purpose") }}</th>
-                                    <th class="w-[100px] p-3">{{ $t("media.headers.quality") }}</th>
-                                    <th class="w-[70px] p-3 text-center">{{ $t("media.headers.default") }}</th>
-                                    <th class="w-[110px] p-3">{{ $t("media.headers.language") }}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr
-                                    v-for="track in tracksConfig"
-                                    :key="track.draft_file_id"
-                                    class="border-b last:border-0 hover:bg-slate-50/40 dark:hover:bg-zinc-800/20 border-slate-100 dark:border-zinc-800 text-xs"
-                                >
-                                    <td class="p-3 text-slate-700 dark:text-zinc-300 font-medium" :title="track.name">
-                                        <div class="truncate">{{ track.name }}</div>
-                                    </td>
-                                    <td class="p-1.5">
-                                        <Select
-                                            :model-value="track.type ?? undefined"
-                                            @update:model-value="(v: unknown) => handleTrackTypeChange(track, v)"
-                                        >
-                                            <SelectTrigger class="h-8 text-xs">
-                                                <SelectValue :placeholder="$t('media.unsupported_track')" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem v-for="type in getTrackTypeOptions(track)" :key="type" :value="type">
-                                                    {{ $t("media.track_types." + type) }}
-                                                </SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </td>
-                                    <td class="p-1.5">
-                                        <Select
-                                            :model-value="track.purpose"
-                                            @update:model-value="(v: unknown) => handleTrackPurposeChange(track, v)"
-                                        >
-                                            <SelectTrigger class="h-8 text-xs">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem v-for="purpose in getPurposeOptions(track)" :key="purpose" :value="purpose">
-                                                    {{ $t("media.purposes." + purpose) }}
-                                                </SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </td>
-                                    <td class="p-1.5">
-                                        <Select v-model="track.quality">
-                                            <SelectTrigger class="h-8 text-xs">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="HIGH">{{ $t("media.quality.high") }}</SelectItem>
-                                                <SelectItem value="MEDIUM">{{ $t("media.quality.medium") }}</SelectItem>
-                                                <SelectItem value="LOW">{{ $t("media.quality.low") }}</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </td>
-                                    <td class="p-3 text-center">
-                                        <Checkbox
-                                            :checked="track.is_default"
-                                            :disabled="
-                                                track.purpose === 'CONTENT' && getRequiredContentTrackTypes(mediaType).includes(track.type!)
-                                            "
-                                            @update:checked="(v: unknown) => handleDefaultChange(track, v)"
-                                        />
-                                    </td>
-                                    <td class="p-1.5">
-                                        <Input
-                                            v-if="isLanguageTrackType(track.type)"
-                                            v-model="track.language"
-                                            placeholder="en"
-                                            class="h-8 text-xs"
-                                        />
-                                        <span v-else class="block px-2 text-gray-400 dark:text-zinc-500">—</span>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <!-- Container query responsive card layout (shown when container is narrow) -->
-                    <div v-else class="space-y-3">
-                        <div
-                            v-for="track in tracksConfig"
-                            :key="`mobile-${track.draft_file_id}`"
-                            class="space-y-4 rounded-lg border dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3.5"
-                        >
-                            <div class="min-w-0 border-b dark:border-zinc-800 pb-3">
-                                <div class="truncate text-sm font-medium">{{ track.name }}</div>
-                                <div class="mt-0.5 truncate text-xs text-gray-500 dark:text-zinc-400">{{ track.mime_type }}</div>
-                            </div>
-                            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                <div class="space-y-1.5">
-                                    <Label class="text-xs text-gray-500 dark:text-zinc-400">{{ $t("media.headers.track_type") }}</Label>
-                                    <Select
-                                        :model-value="track.type ?? undefined"
-                                        @update:model-value="(v: unknown) => handleTrackTypeChange(track, v)"
-                                    >
-                                        <SelectTrigger class="h-9 w-full text-xs">
-                                            <SelectValue :placeholder="$t('media.unsupported_track')" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem v-for="type in getTrackTypeOptions(track)" :key="type" :value="type">
-                                                {{ $t("media.track_types." + type) }}
-                                            </SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div class="space-y-1.5">
-                                    <Label class="text-xs text-gray-500 dark:text-zinc-400">{{ $t("media.headers.purpose") }}</Label>
-                                    <Select
-                                        :model-value="track.purpose"
-                                        @update:model-value="(v: unknown) => handleTrackPurposeChange(track, v)"
-                                    >
-                                        <SelectTrigger class="h-9 w-full text-xs">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem v-for="purpose in getPurposeOptions(track)" :key="purpose" :value="purpose">
-                                                {{ $t("media.purposes." + purpose) }}
-                                            </SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div class="space-y-1.5">
-                                    <Label class="text-xs text-gray-500 dark:text-zinc-400">{{ $t("media.headers.quality") }}</Label>
-                                    <Select v-model="track.quality">
-                                        <SelectTrigger :aria-label="`Quality for ${track.name}`" class="h-9 w-full text-xs">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="HIGH">{{ $t("media.quality.high") }}</SelectItem>
-                                            <SelectItem value="MEDIUM">{{ $t("media.quality.medium") }}</SelectItem>
-                                            <SelectItem value="LOW">{{ $t("media.quality.low") }}</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div v-if="isLanguageTrackType(track.type)" class="space-y-1.5">
-                                    <Label class="text-xs text-gray-500 dark:text-zinc-400">{{ $t("media.headers.language") }}</Label>
-                                    <Input v-model="track.language" placeholder="en" class="h-9 text-xs" />
-                                </div>
-                            </div>
-                            <div
-                                class="flex min-h-9 items-center justify-between gap-3 rounded-md bg-gray-50 dark:bg-zinc-800/50 px-3 py-2 text-sm"
-                            >
-                                <span class="text-xs text-gray-500 dark:text-zinc-400">{{ $t("media.headers.default") }}</span>
-                                <Checkbox
-                                    :checked="track.is_default"
-                                    :disabled="track.purpose === 'CONTENT' && getRequiredContentTrackTypes(mediaType).includes(track.type!)"
-                                    @update:checked="(v: unknown) => handleDefaultChange(track, v)"
-                                />
-                            </div>
-                        </div>
-                    </div>
+                    <DraftFilesTable :media-type="mediaType" :files="filesConfig" />
 
                     <!-- Composition error -->
                     <div
@@ -967,7 +632,7 @@ onUnmounted(() => {
             </Button>
             <Button
                 class="w-full sm:w-auto gap-1.5"
-                :disabled="tracksConfig.length === 0 || !mediaTitle.trim() || !!compositionError || isUploading || isCommitting"
+                :disabled="filesConfig.length === 0 || !mediaTitle.trim() || !!compositionError || isUploading || isCommitting"
                 @click="handleCreate"
             >
                 <Loader2 v-if="isCommitting" class="w-3.5 h-3.5 animate-spin" />

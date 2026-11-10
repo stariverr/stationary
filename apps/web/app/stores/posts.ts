@@ -227,27 +227,14 @@ export const usePostStore = defineStore("posts", () => {
     const mapApiPostToUiPost = (apiPost: ApiPostListItem): Post => {
         const displayTime = apiPost.published_time ?? apiPost.create_time;
 
-        const uiMedia = apiPost.media.map((m) => {
-            const fallbackVideo = m.videos?.[0]?.url || null;
-            const url = m.type === "VIDEO" ? fallbackVideo : previewLargestUrl(m.previews);
-            const live_url = m.type === "LIVE_PHOTO" ? fallbackVideo : null;
-
-            return {
-                ...m,
-                type: m.type,
-                url: url,
-                mime_type: null,
-                thumbnail: previewThumbnailUrl(m.previews),
-                live_url: live_url,
-                poster: previewPosterUrl(m.previews),
-                sync_status: m.sync_status || "PENDING",
-                last_error: m.last_error || null,
-                ai_status: m.ai_status || "PENDING",
-                ai_error: m.ai_error || null,
-                subtitles: [],
-                srcset: previewSrcset(m.previews),
-            };
-        });
+        const uiMedia = apiPost.media.map((m) => ({
+            ...m,
+            // Post cards play a video from its main original and show every other type by its largest preview.
+            url: m.type === "VIDEO" ? m.url : previewLargestUrl(m.previews),
+            thumbnail: previewThumbnailUrl(m.previews),
+            poster: previewPosterUrl(m.previews),
+            srcset: previewSrcset(m.previews),
+        }));
 
         return {
             ...apiPost,
@@ -372,41 +359,6 @@ export const usePostStore = defineStore("posts", () => {
                 const detail = response.data;
                 const displayTime = detail.published_time ?? detail.create_time;
 
-                const uiMedia =
-                    detail.media?.map((m) => {
-                        const primaryTrack = m.tracks.find(
-                            (t) =>
-                                t.purpose === "CONTENT" &&
-                                t.priority === 0 &&
-                                (m.type === "VIDEO" ? t.type === "VIDEO" : t.type === "IMAGE"),
-                        );
-                        const liveTrack =
-                            m.type === "LIVE_PHOTO" ? m.tracks.find((t) => t.type === "VIDEO" && t.purpose === "CONTENT") : null;
-                        const subtitleTracks = m.tracks.filter((t) => t.type === "SUBTITLE");
-
-                        let url = m.url || primaryTrack?.url || null;
-
-                        return {
-                            ...m,
-                            type: m.type as "VIDEO" | "IMAGE" | "LIVE_PHOTO" | "AUDIO" | "PDF",
-                            url: url,
-                            mime_type: primaryTrack?.mime_type || null,
-                            thumbnail: previewThumbnailUrl(m.previews),
-                            live_url: liveTrack?.url || null,
-                            poster: previewPosterUrl(m.previews),
-                            sync_status: m.sync_status || "PENDING",
-                            last_error: m.last_error || null,
-                            ai_status: m.ai_status || "PENDING",
-                            ai_error: m.ai_error || null,
-                            subtitles: subtitleTracks.map((sub) => ({
-                                url: sub.url,
-                                language: sub.metadata?.language || "unknown",
-                                label: sub.metadata?.label || sub.metadata?.language || "unknown",
-                                format: sub.metadata?.format === "json" ? "vtt" : sub.metadata?.format || "vtt",
-                            })),
-                        };
-                    }) || [];
-
                 return {
                     ...detail,
                     id: detail.id || "",
@@ -430,10 +382,9 @@ export const usePostStore = defineStore("posts", () => {
                     width: 1080,
                     height: 1920,
                     type: detail.type as "TEXT" | "MULTI_MEDIA",
-                    originalUrl: detail.url || (uiMedia.length ? uiMedia[0]?.url || "" : ""),
+                    originalUrl: detail.url || "",
                     sync_status: detail.sync_status || "PENDING",
                     last_error: detail.last_error || null,
-                    media: uiMedia,
                 } as Post;
             }
             return null;
@@ -448,7 +399,7 @@ export const usePostStore = defineStore("posts", () => {
         const listPost = posts.value.find((p) => p.id == selectedPostId.value);
         const detailPost = detailData.value;
 
-        if (!detailPost || !listPost || (detailPost.media?.length ?? 0) > 0 || (listPost.media?.length ?? 0) === 0) {
+        if (!detailPost || !listPost || (listPost.media?.length ?? 0) === 0) {
             return detailPost || listPost || null;
         }
 

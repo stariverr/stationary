@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { buildMediaDraft, type StagedMediaDraft } from "@/utils/draft-media-rules";
+import { apiErrorMessage } from "@/composables/useApi";
 import { ref, computed, watch } from "vue";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -111,7 +113,7 @@ interface StagedItem {
     type: "IMAGE" | "VIDEO" | "LIVE_PHOTO" | "AUDIO" | "PDF";
     source: "existing" | "draft";
     existingId?: string;
-    draftGroup?: any; // DraftMediaGroup payload
+    draftGroup?: StagedMediaDraft;
     thumbnail?: string | null;
     preExistingDraftFileIds?: string[];
     _files?: {
@@ -124,7 +126,7 @@ interface StagedItem {
 
 const stagedItems = ref<StagedItem[]>([]);
 const mediaView = ref<"attached" | "library" | "upload">("attached");
-const editingDraft = ref<any>(null);
+const editingDraft = ref<StagedMediaDraft | null>(null);
 
 // Search input for library orphans list
 const searchOrphanQuery = ref("");
@@ -160,11 +162,11 @@ watch(
 
 function cleanupAllDraftFiles() {
     for (const item of stagedItems.value) {
-        if (item.source === "draft" && item.draftGroup?.tracks) {
-            for (const track of item.draftGroup.tracks) {
-                const isPreExisting = item.preExistingDraftFileIds?.includes(track.draft_file_id);
+        if (item.source === "draft" && item.draftGroup) {
+            for (const file of item.draftGroup.files) {
+                const isPreExisting = item.preExistingDraftFileIds?.includes(file.draft_file_id);
                 if (!isPreExisting && libraryId.value) {
-                    importStore.deleteDraftFile(libraryId.value, track.draft_file_id).catch(() => undefined);
+                    importStore.deleteDraftFile(libraryId.value, file.draft_file_id).catch(() => undefined);
                 }
             }
         }
@@ -257,8 +259,8 @@ function getStagedItemThumbnail(item: StagedItem): string | null {
     return item.thumbnail || null;
 }
 
-function handleMediaDraftCreated(draft: any) {
-    const firstImage = draft._files?.find((f: any) => f.mime_type.startsWith("image/"));
+function handleMediaDraftCreated(draft: StagedMediaDraft) {
+    const firstImage = draft._files.find((f) => f.mime_type.startsWith("image/"));
     const thumbnail: string | null = firstImage?.url || null;
 
     const existingIndex = stagedItems.value.findIndex((item) => item.id === draft.temp_id);
@@ -270,7 +272,7 @@ function handleMediaDraftCreated(draft: any) {
         draftGroup: draft,
         _files: draft._files,
         thumbnail: thumbnail,
-        preExistingDraftFileIds: draft.preExistingDraftFileIds || [],
+        preExistingDraftFileIds: draft.preExistingDraftFileIds,
     };
 
     if (existingIndex !== -1) {
@@ -286,7 +288,7 @@ function handleMediaDraftCreated(draft: any) {
 }
 
 function editDraftMedia(item: StagedItem) {
-    editingDraft.value = item.draftGroup;
+    editingDraft.value = item.draftGroup ?? null;
     mediaView.value = "upload";
 }
 
@@ -354,11 +356,11 @@ function moveDown(idx: number) {
 
 function removeStagedItem(idx: number) {
     const item = stagedItems.value[idx];
-    if (item && item.source === "draft" && item.draftGroup?.tracks) {
-        for (const track of item.draftGroup.tracks) {
-            const isPreExisting = item.preExistingDraftFileIds?.includes(track.draft_file_id);
+    if (item && item.source === "draft" && item.draftGroup) {
+        for (const file of item.draftGroup.files) {
+            const isPreExisting = item.preExistingDraftFileIds?.includes(file.draft_file_id);
             if (!isPreExisting && libraryId.value) {
-                importStore.deleteDraftFile(libraryId.value, track.draft_file_id).catch(() => undefined);
+                importStore.deleteDraftFile(libraryId.value, file.draft_file_id).catch(() => undefined);
             }
         }
     }
@@ -380,18 +382,7 @@ async function handleSubmit() {
         } else {
             return {
                 kind: "draft" as const,
-                draft: {
-                    title: item.draftGroup.title,
-                    type: item.draftGroup.type,
-                    tracks: item.draftGroup.tracks.map((t: any) => ({
-                        draft_file_id: t.draft_file_id,
-                        type: t.type,
-                        purpose: t.purpose,
-                        quality: t.quality,
-                        is_default: t.is_default,
-                        language: t.language || null,
-                    })),
-                },
+                draft: buildMediaDraft(item.draftGroup!.title, item.draftGroup!.type, item.draftGroup!.files),
             };
         }
     });
@@ -415,7 +406,7 @@ async function handleSubmit() {
         }
     } catch (e: any) {
         toast.error(t("post.toast_create_failed", "Failed to create post"), {
-            description: e.message || String(e),
+            description: apiErrorMessage(e),
         });
     } finally {
         isSubmitting.value = false;
@@ -795,8 +786,7 @@ async function handleSubmit() {
                                         {{ media.title || $t("media.untitled") }}
                                     </div>
                                     <div class="text-xs text-slate-400 mt-0.5">
-                                        {{ formatMediaType(media.type) }} •
-                                        {{ $t("media.tracks_count", { count: media.tracks?.length || 0 }) }}
+                                        {{ formatMediaType(media.type) }}
                                     </div>
                                 </div>
                             </div>

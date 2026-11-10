@@ -1,43 +1,20 @@
-import { MediaType, TrackPurpose, TrackType, type MediaPreviews } from "@/types/post";
+import { MediaType, type MediaOriginal, type MediaPreviews } from "@/types/post";
 
-interface SelectableTrack {
-    type: string;
-    purpose: string;
-    is_default?: boolean;
-    is_original?: boolean;
-    priority?: number;
-    quality?: string;
+/**
+ * Whether this browser can decode a stream with this RFC 6381 codec string. Manifests carry single-stream fMP4, so the
+ * check runs against MP4; a stream the server could not describe (no codec string) is left to the player.
+ */
+export function isCodecSupported(kind: "video" | "audio", codecString: string | null): boolean {
+    if (!codecString || !import.meta.client) return true;
+    const type = `${kind}/mp4; codecs="${codecString}"`;
+    const mediaSource = window.MediaSource ?? (window as { ManagedMediaSource?: typeof MediaSource }).ManagedMediaSource;
+    if (mediaSource) return mediaSource.isTypeSupported(type);
+    return document.createElement(kind).canPlayType(type) !== "";
 }
 
-const qualityRank: Record<string, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
-
-/** Orders tracks by ascending priority, then by descending quality. */
-export function sortTracks<T extends SelectableTrack>(tracks: T[]): T[] {
-    return [...tracks].sort((a, b) => {
-        const priorityA = a.priority ?? 999;
-        const priorityB = b.priority ?? 999;
-        if (priorityA !== priorityB) return priorityA - priorityB;
-        return (qualityRank[b.quality || ""] || 0) - (qualityRank[a.quality || ""] || 0);
-    });
-}
-
-/** Picks the track a viewer plays or shows for a track type. */
-export function selectContentTrack<T extends SelectableTrack>(tracks: T[] | undefined, type: string): T | undefined {
-    const candidates = sortTracks((tracks || []).filter((track) => track.type.toUpperCase() === type));
-    return (
-        candidates.find((track) => track.is_default) ||
-        candidates.find((track) => track.purpose.toUpperCase() === TrackPurpose.CONTENT) ||
-        candidates[0]
-    );
-}
-
-/** The file behind a media item that a viewer downloads or opens: its original content track when it has one. */
-export function selectOriginalTrack<T extends SelectableTrack>(media: { type: MediaType; tracks?: T[] }): T | undefined {
-    const trackType = media.type === MediaType.LIVE_PHOTO ? TrackType.IMAGE : media.type;
-    const original = (media.tracks || []).find(
-        (track) => track.is_original && track.type.toUpperCase() === trackType && track.purpose.toUpperCase() === TrackPurpose.CONTENT,
-    );
-    return original ?? selectContentTrack(media.tracks, trackType);
+/** The original a media is shown by (its `url`), which the viewers open and download. */
+export function mainOriginal(media: { url: string | null; originals: MediaOriginal[] }): MediaOriginal | undefined {
+    return media.url ? media.originals.find((original) => original.url === media.url) : undefined;
 }
 
 /**

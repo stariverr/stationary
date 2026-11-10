@@ -30,16 +30,15 @@ import { useApi } from "@/composables/useApi";
 import type { ApiResponse } from "@/types/api";
 import {
     MediaType,
-    TrackPurpose,
     type AttachMediaResult,
+    type MediaDetail,
     type PostMediaPage,
-    type PostMediaSummary,
     type ReorderMediaResult,
     type TrashMediaResult,
     type UnbindMediaResult,
 } from "@/types/post";
 import OrphanMediaPickerDialog from "./OrphanMediaPickerDialog.vue";
-import ManageTracksDialog from "./ManageTracksDialog.vue";
+import MediaEditorDialog from "./MediaEditorDialog.vue";
 
 const { selectedPost, selectedPostId } = usePosts();
 const { t } = useI18n();
@@ -112,7 +111,7 @@ const handlePlayerPause = () => {
     showChrome();
 };
 
-const currentMedia = computed<PostMediaSummary | null>(() => {
+const currentMedia = computed<MediaDetail | null>(() => {
     const activeMedia = postMediaList.value.find((media) => media.id === activeMediaId.value);
     return activeMedia ?? postMediaList.value[0] ?? null;
 });
@@ -150,17 +149,17 @@ const getErrorMessage = (error: unknown): string => {
     return "";
 };
 
-const currentOriginalTrack = computed(() => (currentMedia.value ? selectOriginalTrack(currentMedia.value) : undefined));
+const currentOriginal = computed(() => (currentMedia.value ? mainOriginal(currentMedia.value) : undefined));
 const isDownloading = ref(false);
 
 const downloadCurrentMedia = async () => {
     const media = currentMedia.value;
-    const track = currentOriginalTrack.value;
-    if (!media || !track || isDownloading.value) return;
+    const original = currentOriginal.value;
+    if (!media || !original || isDownloading.value) return;
 
     isDownloading.value = true;
     try {
-        const response = await useApi<ApiResponse<{ url: string }>>(`/media/${media.id}/tracks/${track.id}/download-url`);
+        const response = await useApi<ApiResponse<{ url: string }>>(`/media/${media.id}/originals/${original.id}/download-url`);
         if (!response.success || !response.data) {
             throw new Error(response.message || t("post_detail.toasts.download_failed"));
         }
@@ -176,8 +175,8 @@ const downloadCurrentMedia = async () => {
     }
 };
 
-const isEditingTracks = ref(false);
-const trackEditMediaId = ref<string | undefined>(undefined);
+const isEditingMedia = ref(false);
+const editingMediaId = ref<string | undefined>(undefined);
 const isOrphanPickerOpen = ref(false);
 const isCreateMediaOpen = ref(false);
 
@@ -237,13 +236,13 @@ watch(
     },
 );
 
-const openTrackEditor = (mediaId: string) => {
-    trackEditMediaId.value = mediaId;
-    isEditingTracks.value = true;
+const openMediaEditor = (mediaId: string) => {
+    editingMediaId.value = mediaId;
+    isEditingMedia.value = true;
 };
 
 const handleDialogClose = async (open: boolean) => {
-    isEditingTracks.value = open;
+    isEditingMedia.value = open;
     const postId = selectedPost.value?.id;
     if (!open && postId) {
         await refreshPostData(postId);
@@ -370,7 +369,11 @@ const stripSlots = computed(() => {
 });
 
 const swipeAreaRef = ref<HTMLElement | null>(null);
-const { style: swipeStyle, isDragging: isSwiping, direction: swipeDirection } = useSwipeNavigation(swipeAreaRef, {
+const {
+    style: swipeStyle,
+    isDragging: isSwiping,
+    direction: swipeDirection,
+} = useSwipeNavigation(swipeAreaRef, {
     // A zoomed-in image pans under drags instead.
     enabled: () => zoomLevel.value <= 1 && !isLoadingMediaList.value,
     canPrevious: () => canPrevious.value,
@@ -412,7 +415,7 @@ const handleResize = () => {
 
 const handleKeydown = (event: KeyboardEvent) => {
     handleStageActivity();
-    if (event.defaultPrevented || isEditingTracks.value || isOrphanPickerOpen.value || isCreateMediaOpen.value) return;
+    if (event.defaultPrevented || isEditingMedia.value || isOrphanPickerOpen.value || isCreateMediaOpen.value) return;
     const target = event.target;
     if (
         target instanceof HTMLInputElement ||
@@ -691,7 +694,11 @@ const confirmTrashMedia = async () => {
                         v-for="slot in stripSlots"
                         :key="slot.key"
                         class="absolute inset-0"
-                        :style="slot.position ? { transform: `translateX(calc(${slot.position * 100}% + ${slot.position * SWIPE_GAP_PX}px))` } : undefined"
+                        :style="
+                            slot.position
+                                ? { transform: `translateX(calc(${slot.position * 100}% + ${slot.position * SWIPE_GAP_PX}px))` }
+                                : undefined
+                        "
                         :inert="slot.position !== 0"
                         :aria-hidden="slot.position !== 0 || undefined"
                     >
@@ -766,14 +773,14 @@ const confirmTrashMedia = async () => {
                 <span v-else />
 
                 <div
-                    v-if="mediaTotal > 1 || currentOriginalTrack"
+                    v-if="mediaTotal > 1 || currentOriginal"
                     class="pointer-events-auto flex h-9 shrink-0 items-center rounded-full bg-black/45 px-1 text-white/90 backdrop-blur-md"
                 >
                     <span v-if="mediaTotal > 1" class="px-2.5 font-mono text-xs font-medium tabular-nums">{{ mediaCounter }}</span>
-                    <template v-if="currentOriginalTrack">
+                    <template v-if="currentOriginal">
                         <span v-if="mediaTotal > 1" class="h-4 w-px bg-white/20" />
                         <a
-                            :href="currentOriginalTrack.url"
+                            :href="currentOriginal.url ?? undefined"
                             target="_blank"
                             rel="noopener"
                             class="flex h-7 w-7 items-center justify-center rounded-full transition hover:bg-white/15 hover:text-white"
@@ -826,7 +833,11 @@ const confirmTrashMedia = async () => {
                         type="button"
                         @click="toggleActualSize"
                         class="h-8 min-w-14 px-2 flex items-center justify-center rounded-full font-mono text-xs font-semibold tabular-nums text-white/85 hover:bg-white/15 hover:text-white transition-all cursor-pointer active:scale-95"
-                        :title="isFitZoom && actualSizeZoom ? $t('post_detail.viewer.zoom_reset_original') : $t('post_detail.viewer.zoom_reset_fit')"
+                        :title="
+                            isFitZoom && actualSizeZoom
+                                ? $t('post_detail.viewer.zoom_reset_original')
+                                : $t('post_detail.viewer.zoom_reset_fit')
+                        "
                     >
                         {{ zoomPercent }}%
                     </button>
@@ -1070,16 +1081,16 @@ const confirmTrashMedia = async () => {
                     @shift-media="handleShiftMedia"
                     @unlink-media="requestUnlinkMedia"
                     @trash-media="requestTrashMedia"
-                    @manage-tracks="openTrackEditor"
+                    @edit-media="openMediaEditor"
                 />
             </div>
         </section>
     </div>
 
-    <ManageTracksDialog
-        :open="isEditingTracks"
+    <MediaEditorDialog
+        :open="isEditingMedia"
         :media-list="postMediaList"
-        :initial-media-id="trackEditMediaId"
+        :initial-media-id="editingMediaId"
         @update:open="handleDialogClose"
     />
 
