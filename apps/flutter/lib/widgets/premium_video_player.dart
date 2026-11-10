@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -20,27 +18,23 @@ import 'premium_image.dart';
 ///    until `_isVideoReadyToPaint` confirms active video frame output, then smoothly
 ///    dissolves the cover via [AnimatedOpacity] (250ms `Curves.easeOut`), eliminating black flashes.
 class PremiumVideoPlayer extends StatefulWidget {
-  final String videoUrl;
+  final MediaPlayback playback;
   final String? posterUrl;
   final double? width;
   final double? height;
   final VoidCallback? onFullscreen;
   final bool autoPlay;
-  final List<MediaTrack>? tracks;
-  final MediaPlayback? playback;
   final ValueChanged<bool>? onControlsVisibilityChanged;
   final BorderRadiusGeometry? borderRadius;
 
   const PremiumVideoPlayer({
     super.key,
-    required this.videoUrl,
+    required this.playback,
     this.posterUrl,
     this.width,
     this.height,
     this.onFullscreen,
     this.autoPlay = false,
-    this.tracks,
-    this.playback,
     this.onControlsVisibilityChanged,
     this.borderRadius,
   });
@@ -54,7 +48,6 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   bool _isInitializing = true;
   bool _isVideoReadyToPaint = false;
   String? _error;
-  bool _isUnsupportedOnIos = false;
 
   // Custom Controls State
   bool _showControls = true;
@@ -74,12 +67,13 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   bool? _seekRippleIsLeft;
   int _seekRippleId = 0;
 
-  // Subtitle cue list & active states
+  // Captions: cues of the selected caption, loaded from its WebVTT file.
   List<WebVttCue>? _subtitleCues;
-  MediaTrack? _activeSubtitleTrack;
+  String? _selectedCaptionId;
 
-  // Track selection state
-  String? _selectedVideoTrackId;
+  // Audio renditions the platform player reports for the HLS manifest, in
+  // manifest order (the order of `playback.audioTracks`).
+  List<VideoAudioTrack> _platformAudioTracks = const [];
   String? _selectedAudioTrackId;
 
   // Settings overlays
@@ -92,30 +86,11 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     _checkAndInitPlayer();
   }
 
+  /// iOS/macOS need HLS (AVPlayer has no DASH); Android plays the same
+  /// manifest so there is one code path. Media without a manifest play their
+  /// original directly (docs/media_refactor §8.3).
   void _checkAndInitPlayer() {
-    var rawUrl = widget.videoUrl;
-    final isIosOrMac = !kIsWeb && (Platform.isIOS || Platform.isMacOS);
-    if (isIosOrMac && widget.playback?.hlsUrl != null) {
-      rawUrl = widget.playback!.hlsUrl!;
-    }
-
-    final resolvedUrl = _resolveUrl(rawUrl);
-    final isDash =
-        resolvedUrl.contains('.mpd') || resolvedUrl.contains('manifest.mpd');
-
-    if (isIosOrMac && isDash) {
-      if (widget.playback?.hlsUrl != null) {
-        _initPlayer(_resolveUrl(widget.playback!.hlsUrl!));
-        return;
-      }
-      setState(() {
-        _isUnsupportedOnIos = true;
-        _isInitializing = false;
-      });
-      return;
-    }
-
-    _initPlayer(resolvedUrl);
+    _initPlayer(_resolveUrl(widget.playback.sourceUrl));
   }
 
   Future<void> _initPlayer(String resolvedUrl) async {
@@ -141,6 +116,10 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
 
       // Listen to events to trigger setState for custom controls updates
       _videoPlayerController!.addListener(_onVideoControllerUpdate);
+      await _loadPlatformAudioTracks();
+      final defaultCaption =
+          widget.playback.captions.where((c) => c.isDefault).firstOrNull;
+      if (defaultCaption != null) _selectCaption(defaultCaption);
 
       if (widget.autoPlay) {
         await _videoPlayerController!.play();
@@ -200,16 +179,16 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   @override
   void didUpdateWidget(covariant PremiumVideoPlayer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.videoUrl != widget.videoUrl) {
+    if (oldWidget.playback.sourceUrl != widget.playback.sourceUrl) {
       _isVideoReadyToPaint = false;
       _controlsTimer?.cancel();
       _videoPlayerController?.removeListener(_onVideoControllerUpdate);
       _videoPlayerController?.dispose();
 
       // Reset selections for new video
-      _selectedVideoTrackId = null;
+      _platformAudioTracks = const [];
       _selectedAudioTrackId = null;
-      _activeSubtitleTrack = null;
+      _selectedCaptionId = null;
       _subtitleCues = null;
       _showSettingsMenu = false;
       _showInfoMenu = false;
@@ -450,36 +429,21 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     return '$minutes:$seconds';
   }
 
-  String? _selectedSubtitleTrackId;
-
-  Future<void> _loadSubtitleFromUrl(String url, {String? trackId}) async {
+  Future<void> _selectCaption(PlaybackCaption caption) async {
+    setState(() => _selectedCaptionId = caption.id);
     try {
-      final token = ApiService().token;
-      final headers = <String, String>{};
-      if (token != null) {
-        headers['Authorization'] = 'Bearer $token';
+      final response = await http.get(Uri.parse(_resolveUrl(caption.vttUrl)));
+      if (response.statusCode != 200) {
+        throw Exception('HTTP ${response.statusCode}');
       }
-
-      final resolvedUrl = _resolveUrl(url);
-      final response = await http.get(Uri.parse(resolvedUrl), headers: headers);
-
-      if (response.statusCode == 200) {
-        setState(() {
-          _subtitleCues = parseWebVtt(response.body);
-          if (trackId != null) {
-            _selectedSubtitleTrackId = trackId;
-          }
-        });
-      } else {
-        throw Exception(
-          'Failed to load subtitle file (HTTP ${response.statusCode})',
-        );
+      if (mounted && _selectedCaptionId == caption.id) {
+        setState(() => _subtitleCues = parseWebVtt(response.body));
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to load subtitles: $e'),
+            content: Text('Failed to load captions: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -487,200 +451,57 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     }
   }
 
-  Future<void> _loadSubtitleTrack(MediaTrack track) async {
-    await _loadSubtitleFromUrl(track.url, trackId: track.id);
-    _activeSubtitleTrack = track;
-  }
-
-  MediaTrack? get _activeVideoTrack {
-    final videoTracks = (widget.tracks ?? [])
-        .where((t) => t.type == 'VIDEO' && t.purpose == 'CONTENT')
-        .toList();
-    if (videoTracks.isEmpty) return null;
-    if (_selectedVideoTrackId != null) {
-      return videoTracks.firstWhere(
-        (t) => t.id == _selectedVideoTrackId,
-        orElse: () => videoTracks.first,
-      );
+  /// Audio tracks can only be switched inside the HLS manifest; direct play
+  /// carries the default audio alone (docs/media_refactor §8.1).
+  Future<void> _loadPlatformAudioTracks() async {
+    final controller = _videoPlayerController!;
+    if (widget.playback.hlsUrl == null ||
+        widget.playback.audioTracks.length < 2 ||
+        !controller.isAudioTrackSupportAvailable()) {
+      return;
     }
-    return videoTracks.firstWhere(
-      (t) => t.isDefault || t.isPrimary,
-      orElse: () => videoTracks.first,
-    );
-  }
-
-  MediaTrack? get _activeAudioTrack {
-    final audioTracks = (widget.tracks ?? [])
-        .where((t) => t.type == 'AUDIO' && t.purpose == 'CONTENT')
-        .toList();
-    if (audioTracks.isEmpty) return null;
-    if (_selectedAudioTrackId != null) {
-      return audioTracks.firstWhere(
-        (t) => t.id == _selectedAudioTrackId,
-        orElse: () => audioTracks.first,
-      );
-    }
-    return audioTracks.firstWhere(
-      (t) => t.isDefault,
-      orElse: () => audioTracks.first,
-    );
-  }
-
-  Future<void> _switchTrackByUrl(
-    String url, {
-    String? videoTrackId,
-    String? audioTrackId,
-  }) async {
-    if (_videoPlayerController == null) return;
-
-    final currentPos = _videoPlayerController!.value.position;
-    final wasPlaying = _videoPlayerController!.value.isPlaying;
-
-    setState(() {
-      _isInitializing = true;
-      if (videoTrackId != null) _selectedVideoTrackId = videoTrackId;
-      if (audioTrackId != null) _selectedAudioTrackId = audioTrackId;
-    });
-
-    _controlsTimer?.cancel();
-    _videoPlayerController?.removeListener(_onVideoControllerUpdate);
-    await _videoPlayerController?.dispose();
-    _videoPlayerController = null;
-
-    final newUrl = _resolveUrl(url);
-
     try {
-      final token = ApiService().token;
-      final headers = <String, String>{};
-      if (token != null) {
-        headers['Authorization'] = 'Bearer $token';
-      }
+      _platformAudioTracks = await controller.getAudioTracks();
+    } catch (_) {
+      _platformAudioTracks = const [];
+    }
+  }
 
-      _videoPlayerController = VideoPlayerController.networkUrl(
-        Uri.parse(newUrl),
-        httpHeaders: headers,
+  /// The manifest lists its renditions in `playback.audioTracks` order, so
+  /// the platform tracks map by position once both lists agree in length.
+  bool get _canSwitchAudio =>
+      _platformAudioTracks.length == widget.playback.audioTracks.length &&
+      _platformAudioTracks.length > 1;
+
+  PlaybackAudioTrack? get _activeAudioTrack {
+    final tracks = widget.playback.audioTracks;
+    if (tracks.isEmpty) return null;
+    return tracks.where((t) => t.id == _selectedAudioTrackId).firstOrNull ??
+        tracks.where((t) => t.isDefault).firstOrNull ??
+        tracks.first;
+  }
+
+  Future<void> _selectAudioTrack(PlaybackAudioTrack track) async {
+    final index = widget.playback.audioTracks.indexOf(track);
+    setState(() => _selectedAudioTrackId = track.id);
+    try {
+      await _videoPlayerController?.selectAudioTrack(
+        _platformAudioTracks[index].id,
       );
-
-      await _videoPlayerController!.initialize();
-      _videoPlayerController!.addListener(_onVideoControllerUpdate);
-
-      await _videoPlayerController!.seekTo(currentPos);
-      if (wasPlaying) {
-        await _videoPlayerController!.play();
-        _startControlsTimer();
-      }
-
-      if (mounted) {
-        setState(() {
-          _isInitializing = false;
-        });
-      }
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _isInitializing = false;
-        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to switch audio: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }
 
-  Future<void> _switchTrack({
-    String? videoTrackId,
-    String? audioTrackId,
-  }) async {
-    if (_videoPlayerController == null) return;
-
-    final currentPos = _videoPlayerController!.value.position;
-    final wasPlaying = _videoPlayerController!.value.isPlaying;
-
-    setState(() {
-      _isInitializing = true;
-      if (videoTrackId != null) _selectedVideoTrackId = videoTrackId;
-      if (audioTrackId != null) _selectedAudioTrackId = audioTrackId;
-    });
-
-    _controlsTimer?.cancel();
-    _videoPlayerController?.removeListener(_onVideoControllerUpdate);
-    await _videoPlayerController?.dispose();
-    _videoPlayerController = null;
-
-    var rawUrl = widget.videoUrl;
-    final isIosOrMac = !kIsWeb && (Platform.isIOS || Platform.isMacOS);
-    if (isIosOrMac && widget.playback?.hlsUrl != null) {
-      rawUrl = widget.playback!.hlsUrl!;
-    }
-
-    String newUrl = _resolveUrl(rawUrl);
-    final isDash = newUrl.contains('.mpd') || newUrl.contains('manifest.mpd');
-    final isHls = newUrl.contains('.m3u8') || newUrl.contains('manifest.m3u8');
-
-    if (isDash || isHls) {
-      final uri = Uri.parse(newUrl);
-      final queryParams = Map<String, String>.from(uri.queryParameters);
-      if (_selectedVideoTrackId != null && _selectedVideoTrackId != 'default') {
-        queryParams['video_track_id'] = _selectedVideoTrackId!;
-      } else {
-        queryParams.remove('video_track_id');
-      }
-      if (_selectedAudioTrackId != null && _selectedAudioTrackId != 'default') {
-        queryParams['audio_track_id'] = _selectedAudioTrackId!;
-      } else {
-        queryParams.remove('audio_track_id');
-      }
-      newUrl = uri.replace(queryParameters: queryParams).toString();
-    } else {
-      if (videoTrackId != null && videoTrackId != 'default') {
-        final playback = widget.playback;
-        final variantMatch = playback?.variants.where((v) => v.trackId == videoTrackId).toList();
-        if (variantMatch != null && variantMatch.isNotEmpty) {
-          newUrl = _resolveUrl(variantMatch.first.url);
-        } else {
-          final matches = (widget.tracks ?? [])
-              .where((t) => t.id == videoTrackId)
-              .toList();
-          if (matches.isNotEmpty) {
-            newUrl = _resolveUrl(matches.first.url);
-          }
-        }
-      }
-    }
-
-    try {
-      final token = ApiService().token;
-      final headers = <String, String>{};
-      if (token != null) {
-        headers['Authorization'] = 'Bearer $token';
-      }
-
-      _videoPlayerController = VideoPlayerController.networkUrl(
-        Uri.parse(newUrl),
-        httpHeaders: headers,
-      );
-
-      await _videoPlayerController!.initialize();
-      _videoPlayerController!.addListener(_onVideoControllerUpdate);
-
-      await _videoPlayerController!.seekTo(currentPos);
-      if (wasPlaying) {
-        await _videoPlayerController!.play();
-        _startControlsTimer();
-      }
-
-      if (mounted) {
-        setState(() {
-          _isInitializing = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _error = e.toString();
-          _isInitializing = false;
-        });
-      }
-    }
-  }
+  bool get _hasSettings =>
+      _canSwitchAudio || widget.playback.captions.isNotEmpty;
 
   Widget _buildSettingsTile({
     required String title,
@@ -757,19 +578,19 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
 
   Widget _buildSettingsContent() {
     final playback = widget.playback;
-    final hasPlaybackVariants = playback != null && playback.variants.isNotEmpty;
-    final hasPlaybackAudio = playback != null && playback.audioTracks.isNotEmpty;
-    final hasPlaybackSubtitles = playback != null && playback.subtitleTracks.isNotEmpty;
+    final activeAudio = _activeAudioTrack;
 
-    final videoTracks = (widget.tracks ?? [])
-        .where((t) => t.type == 'VIDEO' && t.purpose == 'CONTENT')
-        .toList();
-    final audioTracks = (widget.tracks ?? [])
-        .where((t) => t.type == 'AUDIO' && t.purpose == 'CONTENT')
-        .toList();
-    final subtitleTracks = (widget.tracks ?? [])
-        .where((t) => t.type == 'SUBTITLE' && t.purpose == 'CONTENT')
-        .toList();
+    Widget sectionTitle(String title) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
+      child: Text(
+        title,
+        style: const TextStyle(
+          color: Colors.grey,
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
 
     return Material(
       color: Colors.transparent,
@@ -799,104 +620,24 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
           ),
           const Divider(color: Colors.white10),
 
-          if (hasPlaybackVariants) ...[
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
-              child: Text(
-                'Video Quality',
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            ...playback.variants.map((v) {
-              final isActive =
-                  _selectedVideoTrackId == v.trackId ||
-                  (_selectedVideoTrackId == null &&
-                      (v.trackId == playback.trackId ||
-                          v == playback.variants.first));
-              
-              String title = v.label;
-              if (title.isEmpty ||
-                  title == 'HIGH' ||
-                  title == 'MEDIUM' ||
-                  title == 'LOW' ||
-                  title == 'ORIGINAL') {
-                title = v.height != null
-                    ? '${v.height}p'
-                    : (v.quality.isNotEmpty ? v.quality : 'Video Quality');
-              }
-
-              List<String> details = [];
-              if (v.height != null && !title.contains('${v.height}p')) {
-                details.add('${v.height}p');
-              }
-              if (v.codec != null && v.codec!.isNotEmpty) {
-                details.add(v.codec!.toUpperCase());
-              }
-              if (v.frameRate != null && v.frameRate! > 0) {
-                details.add('${v.frameRate!.round()}fps');
-              }
-              final subtitle = details.isNotEmpty ? details.join(' • ') : null;
-
+          if (_canSwitchAudio) ...[
+            sectionTitle('Audio Track'),
+            ...playback.audioTracks.indexed.map((entry) {
+              final (index, a) = entry;
+              final language = _formatLanguageName(a.language);
+              final title = a.label ??
+                  (language.isNotEmpty ? language : 'Audio ${index + 1}');
+              final details = [
+                if (language.isNotEmpty && !title.contains(language)) language,
+                a.codec.toUpperCase(),
+                '${a.channels} ch',
+              ];
               return _buildSettingsTile(
                 title: title,
-                subtitle: subtitle,
-                isActive: isActive,
+                subtitle: details.join(' • '),
+                isActive: a.id == activeAudio?.id,
                 onTap: () {
-                  if (playback.protocol == 'DASH') {
-                    _switchTrack(videoTrackId: v.trackId);
-                  } else {
-                    _switchTrackByUrl(v.url, videoTrackId: v.trackId);
-                  }
-                  setState(() => _showSettingsMenu = false);
-                },
-              );
-            }),
-            const Divider(color: Colors.white10),
-          ] else if (videoTracks.isNotEmpty) ...[
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
-              child: Text(
-                'Video Quality',
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            ...videoTracks.map((t) {
-              final isActive = _activeVideoTrack?.id == t.id;
-              final width = t.metadata['width'] ?? t.width ?? 0;
-              final height = t.metadata['height'] ?? t.height ?? 0;
-
-              String title = t.displayName ?? '';
-              if (title.isEmpty) {
-                if (height > 0) {
-                  title = '${height}p';
-                } else if (width > 0 && height > 0) {
-                  title = '${width}x$height';
-                } else if (t.quality != null &&
-                    t.quality != 'HIGH' &&
-                    t.quality != 'MEDIUM' &&
-                    t.quality != 'LOW') {
-                  title = t.quality!;
-                } else {
-                  title = 'Video Quality';
-                }
-              }
-
-              final subtitle = t.codec?.toUpperCase();
-
-              return _buildSettingsTile(
-                title: title,
-                subtitle: subtitle,
-                isActive: isActive,
-                onTap: () {
-                  _switchTrack(videoTrackId: t.id);
+                  _selectAudioTrack(a);
                   setState(() => _showSettingsMenu = false);
                 },
               );
@@ -904,223 +645,34 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
             const Divider(color: Colors.white10),
           ],
 
-          if (hasPlaybackAudio) ...[
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
-              child: Text(
-                'Audio Track',
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            ...playback.audioTracks.map((a) {
-              final isActive =
-                  _selectedAudioTrackId == a.trackId ||
-                  (_selectedAudioTrackId == null && a.isDefault);
-
-              final formattedLang = _formatLanguageName(a.language);
-              String title = a.label;
-              if (title.isEmpty ||
-                  title == 'HIGH' ||
-                  title == 'MEDIUM' ||
-                  title == 'LOW' ||
-                  title == 'ORIGINAL' ||
-                  title == a.language ||
-                  title == 'Audio') {
-                if (formattedLang.isNotEmpty) {
-                  title = formattedLang;
-                } else if (a.codec != null) {
-                  title = 'Audio (${a.codec!.toUpperCase()})';
-                } else {
-                  title = 'Audio Track';
-                }
-              }
-
-              List<String> details = [];
-              if (formattedLang.isNotEmpty && !title.contains(formattedLang)) {
-                details.add(formattedLang);
-              }
-              if (a.codec != null &&
-                  !title.toUpperCase().contains(a.codec!.toUpperCase())) {
-                details.add(a.codec!.toUpperCase());
-              }
-              if (a.channels != null && a.channels! > 0) {
-                details.add('${a.channels} ch');
-              }
-              final subtitle = details.isNotEmpty ? details.join(' • ') : null;
-
-              return _buildSettingsTile(
-                title: title,
-                subtitle: subtitle,
-                isActive: isActive,
-                onTap: () {
-                  _switchTrack(audioTrackId: a.trackId);
-                  setState(() => _showSettingsMenu = false);
-                },
-              );
-            }),
-            const Divider(color: Colors.white10),
-          ] else if (audioTracks.isNotEmpty) ...[
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
-              child: Text(
-                'Audio Track',
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            ...audioTracks.map((t) {
-              final isActive = _activeAudioTrack?.id == t.id;
-
-              final formattedLang = _formatLanguageName(t.language);
-              String title = t.displayName ?? '';
-              if (title.isEmpty ||
-                  title == 'HIGH' ||
-                  title == 'MEDIUM' ||
-                  title == 'LOW' ||
-                  title == 'ORIGINAL' ||
-                  title == t.language) {
-                if (formattedLang.isNotEmpty) {
-                  title = formattedLang;
-                } else if (t.variantKey != null &&
-                    t.variantKey != 'HIGH' &&
-                    !t.variantKey!.toUpperCase().contains('HIGH')) {
-                  title = t.variantKey!;
-                } else if (t.codec != null) {
-                  title = 'Audio (${t.codec!.toUpperCase()})';
-                } else {
-                  title = 'Audio Track';
-                }
-              }
-
-              List<String> details = [];
-              if (formattedLang.isNotEmpty && !title.contains(formattedLang)) {
-                details.add(formattedLang);
-              }
-              if (t.codec != null &&
-                  !title.toUpperCase().contains(t.codec!.toUpperCase())) {
-                details.add(t.codec!.toUpperCase());
-              }
-              final subtitle = details.isNotEmpty ? details.join(' • ') : null;
-
-              return _buildSettingsTile(
-                title: title,
-                subtitle: subtitle,
-                isActive: isActive,
-                onTap: () {
-                  _switchTrack(audioTrackId: t.id);
-                  setState(() => _showSettingsMenu = false);
-                },
-              );
-            }),
-            const Divider(color: Colors.white10),
-          ],
-
-          if (hasPlaybackSubtitles) ...[
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
-              child: Text(
-                'Subtitles',
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
+          if (playback.captions.isNotEmpty) ...[
+            sectionTitle('Subtitles'),
             _buildSettingsTile(
               title: 'Off',
-              isActive:
-                  _activeSubtitleTrack == null &&
-                  _selectedSubtitleTrackId == null,
+              isActive: _selectedCaptionId == null,
               onTap: () {
                 setState(() {
-                  _activeSubtitleTrack = null;
-                  _selectedSubtitleTrackId = null;
+                  _selectedCaptionId = null;
                   _subtitleCues = null;
                   _showSettingsMenu = false;
                 });
               },
             ),
-            ...playback.subtitleTracks.map((s) {
-              final isActive = _selectedSubtitleTrackId == s.trackId;
-
-              final formattedLang = _formatLanguageName(s.language);
-              String title = s.label;
-              if (title.isEmpty ||
-                  title == s.language ||
-                  title == 'Subtitle' ||
-                  title == 'HIGH' ||
-                  title == 'MEDIUM' ||
-                  title == 'LOW') {
-                title = formattedLang.isNotEmpty ? formattedLang : 'Subtitle';
-              } else if (formattedLang.isNotEmpty &&
-                  !title.contains(formattedLang)) {
-                title = '$title ($formattedLang)';
+            ...playback.captions.indexed.map((entry) {
+              final (index, c) = entry;
+              final language = _formatLanguageName(c.language);
+              var title = c.label ??
+                  (language.isNotEmpty ? language : 'Caption ${index + 1}');
+              if (c.label != null &&
+                  language.isNotEmpty &&
+                  !title.contains(language)) {
+                title = '$title ($language)';
               }
-
-              final subtitle = s.format?.toUpperCase();
-
               return _buildSettingsTile(
                 title: title,
-                subtitle: subtitle,
-                isActive: isActive,
+                isActive: _selectedCaptionId == c.id,
                 onTap: () {
-                  if (s.url != null) {
-                    _loadSubtitleFromUrl(s.url!, trackId: s.trackId);
-                  }
-                  setState(() => _showSettingsMenu = false);
-                },
-              );
-            }),
-          ] else if (subtitleTracks.isNotEmpty) ...[
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
-              child: Text(
-                'Subtitles',
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            _buildSettingsTile(
-              title: 'Off',
-              isActive: _activeSubtitleTrack == null,
-              onTap: () {
-                setState(() {
-                  _activeSubtitleTrack = null;
-                  _subtitleCues = null;
-                  _showSettingsMenu = false;
-                });
-              },
-            ),
-            ...subtitleTracks.map((t) {
-              final isActive = _activeSubtitleTrack?.id == t.id;
-
-              final formattedLang = _formatLanguageName(t.language);
-              String title = t.displayName ?? '';
-              if (title.isEmpty ||
-                  title == t.language ||
-                  title == 'Subtitle') {
-                title = formattedLang.isNotEmpty ? formattedLang : 'Subtitle';
-              } else if (formattedLang.isNotEmpty &&
-                  !title.contains(formattedLang)) {
-                title = '$title ($formattedLang)';
-              }
-
-              return _buildSettingsTile(
-                title: title,
-                isActive: isActive,
-                onTap: () {
-                  _loadSubtitleTrack(t);
+                  _selectCaption(c);
                   setState(() => _showSettingsMenu = false);
                 },
               );
@@ -1132,52 +684,22 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   }
 
   Widget _buildInfoContent() {
-    final activeVideo = _activeVideoTrack;
-    final activeAudio = _activeAudioTrack;
     final playback = widget.playback;
+    final video = playback.video;
+    final activeAudio = _activeAudioTrack;
+    final size = _videoPlayerController?.value.size;
 
-    int width =
-        activeVideo?.metadata['width'] ??
-        activeVideo?.width ??
-        _videoPlayerController?.value.size.width.toInt() ??
-        0;
-    int height =
-        activeVideo?.metadata['height'] ??
-        activeVideo?.height ??
-        _videoPlayerController?.value.size.height.toInt() ??
-        0;
-
-    if (width == 0 && playback != null && playback.variants.isNotEmpty) {
-      width = playback.variants.first.width ?? 0;
-      height = playback.variants.first.height ?? 0;
-    }
-
-    final resolution = width > 0 && height > 0 ? '${width}x$height' : 'Unknown';
-
-    final videoCodec =
-        activeVideo?.codec ??
-        activeVideo?.metadata['codecs'] ??
-        (playback != null && playback.variants.isNotEmpty
-            ? playback.variants.first.codec
-            : null) ??
-        'Unknown';
-    final audioCodec =
-        activeAudio?.codec ??
-        activeAudio?.metadata['codecs'] ??
-        (playback != null && playback.audioTracks.isNotEmpty
-            ? playback.audioTracks.first.codec
-            : null) ??
-        'Unknown';
-
+    final resolution = video != null
+        ? '${video.width}x${video.height}'
+        : (size != null && size.width > 0
+              ? '${size.width.toInt()}x${size.height.toInt()}'
+              : 'Unknown');
     final duration = _videoPlayerController != null
         ? _formatDuration(_videoPlayerController!.value.duration)
         : 'Unknown';
-    final formatStr =
-        playback?.protocol ??
-        (widget.videoUrl.contains('.mpd') ||
-                widget.videoUrl.contains('manifest.mpd')
-            ? 'MPEG-DASH (MPD)'
-            : 'Progressive (MP4)');
+    final formatStr = playback.hlsUrl != null
+        ? 'HLS'
+        : 'Direct (${playback.directMimeType})';
 
     Widget infoRow(String label, String value) {
       return Padding(
@@ -1242,18 +764,15 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
           infoRow('Format', formatStr),
           infoRow('Resolution', resolution),
           infoRow('Duration', duration),
-          infoRow('Video Codec', videoCodec),
-          infoRow('Audio Codec', audioCodec),
-          if (activeVideo != null && activeVideo.metadata['bandwidth'] != null)
-            infoRow(
-              'Bitrate',
-              '${(activeVideo.metadata['bandwidth'] / 1000).round()} kbps',
-            ),
-          if (activeAudio != null && activeAudio.metadata['bandwidth'] != null)
-            infoRow(
-              'Audio Bitrate',
-              '${(activeAudio.metadata['bandwidth'] / 1000).round()} kbps',
-            ),
+          infoRow('Video Codec', video?.codecString ?? video?.codec ?? 'Unknown'),
+          if (video?.frameRate != null)
+            infoRow('Frame Rate', '${video!.frameRate!.toStringAsFixed(2)} fps'),
+          infoRow(
+            'Audio Codec',
+            activeAudio?.codecString ?? activeAudio?.codec ?? 'None',
+          ),
+          if (activeAudio != null)
+            infoRow('Audio Channels', '${activeAudio.channels}'),
         ],
       ),
     );
@@ -1331,39 +850,6 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
-    if (_isUnsupportedOnIos) {
-      return _buildPlayerState(
-        padding: const EdgeInsets.all(16),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                LucideIcons.alertTriangle,
-                color: theme.colorScheme.primary,
-                size: 36,
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'DASH (.mpd) Unsupported on iOS',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Apple AVPlayer only supports DASH on Android/Web. Use Android emulator to preview this DASH video.',
-                style: TextStyle(color: Colors.grey, fontSize: 11),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      );
-    }
 
     if (_error != null) {
       return _buildPlayerState(
@@ -1758,20 +1244,22 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                                     },
                                   ),
                                 ],
-                                SizedBox(width: spacing),
-                                _buildControlButton(
-                                  icon: LucideIcons.settings2,
-                                  tooltip: 'Settings',
-                                  active: _showSettingsMenu,
-                                  onPressed: () {
-                                    setState(() {
-                                      _showSettingsMenu = !_showSettingsMenu;
-                                      _showInfoMenu = false;
-                                      _showSpeedMenu = false;
-                                    });
-                                    _cancelControlsTimer();
-                                  },
-                                ),
+                                if (_hasSettings) ...[
+                                  SizedBox(width: spacing),
+                                  _buildControlButton(
+                                    icon: LucideIcons.settings2,
+                                    tooltip: 'Settings',
+                                    active: _showSettingsMenu,
+                                    onPressed: () {
+                                      setState(() {
+                                        _showSettingsMenu = !_showSettingsMenu;
+                                        _showInfoMenu = false;
+                                        _showSpeedMenu = false;
+                                      });
+                                      _cancelControlsTimer();
+                                    },
+                                  ),
+                                ],
                                 SizedBox(width: spacing),
                                 _buildControlButton(
                                   icon: _isFullscreen ? LucideIcons.minimize : LucideIcons.maximize,

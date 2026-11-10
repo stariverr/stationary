@@ -777,15 +777,6 @@ class _PostDetailPageState extends State<PostDetailPage> {
             },
             itemBuilder: (context, idx) {
               final item = post.media[idx];
-              MediaTrack? liveTrack;
-              if (item.type == 'LIVE_PHOTO') {
-                for (final t in item.tracks) {
-                  if (t.type == 'VIDEO' && t.purpose == 'CONTENT') {
-                    liveTrack = t;
-                    break;
-                  }
-                }
-              }
               
               final String? posterUrl = item.previews.poster?.url;
               // The first item reuses the grid card's preview so the hero
@@ -796,13 +787,11 @@ class _PostDetailPageState extends State<PostDetailPage> {
                       : posterUrl;
               Widget mediaContent;
 
-              if (item.type == 'VIDEO' && (item.playback?.url != null || item.url != null)) {
+              if (item.type == 'VIDEO' && item.playback != null) {
                 mediaContent = PremiumVideoPlayer(
-                  videoUrl: item.playback?.url ?? item.url!,
                   posterUrl: posterUrl,
                   autoPlay: idx == _swiperIndex,
-                  tracks: item.tracks,
-                  playback: item.playback,
+                  playback: item.playback!,
                   borderRadius: BorderRadius.zero,
                   onFullscreen: () {
                     Navigator.push(
@@ -835,7 +824,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                       if (item.type == 'LIVE_PHOTO' && posterUrl != null)
                         PremiumLivePhotoPlayer(
                           imageUrl: posterUrl,
-                          videoUrl: liveTrack?.url,
+                          videoUrl: item.playback?.directUrl,
                           fit: BoxFit.contain,
                         )
                       else if (item.url != null || placeholderUrl != null)
