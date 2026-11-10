@@ -41,7 +41,7 @@ export interface HlsMasterInput {
     query_suffix?: string;
 }
 
-/** Exactly one rendition per group is DEFAULT=YES: the first one marked default, else the first one. */
+/** Exactly one audio rendition is DEFAULT=YES: the first one marked default, else the first one. */
 const defaultIndex = (renditions: { is_default?: boolean }[]) => Math.max(0, renditions.findIndex((r) => r.is_default));
 
 export function buildHlsMasterManifest(input: HlsMasterInput): string {
@@ -87,12 +87,11 @@ export function buildHlsMasterManifest(input: HlsMasterInput): string {
 
     // 2. Subtitle Media Group
     if (hasSubtitles && input.subtitle) {
-        const defaultSubtitle = defaultIndex(input.subtitle);
-        for (let i = 0; i < input.subtitle.length; i++) {
-            const s = input.subtitle[i];
+        // Captions start off unless the media marks one as default, so a subtitle group may have no default.
+        for (const s of input.subtitle) {
             const suffix = appendSigIfNeeded(s.track_id, input.query_suffix);
             const uri = `hls/${s.track_id}/manifest.m3u8${suffix}`;
-            const isDefault = i === defaultSubtitle ? "YES" : "NO";
+            const isDefault = s.is_default ? "YES" : "NO";
             const langAttr = s.language ? `,LANGUAGE="${s.language}"` : "";
             lines.push(
                 `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitles",NAME="${s.label}"${langAttr},DEFAULT=${isDefault},AUTOSELECT=YES,URI="${uri}"`,

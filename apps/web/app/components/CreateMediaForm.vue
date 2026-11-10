@@ -478,9 +478,9 @@ onUnmounted(() => {
                         <Upload class="w-8 h-8 text-slate-400 dark:text-zinc-500" />
                     </div>
                     <div class="space-y-1">
-                        <h3 class="text-sm font-semibold text-slate-800 dark:text-zinc-100">{{ $t("media.add_tracks_title") }}</h3>
+                        <h3 class="text-sm font-semibold text-slate-800 dark:text-zinc-100">{{ $t("media.add_files_title") }}</h3>
                         <p class="text-xs text-slate-400 dark:text-zinc-400 max-w-sm leading-relaxed">
-                            {{ $t("media.add_tracks_desc") }}
+                            {{ $t("media.add_files_desc") }}
                         </p>
                     </div>
                     <div class="flex items-center gap-3 mt-1.5">

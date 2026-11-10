@@ -262,6 +262,10 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
         _rippleIcon = null;
         _cancelControlsTimer(); // Keep controls visible when paused
       } else {
+        // At the end the platform player stays put on play; start over instead.
+        if (_videoPlayerController!.value.isCompleted) {
+          _videoPlayerController!.seekTo(Duration.zero);
+        }
         _videoPlayerController!.play();
         _rippleIcon = LucideIcons.play;
         _startControlsTimer();
@@ -347,76 +351,64 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     });
   }
 
+  /// The language's own name for a BCP 47 or ISO 639-2 code (ffprobe reports
+  /// the latter, e.g. `jpn`); empty when the media leaves it undetermined.
   String _formatLanguageName(String? lang) {
     if (lang == null || lang.trim().isEmpty) return '';
     final code = lang.trim();
-    final lower = code.toLowerCase().replaceAll('_', '-');
-
-    const Map<String, String> langMap = {
-      'zh-cn': '简体中文 (zh-CN)',
-      'zh-hans': '简体中文 (zh-CN)',
-      'zh-tw': '繁體中文 (zh-TW)',
-      'zh-hant': '繁體中文 (zh-TW)',
-      'zh-hk': '繁體中文 (zh-HK)',
-      'zh': '中文 (zh)',
-      'en-us': 'English (en-US)',
-      'en-gb': 'English (en-GB)',
-      'en': 'English (en)',
-      'ja-jp': '日本語 (ja-JP)',
-      'ja': '日本語 (ja)',
-      'ko-kr': '한국어 (ko-KR)',
-      'ko': '한국어 (ko)',
-      'fr-fr': 'Français (fr-FR)',
-      'fr': 'Français (fr)',
-      'de-de': 'Deutsch (de-DE)',
-      'de': 'Deutsch (de)',
-      'es-es': 'Español (es-ES)',
-      'es': 'Español (es)',
-      'ru-ru': 'Русский (ru-RU)',
-      'ru': 'Русский (ru)',
-      'pt-br': 'Português (pt-BR)',
-      'pt': 'Português (pt)',
-      'it-it': 'Italiano (it-IT)',
-      'it': 'Italiano (it)',
-      'vi-vn': 'Tiếng Việt (vi)',
-      'vi': 'Tiếng Việt (vi)',
-      'th-th': 'ไทย (th)',
-      'th': 'ไทย (th)',
-      'id-id': 'Bahasa Indonesia (id)',
-      'id': 'Bahasa Indonesia (id)',
-      'ar': 'العربية (ar)',
-      'hi': 'हिन्दी (hi)',
-    };
-
-    if (langMap.containsKey(lower)) {
-      return langMap[lower]!;
+    final subtags = code.toLowerCase().replaceAll('_', '-').split('-');
+    final primary = _iso6392ToIso6391[subtags.first] ?? subtags.first;
+    if (primary == 'und') return '';
+    if (primary == 'zh') {
+      final rest = subtags.skip(1).toSet();
+      if (rest.intersection(const {'hant', 'tw', 'hk', 'mo'}).isNotEmpty) {
+        return '繁體中文';
+      }
+      if (rest.intersection(const {'hans', 'cn', 'sg'}).isNotEmpty) {
+        return '简体中文';
+      }
     }
-
-    final primary = lower.split('-').first;
-    const Map<String, String> primaryMap = {
-      'zh': '中文',
-      'en': 'English',
-      'ja': '日本語',
-      'ko': '한국어',
-      'fr': 'Français',
-      'de': 'Deutsch',
-      'es': 'Español',
-      'ru': 'Русский',
-      'pt': 'Português',
-      'it': 'Italiano',
-      'vi': 'Tiếng Việt',
-      'th': 'ไทย',
-      'id': 'Bahasa Indonesia',
-      'ar': 'العربية',
-      'hi': 'हिन्दी',
-    };
-
-    if (primaryMap.containsKey(primary)) {
-      return '${primaryMap[primary]!} ($code)';
-    }
-
-    return code;
+    return _languageNames[primary] ?? code;
   }
+
+  static const Map<String, String> _iso6392ToIso6391 = {
+    'zho': 'zh',
+    'chi': 'zh',
+    'eng': 'en',
+    'jpn': 'ja',
+    'kor': 'ko',
+    'fra': 'fr',
+    'fre': 'fr',
+    'deu': 'de',
+    'ger': 'de',
+    'spa': 'es',
+    'rus': 'ru',
+    'por': 'pt',
+    'ita': 'it',
+    'vie': 'vi',
+    'tha': 'th',
+    'ind': 'id',
+    'ara': 'ar',
+    'hin': 'hi',
+  };
+
+  static const Map<String, String> _languageNames = {
+    'zh': '中文',
+    'en': 'English',
+    'ja': '日本語',
+    'ko': '한국어',
+    'fr': 'Français',
+    'de': 'Deutsch',
+    'es': 'Español',
+    'ru': 'Русский',
+    'pt': 'Português',
+    'it': 'Italiano',
+    'vi': 'Tiếng Việt',
+    'th': 'ไทย',
+    'id': 'Bahasa Indonesia',
+    'ar': 'العربية',
+    'hi': 'हिन्दी',
+  };
 
   String _formatDuration(Duration duration) {
     String twoDigits(int n) => n.toString().padLeft(2, '0');

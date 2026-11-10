@@ -13,13 +13,9 @@
         "deploy": "bunx wrangler deploy",
         "worker:dev": "bunx wrangler dev",
         "db:migrate": "bunx drizzle-kit generate && bunx drizzle-kit push",
-        "backfill:track-formats": "bun run src/scripts/backfill_track_formats.ts",
-        "backfill:track-formats:apply": "bun run src/scripts/backfill_track_formats.ts --apply",
         "docker:build": "docker build --platform linux/amd64 -f Dockerfile -t stationary:latest ../..",
         "generate:openapi": "bun run src/scripts/generate_openapi.ts",
-        "generate:model-catalog": "bun run src/scripts/generate_model_catalog.ts",
-        "audit:media-track": "bun run src/scripts/audit_media_track_integrity.ts",
-        "verify:media-track-migration": "bun run src/scripts/verify_media_track_migration.ts"
+        "generate:model-catalog": "bun run src/scripts/generate_model_catalog.ts"
     },
     "dependencies": {
         "@ai-sdk/google": "^4.0.69",

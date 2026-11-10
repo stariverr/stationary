@@ -717,11 +717,11 @@ onUnmounted(() => {
                             variant="outline"
                             size="sm"
                             class="h-8 px-3 text-xs border-zinc-200 bg-white hover:bg-zinc-100 text-zinc-700 font-medium cursor-pointer shadow-2xs gap-1.5"
-                            :title="$t('draft_box.merge_tracks_tooltip')"
+                            :title="$t('draft_box.merge_files_tooltip')"
                             @click="openMergeSetup"
                         >
                             <Layers class="w-3.5 h-3.5 text-zinc-500" />
-                            <span>{{ $t("draft_box.merge_tracks_btn") }}</span>
+                            <span>{{ $t("draft_box.merge_files_btn") }}</span>
                         </Button>
 
                         <Button
