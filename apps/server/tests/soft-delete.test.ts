@@ -9,7 +9,6 @@ const sourceFiles = {
     mediaApi: () => Bun.file(resolveSrc("src/api/media.ts")).text(),
     libraryApi: () => Bun.file(resolveSrc("src/api/library.ts")).text(),
     ingestPersistence: () => Bun.file(resolveSrc("src/features/ingest/persistence.ts")).text(),
-    trackService: () => Bun.file(resolveSrc("src/features/media/track.ts")).text(),
     libraryDelete: () => Bun.file(resolveSrc("src/features/library/delete-library.ts")).text(),
     latestMigration: async () => {
         const proc = Bun.spawn(["find", resolveSrc("drizzle"), "-name", "migration.sql", "-print"], {
@@ -77,12 +76,5 @@ describe("soft deletion lifecycle", () => {
         expect(ingestPersistence).toContain("delete_time: deleteTime");
         expect(ingestPersistence).not.toContain("db.delete(Media)");
         expect(ingestPersistence).not.toContain("db.delete(MediaFile)");
-    });
-
-    test("track replacement and deletion perform 1:1 file soft-deletion", async () => {
-        const trackService = await sourceFiles.trackService();
-
-        expect(trackService).toContain("delete_status: DeleteStatus.DELETED");
-        expect(trackService).toContain("delete_time: now");
     });
 });

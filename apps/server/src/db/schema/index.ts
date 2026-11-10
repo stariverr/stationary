@@ -21,7 +21,6 @@ import {
 import { v7 as createUuidV7 } from "uuid";
 
 import { sql, type SQL, type SQLWrapper } from "drizzle-orm";
-import { Quality } from "@/lib/types";
 import { AI_MODEL_CATEGORIES, EMBEDDING_DIMENSIONS } from "@/features/ai/model-schema";
 
 const uuidv7 = { generate: createUuidV7 };
@@ -84,45 +83,6 @@ export enum SyncStatus {
     FAILED = "FAILED",
 }
 export const SyncStatusEnum = pgEnum("sync_status", [SyncStatus.PENDING, SyncStatus.IN_PROGRESS, SyncStatus.COMPLETED, SyncStatus.FAILED]);
-
-export enum TrackType {
-    IMAGE = "IMAGE",
-    VIDEO = "VIDEO",
-    AUDIO = "AUDIO",
-    SUBTITLE = "SUBTITLE",
-    PDF = "PDF",
-}
-export const TrackTypeEnum = pgEnum("track_type", [TrackType.IMAGE, TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE, TrackType.PDF]);
-
-export enum TrackStreamLayout {
-    SINGLE = "SINGLE",
-    MUXED = "MUXED",
-    VIDEO_ONLY = "VIDEO_ONLY",
-    AUDIO_ONLY = "AUDIO_ONLY",
-    TEXT_ONLY = "TEXT_ONLY",
-}
-export const TrackStreamLayoutEnum = pgEnum("track_stream_layout", [
-    TrackStreamLayout.SINGLE,
-    TrackStreamLayout.MUXED,
-    TrackStreamLayout.VIDEO_ONLY,
-    TrackStreamLayout.AUDIO_ONLY,
-    TrackStreamLayout.TEXT_ONLY,
-]);
-
-export enum TrackPurpose {
-    CONTENT = "CONTENT",
-    COVER = "COVER",
-    THUMBNAIL = "THUMBNAIL",
-    PREVIEW = "PREVIEW",
-}
-export const TrackPurposeEnum = pgEnum("track_purpose", [
-    TrackPurpose.CONTENT,
-    TrackPurpose.COVER,
-    TrackPurpose.THUMBNAIL,
-    TrackPurpose.PREVIEW,
-]);
-
-export const TrackQualityEnum = pgEnum("track_quality", [Quality.HIGH, Quality.MEDIUM, Quality.LOW]);
 
 export enum AccessRole {
     VIEWER = "VIEWER",
@@ -406,6 +366,14 @@ export const Media = pgTable(
         title: text("title").notNull(),
         description: text("description").notNull(),
         type: MediaTypeEnum("type").notNull(),
+        /**
+         * Size as displayed (rotation applied) and length, probed from the originals (docs/media_refactor.zh-Hans.md,
+         * 3.2): IMAGE and LIVE_PHOTO take the size from the image original, VIDEO from its video stream; durations come
+         * from the longest audio or video original. Null where the type has none, or until the originals are probed.
+         */
+        display_width: integer("display_width"),
+        display_height: integer("display_height"),
+        duration: real("duration"),
         /** Original published time on the source platform */
         // TODO: Change it to not null
         published_time: temporal("published_time"),
@@ -431,109 +399,11 @@ export const Media = pgTable(
             .on(table.post_id, table.sort_order)
             .where(sql`delete_status = 'ACTIVE'`),
         index("media_source_eid_idx").on(table.source, table.eid),
+        check("media_display_size_pair", sql`(${table.display_width} IS NULL) = (${table.display_height} IS NULL)`),
+        check("media_display_size_by_type", sql`${table.type} NOT IN ('AUDIO', 'PDF') OR ${table.display_width} IS NULL`),
+        check("media_duration_by_type", sql`${table.type} NOT IN ('IMAGE', 'PDF') OR ${table.duration} IS NULL`),
         index("media_library_delete_time_idx").on(table.library_id, table.delete_time),
         index("media_post_delete_time_idx").on(table.post_id, table.delete_time),
-    ],
-);
-
-export interface MediaStream {
-    index: number;
-    id?: string | null;
-    type: TrackType.VIDEO | TrackType.AUDIO | TrackType.SUBTITLE;
-    codec?: string | null;
-    language?: string | null;
-    label?: string | null;
-    role?: string | null;
-    width?: number | null;
-    height?: number | null;
-    bandwidth?: number | null;
-    channels?: number | null;
-    sample_rate?: number | null;
-    is_default?: boolean;
-}
-
-export type Stream = MediaStream;
-
-export interface TrackMetadata {
-    /** DASH / fMP4 segment index info */
-    segment_base?: {
-        initialization?: string;
-        index_range?: string;
-        timescale?: number;
-        earliest_presentation_time?: string;
-    };
-    frame_rate?: number;
-    label?: string;
-    role?: string;
-    audio_group_id?: string;
-
-    /** Low-frequency raw tags/extensions */
-    raw_tags?: Record<string, string>;
-    [key: string]: any;
-}
-
-// Track Model
-export const Track = pgTable(
-    "track",
-    {
-        id: uuid("id")
-            .primaryKey()
-            .notNull()
-            .$defaultFn(() => uuidv7.generate()),
-        media_id: uuid("media_id").notNull(),
-        /** File ID
-         * - Can be null because the file does not exist at first.
-         */
-        file_id: uuid("file_id"),
-        type: TrackTypeEnum("type").notNull(),
-        purpose: TrackPurposeEnum("purpose").notNull(),
-        is_original: boolean("is_original").default(true).notNull(),
-        is_generated: boolean("is_generated").default(false).notNull(),
-        quality: TrackQualityEnum("quality").notNull(),
-        /** Sorting/fallback priority of Track Variant */
-        priority: integer("priority").default(0).notNull(),
-        source_url: text("source_url").default(""),
-        sync_status: SyncStatusEnum("sync_status").default(SyncStatus.PENDING).notNull(),
-        last_error: text("last_error"),
-        metadata: jsonb("metadata").$type<TrackMetadata>().default({}).notNull(),
-        container: text("container"),
-        is_fragmented: boolean("is_fragmented"),
-        stream_layout: TrackStreamLayoutEnum("stream_layout"),
-        has_video: boolean("has_video").default(false).notNull(),
-        has_audio: boolean("has_audio").default(false).notNull(),
-        streams: jsonb("streams").$type<MediaStream[]>().default([]).notNull(),
-        variant_key: varchar("variant_key", { length: 255 }).notNull(),
-        is_default: boolean("is_default").default(false).notNull(),
-        is_primary: boolean("is_primary").default(false).notNull(),
-        display_name: text("display_name"),
-        language: text("language"),
-        codec: text("codec"),
-        duration: real("duration"),
-        width: integer("width"),
-        height: integer("height"),
-        bandwidth: integer("bandwidth"),
-        is_stale: boolean("is_stale").default(false).notNull(),
-        source_track_id: uuid("source_track_id"),
-        create_time: temporal("create_time")
-            .default(sql`now()`)
-            .notNull(),
-        update_time: temporal("update_time")
-            .default(sql`now()`)
-            .notNull(),
-        delete_time: temporal("delete_time"),
-        delete_status: DeleteStatusEnum("delete_status").default(DeleteStatus.ACTIVE).notNull(),
-    },
-    (table) => [
-        check("track_variant_key_non_empty", sql`btrim(${table.variant_key}) <> ''`),
-        uniqueIndex("track_media_type_purpose_variant_key_active_unique")
-            .on(table.media_id, table.type, table.purpose, table.variant_key)
-            .where(sql`delete_status = 'ACTIVE'`),
-        uniqueIndex("track_media_default_active_unique")
-            .on(table.media_id, table.type, table.purpose)
-            .where(sql`is_default = true AND delete_status = 'ACTIVE'`),
-        uniqueIndex("track_media_primary_active_unique")
-            .on(table.media_id)
-            .where(sql`is_primary = true AND delete_status = 'ACTIVE'`),
     ],
 );
 
@@ -553,6 +423,8 @@ export const MediaCover = pgTable(
         file_id: uuid("file_id"),
         /** Where an imported cover is downloaded from; null for a user upload. */
         source_url: text("source_url"),
+        /** The import's stable key for the cover; a sync with the same key keeps the cover even if the URL changed. */
+        source_key: text("source_key"),
         status: SyncStatusEnum("status").notNull(),
         last_error: text("last_error"),
         create_time: temporal("create_time")
@@ -566,6 +438,7 @@ export const MediaCover = pgTable(
         uniqueIndex("media_cover_media_unique").on(table.media_id),
         check("media_cover_file_when_completed", sql`(${table.status} = 'COMPLETED') = (${table.file_id} IS NOT NULL)`),
         check("media_cover_source_or_file", sql`${table.source_url} IS NOT NULL OR ${table.file_id} IS NOT NULL`),
+        check("media_cover_source_pair", sql`(${table.source_url} IS NULL) = (${table.source_key} IS NULL)`),
     ],
 );
 
@@ -612,6 +485,188 @@ export const MediaPreview = pgTable(
             "media_preview_size_with_file",
             sql`(${table.file_id} IS NULL) = (${table.width} IS NULL) AND (${table.file_id} IS NULL) = (${table.height} IS NULL)`,
         ),
+    ],
+);
+
+/**
+ * An original file of a media (docs/media_refactor.zh-Hans.md, 3.3): what the user uploaded or the import fetched,
+ * never modified. What it holds (an image, a video, audio only) is read from its probed content, not stored here.
+ * Replacing an original deletes its row and inserts a new one, so a probe result never goes stale.
+ * - [Hard Delete] With it go its `av_file` and `av_stream` rows and what was extracted from it; files are soft deleted.
+ */
+export const MediaOriginal = pgTable(
+    "media_original",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        media_id: uuid("media_id").notNull(),
+        /** Set once downloaded and probed; a user upload is probed before it is inserted. */
+        file_id: uuid("file_id"),
+        /** Where an imported original is downloaded from, and its stable key in the import; both null for an upload. */
+        source_url: text("source_url"),
+        source_key: text("source_key"),
+        /** Import declarations for the audio streams inside, applied over the probe (3.7). */
+        declared_language: text("declared_language"),
+        declared_label: text("declared_label"),
+        declared_default: boolean("declared_default"),
+        /** COMPLETED means downloaded and probed; a source or probe that is rejected ends FAILED. */
+        status: SyncStatusEnum("status").notNull(),
+        last_error: text("last_error"),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        update_time: temporal("update_time")
+            .default(sql`now()`)
+            .notNull(),
+    },
+    (table) => [
+        index("media_original_media_idx").on(table.media_id),
+        uniqueIndex("media_original_media_source_key_unique").on(table.media_id, table.source_key).where(sql`${table.source_key} IS NOT NULL`),
+        check("media_original_file_when_completed", sql`(${table.status} = 'COMPLETED') = (${table.file_id} IS NOT NULL)`),
+        check("media_original_source_pair", sql`(${table.source_url} IS NULL) = (${table.source_key} IS NULL)`),
+        check("media_original_source_or_file", sql`${table.source_url} IS NOT NULL OR ${table.file_id} IS NOT NULL`),
+    ],
+);
+
+/**
+ * The container facts of an audio or video file (3.6), read only by the playback assembly. The segment columns come
+ * from the sidx of an fMP4 and are all set or all null; HLS and DASH only reference files that have them.
+ * - [Hard Delete] Goes with the original it describes.
+ */
+export const AvFile = pgTable(
+    "av_file",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        file_id: uuid("file_id").notNull(),
+        /** ffprobe's format name, e.g. `mov,mp4,m4a,3gp,3g2,mj2`, `matroska,webm`. */
+        container: text("container").notNull(),
+        duration: real("duration"),
+        bitrate: integer("bitrate"),
+        /** The init segment is bytes [0, init_size). */
+        init_size: integer("init_size"),
+        /** The sidx box is bytes [index_offset, index_offset + index_size). */
+        index_offset: bigint("index_offset", { mode: "number" }),
+        index_size: integer("index_size"),
+        timescale: integer("timescale"),
+        earliest_presentation_time: bigint("earliest_presentation_time", { mode: "number" }),
+    },
+    (table) => [
+        uniqueIndex("av_file_file_unique").on(table.file_id),
+        check(
+            "av_file_segment_all_or_none",
+            sql`(${table.init_size} IS NULL) = (${table.index_offset} IS NULL)
+                AND (${table.init_size} IS NULL) = (${table.index_size} IS NULL)
+                AND (${table.init_size} IS NULL) = (${table.timescale} IS NULL)
+                AND (${table.init_size} IS NULL) = (${table.earliest_presentation_time} IS NULL)`,
+        ),
+    ],
+);
+
+export enum AvStreamType {
+    VIDEO = "VIDEO",
+    AUDIO = "AUDIO",
+    SUBTITLE = "SUBTITLE",
+}
+export const AvStreamTypeEnum = pgEnum("av_stream_type", [AvStreamType.VIDEO, AvStreamType.AUDIO, AvStreamType.SUBTITLE]);
+
+/**
+ * One stream of an audio or video file (3.7). Attached pictures (album art) are not streams here.
+ * `codec_string` is the RFC 6381 string read from the MP4 sample entry, so only video and audio streams in MP4 files
+ * have one; every stream a manifest lists is in a single-stream fMP4 and has it.
+ * `language`, `label` and `is_default` come from the probe, then the import's declaration, then the user.
+ * - [Hard Delete] Goes with its `av_file`.
+ */
+export const AvStream = pgTable(
+    "av_stream",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        av_file_id: uuid("av_file_id").notNull(),
+        stream_index: integer("stream_index").notNull(),
+        type: AvStreamTypeEnum("type").notNull(),
+        /** ffprobe's `codec_name`, stored as is (`h264`, `hevc`, `aac`, `opus`, `subrip`...). */
+        codec: text("codec").notNull(),
+        codec_string: text("codec_string"),
+        bitrate: integer("bitrate"),
+        language: text("language"),
+        label: text("label"),
+        is_default: boolean("is_default").default(false).notNull(),
+        /** Coded size; the displayed size applies `rotation`. */
+        width: integer("width"),
+        height: integer("height"),
+        rotation: smallint("rotation"),
+        frame_rate: real("frame_rate"),
+        channels: smallint("channels"),
+        sample_rate: integer("sample_rate"),
+    },
+    (table) => [
+        uniqueIndex("av_stream_file_index_unique").on(table.av_file_id, table.stream_index),
+        check("av_stream_video_size", sql`(${table.type} = 'VIDEO') = (${table.width} IS NOT NULL AND ${table.height} IS NOT NULL)`),
+        check("av_stream_video_only_fields", sql`${table.type} = 'VIDEO' OR (${table.rotation} IS NULL AND ${table.frame_rate} IS NULL)`),
+        check("av_stream_rotation_values", sql`${table.rotation} IS NULL OR ${table.rotation} IN (0, 90, 180, 270)`),
+        check("av_stream_audio_channels", sql`(${table.type} = 'AUDIO') = (${table.channels} IS NOT NULL)`),
+        check("av_stream_audio_only_fields", sql`${table.type} = 'AUDIO' OR ${table.sample_rate} IS NULL`),
+        check("av_stream_subtitle_no_codec_string", sql`${table.type} <> 'SUBTITLE' OR ${table.codec_string} IS NULL`),
+    ],
+);
+
+export enum AssetOrigin {
+    FILE = "FILE",
+    EMBEDDED = "EMBEDDED",
+}
+export const AssetOriginEnum = pgEnum("asset_origin", [AssetOrigin.FILE, AssetOrigin.EMBEDDED]);
+
+/**
+ * A caption of an audio or video media (3.8), served as WebVTT. FILE captions keep the uploaded or imported file
+ * (SRT, ASS, VTT) in `source_file_id` and its conversion in `vtt_file_id`; EMBEDDED captions are text streams
+ * extracted from an original and point at that stream.
+ * - [Hard Delete] Files are soft deleted; EMBEDDED ones go with their original.
+ */
+export const MediaCaption = pgTable(
+    "media_caption",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        media_id: uuid("media_id").notNull(),
+        origin: AssetOriginEnum("origin").notNull(),
+        language: text("language"),
+        label: text("label"),
+        is_default: boolean("is_default").default(false).notNull(),
+        vtt_file_id: uuid("vtt_file_id"),
+        source_file_id: uuid("source_file_id"),
+        source_stream_id: uuid("source_stream_id"),
+        source_url: text("source_url"),
+        source_key: text("source_key"),
+        status: SyncStatusEnum("status").notNull(),
+        last_error: text("last_error"),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        update_time: temporal("update_time")
+            .default(sql`now()`)
+            .notNull(),
+    },
+    (table) => [
+        index("media_caption_media_idx").on(table.media_id),
+        uniqueIndex("media_caption_media_default_unique").on(table.media_id).where(sql`${table.is_default}`),
+        uniqueIndex("media_caption_media_source_key_unique").on(table.media_id, table.source_key).where(sql`${table.source_key} IS NOT NULL`),
+        check("media_caption_embedded_stream", sql`(${table.origin} = 'EMBEDDED') = (${table.source_stream_id} IS NOT NULL)`),
+        check("media_caption_file_source_only", sql`${table.origin} = 'FILE' OR ${table.source_file_id} IS NULL`),
+        check("media_caption_vtt_when_completed", sql`(${table.status} = 'COMPLETED') = (${table.vtt_file_id} IS NOT NULL)`),
+        check(
+            "media_caption_file_source_when_completed",
+            sql`${table.origin} = 'EMBEDDED' OR ${table.status} <> 'COMPLETED' OR ${table.source_file_id} IS NOT NULL`,
+        ),
+        check("media_caption_source_pair", sql`(${table.source_url} IS NULL) = (${table.source_key} IS NULL)`),
     ],
 );
 

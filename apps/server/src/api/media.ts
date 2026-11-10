@@ -8,36 +8,32 @@ import {
     Post,
     PostSource,
     DeleteStatus,
-    TrackType,
-    TrackPurpose,
     AssetAiMetadata,
     EntityType,
     Tag,
     MediaTag,
     TagStatus,
     MediaType,
-    TrackStreamLayout,
 } from "@/db/schema";
 import { s3 } from "@/global/s3";
 import { and, eq, ilike, SQL, sql, count, asc, desc, or, isNull, inArray } from "drizzle-orm";
 
-import { Quality } from "@/lib/types";
 import { AuthEnv, ownedLibrary, requireAuth } from "@/lib/auth/middleware";
 import { verifyMediaSignature } from "@/lib/utils/media-signer";
 import { MediaService } from "@/features/media/queries";
-import { TrackService } from "@/features/media/track";
 import { v7 as uuidv7 } from "uuid";
 import { env } from "@/global/env";
 import { CoverNotAllowedError, CoverService } from "@/features/media/cover";
 import { clearPreviews, loadPreviewImages, NO_PREVIEWS } from "@/features/media/preview";
 import { COVER_MEDIA_TYPES } from "@/lib/validation/media-composition";
 import { requeue } from "@/infra/queue/changes";
-import { buildCdnUrl } from "@/lib/utils/cdn";
 import { FormTimestampSchema, toIsoTimestamp } from "@/lib/utils/time";
-import { getAllowedTrackTypesForFile, getFileExtension, getMimeTypeByExt } from "@/lib/utils/file";
+import { getFileCategories, getFileExtension, getMimeTypeByExt } from "@/lib/utils/file";
 import { validate } from "@/lib/validation/validator";
-import { AddTracksFromDraftSchema } from "@/features/media/schema";
-import { AddTracksFromDraftError, addTracksFromDraft } from "@/features/media/add-tracks-from-draft";
+import { addCaption, addOriginal, deleteCaption, deleteOriginal, MediaEditError, updateAudioTrack, updateCaption } from "@/features/media/edit";
+import { loadOriginalStates } from "@/features/media/originals";
+import { mediaStoragePath } from "@/features/media/storage";
+import { buildMediaDashManifest, buildMediaHlsMaster, buildMediaHlsRendition } from "@/features/playback/manifests";
 import { deleteMedia, restoreMedia, trashMedia } from "@/features/media/lifecycle";
 import { getMediaAiView, summarizeAiStatus } from "@/features/ai/media-view";
 import { coverageFilter, getCoverageTargets } from "@/features/ai/coverage";
@@ -152,6 +148,9 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
             post_media_count: Post.media_count,
             sync_status: Media.sync_status,
             last_error: Media.last_error,
+            display_width: Media.display_width,
+            display_height: Media.display_height,
+            duration: Media.duration,
         })
         .from(Media)
         .leftJoin(Post, eq(Media.post_id, Post.id))
@@ -161,11 +160,7 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
         .offset(offset);
 
     const mediaIds = rawMedia.map((m) => m.id);
-    const [previewsByMediaId, contentUrls, videosByMediaId] = await Promise.all([
-        loadPreviewImages(mediaIds),
-        MediaService.getContentUrls(mediaIds),
-        MediaService.getVideosMap(mediaIds),
-    ]);
+    const [previewsByMediaId, mainUrls] = await Promise.all([loadPreviewImages(mediaIds), MediaService.getMainUrls(rawMedia)]);
 
     const aiRows =
         mediaIds.length > 0
@@ -180,7 +175,6 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
             : [];
 
     const medias = rawMedia.map((m) => {
-        const videos = videosByMediaId.get(m.id) || [];
         const aiStatus = summarizeAiStatus(aiRows.find((row) => row.entity_id === m.id));
 
         return {
@@ -198,13 +192,12 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
             last_error: m.last_error,
             ai_status: aiStatus.status,
             ai_error: aiStatus.error,
-            url: contentUrls.get(m.id) ?? null,
+            url: mainUrls.get(m.id) ?? null,
             previews: previewsByMediaId.get(m.id) ?? NO_PREVIEWS,
-            width: null,
-            height: null,
-            tracks: [],
+            width: m.display_width,
+            height: m.display_height,
+            duration: m.duration,
             media_count: m.post_media_count || 1,
-            videos: videos,
         };
     });
 
@@ -393,15 +386,12 @@ router.post("/:id/cover/presign-upload", requireAuth, validate("param", MediaIdP
     if (!COVER_MEDIA_TYPES.has(media.type)) {
         return c.json(error(Code.INVALID_PARAMETER, `${media.type} media cannot have a cover`), 400);
     }
-    if (!getAllowedTrackTypesForFile(fileName).includes(TrackType.IMAGE)) {
+    if (!getFileCategories(fileName).includes("IMAGE")) {
         return c.json(error(Code.INVALID_PARAMETER, `${fileName} is not an image`), 400);
     }
 
     const ext = getFileExtension(fileName) || "bin";
-    const name = `${media.id}_cover_${uuidv7()}.${ext}`;
-    const path = media.post_id
-        ? `v2/p/${media.post_id.slice(-2)}/${media.post_id}/${name}`
-        : `v2/l/${media.library_id.slice(-2)}/${media.library_id}/${name}`;
+    const path = mediaStoragePath(media, `cover_${uuidv7()}.${ext}`);
     const mimeType = getMimeTypeByExt(ext);
     const url = await s3.getUploadPresignedUrl(path, { bucket: env.S3_BUCKET, contentType: mimeType, expiresInSeconds: 3600 });
 
@@ -446,86 +436,59 @@ router.post("/:id/cover/delete", requireAuth, validate("param", MediaIdParamSche
     return c.json(success(Code.SUCCESS, { cover: null }));
 });
 
-const GetMpdRequestSchema = v.object({
+const ManifestParamSchema = v.object({
     id: v.pipe(v.string(), v.uuid()),
 });
 
-router.get("/:id/manifest.mpd", validate("param", GetMpdRequestSchema), async (c) => {
+const RenditionParamSchema = v.object({
+    id: v.pipe(v.string(), v.uuid()),
+    renditionId: v.pipe(v.string(), v.uuid()),
+});
+
+const querySuffixOf = (c: Context) => {
+    const query = new URLSearchParams(c.req.query()).toString();
+    return query ? `?${query}` : undefined;
+};
+
+router.get("/:id/manifest.mpd", validate("param", ManifestParamSchema), async (c) => {
     const mediaId = c.req.valid("param").id;
     const access = await verifyMediaStreamAccess(c, mediaId);
     if (!access.ok) return access.errorResponse;
 
-    const mpd = await MediaService.getDashManifest(mediaId);
-    if (!mpd) {
-        return c.json(error(Code.NOT_FOUND, "No playable DASH video tracks found for this media"), 404);
-    }
-
+    const mpd = await buildMediaDashManifest(mediaId);
+    if (!mpd) return c.json(error(Code.NOT_FOUND, "This media has no adaptive playback"), 404);
     c.header("Content-Type", "application/dash+xml");
     return c.text(mpd);
 });
 
-const GetHlsRequestSchema = v.object({
-    id: v.pipe(v.string(), v.uuid()),
-});
-
-const GetHlsVariantRequestSchema = v.object({
-    id: v.pipe(v.string(), v.uuid()),
-    trackId: v.pipe(v.string(), v.uuid()),
-});
-
-router.get("/:id/manifest.m3u8", validate("param", GetHlsRequestSchema), async (c) => {
+router.get("/:id/manifest.m3u8", validate("param", ManifestParamSchema), async (c) => {
     const mediaId = c.req.valid("param").id;
     const access = await verifyMediaStreamAccess(c, mediaId);
     if (!access.ok) return access.errorResponse;
 
-    const videoTrackId = c.req.query("video_track_id");
-    const audioTrackId = c.req.query("audio_track_id");
-
-    const rawQuery = c.req.query();
-    const queryParams = new URLSearchParams(rawQuery);
-    const queryString = queryParams.toString();
-    const querySuffix = queryString ? `?${queryString}` : undefined;
-
-    const m3u8 = await MediaService.getHlsMasterManifest(mediaId, querySuffix, {
-        videoTrackId,
-        audioTrackId,
-    });
-    if (!m3u8) {
-        return c.json(error(Code.NOT_FOUND, "No playable HLS video tracks found for this media"), 404);
-    }
-
-    return c.newResponse(m3u8, 200, {
-        "Content-Type": "application/x-mpegURL",
-    });
+    const m3u8 = await buildMediaHlsMaster(mediaId, querySuffixOf(c));
+    if (!m3u8) return c.json(error(Code.NOT_FOUND, "This media has no adaptive playback"), 404);
+    return c.newResponse(m3u8, 200, { "Content-Type": "application/x-mpegURL" });
 });
 
-router.get("/:id/hls/:trackId/manifest.m3u8", validate("param", GetHlsVariantRequestSchema), async (c) => {
-    const { id: mediaId, trackId } = c.req.valid("param");
-    const access = await verifyMediaStreamAccess(c, mediaId, trackId);
+/** The playlist of one stream or caption of the master playlist. */
+router.get("/:id/hls/:renditionId/manifest.m3u8", validate("param", RenditionParamSchema), async (c) => {
+    const { id: mediaId, renditionId } = c.req.valid("param");
+    const access = await verifyMediaStreamAccess(c, mediaId, renditionId);
     if (!access.ok) return access.errorResponse;
 
-    const rawQuery = c.req.query();
-    const queryParams = new URLSearchParams(rawQuery);
-    const queryString = queryParams.toString();
-    const querySuffix = queryString ? `?${queryString}` : undefined;
-
-    const m3u8 = await MediaService.getHlsVariantManifest(mediaId, trackId, querySuffix);
-    if (!m3u8) {
-        return c.json(error(Code.NOT_FOUND, "No playable HLS variant track found"), 404);
-    }
-
-    return c.newResponse(m3u8, 200, {
-        "Content-Type": "application/x-mpegURL",
-    });
+    const m3u8 = await buildMediaHlsRendition(mediaId, renditionId);
+    if (!m3u8) return c.json(error(Code.NOT_FOUND, "Rendition not found"), 404);
+    return c.newResponse(m3u8, 200, { "Content-Type": "application/x-mpegURL" });
 });
 
-async function verifyMediaStreamAccess(c: Context, mediaId: string, trackId?: string): Promise<{ ok: boolean; errorResponse: any }> {
+async function verifyMediaStreamAccess(c: Context, mediaId: string, renditionId?: string): Promise<{ ok: boolean; errorResponse: any }> {
     const expires = c.req.query("expires");
     const sig = c.req.query("sig");
 
     // 1. Zero-DB HMAC Signature Check (Industry Standard Signed URL)
     if (expires && sig) {
-        const isValid = verifyMediaSignature(mediaId, trackId, expires, sig);
+        const isValid = verifyMediaSignature(mediaId, renditionId, expires, sig);
         if (isValid) {
             return { ok: true, errorResponse: null };
         }
@@ -618,315 +581,161 @@ router.post("/:id/tags/replace", requireAuth, validate("json", MediaReplaceTagsS
     return c.json(success(Code.SUCCESS, { tag_ids: resolvedTagIds }));
 });
 
-router.get("/:id/tracks", requireAuth, async (c) => {
-    const id = c.req.param("id")!;
-    const access = await checkMediaAccess(c, id);
-    if (access.errorResponse) return access.errorResponse;
-
-    const tracks = await TrackService.listTracks(id);
-
-    const result = tracks.map((t) => ({
-        ...t.track,
-        file: t.file
-            ? {
-                  ...t.file,
-                  url: buildCdnUrl(t.file.bucket, t.file.path),
-              }
-            : null,
-    }));
-
-    return c.json(success(Code.SUCCESS, result));
-});
-
 const DOWNLOAD_URL_TTL_SECONDS = 300;
 
-router.get("/:id/tracks/:trackId/download-url", requireAuth, async (c) => {
-    const id = c.req.param("id")!;
-    const trackId = c.req.param("trackId")!;
+const OriginalParamSchema = v.object({
+    id: v.pipe(v.string(), v.uuid()),
+    originalId: v.pipe(v.string(), v.uuid()),
+});
+const CaptionParamSchema = v.object({
+    id: v.pipe(v.string(), v.uuid()),
+    captionId: v.pipe(v.string(), v.uuid()),
+});
+const StreamParamSchema = v.object({
+    id: v.pipe(v.string(), v.uuid()),
+    streamId: v.pipe(v.string(), v.uuid()),
+});
+
+function editErrorResponse(c: Context, cause: unknown) {
+    if (!(cause instanceof MediaEditError)) throw cause;
+    return c.json(error(cause.status === 404 ? Code.NOT_FOUND : Code.INVALID_PARAMETER, cause.message), cause.status);
+}
+
+/** A short-lived link that downloads an original under the media's title. */
+router.get("/:id/originals/:originalId/download-url", requireAuth, validate("param", OriginalParamSchema), async (c) => {
+    const { id, originalId } = c.req.valid("param");
     const access = await checkMediaAccess(c, id);
     if (access.errorResponse) return access.errorResponse;
     const media = access.media!;
 
-    const file = (await TrackService.listTracks(id)).find((row) => row.track.id === trackId)?.file;
-    if (!file) return c.json(error(Code.NOT_FOUND, "Track file not found"), 404);
+    const state = ((await loadOriginalStates(db, [id])).get(id) ?? []).find((item) => item.original.id === originalId);
+    const file = state?.file;
+    if (!file) return c.json(error(Code.NOT_FOUND, "Original file not found"), 404);
 
     const extension = file.extension || getFileExtension(file.path);
     const baseName = media.title?.trim() || media.id;
     const downloadName = extension && !baseName.toLowerCase().endsWith(`.${extension}`) ? `${baseName}.${extension}` : baseName;
-    const url = await s3.getPresignedUrl(file.path, {
-        bucket: file.bucket,
-        expiresInSeconds: DOWNLOAD_URL_TTL_SECONDS,
-        downloadName,
-    });
+    const url = await s3.getPresignedUrl(file.path, { bucket: file.bucket, expiresInSeconds: DOWNLOAD_URL_TTL_SECONDS, downloadName });
     return c.json(success(Code.SUCCESS, { url }));
 });
 
-/** Covers are set through the cover routes, never as tracks. */
-const TrackPurposeSchema = v.picklist(
-    Object.values(TrackPurpose).filter((purpose) => purpose !== TrackPurpose.COVER),
-    "A cover is not a track; use the cover routes",
+const AddOriginalSchema = v.object({
+    draft_file_id: v.pipe(v.string(), v.uuid()),
+    /** The original the new file takes the place of. */
+    replaces: v.optional(v.pipe(v.string(), v.uuid())),
+});
+
+/** Adds an original uploaded as a draft file, or replaces one with it. */
+router.post("/:id/originals", requireAuth, validate("param", MediaIdParamSchema), validate("json", AddOriginalSchema), async (c) => {
+    const { id } = c.req.valid("param");
+    const { draft_file_id, replaces } = c.req.valid("json");
+    const access = await checkMediaAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+
+    try {
+        const originalId = await addOriginal(access.media!, draft_file_id, replaces);
+        return c.json(success(Code.SUCCESS, { id: originalId }));
+    } catch (cause) {
+        return editErrorResponse(c, cause);
+    }
+});
+
+router.post("/:id/originals/:originalId/delete", requireAuth, validate("param", OriginalParamSchema), async (c) => {
+    const { id, originalId } = c.req.valid("param");
+    const access = await checkMediaAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+
+    try {
+        await deleteOriginal(access.media!, originalId);
+        return c.json(success(Code.SUCCESS, { id: originalId }));
+    } catch (cause) {
+        return editErrorResponse(c, cause);
+    }
+});
+
+const NullableTextSchema = v.optional(v.nullable(v.pipe(v.string(), v.trim(), v.maxLength(100))));
+
+const AddCaptionSchema = v.object({
+    draft_file_id: v.pipe(v.string(), v.uuid()),
+    language: NullableTextSchema,
+    label: NullableTextSchema,
+    is_default: v.optional(v.boolean()),
+});
+
+/** Adds a caption uploaded as a draft subtitle file. */
+router.post("/:id/captions", requireAuth, validate("param", MediaIdParamSchema), validate("json", AddCaptionSchema), async (c) => {
+    const { id } = c.req.valid("param");
+    const { draft_file_id, ...declared } = c.req.valid("json");
+    const access = await checkMediaAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+
+    try {
+        const captionId = await addCaption(access.media!, draft_file_id, declared);
+        return c.json(success(Code.SUCCESS, { id: captionId }));
+    } catch (cause) {
+        return editErrorResponse(c, cause);
+    }
+});
+
+const TrackInfoPatchSchema = v.pipe(
+    v.object({
+        language: NullableTextSchema,
+        label: NullableTextSchema,
+        is_default: v.optional(v.boolean()),
+    }),
+    v.check((data) => Object.keys(data).length > 0, "At least one field must be provided for update"),
 );
 
-const PresignUploadSchema = v.object({
-    type: v.enum(TrackType),
-    purpose: TrackPurposeSchema,
-    quality: v.enum(Quality),
-    priority: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
-    fileName: v.pipe(v.string(), v.nonEmpty("fileName is required")),
-});
+router.post(
+    "/:id/captions/:captionId/update",
+    requireAuth,
+    validate("param", CaptionParamSchema),
+    validate("json", TrackInfoPatchSchema),
+    async (c) => {
+        const { id, captionId } = c.req.valid("param");
+        const access = await checkMediaAccess(c, id);
+        if (access.errorResponse) return access.errorResponse;
 
-router.post("/:id/tracks/presign-upload", requireAuth, validate("json", PresignUploadSchema), async (c) => {
-    const id = c.req.param("id")!;
-    const { type, purpose, priority, fileName } = c.req.valid("json");
-
-    const access = await checkMediaAccess(c, id);
-    if (access.errorResponse) return access.errorResponse;
-    const media = access.media!;
-
-    const allowedTrackTypes = getAllowedTrackTypesForFile(fileName);
-    if (!allowedTrackTypes.includes(type)) {
-        const expected = allowedTrackTypes.length > 0 ? allowedTrackTypes.join(" or ") : "a supported media";
-        return c.json(error(Code.INVALID_PARAMETER, `${fileName} must be uploaded as ${expected} track`), 400);
-    }
-
-    const ext = getFileExtension(fileName) || "bin";
-    const fileId = uuidv7();
-    const prefix = `${type.toLowerCase()}_${purpose.toLowerCase()}_${priority}`;
-    const postId = media.post_id;
-    const libraryId = media.library_id;
-
-    const path = postId
-        ? `v2/p/${postId.slice(-2)}/${postId}/${media.id}_${prefix}_${fileId}.${ext}`
-        : `v2/l/${libraryId.slice(-2)}/${libraryId}/${media.id}_${prefix}_${fileId}.${ext}`;
-
-    const mimeType = getMimeTypeByExt(ext);
-    const uploadUrl = await s3.getUploadPresignedUrl(path, {
-        bucket: env.S3_BUCKET,
-        contentType: mimeType,
-        expiresInSeconds: 3600,
-    });
-
-    return c.json(
-        success(Code.SUCCESS, {
-            url: uploadUrl,
-            path: path,
-            bucket: env.S3_BUCKET,
-            mime_type: mimeType,
-            extension: ext,
-        }),
-    );
-});
-
-const RegisterTrackSchema = v.object({
-    type: v.enum(TrackType),
-    purpose: TrackPurposeSchema,
-    quality: v.enum(Quality),
-    priority: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
-    source_url: v.optional(v.string()),
-    metadata: v.optional(v.any()),
-    variant_key: v.optional(v.string()),
-    is_default: v.optional(v.boolean()),
-    is_primary: v.optional(v.boolean()),
-    display_name: v.optional(v.string()),
-    language: v.optional(v.nullable(v.string())),
-    codec: v.optional(v.nullable(v.string())),
-    duration: v.optional(v.nullable(v.number())),
-    width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-    height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-    bandwidth: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
-    is_stale: v.optional(v.boolean()),
-    source_track_id: v.optional(v.nullable(v.string())),
-    container: v.optional(v.nullable(v.string())),
-    is_fragmented: v.optional(v.nullable(v.boolean())),
-    stream_layout: v.optional(v.nullable(v.enum(TrackStreamLayout))),
-    has_video: v.optional(v.nullable(v.boolean())),
-    has_audio: v.optional(v.nullable(v.boolean())),
-    streams: v.optional(
-        v.nullable(
-            v.array(
-                v.object({
-                    index: v.pipe(v.number(), v.integer(), v.minValue(0)),
-                    id: v.optional(v.nullable(v.string())),
-                    type: v.picklist([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
-                    codec: v.optional(v.nullable(v.string())),
-                    language: v.optional(v.nullable(v.string())),
-                    label: v.optional(v.nullable(v.string())),
-                    role: v.optional(v.nullable(v.string())),
-                    width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-                    height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-                    bandwidth: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
-                    channels: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-                    sample_rate: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-                    is_default: v.optional(v.boolean()),
-                }),
-            ),
-        ),
-    ),
-    file: v.object({
-        path: v.pipe(v.string(), v.nonEmpty()),
-        bucket: v.pipe(v.string(), v.nonEmpty()),
-        mime_type: v.pipe(v.string(), v.nonEmpty()),
-        extension: v.pipe(v.string(), v.nonEmpty()),
-        size: v.pipe(v.number(), v.integer(), v.minValue(0)),
-    }),
-});
-
-router.post("/:id/tracks/upsert", requireAuth, validate("json", RegisterTrackSchema), async (c) => {
-    const id = c.req.param("id");
-    const body = c.req.valid("json");
-
-    const access = await checkMediaAccess(c, id);
-    if (access.errorResponse) return access.errorResponse;
-
-    const result = await db.transaction(async (tx) => {
-        return TrackService.upsertTrack(
-            id,
-            {
-                type: body.type,
-                purpose: body.purpose,
-                quality: body.quality,
-                priority: body.priority,
-                source_url: body.source_url,
-                metadata: body.metadata,
-                variant_key: body.variant_key,
-                is_default: body.is_default,
-                is_primary: body.is_primary,
-                display_name: body.display_name,
-                language: body.language,
-                codec: body.codec,
-                is_stale: body.is_stale,
-                source_track_id: body.source_track_id,
-                container: body.container,
-                is_fragmented: body.is_fragmented,
-                stream_layout: body.stream_layout,
-                has_video: body.has_video,
-                has_audio: body.has_audio,
-                streams: body.streams,
-            },
-            body.file,
-            tx,
-        );
-    });
-
-    return c.json(success(Code.SUCCESS, result));
-});
-
-const ReplaceFileSchema = v.object({
-    file: v.object({
-        path: v.pipe(v.string(), v.nonEmpty()),
-        bucket: v.pipe(v.string(), v.nonEmpty()),
-        mime_type: v.pipe(v.string(), v.nonEmpty()),
-        extension: v.pipe(v.string(), v.nonEmpty()),
-        size: v.pipe(v.number(), v.integer(), v.minValue(0)),
-        width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-        height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-        duration: v.optional(v.nullable(v.number())),
-    }),
-});
-
-router.post("/:id/tracks/:trackId/replace-file", requireAuth, validate("json", ReplaceFileSchema), async (c) => {
-    const id = c.req.param("id")!;
-    const trackId = c.req.param("trackId")!;
-    const { file } = c.req.valid("json");
-
-    const access = await checkMediaAccess(c, id);
-    if (access.errorResponse) return access.errorResponse;
-
-    try {
-        const result = await TrackService.replaceFile(id, trackId, file);
-        return c.json(success(Code.SUCCESS, result));
-    } catch (e: any) {
-        return c.json(error(Code.INVALID_PARAMETER, e.message || "File replacement failed"), 400);
-    }
-});
-
-router.post("/:id/tracks/:trackId/delete", requireAuth, async (c) => {
-    const id = c.req.param("id");
-    const trackId = c.req.param("trackId");
-    if (!id) {
-        return c.json(error(Code.INVALID_PARAMETER, "media id is required"), 400);
-    }
-    if (!trackId) {
-        return c.json(error(Code.INVALID_PARAMETER, "track id is required"), 400);
-    }
-
-    const access = await checkMediaAccess(c, id);
-    if (access.errorResponse) return access.errorResponse;
-
-    const result = await TrackService.deleteTrack(id, trackId);
-    return respondWithResult(c, result);
-});
-
-const UpdateTrackMetadataSchema = v.object({
-    priority: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
-    quality: v.optional(v.enum(Quality)),
-    display_name: v.optional(v.nullable(v.string())),
-    variant_key: v.optional(v.string()),
-    is_default: v.optional(v.boolean()),
-    is_primary: v.optional(v.boolean()),
-    language: v.optional(v.nullable(v.string())),
-    codec: v.optional(v.nullable(v.string())),
-    is_stale: v.optional(v.boolean()),
-    metadata: v.optional(v.any()),
-    source_track_id: v.optional(v.nullable(v.string())),
-    container: v.optional(v.nullable(v.string())),
-    is_fragmented: v.optional(v.nullable(v.boolean())),
-    stream_layout: v.optional(v.nullable(v.enum(TrackStreamLayout))),
-    has_video: v.optional(v.nullable(v.boolean())),
-    has_audio: v.optional(v.nullable(v.boolean())),
-    streams: v.optional(
-        v.nullable(
-            v.array(
-                v.object({
-                    index: v.pipe(v.number(), v.integer(), v.minValue(0)),
-                    id: v.optional(v.nullable(v.string())),
-                    type: v.picklist([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
-                    codec: v.optional(v.nullable(v.string())),
-                    language: v.optional(v.nullable(v.string())),
-                    label: v.optional(v.nullable(v.string())),
-                    role: v.optional(v.nullable(v.string())),
-                    width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-                    height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-                    bandwidth: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
-                    channels: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-                    sample_rate: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-                    is_default: v.optional(v.boolean()),
-                }),
-            ),
-        ),
-    ),
-});
-
-router.post("/:id/tracks/:trackId/update", requireAuth, validate("json", UpdateTrackMetadataSchema), async (c) => {
-    const id = c.req.param("id");
-    const trackId = c.req.param("trackId");
-    const body = c.req.valid("json");
-
-    const access = await checkMediaAccess(c, id);
-    if (access.errorResponse) return access.errorResponse;
-
-    const updated = await TrackService.updateTrackMetadata(id, trackId, body);
-    return c.json(success(Code.SUCCESS, updated));
-});
-
-router.post("/:id/tracks/from-draft", requireAuth, validate("json", AddTracksFromDraftSchema), async (c) => {
-    const id = c.req.param("id")!;
-
-    const access = await checkMediaAccess(c, id);
-    if (!access.media || access.errorResponse) return access.errorResponse;
-
-    try {
-        const result = await addTracksFromDraft(access.media, c.req.valid("json"));
-        return c.json(success(Code.SUCCESS, result));
-    } catch (cause) {
-        if (cause instanceof AddTracksFromDraftError) {
-            if (cause.kind === "CONFLICT") {
-                return c.json(error(Code.ALREADY_EXISTS, cause.message), 409);
-            }
-            return c.json(error(Code.INVALID_PARAMETER, cause.message), 400);
+        try {
+            await updateCaption(access.media!, captionId, c.req.valid("json"));
+            return c.json(success(Code.SUCCESS, { id: captionId }));
+        } catch (cause) {
+            return editErrorResponse(c, cause);
         }
-        throw cause;
+    },
+);
+
+router.post("/:id/captions/:captionId/delete", requireAuth, validate("param", CaptionParamSchema), async (c) => {
+    const { id, captionId } = c.req.valid("param");
+    const access = await checkMediaAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+
+    try {
+        await deleteCaption(access.media!, captionId);
+        return c.json(success(Code.SUCCESS, { id: captionId }));
+    } catch (cause) {
+        return editErrorResponse(c, cause);
     }
 });
+
+/** Renames an audio track or makes it the default one. */
+router.post(
+    "/:id/audio-tracks/:streamId/update",
+    requireAuth,
+    validate("param", StreamParamSchema),
+    validate("json", TrackInfoPatchSchema),
+    async (c) => {
+        const { id, streamId } = c.req.valid("param");
+        const access = await checkMediaAccess(c, id);
+        if (access.errorResponse) return access.errorResponse;
+
+        try {
+            await updateAudioTrack(access.media!, streamId, c.req.valid("json"));
+            return c.json(success(Code.SUCCESS, { id: streamId }));
+        } catch (cause) {
+            return editErrorResponse(c, cause);
+        }
+    },
+);
 
 export default router;

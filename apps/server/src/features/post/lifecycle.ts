@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull, isNotNull } from "drizzle-orm";
-import { deleteMediaImages } from "@/features/media/cover";
+import { releaseMediaAssets } from "@/features/media/release";
 import { db } from "@/global/db";
-import { DeleteStatus, File, Media, MediaTag, Post, PostTag, Track } from "@/db/schema";
+import { DeleteStatus, File, Media, MediaTag, Post, PostTag } from "@/db/schema";
 import { deleteMediaAiData } from "@/features/ai/cleanup";
 import { markRestored } from "@/features/media/restored";
 
@@ -151,15 +151,6 @@ export async function batchDeletePost(postIds: string[]): Promise<{
 
             const mediaIds = childMedias.map((m) => m.id);
 
-            let fileIds: string[] = [];
-            if (mediaIds.length > 0) {
-                const tracks = await tx
-                    .select({ file_id: Track.file_id })
-                    .from(Track)
-                    .where(and(inArray(Track.media_id, mediaIds), eq(Track.delete_status, DeleteStatus.ACTIVE)));
-                fileIds = Array.from(new Set(tracks.map((t) => t.file_id).filter((fileId): fileId is string => Boolean(fileId))));
-            }
-
             await tx.delete(PostTag).where(inArray(PostTag.post_id, validPostIds));
             if (mediaIds.length > 0) {
                 await tx.delete(MediaTag).where(inArray(MediaTag.media_id, mediaIds));
@@ -172,6 +163,7 @@ export async function batchDeletePost(postIds: string[]): Promise<{
                 .returning({ id: Post.id });
 
             let mediaUpdated = 0;
+            let fileUpdated = 0;
             if (mediaIds.length > 0) {
                 const updatedMedias = await tx
                     .update(Media)
@@ -180,23 +172,9 @@ export async function batchDeletePost(postIds: string[]): Promise<{
                     .returning({ id: Media.id });
                 mediaUpdated = updatedMedias.length;
                 await deleteMediaAiData(tx, mediaIds);
-                await deleteMediaImages(tx, mediaIds);
-
-                await tx
-                    .update(Track)
-                    .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
-                    .where(inArray(Track.media_id, mediaIds));
+                fileUpdated = await releaseMediaAssets(tx, mediaIds);
             }
 
-            let fileUpdated = 0;
-            if (fileIds.length > 0) {
-                const updatedFiles = await tx
-                    .update(File)
-                    .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
-                    .where(and(inArray(File.id, fileIds), eq(File.delete_status, DeleteStatus.ACTIVE)))
-                    .returning({ id: File.id });
-                fileUpdated = updatedFiles.length;
-            }
 
             return {
                 postUpdated: updatedPosts.length,

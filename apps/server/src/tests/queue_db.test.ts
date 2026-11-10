@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { jobsApp } from "@/api/jobs";
-import { ExternalApiToken, JobQueue, Library, Media, MediaType, Track, TrackPurpose, TrackType, User } from "@/db/schema";
+import { ExternalApiToken, JobQueue, Library, Media, MediaOriginal, MediaType, SyncStatus, User } from "@/db/schema";
 import { downloadPipeline } from "@/features/ingest/download-pipeline";
 import { deleteLibrary } from "@/features/library/delete-library";
 import { ApiTokenService } from "@/features/auth/api-token";
@@ -9,7 +9,6 @@ import { db } from "@/global/db";
 import { markChanged, requeue } from "@/infra/queue/changes";
 import { Aspect, PIPELINE_NAMES, scanQueueName } from "@/infra/queue/pipelines";
 import { DEFAULT_MAX_ATTEMPTS } from "@/infra/queue/policy";
-import { Quality } from "@/lib/types";
 import {
     LeaseLostError,
     advance,
@@ -1060,15 +1059,7 @@ describe("download pipeline", () => {
             type: MediaType.IMAGE,
             sort_order: 0,
         });
-        await db.insert(Track).values({
-            media_id: mediaId,
-            type: TrackType.IMAGE,
-            purpose: TrackPurpose.CONTENT,
-            quality: Quality.HIGH,
-            source_url: "https://cdn.test/a.jpg",
-            variant_key: "original",
-            is_primary: true,
-        });
+        await db.insert(MediaOriginal).values({ media_id: mediaId, source_url: "https://cdn.test/a.jpg", source_key: "image", status: SyncStatus.PENDING });
         try {
             expect((await downloadPipeline.scanPage(libraryId, null, 100, null)).subjectIds).toEqual([mediaId]);
 
@@ -1079,7 +1070,7 @@ describe("download pipeline", () => {
             expect((await downloadPipeline.scanPage(libraryId, null, 100, null)).subjectIds).toEqual([]);
             expect(await downloadPipeline.countFailures([libraryId])).toEqual(new Map([[libraryId, 1]]));
         } finally {
-            await db.delete(Track).where(eq(Track.media_id, mediaId));
+            await db.delete(MediaOriginal).where(eq(MediaOriginal.media_id, mediaId));
             await db.delete(Media).where(eq(Media.id, mediaId));
         }
     });

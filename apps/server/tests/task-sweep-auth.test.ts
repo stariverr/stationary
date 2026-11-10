@@ -21,15 +21,14 @@ Object.assign(process.env, {
 const { env } = await import("@/global/env");
 const { db } = await import("@/global/db");
 const { ApiTokenService } = await import("@/features/auth/api-token");
-const { Library, Media, MediaType, Post, SyncStatus, Track, TrackPurpose, TrackType, User } = await import("@/db/schema");
-const { Quality } = await import("@/lib/types");
+const { Library, Media, MediaType, Post, SyncStatus, User } = await import("@/db/schema");
 const { default: taskApp } = await import("@/api/task");
 const { eq, inArray } = await import("drizzle-orm");
 
 const databaseTest = databaseUrl && env.DB_URL === databaseUrl ? test : test.skip;
 
 const secret = "test-cron-secret";
-const cronRoutes = ["/purge-stale-pending-drafts", "/sweep-stuck-tasks", "/sweep-orphan-tags", "/sweep-media-track-integrity"];
+const cronRoutes = ["/purge-stale-pending-drafts", "/sweep-stuck-tasks", "/sweep-orphan-tags"];
 const post = (route: string, headers: Record<string, string> = {}) => taskApp.request(route, { method: "POST", headers });
 const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
 
@@ -158,32 +157,19 @@ describe("POST /task/sweep-stuck-library", () => {
                     update_time: stale,
                 })
                 .returning();
-            const [stuckTrack] = await db
-                .insert(Track)
-                .values({
-                    media_id: stuckMedia!.id,
-                    type: TrackType.VIDEO,
-                    purpose: TrackPurpose.CONTENT,
-                    quality: Quality.HIGH,
-                    variant_key: "original",
-                    sync_status: SyncStatus.IN_PROGRESS,
-                    update_time: stale,
-                })
-                .returning();
-            return { postId: stuckPost!.id, mediaId: stuckMedia!.id, trackId: stuckTrack!.id };
+            return { postId: stuckPost!.id, mediaId: stuckMedia!.id };
         };
 
-        const statuses = async ({ postId, mediaId, trackId }: Awaited<ReturnType<typeof seed>>) => {
+        const statuses = async ({ postId, mediaId }: Awaited<ReturnType<typeof seed>>) => {
             const [postRow] = await db.select().from(Post).where(eq(Post.id, postId));
             const [mediaRow] = await db.select().from(Media).where(eq(Media.id, mediaId));
-            const [trackRow] = await db.select().from(Track).where(eq(Track.id, trackId));
-            return [postRow!.sync_status, mediaRow!.sync_status, trackRow!.sync_status];
+            return [postRow!.sync_status, mediaRow!.sync_status];
         };
 
         const ownItems = await seed(own!.id);
         const otherItems = await seed(other!.id);
         const foreignItems = await seed(foreign!.id);
-        const stuck = [SyncStatus.IN_PROGRESS, SyncStatus.IN_PROGRESS, SyncStatus.IN_PROGRESS];
+        const stuck = [SyncStatus.IN_PROGRESS, SyncStatus.IN_PROGRESS];
         const token = (libraryId: string | null) =>
             spyOn(ApiTokenService, "verifyToken").mockResolvedValue({ owner_id: owner!.id, library_id: libraryId } as never);
 
@@ -192,8 +178,8 @@ describe("POST /task/sweep-stuck-library", () => {
             const res = await sweep(own!.id, bearer("st_test"));
 
             expect(res.status).toBe(200);
-            expect(await res.json()).toMatchObject({ success: true, data: { stuck_entities_swept: 3 } });
-            expect(await statuses(ownItems)).toEqual([SyncStatus.FAILED, SyncStatus.FAILED, SyncStatus.FAILED]);
+            expect(await res.json()).toMatchObject({ success: true, data: { stuck_entities_swept: 2 } });
+            expect(await statuses(ownItems)).toEqual([SyncStatus.FAILED, SyncStatus.FAILED]);
             expect(await statuses(otherItems)).toEqual(stuck);
 
             expect((await sweep(foreign!.id, bearer("st_test"))).status).toBe(404);
@@ -208,7 +194,6 @@ describe("POST /task/sweep-stuck-library", () => {
         } finally {
             unscoped.mockRestore();
             const items = [ownItems, otherItems, foreignItems];
-            await db.delete(Track).where(inArray(Track.id, items.map((item) => item.trackId)));
             await db.delete(Media).where(inArray(Media.id, items.map((item) => item.mediaId)));
             await db.delete(Post).where(inArray(Post.id, items.map((item) => item.postId)));
             await db.delete(Library).where(inArray(Library.id, [own!.id, other!.id, foreign!.id]));

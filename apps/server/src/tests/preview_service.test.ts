@@ -1,30 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { DeleteStatus, File as DbFile, Media, MediaPreview, MediaType, PreviewSize, SyncStatus, Track, TrackPurpose, TrackType } from "@/db/schema";
+import { DeleteStatus, File as DbFile, Media, MediaPreview, MediaType, PreviewSize } from "@/db/schema";
 import { pickContentSource, planPreviews, previewSourceOf, previewsNeedWork, type PreviewState } from "@/features/media/preview";
 import { detectFormatStrategy } from "@/lib/utils/preview_renderer";
 import { PREVIEW_PROFILES, RECIPE_VERSION } from "@/lib/utils/preview_profiles";
-import { Quality } from "@/lib/types";
 
-type TrackRow = typeof Track.$inferSelect;
 type FileRow = typeof DbFile.$inferSelect;
 
 const file = (id: string, extension = "jpg"): FileRow =>
     ({ id, path: `p/${id}.${extension}`, bucket: "b", extension, delete_status: DeleteStatus.ACTIVE }) as FileRow;
 
-const content = (fileId: string, type: TrackType, overrides: Partial<TrackRow> = {}, extension?: string) => ({
-    track: {
-        id: `t-${fileId}`,
-        type,
-        purpose: TrackPurpose.CONTENT,
-        quality: Quality.HIGH,
-        is_primary: false,
-        is_default: false,
-        priority: 0,
-        sync_status: SyncStatus.COMPLETED,
-        ...overrides,
-    } as TrackRow,
-    file: file(fileId, extension),
-});
+const content = (fileId: string, kind: "IMAGE" | "VIDEO", extension?: string) => ({ kind, file: file(fileId, extension) });
 
 const preview = (size: PreviewSize, values: Partial<typeof MediaPreview.$inferSelect>) =>
     ({
@@ -56,34 +41,24 @@ describe("preview profiles", () => {
 });
 
 describe("preview source", () => {
-    test("prefers a renderable image, then primary, default and priority", () => {
-        const picked = pickContentSource([
-            content("vvic", TrackType.IMAGE, { is_primary: true }, "vvic"),
-            content("video", TrackType.VIDEO, { is_primary: true }),
-            content("second", TrackType.IMAGE, { priority: 1 }),
-            content("default", TrackType.IMAGE, { is_default: true, priority: 2 }),
-        ]);
-        expect(picked?.fileId).toBe("default");
-        expect(picked?.renderAs).toBe(MediaType.IMAGE);
-    });
-
-    test("falls back to a video frame, and ignores audio", () => {
-        expect(pickContentSource([content("video", TrackType.VIDEO)])?.renderAs).toBe(MediaType.VIDEO);
-        expect(pickContentSource([content("audio", TrackType.AUDIO)])).toBeNull();
+    test("prefers a renderable image over a video frame", () => {
+        expect(pickContentSource([content("video", "VIDEO"), content("image", "IMAGE")])).toMatchObject({ fileId: "image", renderAs: MediaType.IMAGE });
+        expect(pickContentSource([content("jxl", "IMAGE", "jxl"), content("video", "VIDEO")])).toMatchObject({ fileId: "video", renderAs: MediaType.VIDEO });
+        expect(pickContentSource([])).toBeNull();
     });
 
     test("a cover wins for video, audio and PDF; images never use one", () => {
         const cover = file("cover");
-        const contents = [content("video", TrackType.VIDEO)];
+        const contents = [content("video", "VIDEO")];
         expect(previewSourceOf(MediaType.VIDEO, cover, contents)?.fileId).toBe("cover");
         expect(previewSourceOf(MediaType.AUDIO, cover, [])?.fileId).toBe("cover");
-        expect(previewSourceOf(MediaType.IMAGE, cover, [content("image", TrackType.IMAGE)])?.fileId).toBe("image");
+        expect(previewSourceOf(MediaType.IMAGE, cover, [content("image", "IMAGE")])?.fileId).toBe("image");
         expect(previewSourceOf(MediaType.VIDEO, null, contents)?.fileId).toBe("video");
     });
 
     test("audio and PDF without a cover have no preview", () => {
-        expect(previewSourceOf(MediaType.AUDIO, null, [content("audio", TrackType.AUDIO)])).toBeNull();
-        expect(previewSourceOf(MediaType.PDF, null, [content("pdf", TrackType.PDF)])).toBeNull();
+        expect(previewSourceOf(MediaType.AUDIO, null, [])).toBeNull();
+        expect(previewSourceOf(MediaType.PDF, null, [])).toBeNull();
     });
 });
 

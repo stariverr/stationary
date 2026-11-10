@@ -1,7 +1,6 @@
 import * as v from "valibot";
 import { toJsonSchema } from "@valibot/to-json-schema";
-import { MediaType, PostSource, TrackType, TrackPurpose, TrackStreamLayout } from "@/db/schema";
-import { Quality } from "@/lib/types";
+import { AssetOrigin, MediaType, PostSource, SyncStatus } from "@/db/schema";
 
 // FormTimestampSchema helper
 const FormTimestampSchema = v.optional(v.nullable(v.union([v.string(), v.number()])));
@@ -217,127 +216,44 @@ const MediaReplaceTagsSchema = v.object({
     tags: v.array(v.string()),
 });
 
-const PresignUploadSchema = v.object({
-    type: v.enum(TrackType),
-    purpose: v.enum(TrackPurpose),
-    quality: v.enum(Quality),
-    priority: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
-    fileName: v.pipe(v.string(), v.minLength(1)),
-});
-
-const TrackStreamSchema = v.object({
-    index: v.pipe(v.number(), v.integer(), v.minValue(0)),
-    id: v.optional(v.nullable(v.string())),
-    type: v.picklist([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
-    codec: v.optional(v.nullable(v.string())),
-    language: v.optional(v.nullable(v.string())),
-    label: v.optional(v.nullable(v.string())),
-    role: v.optional(v.nullable(v.string())),
-    width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-    height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-    bandwidth: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
-    channels: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-    sample_rate: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-    is_default: v.optional(v.boolean()),
-});
-
-const TrackFormatFields = {
-    container: v.optional(v.nullable(v.string())),
-    is_fragmented: v.optional(v.nullable(v.boolean())),
-    stream_layout: v.optional(v.nullable(v.enum(TrackStreamLayout))),
-    has_video: v.optional(v.nullable(v.boolean())),
-    has_audio: v.optional(v.nullable(v.boolean())),
-    streams: v.optional(v.nullable(v.array(TrackStreamSchema))),
-};
-
-const TrackFormatSchema = v.object(TrackFormatFields);
-
-const TrackResponseSchema = v.object({
+const PlaybackVideoResponseSchema = v.object({
     id: v.string(),
-    file_id: v.string(),
-    url: v.string(),
-    type: v.enum(TrackType),
-    purpose: v.enum(TrackPurpose),
-    is_original: v.boolean(),
-    quality: v.enum(Quality),
-    priority: v.pipe(v.number(), v.integer()),
-    metadata: v.record(v.string(), v.unknown()),
-    variant_key: v.string(),
-    is_default: v.boolean(),
-    is_primary: v.boolean(),
-    display_name: v.nullable(v.string()),
-    language: v.nullable(v.string()),
-    codec: v.nullable(v.string()),
-    is_stale: v.boolean(),
-    mime_type: v.nullable(v.string()),
-    extension: v.nullable(v.string()),
-    width: v.nullable(v.number()),
-    height: v.nullable(v.number()),
-    container: v.nullable(v.string()),
-    is_fragmented: v.nullable(v.boolean()),
-    stream_layout: v.nullable(v.enum(TrackStreamLayout)),
-    has_video: v.boolean(),
-    has_audio: v.boolean(),
-    streams: v.array(TrackStreamSchema),
-});
-
-const PlaybackVariantResponseSchema = v.object({
-    track_id: v.string(),
-    url: v.string(),
-    mime_type: v.nullable(v.string()),
-    quality: v.string(),
-    label: v.string(),
-    codec: v.nullable(v.string()),
-    width: v.nullable(v.number()),
-    height: v.nullable(v.number()),
-    bandwidth: v.nullable(v.number()),
+    codec: v.string(),
+    codec_string: v.nullable(v.string()),
+    width: v.number(),
+    height: v.number(),
+    rotation: v.nullable(v.number()),
     frame_rate: v.nullable(v.number()),
 });
 
 const PlaybackAudioTrackResponseSchema = v.object({
     id: v.string(),
-    track_id: v.string(),
-    source: v.picklist(["INTERNAL", "EXTERNAL"]),
-    stream_index: v.nullable(v.number()),
-    url: v.nullable(v.string()),
-    select_url: v.nullable(v.string()),
-    mime_type: v.nullable(v.string()),
+    codec: v.string(),
+    codec_string: v.nullable(v.string()),
     language: v.nullable(v.string()),
-    label: v.string(),
-    role: v.nullable(v.string()),
-    codec: v.nullable(v.string()),
-    channels: v.nullable(v.number()),
+    label: v.nullable(v.string()),
     is_default: v.boolean(),
-    selectable: v.boolean(),
+    channels: v.nullable(v.number()),
 });
 
-const PlaybackSubtitleTrackResponseSchema = v.object({
+const PlaybackCaptionResponseSchema = v.object({
     id: v.string(),
-    track_id: v.string(),
-    source: v.picklist(["INTERNAL", "EXTERNAL"]),
-    stream_index: v.nullable(v.number()),
-    url: v.nullable(v.string()),
-    mime_type: v.nullable(v.string()),
     language: v.nullable(v.string()),
-    label: v.string(),
-    format: v.nullable(v.string()),
-    selectable: v.boolean(),
+    label: v.nullable(v.string()),
+    is_default: v.boolean(),
+    vtt_url: v.string(),
 });
 
+/** How to play a media: direct play of its one original, or adaptive manifests over its streams. */
 const MediaPlaybackResponseSchema = v.object({
-    url: v.nullable(v.string()),
-    mime_type: v.nullable(v.string()),
-    protocol: v.nullable(v.picklist(["DASH", "PROGRESSIVE"])),
-    track_id: v.nullable(v.string()),
-    variants: v.array(PlaybackVariantResponseSchema),
-    capabilities: v.object({
-        quality_switching: v.boolean(),
-        audio_switching: v.boolean(),
-        subtitle_switching: v.boolean(),
-        protocol_supports_switching: v.boolean(),
-    }),
+    direct_url: v.nullable(v.string()),
+    direct_mime_type: v.nullable(v.string()),
+    hls_url: v.nullable(v.string()),
+    dash_url: v.nullable(v.string()),
+    duration: v.nullable(v.number()),
+    video: v.nullable(PlaybackVideoResponseSchema),
     audio_tracks: v.array(PlaybackAudioTrackResponseSchema),
-    subtitle_tracks: v.array(PlaybackSubtitleTrackResponseSchema),
+    captions: v.array(PlaybackCaptionResponseSchema),
 });
 
 const PreviewImageResponseSchema = v.nullable(v.object({ url: v.string(), width: v.number(), height: v.number() }));
@@ -345,6 +261,27 @@ const PreviewImagesResponseSchema = v.object({
     small: PreviewImageResponseSchema,
     medium: PreviewImageResponseSchema,
     large: PreviewImageResponseSchema,
+});
+
+const MediaOriginalResponseSchema = v.object({
+    id: v.string(),
+    kind: v.nullable(v.picklist(["IMAGE", "PDF", "VIDEO", "AUDIO"])),
+    url: v.nullable(v.string()),
+    mime_type: v.nullable(v.string()),
+    size: v.nullable(v.number()),
+    status: v.enum(SyncStatus),
+    last_error: v.nullable(v.string()),
+});
+
+const MediaCaptionResponseSchema = v.object({
+    id: v.string(),
+    origin: v.enum(AssetOrigin),
+    language: v.nullable(v.string()),
+    label: v.nullable(v.string()),
+    is_default: v.boolean(),
+    status: v.enum(SyncStatus),
+    last_error: v.nullable(v.string()),
+    vtt_url: v.nullable(v.string()),
 });
 
 const MediaDetailResponseSchema = v.object({
@@ -361,25 +298,15 @@ const MediaDetailResponseSchema = v.object({
     sync_status: v.string(),
     last_error: v.nullable(v.string()),
     url: v.nullable(v.string()),
-    playback: v.nullable(MediaPlaybackResponseSchema),
-    audio_tracks: v.array(PlaybackAudioTrackResponseSchema),
-    subtitle_tracks: v.array(PlaybackSubtitleTrackResponseSchema),
-    subtitles: v.array(
-        v.object({
-            url: v.string(),
-            language: v.string(),
-            label: v.string(),
-            format: v.string(),
-        }),
-    ),
-    previews: PreviewImagesResponseSchema,
-    cover: v.optional(v.nullable(v.object({ url: v.string() }))),
     width: v.nullable(v.number()),
     height: v.nullable(v.number()),
-    tracks: v.array(TrackResponseSchema),
+    duration: v.nullable(v.number()),
+    previews: PreviewImagesResponseSchema,
+    cover: v.nullable(v.object({ url: v.string() })),
+    playback: v.nullable(MediaPlaybackResponseSchema),
+    originals: v.array(MediaOriginalResponseSchema),
+    captions: v.array(MediaCaptionResponseSchema),
     position: v.optional(v.pipe(v.number(), v.integer())),
-    ai_status: v.optional(v.string()),
-    ai_error: v.optional(v.nullable(v.string())),
     ai: v.optional(
         v.object({
             status: v.picklist(["PENDING", "COMPLETED", "FAILED"]),
@@ -403,62 +330,26 @@ const MediaDetailResponseSchema = v.object({
 });
 
 const mediaDetailOpenApiSchema = valibotToOpenApi(MediaDetailResponseSchema);
-const trackResponseOpenApiSchema = valibotToOpenApi(TrackResponseSchema);
 
-const RegisterTrackSchema = v.object({
-    type: v.enum(TrackType),
-    purpose: v.enum(TrackPurpose),
-    quality: v.enum(Quality),
-    priority: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
-    source_url: v.optional(v.string()),
-    metadata: v.optional(v.any()),
-    variant_key: v.optional(v.string()),
-    is_default: v.optional(v.boolean()),
-    is_primary: v.optional(v.boolean()),
-    display_name: v.optional(v.string()),
+const AddOriginalSchema = v.object({
+    draft_file_id: v.pipe(v.string(), v.uuid()),
+    replaces: v.optional(v.pipe(v.string(), v.uuid())),
+});
+
+const AddCaptionSchema = v.object({
+    draft_file_id: v.pipe(v.string(), v.uuid()),
     language: v.optional(v.nullable(v.string())),
-    codec: v.optional(v.nullable(v.string())),
-    is_stale: v.optional(v.boolean()),
-    source_track_id: v.optional(v.nullable(v.string())),
-    ...TrackFormatFields,
-    file: v.object({
-        path: v.pipe(v.string(), v.minLength(1)),
-        bucket: v.pipe(v.string(), v.minLength(1)),
-        mime_type: v.pipe(v.string(), v.minLength(1)),
-        extension: v.pipe(v.string(), v.minLength(1)),
-        size: v.pipe(v.number(), v.integer(), v.minValue(0)),
-        width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-        height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-        duration: v.optional(v.nullable(v.number())),
-    }),
-});
-
-const ReplaceFileSchema = v.object({
-    file: v.object({
-        path: v.pipe(v.string(), v.minLength(1)),
-        bucket: v.pipe(v.string(), v.minLength(1)),
-        mime_type: v.pipe(v.string(), v.minLength(1)),
-        extension: v.pipe(v.string(), v.minLength(1)),
-        size: v.pipe(v.number(), v.integer(), v.minValue(0)),
-        width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-        height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-        duration: v.optional(v.nullable(v.number())),
-    }),
-});
-
-const UpdateTrackMetadataSchema = v.object({
-    priority: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
-    quality: v.optional(v.enum(Quality)),
-    display_name: v.optional(v.nullable(v.string())),
-    variant_key: v.optional(v.string()),
+    label: v.optional(v.nullable(v.string())),
     is_default: v.optional(v.boolean()),
-    language: v.optional(v.nullable(v.string())),
-    codec: v.optional(v.nullable(v.string())),
-    is_stale: v.optional(v.boolean()),
-    metadata: v.optional(v.any()),
-    source_track_id: v.optional(v.nullable(v.string())),
-    ...TrackFormatFields,
 });
+
+const TrackInfoPatchSchema = v.object({
+    language: v.optional(v.nullable(v.string())),
+    label: v.optional(v.nullable(v.string())),
+    is_default: v.optional(v.boolean()),
+});
+
+const IdResponseSchema = makeUnifiedSuccessResponse({ type: "object", properties: { id: { type: "string" } } });
 
 // Task & Workflow schemas
 const AuthorSchema = v.object({
@@ -468,34 +359,25 @@ const AuthorSchema = v.object({
     avatar_file_url: v.optional(v.nullable(v.string())),
 });
 
-const SegmentBaseSchema = v.object({
-    initialization: v.optional(v.nullable(v.string())),
-    index_range: v.optional(v.nullable(v.string())),
+const ImportOriginalSchema = v.object({
+    url: v.pipe(v.string(), v.minLength(1)),
+    source_key: v.pipe(v.string(), v.minLength(1)),
+    language: v.optional(v.nullable(v.string())),
+    label: v.optional(v.nullable(v.string())),
+    is_default: v.optional(v.boolean(), false),
 });
 
-const TrackMetadataSchema = v.object({
-    format: v.optional(v.nullable(v.string())),
-    segment_base: v.optional(v.nullable(SegmentBaseSchema)),
-});
-
-const TrackSchema = v.object({
-    url: v.pipe(v.string(), v.trim(), v.minLength(1)),
-    type: v.enum(TrackType),
-    purpose: v.optional(v.enum(TrackPurpose), TrackPurpose.CONTENT),
-    is_original: v.optional(v.boolean(), true),
-    quality: v.optional(v.enum(Quality), Quality.HIGH),
-    metadata: v.optional(v.nullable(TrackMetadataSchema)),
-    ...TrackFormatFields,
-});
+const ImportCaptionSchema = ImportOriginalSchema;
 
 const MediaItemSchema = v.object({
     external_id: v.pipe(v.string(), v.trim(), v.minLength(1)),
     title: v.optional(v.nullable(v.string())),
     description: v.optional(v.nullable(v.string())),
     type: v.enum(MediaType),
-    tracks: v.pipe(v.array(TrackSchema), v.minLength(1)),
+    originals: v.pipe(v.array(ImportOriginalSchema), v.minLength(1)),
+    cover: v.optional(v.nullable(v.object({ url: v.pipe(v.string(), v.minLength(1)), source_key: v.pipe(v.string(), v.minLength(1)) }))),
+    captions: v.optional(v.array(ImportCaptionSchema), []),
     tags: v.optional(v.array(v.string()), []),
-    duration: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
     published_time: v.optional(v.string()),
     create_time: v.optional(v.string()),
 });
@@ -1131,14 +1013,29 @@ const routes: RouteItem[] = [
     {
         path: "/api/media/:id/manifest.mpd",
         method: "get",
-        summary: "Get MPEG-DASH MPD playlist for video",
+        summary: "MPEG-DASH manifest of a media that has adaptive playback",
         tags: ["Media"],
         paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
-        responseSchema: {
-            type: "string",
-            description: "DASH XML manifest file",
-        },
+        responseSchema: { type: "string", description: "DASH XML manifest" },
+    },
+    {
+        path: "/api/media/:id/manifest.m3u8",
+        method: "get",
+        summary: "HLS master playlist of a media that has adaptive playback",
+        tags: ["Media"],
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
+        requiresAuth: true,
+        responseSchema: { type: "string", description: "HLS master playlist" },
+    },
+    {
+        path: "/api/media/:id/hls/:renditionId/manifest.m3u8",
+        method: "get",
+        summary: "HLS playlist of one stream or caption of the master playlist",
+        tags: ["Media"],
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), renditionId: v.pipe(v.string(), v.uuid()) }),
+        requiresAuth: true,
+        responseSchema: { type: "string", description: "HLS media playlist" },
     },
     {
         path: "/api/media/update-info/:id",
@@ -1166,20 +1063,11 @@ const routes: RouteItem[] = [
         }),
     },
     {
-        path: "/api/media/:id/tracks",
+        path: "/api/media/:id/originals/:originalId/download-url",
         method: "get",
-        summary: "List all playback tracks under Media",
+        summary: "Get a short-lived URL that downloads an original as an attachment",
         tags: ["Media"],
-        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
-        requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "array", items: trackResponseOpenApiSchema }),
-    },
-    {
-        path: "/api/media/:id/tracks/:trackId/download-url",
-        method: "get",
-        summary: "Get a short-lived URL that downloads a track file as an attachment",
-        tags: ["Media"],
-        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), trackId: v.pipe(v.string(), v.uuid()) }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), originalId: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
@@ -1187,62 +1075,62 @@ const routes: RouteItem[] = [
         }),
     },
     {
-        path: "/api/media/:id/tracks/presign-upload",
+        path: "/api/media/:id/originals",
         method: "post",
-        summary: "Get S3 presigned URL for uploading track",
+        summary: "Add an original uploaded as a draft file, or replace one with it",
         tags: ["Media"],
         paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
-        bodySchema: PresignUploadSchema,
+        bodySchema: AddOriginalSchema,
         requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({
-            type: "object",
-            properties: {
-                url: { type: "string", format: "uri" },
-                path: { type: "string" },
-                bucket: { type: "string" },
-                mime_type: { type: "string" },
-                extension: { type: "string" },
-            },
-        }),
+        responseSchema: IdResponseSchema,
     },
     {
-        path: "/api/media/:id/tracks/upsert",
+        path: "/api/media/:id/originals/:originalId/delete",
         method: "post",
-        summary: "Register/replace specified track and associate physical file",
+        summary: "Delete an original, unless the media would be left incomplete",
+        tags: ["Media"],
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), originalId: v.pipe(v.string(), v.uuid()) }),
+        requiresAuth: true,
+        responseSchema: IdResponseSchema,
+    },
+    {
+        path: "/api/media/:id/captions",
+        method: "post",
+        summary: "Add a caption uploaded as a draft subtitle file",
         tags: ["Media"],
         paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
-        bodySchema: RegisterTrackSchema,
+        bodySchema: AddCaptionSchema,
         requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
+        responseSchema: IdResponseSchema,
     },
     {
-        path: "/api/media/:id/tracks/:trackId/replace-file",
+        path: "/api/media/:id/captions/:captionId/update",
         method: "post",
-        summary: "Replace physical file association of specified track",
+        summary: "Change a caption's language, label or default",
         tags: ["Media"],
-        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), trackId: v.pipe(v.string(), v.uuid()) }),
-        bodySchema: ReplaceFileSchema,
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), captionId: v.pipe(v.string(), v.uuid()) }),
+        bodySchema: TrackInfoPatchSchema,
         requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
+        responseSchema: IdResponseSchema,
     },
     {
-        path: "/api/media/:id/tracks/:trackId/delete",
+        path: "/api/media/:id/captions/:captionId/delete",
         method: "post",
-        summary: "Delete track record",
+        summary: "Delete a caption",
         tags: ["Media"],
-        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), trackId: v.pipe(v.string(), v.uuid()) }),
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), captionId: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
+        responseSchema: IdResponseSchema,
     },
     {
-        path: "/api/media/:id/tracks/:trackId/update",
+        path: "/api/media/:id/audio-tracks/:streamId/update",
         method: "post",
-        summary: "Update track attributes",
+        summary: "Change an audio track's language or label, or make it the default",
         tags: ["Media"],
-        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), trackId: v.pipe(v.string(), v.uuid()) }),
-        bodySchema: UpdateTrackMetadataSchema,
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), streamId: v.pipe(v.string(), v.uuid()) }),
+        bodySchema: TrackInfoPatchSchema,
         requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
+        responseSchema: IdResponseSchema,
     },
     // Task
     {
@@ -1309,14 +1197,6 @@ const routes: RouteItem[] = [
         path: "/api/task/sweep-orphan-tags",
         method: "post",
         summary: "Clean up orphan tags under the media library",
-        tags: ["Task"],
-        requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
-    },
-    {
-        path: "/api/task/sweep-media-track-integrity",
-        method: "post",
-        summary: "Reconcile logical Media, Track, and File references",
         tags: ["Task"],
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),

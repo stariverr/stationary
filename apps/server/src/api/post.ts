@@ -13,7 +13,7 @@ import { assertPostAccess, PostAccessError } from "@/features/post/access";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { toIsoTimestamp, FormTimestampSchema } from "@/lib/utils/time";
 import { validate } from "@/lib/validation/validator";
-import { MediaService, type VideoItem } from "@/features/media/queries";
+import { MediaService } from "@/features/media/queries";
 import { loadPreviewImages, NO_PREVIEWS, type PreviewImages } from "@/features/media/preview";
 import { CreatePostSchema } from "@/features/post/schema";
 import { CreatePostError, createPost } from "@/features/post/create-post";
@@ -153,7 +153,7 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
 
     type MediaItem = Pick<typeof Media.$inferSelect, "id" | "post_id" | "type" | "sort_order"> & {
         previews: PreviewImages;
-        videos: VideoItem[];
+        url: string | null;
     };
     const mediaByPostId = new Map<string, MediaItem[]>();
 
@@ -170,16 +170,12 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
             .orderBy(asc(Media.sort_order));
 
         const allMediaIds = mediaRows.map((mr) => mr.id);
-        const [previewsByMediaId, videosByMediaId] = await Promise.all([
-            loadPreviewImages(allMediaIds),
-            MediaService.getVideosMap(allMediaIds),
-        ]);
+        const [previewsByMediaId, mainUrls] = await Promise.all([loadPreviewImages(allMediaIds), MediaService.getMainUrls(mediaRows)]);
 
         for (const row of mediaRows) {
             if (!row.post_id) continue;
 
             const previews = previewsByMediaId.get(row.id) ?? NO_PREVIEWS;
-            const videos = videosByMediaId.get(row.id) ?? [];
 
             let mediaList = mediaByPostId.get(row.post_id);
             if (!mediaList) {
@@ -193,7 +189,7 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
                 type: row.type,
                 sort_order: row.sort_order,
                 previews,
-                videos: videos,
+                url: mainUrls.get(row.id) ?? null,
             });
         }
     }
@@ -345,42 +341,6 @@ export const PostDetailResponseBodySchema = v.object({
     url: v.optional(v.nullable(v.string())),
     sync_status: v.optional(v.string()),
     last_error: v.optional(v.nullable(v.string())),
-    media: v.optional(
-        v.array(
-            v.object({
-                id: v.pipe(v.string(), v.uuid()),
-                eid: v.optional(v.string()),
-                post_id: v.optional(v.nullable(v.pipe(v.string(), v.uuid()))),
-                source: v.optional(v.string()),
-                title: v.optional(v.nullable(v.string())),
-                description: v.optional(v.nullable(v.string())),
-                type: v.optional(v.string()),
-                sort_order: v.optional(v.number()),
-                create_time: v.optional(v.string()),
-                published_time: v.optional(v.nullable(v.string())),
-                sync_status: v.optional(v.string()),
-                last_error: v.optional(v.nullable(v.string())),
-                ai_status: v.optional(v.string()),
-                ai_error: v.optional(v.nullable(v.string())),
-                url: v.optional(v.nullable(v.string())),
-                cover_url: v.optional(v.nullable(v.string())),
-                width: v.optional(v.nullable(v.number())),
-                height: v.optional(v.nullable(v.number())),
-                tracks: v.array(
-                    v.object({
-                        id: v.optional(v.string()),
-                        url: v.string(),
-                        type: v.string(),
-                        purpose: v.string(),
-                        is_original: v.boolean(),
-                        quality: v.string(),
-                        priority: v.number(),
-                        metadata: v.record(v.string(), v.any()),
-                    }),
-                ),
-            }),
-        ),
-    ),
 });
 
 router.get("/detail/:id", requireAuth, validate("param", PostDetailRequestPathParamSchema), async (c) => {

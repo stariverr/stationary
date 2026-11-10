@@ -1,24 +1,20 @@
 import { db } from "@/global/db";
 import {
     Media,
-    Track,
-    File,
     AssetSearchDocument,
     AssetEmbedding,
     AssetAiMetadata,
     DeleteStatus,
     EmbeddingRole,
     EntityType,
-    TrackType,
-    TrackPurpose,
     PostSource,
     MediaType,
     searchFold,
 } from "@/db/schema";
 import { and, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 import { AiService } from "./service";
-import { buildCdnUrl } from "@/lib/utils/cdn";
 import { loadPreviewImages, NO_PREVIEWS, type PreviewImages } from "@/features/media/preview";
+import { MediaService } from "@/features/media/queries";
 import { toIsoTimestamp } from "@/lib/utils/time";
 import { classifyAiError, type AiErrorClassification } from "./errors";
 import type { AiBindingRole } from "./model-schema";
@@ -227,27 +223,7 @@ export const HybridSearchService = {
         }
 
         // 4. Fetch additional rich media files and metadata for matching reasons
-        const [tracks, aiMetadatas, mediaDetails, previewsByMedia] = await Promise.all([
-            db
-                .select({
-                    mediaId: Track.media_id,
-                    type: Track.type,
-                    purpose: Track.purpose,
-                    priority: Track.priority,
-                    filePath: File.path,
-                    fileBucket: File.bucket,
-                })
-                .from(Track)
-                .innerJoin(File, eq(Track.file_id, File.id))
-                .where(
-                    and(
-                        inArray(Track.media_id, candidateMediaIds),
-                        eq(Track.purpose, TrackPurpose.CONTENT),
-                        eq(Track.priority, 0),
-                        eq(Track.delete_status, DeleteStatus.ACTIVE),
-                        eq(File.delete_status, DeleteStatus.ACTIVE),
-                    ),
-                ),
+        const [aiMetadatas, mediaDetails, previewsByMedia] = await Promise.all([
             db
                 .select()
                 .from(AssetAiMetadata)
@@ -263,21 +239,14 @@ export const HybridSearchService = {
                 .where(inArray(Media.id, candidateMediaIds)),
             loadPreviewImages(candidateMediaIds),
         ]);
+        const mainUrls = await MediaService.getMainUrls(mediaDetails);
 
         // 5. Structure final result payload with matched reasons
         const list = paginatedCandidates.map((candidate) => {
             const mediaId = candidate.mediaId;
             const mediaInfo = mediaDetails.find((m) => m.id === mediaId);
 
-            // The media url is its first content track.
-            const tracksForMedia = tracks.filter((f) => f.mediaId === mediaId);
-            const primaryTrack = tracksForMedia.find(
-                (f) =>
-                    f.purpose === TrackPurpose.CONTENT &&
-                    f.priority === 0 &&
-                    (mediaInfo?.type === "VIDEO" ? f.type === TrackType.VIDEO : f.type === TrackType.IMAGE),
-            );
-            const mediaUrl = primaryTrack ? buildCdnUrl(primaryTrack.fileBucket, primaryTrack.filePath) : null;
+            const mediaUrl = mainUrls.get(mediaId) ?? null;
 
             // Which channels matched; clients render the explanation in the viewer's language.
             const channels = candidate.matchedChannels || [];

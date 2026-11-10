@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import * as v from "valibot";
-import { MediaType, TrackPurpose, TrackType } from "../src/db/schema";
-import { Quality } from "../src/lib/types";
+import { MediaType } from "../src/db/schema";
 import { CreatePostSchema } from "../src/features/post/schema";
 
 const libraryId = "018f3b06-70ce-7b2a-9f60-3ed8f0f7b7b3";
@@ -33,7 +32,7 @@ describe("create post schema", () => {
         expect(parsed.success).toBe(true);
     });
 
-    test("accepts draft media items with track metadata", () => {
+    test("accepts draft media items with originals", () => {
         const parsed = v.safeParse(CreatePostSchema, {
             library_id: libraryId,
             title: "Draft media",
@@ -43,15 +42,7 @@ describe("create post schema", () => {
                     draft: {
                         type: MediaType.AUDIO,
                         tag_ids: [],
-                        tracks: [
-                            {
-                                draft_file_id: draftFileId,
-                                type: TrackType.AUDIO,
-                                purpose: TrackPurpose.CONTENT,
-                                quality: Quality.HIGH,
-                                is_default: true,
-                            },
-                        ],
+                        originals: [draftFileId],
                     },
                 },
             ],

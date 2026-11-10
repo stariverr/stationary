@@ -31,21 +31,8 @@ export const relations = defineRelations(schema, (r) => ({
             from: [r.Media.post_id],
             to: [r.Post.id],
         }),
-        tracks: r.many.Track(),
-    },
-    Track: {
-        media: r.one.Media({
-            from: [r.Track.media_id],
-            to: [r.Media.id],
-        }),
-        file: r.one.File({
-            from: [r.Track.file_id],
-            to: [r.File.id],
-            alias: "track_file",
-        }),
     },
     File: {
-        tracks: r.many.Track({ alias: "track_file" }),
         authorsAsAvatar: r.many.Author({ alias: "author_avatar" }),
         authorsAsThumb: r.many.Author({ alias: "author_avatar_thumb" }),
     },

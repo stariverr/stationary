@@ -1,142 +1,129 @@
 import { and, asc, desc, eq, exists, gt, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
-import { DeleteStatus, File, Media, MediaCover, SyncStatus, Track, TrackPurpose, TrackType } from "@/db/schema";
-import { db, type Transaction } from "@/global/db";
+import { DeleteStatus, File, Media, MediaCaption, MediaCover, MediaOriginal, SyncStatus } from "@/db/schema";
+import { db, type DbClient, type Transaction } from "@/global/db";
 import { env } from "@/global/env";
+import { convertToVtt, makeDefaultCaption, storeVtt } from "@/features/media/captions";
 import { getMediaCompletionError, refreshPostSyncStatus } from "@/features/media/composition";
+import { completeOriginal } from "@/features/media/originals";
+import { probeOriginal, ProbeRejectedError } from "@/features/media/probe";
+import { mediaStoragePath } from "@/features/media/storage";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
 import type { ReconcileContext, ReconcileResult, SubjectPipelineHandler } from "@/infra/queue/types";
 import { getErrorMessage } from "@/lib/utils/error";
 import { DownloadStatusError, downloadStream, getBodyLength, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
-import { extractSegmentBase } from "@/lib/utils/mp4-segment";
-import { deriveTrackFormat } from "@/lib/utils/track-format";
 
 type MediaRow = typeof Media.$inferSelect;
-type TrackRow = typeof Track.$inferSelect;
+type OriginalRow = typeof MediaOriginal.$inferSelect;
+type CaptionRow = typeof MediaCaption.$inferSelect;
 type CoverRow = typeof MediaCover.$inferSelect;
 
 const activeMedia = (mediaId: string) =>
     and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time));
-const activeTrack = (track: Pick<TrackRow, "id" | "media_id">) =>
-    and(eq(Track.id, track.id), eq(Track.media_id, track.media_id), eq(Track.delete_status, DeleteStatus.ACTIVE));
 
-/** A track still waiting for its remote source; FAILED tracks failed on it and run only when the media is requeued. */
-const pendingSourceTrack = (failedToo: boolean): SQL =>
-    and(
-        eq(Track.delete_status, DeleteStatus.ACTIVE),
-        ne(Track.source_url, ""),
-        failedToo ? ne(Track.sync_status, SyncStatus.COMPLETED) : inArray(Track.sync_status, [SyncStatus.PENDING, SyncStatus.IN_PROGRESS]),
+/**
+ * An imported source still waiting for its download: FAILED ones failed on it and run only when the media is
+ * requeued. Originals, captions and covers share the shape.
+ */
+function pendingSource(table: typeof MediaOriginal | typeof MediaCaption | typeof MediaCover, failedToo: boolean): SQL {
+    return and(
+        isNotNull(table.source_url),
+        failedToo ? ne(table.status, SyncStatus.COMPLETED) : inArray(table.status, [SyncStatus.PENDING, SyncStatus.IN_PROGRESS]),
     )!;
-
-/** A cover still waiting for its imported source; like tracks, FAILED ones run only when the media is requeued. */
-const pendingCover = (failedToo: boolean): SQL =>
-    and(
-        isNotNull(MediaCover.source_url),
-        failedToo ? ne(MediaCover.status, SyncStatus.COMPLETED) : eq(MediaCover.status, SyncStatus.PENDING),
-    )!;
-
-function mediaStoragePath(media: MediaRow, name: string): string {
-    return media.post_id
-        ? `v2/p/${media.post_id.slice(-2)}/${media.post_id}/media_${media.id}/${name}`
-        : `v2/m/${media.id.slice(-2)}/${media.id}/${name}`;
 }
 
-function storagePath(media: MediaRow, track: TrackRow, ext: string): string {
-    let prefix: string;
-    if (track.type === TrackType.VIDEO && track.purpose === TrackPurpose.CONTENT) prefix = `video_${track.variant_key}`;
-    else if (track.type === TrackType.AUDIO && track.purpose === TrackPurpose.CONTENT) prefix = `audio_${track.variant_key}`;
-    else if (track.type === TrackType.SUBTITLE && track.purpose === TrackPurpose.CONTENT) prefix = `subtitle_${track.variant_key}`;
-    else if (track.type === TrackType.IMAGE && track.purpose === TrackPurpose.CONTENT) prefix = `image_${track.variant_key}`;
-    else prefix = `track_${track.variant_key}`;
-    return mediaStoragePath(media, `${prefix}.${ext}`);
-}
+/** Objects are named after the source key, so a new source never overwrites a file a CDN may still serve. */
+const keyName = (sourceKey: string) => new Bun.CryptoHasher("sha256").update(sourceKey).digest("hex").slice(0, 16);
 
 /** Inserts the file at `path`, or revives the row a previous download of the same object left there. */
-async function upsertFile(tx: Transaction, values: { path: string; mime_type: string; extension: string; size: number | null }) {
-    const [file] = await tx
+async function upsertFile(client: DbClient, values: { path: string; mime_type: string; extension: string; size: number | null }) {
+    const [file] = await client
         .insert(File)
         .values({ ...values, bucket: env.S3_BUCKET })
         .onConflictDoUpdate({
             target: File.path,
             set: { mime_type: values.mime_type, extension: values.extension, size: values.size, delete_status: DeleteStatus.ACTIVE, delete_time: null },
         })
-        .returning({ id: File.id });
+        .returning();
     return file!;
 }
 
-async function softDeleteFile(tx: Transaction, fileId: string) {
-    await tx
+async function softDeleteFile(client: DbClient, fileId: string) {
+    await client
         .update(File)
         .set({ delete_status: DeleteStatus.DELETED, delete_time: Temporal.Now.instant() })
         .where(and(eq(File.id, fileId), eq(File.delete_status, DeleteStatus.ACTIVE)));
 }
 
-/** Downloads one track's source into storage and points the track at the new file. */
-async function downloadTrack(ctx: ReconcileContext, media: MediaRow, track: TrackRow): Promise<void> {
-    const sourceUrl = track.source_url!;
-    await db.transaction(async (tx) => {
-        await tx.update(Track).set({ sync_status: SyncStatus.IN_PROGRESS, update_time: Temporal.Now.instant() }).where(activeTrack(track));
-        await ctx.fence(tx);
-    });
-
+/** Downloads a source into storage under `media`, as `<prefix>_<key>.<ext>`, and records its file. */
+async function fetchSource(ctx: ReconcileContext, media: MediaRow, source: { source_url: string | null; source_key: string | null }, prefix: string) {
+    const sourceUrl = source.source_url!;
     const response = await downloadStream(sourceUrl, { signal: ctx.signal });
     if (!response?.body) throw new Error(`Download of ${sourceUrl} returned no body`);
     ctx.signal.throwIfAborted();
 
-    const contentType = response.headers.get("Content-Type");
+    const contentType = response.headers.get("Content-Type") || "application/octet-stream";
     const size = getBodyLength(response) ?? null;
     const ext = getExtensionFromContentType(contentType, sourceUrl);
+    const path = mediaStoragePath(media, `${prefix}_${keyName(source.source_key!)}.${ext}`);
+    await uploadToS3(path, response.body, contentType, env.S3_BUCKET, size ?? undefined, ctx.signal);
+    ctx.signal.throwIfAborted();
+    return upsertFile(db, { path, mime_type: contentType, extension: ext, size });
+}
 
-    let body: ReadableStream = response.body;
-    let segmentBase: { initialization: string; index_range: string } | undefined;
-    if (track.type === TrackType.VIDEO || track.type === TrackType.AUDIO) {
-        const extracted = await extractSegmentBase(body);
-        segmentBase = extracted.segment_base;
-        body = extracted.stream;
+/** Downloads and probes one original, then completes it unless the import replaced or removed it meanwhile. */
+async function downloadOriginal(ctx: ReconcileContext, media: MediaRow, original: OriginalRow): Promise<void> {
+    await db.transaction(async (tx) => {
+        await tx.update(MediaOriginal).set({ status: SyncStatus.IN_PROGRESS, update_time: Temporal.Now.instant() }).where(eq(MediaOriginal.id, original.id));
+        await ctx.fence(tx);
+    });
+    const file = await fetchSource(ctx, media, original, "original");
+    let probe;
+    try {
+        probe = await probeOriginal(file);
+    } catch (error) {
+        await softDeleteFile(db, file.id);
+        throw error;
     }
 
-    const path = storagePath(media, track, ext);
-    await uploadToS3(path, body, contentType || "application/octet-stream", env.S3_BUCKET, size ?? undefined, ctx.signal);
-    ctx.signal.throwIfAborted();
+    await db.transaction(async (tx) => {
+        const [current] = await tx
+            .select({ id: MediaOriginal.id })
+            .from(MediaOriginal)
+            .where(and(eq(MediaOriginal.id, original.id), eq(MediaOriginal.source_key, original.source_key!)))
+            .for("update");
+        if (!current) return softDeleteFile(tx, file.id);
+        await completeOriginal(tx, media, original.id, file.id, probe);
+        await ctx.fence(tx);
+    });
+}
+
+/** Downloads one caption and converts it to WebVTT, keeping the downloaded file as its source. */
+async function downloadCaption(ctx: ReconcileContext, media: MediaRow, caption: CaptionRow): Promise<void> {
+    const file = await fetchSource(ctx, media, caption, "caption_source");
+    let vtt: Uint8Array;
+    try {
+        vtt = await convertToVtt(file);
+    } catch (error) {
+        await softDeleteFile(db, file.id);
+        throw error;
+    }
 
     await db.transaction(async (tx) => {
-        const [current] = await tx.select({ file_id: Track.file_id }).from(Track).where(activeTrack(track)).limit(1);
-        if (!current) return;
-
-        const file = await upsertFile(tx, { path, mime_type: contentType || "application/octet-stream", extension: ext, size });
-
-        const metadata = segmentBase ? { ...track.metadata, segment_base: segmentBase } : { ...track.metadata };
-        const format = deriveTrackFormat({
-            type: track.type,
-            metadata,
-            container: track.container,
-            is_fragmented: track.is_fragmented,
-            stream_layout: track.stream_layout,
-            has_video: track.has_video,
-            has_audio: track.has_audio,
-            streams: track.streams,
-            file: { mime_type: contentType, extension: ext },
-        });
-
+        const [current] = await tx
+            .select({ id: MediaCaption.id, is_default: MediaCaption.is_default })
+            .from(MediaCaption)
+            .where(and(eq(MediaCaption.id, caption.id), eq(MediaCaption.source_key, caption.source_key!)))
+            .for("update");
+        if (!current) return softDeleteFile(tx, file.id);
+        const vttFileId = await storeVtt(tx, media, keyName(caption.source_key!), vtt);
         await tx
-            .update(Track)
-            .set({
-                file_id: file.id,
-                sync_status: SyncStatus.COMPLETED,
-                last_error: null,
-                metadata,
-                container: format.container,
-                is_fragmented: format.is_fragmented,
-                stream_layout: format.stream_layout,
-                has_video: format.has_video,
-                has_audio: format.has_audio,
-                streams: format.streams,
-                update_time: Temporal.Now.instant(),
-            })
-            .where(activeTrack(track));
-
-        if (current.file_id && current.file_id !== file.id) await softDeleteFile(tx, current.file_id);
+            .update(MediaCaption)
+            .set({ source_file_id: file.id, vtt_file_id: vttFileId, status: SyncStatus.COMPLETED, last_error: null, update_time: Temporal.Now.instant() })
+            .where(eq(MediaCaption.id, caption.id));
+        if (current.is_default) await makeDefaultCaption(tx, media.id, caption.id);
         await ctx.fence(tx);
+        await markChanged(tx, Aspect.MEDIA_CONTENT, [media.id]);
     });
 }
 
@@ -145,38 +132,32 @@ async function downloadTrack(ctx: ReconcileContext, media: MediaRow, track: Trac
  * object is named after its source URL, so a new cover never overwrites one a CDN may still serve.
  */
 async function downloadCover(ctx: ReconcileContext, media: MediaRow, cover: CoverRow): Promise<void> {
-    const sourceUrl = cover.source_url!;
-    const response = await downloadStream(sourceUrl, { signal: ctx.signal });
-    if (!response?.body) throw new Error(`Download of ${sourceUrl} returned no body`);
-    ctx.signal.throwIfAborted();
-
-    const contentType = response.headers.get("Content-Type") || "application/octet-stream";
-    const size = getBodyLength(response) ?? null;
-    const ext = getExtensionFromContentType(contentType, sourceUrl);
-    const sourceKey = new Bun.CryptoHasher("sha256").update(sourceUrl).digest("hex").slice(0, 16);
-    const path = mediaStoragePath(media, `cover_${sourceKey}.${ext}`);
-    await uploadToS3(path, response.body, contentType, env.S3_BUCKET, size ?? undefined, ctx.signal);
-    ctx.signal.throwIfAborted();
-
+    const file = await fetchSource(ctx, media, cover, "cover");
     await db.transaction(async (tx) => {
-        const file = await upsertFile(tx, { path, mime_type: contentType, extension: ext, size });
         const completed = await tx
             .update(MediaCover)
             .set({ file_id: file.id, status: SyncStatus.COMPLETED, last_error: null, update_time: Temporal.Now.instant() })
-            .where(and(eq(MediaCover.id, cover.id), eq(MediaCover.source_url, sourceUrl)))
+            .where(and(eq(MediaCover.id, cover.id), eq(MediaCover.source_key, cover.source_key!)))
             .returning({ id: MediaCover.id });
-        if (completed.length === 0) return;
+        if (completed.length === 0) return softDeleteFile(tx, file.id);
         await ctx.fence(tx);
         await markChanged(tx, Aspect.MEDIA_COVER, [media.id]);
     });
 }
 
-async function recordCoverError(ctx: ReconcileContext, cover: CoverRow, status: SyncStatus, error: string) {
+/** Records a failed download on its row, unless the import replaced the source meanwhile. */
+async function recordSourceError(
+    ctx: ReconcileContext,
+    table: typeof MediaOriginal | typeof MediaCaption | typeof MediaCover,
+    row: { id: string; source_key: string | null },
+    status: SyncStatus,
+    error: string,
+) {
     await db.transaction(async (tx) => {
         await tx
-            .update(MediaCover)
+            .update(table)
             .set({ status, last_error: error, update_time: Temporal.Now.instant() })
-            .where(and(eq(MediaCover.id, cover.id), eq(MediaCover.source_url, cover.source_url!), ne(MediaCover.status, SyncStatus.COMPLETED)));
+            .where(and(eq(table.id, row.id), eq(table.source_key, row.source_key!), ne(table.status, SyncStatus.COMPLETED)));
         await ctx.fence(tx);
     });
 }
@@ -195,10 +176,12 @@ const failedMedia = (libraryIds: readonly string[]) =>
         eq(Media.sync_status, SyncStatus.FAILED),
     );
 
+const SOURCE_TABLES = [MediaOriginal, MediaCaption, MediaCover] as const;
+
 /**
- * `download`: fetches the remote sources of a media's content tracks and imported cover into storage. Once every
- * required track has a file, the media is complete and its content is reported as changed; a downloaded cover is
- * reported on its own. Both queue the previews.
+ * `download`: fetches the imported sources of a media into storage: its originals, which are probed, its captions,
+ * which are converted to WebVTT, and its cover. Once every original is complete and they make up the media, the media
+ * is complete. Content and cover changes are reported as they land, which queues the previews.
  */
 export const downloadPipeline: SubjectPipelineHandler = {
     // A large source takes a long time on a slow link; one that stalls fails the idle read timeout long before this.
@@ -208,12 +191,24 @@ export const downloadPipeline: SubjectPipelineHandler = {
         const [media] = await db.select().from(Media).where(activeMedia(ctx.subjectId)).limit(1);
         if (!media) return { kind: "done" };
 
-        const tracks = await db
-            .select()
-            .from(Track)
-            .where(and(eq(Track.media_id, media.id), pendingSourceTrack(true)));
+        const [originals, captions, covers] = await Promise.all([
+            db
+                .select()
+                .from(MediaOriginal)
+                .where(and(eq(MediaOriginal.media_id, media.id), pendingSource(MediaOriginal, true)))
+                .orderBy(asc(MediaOriginal.create_time)),
+            db
+                .select()
+                .from(MediaCaption)
+                .where(and(eq(MediaCaption.media_id, media.id), pendingSource(MediaCaption, true)))
+                .orderBy(asc(MediaCaption.create_time)),
+            db
+                .select()
+                .from(MediaCover)
+                .where(and(eq(MediaCover.media_id, media.id), pendingSource(MediaCover, true))),
+        ]);
 
-        if (tracks.length > 0) {
+        if (originals.length + captions.length + covers.length > 0) {
             await db.transaction(async (tx) => {
                 await tx
                     .update(Media)
@@ -224,79 +219,56 @@ export const downloadPipeline: SubjectPipelineHandler = {
         }
 
         let failure: ReconcileResult | undefined;
-        for (const track of tracks) {
+        const attempt = async (
+            table: (typeof SOURCE_TABLES)[number],
+            row: { id: string; source_key: string | null },
+            download: () => Promise<void>,
+        ) => {
             try {
-                await downloadTrack(ctx, media, track);
+                await download();
             } catch (error) {
                 if (ctx.signal.aborted) throw error;
-                const rejected = error instanceof DownloadStatusError && error.rejected;
+                // A source the platform refuses, or a file the tools cannot read, will not work on a retry.
+                const rejected = (error instanceof DownloadStatusError && error.rejected) || error instanceof ProbeRejectedError;
                 const message = getErrorMessage(error);
-                await db.transaction(async (tx) => {
-                    await tx
-                        .update(Track)
-                        .set({
-                            sync_status: rejected ? SyncStatus.FAILED : SyncStatus.PENDING,
-                            last_error: message,
-                            update_time: Temporal.Now.instant(),
-                        })
-                        .where(activeTrack(track));
-                    await ctx.fence(tx);
-                });
-                // Any track that may still work keeps the media retrying.
+                await recordSourceError(ctx, table, row, rejected ? SyncStatus.FAILED : SyncStatus.PENDING, message);
+                // Any source that may still work keeps the media retrying.
                 if (!failure || !rejected) failure = { kind: rejected ? "rejected" : "retry", error: message };
             }
-        }
-
-        const [cover] = await db
-            .select()
-            .from(MediaCover)
-            .where(and(eq(MediaCover.media_id, media.id), pendingCover(true)))
-            .limit(1);
-        if (cover) {
-            try {
-                await downloadCover(ctx, media, cover);
-            } catch (error) {
-                if (ctx.signal.aborted) throw error;
-                const rejected = error instanceof DownloadStatusError && error.rejected;
-                const message = getErrorMessage(error);
-                await recordCoverError(ctx, cover, rejected ? SyncStatus.FAILED : SyncStatus.PENDING, message);
-                if (!failure || !rejected) failure = { kind: rejected ? "rejected" : "retry", error: message };
-            }
-        }
+        };
+        for (const original of originals) await attempt(MediaOriginal, original, () => downloadOriginal(ctx, media, original));
+        for (const caption of captions) await attempt(MediaCaption, caption, () => downloadCaption(ctx, media, caption));
+        for (const cover of covers) await attempt(MediaCover, cover, () => downloadCover(ctx, media, cover));
         if (failure) return failure;
 
         await db.transaction(async (tx) => {
-            const completionError = await getMediaCompletionError(media.id, true, tx);
+            const completionError = await getMediaCompletionError(tx, media);
             if (completionError) {
                 await setMediaFailed(tx, media, completionError);
                 await ctx.fence(tx);
                 return;
             }
             const now = Temporal.Now.instant();
-            const completed = await tx
+            await tx
                 .update(Media)
                 .set({ sync_status: SyncStatus.COMPLETED, last_error: null, update_time: now })
-                .where(and(activeMedia(media.id), ne(Media.sync_status, SyncStatus.COMPLETED)))
-                .returning({ id: Media.id });
+                .where(and(activeMedia(media.id), ne(Media.sync_status, SyncStatus.COMPLETED)));
             if (media.post_id) await refreshPostSyncStatus(tx, media.post_id, now);
             await ctx.fence(tx);
-            if (completed.length > 0 || tracks.length > 0) await markChanged(tx, Aspect.MEDIA_CONTENT, [media.id]);
         });
         return { kind: "done" };
     },
 
-    /** Marks the media failed, and its tracks still waiting for a source too, so scans leave them until a requeue. */
+    /** Marks the media failed, and its sources still waiting for a download too, so scans leave them until a requeue. */
     async recordFailure(tx, { subjectId: mediaId, error }) {
         const [media] = await tx.select({ id: Media.id, post_id: Media.post_id }).from(Media).where(activeMedia(mediaId)).limit(1);
         if (!media) return;
-        await tx
-            .update(Track)
-            .set({ sync_status: SyncStatus.FAILED, update_time: Temporal.Now.instant() })
-            .where(and(eq(Track.media_id, mediaId), pendingSourceTrack(false)));
-        await tx
-            .update(MediaCover)
-            .set({ status: SyncStatus.FAILED, update_time: Temporal.Now.instant() })
-            .where(and(eq(MediaCover.media_id, mediaId), pendingCover(false)));
+        for (const table of SOURCE_TABLES) {
+            await tx
+                .update(table)
+                .set({ status: SyncStatus.FAILED, update_time: Temporal.Now.instant() })
+                .where(and(eq(table.media_id, mediaId), pendingSource(table, false)));
+        }
         await setMediaFailed(tx, media, error);
     },
 
@@ -321,17 +293,13 @@ export const downloadPipeline: SubjectPipelineHandler = {
                         page.map((media) => media.id),
                     ),
                     or(
-                        exists(
-                            db
-                                .select({ id: Track.id })
-                                .from(Track)
-                                .where(and(eq(Track.media_id, Media.id), pendingSourceTrack(false))),
-                        ),
-                        exists(
-                            db
-                                .select({ id: MediaCover.id })
-                                .from(MediaCover)
-                                .where(and(eq(MediaCover.media_id, Media.id), pendingCover(false))),
+                        ...SOURCE_TABLES.map((table) =>
+                            exists(
+                                db
+                                    .select({ id: table.id })
+                                    .from(table)
+                                    .where(and(eq(table.media_id, Media.id), pendingSource(table, false))),
+                            ),
                         ),
                     ),
                 ),

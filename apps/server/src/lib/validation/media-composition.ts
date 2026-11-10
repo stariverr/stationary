@@ -1,15 +1,24 @@
-import { MediaType, TrackPurpose, TrackType } from "@/db/schema";
-import { getAllowedTrackTypesForFile } from "@/lib/utils/file";
+/**
+ * The draft shape of a media the user uploads, and the checks that can run before its files are probed. What the
+ * originals actually hold is checked against the composition rules after probing (features/media/originals.ts).
+ */
 import * as v from "valibot";
-import { Quality } from "@/lib/types";
+import { MediaType } from "@/db/schema";
+import { getFileCategories, type FileCategory } from "@/lib/utils/file";
 
-export const TrackDraftSchema = v.object({
-    draft_file_id: v.pipe(v.string(), v.uuid()),
-    type: v.enum(TrackType),
-    purpose: v.enum(TrackPurpose),
-    quality: v.enum(Quality),
-    is_default: v.optional(v.boolean(), false),
+/** Media types that can have a cover: one image, uploaded or imported, that their previews are rendered from. */
+export const COVER_MEDIA_TYPES: ReadonlySet<MediaType> = new Set([MediaType.VIDEO, MediaType.AUDIO, MediaType.PDF]);
+
+/** Media types that can have captions. */
+export const CAPTION_MEDIA_TYPES: ReadonlySet<MediaType> = new Set([MediaType.VIDEO, MediaType.AUDIO]);
+
+const DraftFileIdSchema = v.pipe(v.string(), v.uuid());
+
+export const CaptionDraftSchema = v.object({
+    draft_file_id: DraftFileIdSchema,
     language: v.optional(v.nullable(v.string())),
+    label: v.optional(v.nullable(v.string())),
+    is_default: v.optional(v.boolean(), false),
 });
 
 export const MediaDraftSchema = v.object({
@@ -17,195 +26,58 @@ export const MediaDraftSchema = v.object({
     description: v.optional(v.string(), ""),
     type: v.enum(MediaType),
     tag_ids: v.optional(v.array(v.pipe(v.string(), v.uuid())), []),
-    tracks: v.pipe(v.array(TrackDraftSchema), v.minLength(1, "Each media must have at least one track")),
+    /** The files of the media as uploaded, e.g. a video and separate audio files. */
+    originals: v.pipe(v.array(DraftFileIdSchema), v.minLength(1, "Each media must have at least one original")),
+    cover: v.optional(v.nullable(DraftFileIdSchema), null),
+    captions: v.optional(v.array(CaptionDraftSchema), []),
 });
 
-export interface MediaCompositionTrack {
-    type: TrackType;
-    purpose: TrackPurpose;
-    is_default: boolean;
-}
+export type MediaDraft = v.InferOutput<typeof MediaDraftSchema>;
 
-export interface DraftMediaCompositionTrack extends MediaCompositionTrack {
-    draft_file_id: string;
-}
-
-export interface DraftMediaComposition {
-    title?: string;
-    type: MediaType;
-    tracks: DraftMediaCompositionTrack[];
-}
-
-export interface DraftFileTypeDescriptor {
-    name: string;
-    mime_type: string;
-}
-
-export interface PrioritizedTrack {
-    type: TrackType;
-    purpose: TrackPurpose;
-    priority: number;
-}
-
-/** Media types that can have a cover: one image, uploaded or imported, that their previews are rendered from. */
-export const COVER_MEDIA_TYPES: ReadonlySet<MediaType> = new Set([MediaType.VIDEO, MediaType.AUDIO, MediaType.PDF]);
-
-const allowedContentTrackTypes: Partial<Record<MediaType, TrackType[]>> = {
-    [MediaType.IMAGE]: [TrackType.IMAGE],
-    [MediaType.VIDEO]: [TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE],
-    [MediaType.AUDIO]: [TrackType.AUDIO, TrackType.SUBTITLE],
-    [MediaType.LIVE_PHOTO]: [TrackType.IMAGE, TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE],
-    [MediaType.PDF]: [TrackType.PDF],
+/** What each original of a media type may be, judged from its file name before it is probed. */
+const ORIGINAL_CATEGORIES: Record<MediaType, FileCategory[]> = {
+    [MediaType.IMAGE]: ["IMAGE"],
+    [MediaType.VIDEO]: ["VIDEO", "AUDIO"],
+    [MediaType.AUDIO]: ["AUDIO", "VIDEO"],
+    [MediaType.LIVE_PHOTO]: ["IMAGE", "VIDEO"],
+    [MediaType.PDF]: ["PDF"],
 };
 
-function hasDefaultContentTrack(tracks: MediaCompositionTrack[], type: TrackType): boolean {
-    return tracks.some((track) => track.type === type && track.purpose === TrackPurpose.CONTENT && track.is_default);
-}
-
-export function validateMediaComposition(mediaType: MediaType, tracks: MediaCompositionTrack[]): string | null {
-    if (tracks.length === 0) {
-        return "Media must contain at least one track";
-    }
-
-    const allowedContentTypes = allowedContentTrackTypes[mediaType];
-    if (!allowedContentTypes) {
-        return `${mediaType} media cannot be created from draft tracks`;
-    }
-
-    if (tracks.some((track) => track.purpose === TrackPurpose.COVER)) {
-        return "A cover is not a track; set it as the media cover";
-    }
-
-    const invalidThumbnail = tracks.find((track) => track.purpose === TrackPurpose.THUMBNAIL && track.type !== TrackType.IMAGE);
-    if (invalidThumbnail) {
-        return "THUMBNAIL tracks must use the IMAGE type";
-    }
-
-    const contentOnlyTrack = tracks.find(
-        (track) => (track.type === TrackType.SUBTITLE || track.type === TrackType.PDF) && track.purpose !== TrackPurpose.CONTENT,
-    );
-    if (contentOnlyTrack) {
-        return `${contentOnlyTrack.type} tracks must use the CONTENT purpose`;
-    }
-
-    const invalidContentTrack = tracks.find((track) => track.purpose === TrackPurpose.CONTENT && !allowedContentTypes.includes(track.type));
-    if (invalidContentTrack) {
-        return `${invalidContentTrack.type} CONTENT tracks are not valid for ${mediaType} media`;
-    }
-
-    const defaultGroups = new Set<string>();
-    for (const track of tracks) {
-        if (!track.is_default) continue;
-
-        const key = `${track.type}:${track.purpose}`;
-        if (defaultGroups.has(key)) {
-            return `Only one default ${track.type} ${track.purpose} track is allowed`;
-        }
-        defaultGroups.add(key);
-    }
-
-    if (mediaType === MediaType.LIVE_PHOTO) {
-        if (!hasDefaultContentTrack(tracks, TrackType.IMAGE)) {
-            return "LIVE_PHOTO media requires a default IMAGE CONTENT track";
-        }
-        if (!hasDefaultContentTrack(tracks, TrackType.VIDEO)) {
-            return "LIVE_PHOTO media requires a default VIDEO CONTENT track";
-        }
-        return null;
-    }
-
-    const requiredTrackTypeByMedia: Partial<Record<MediaType, TrackType>> = {
-        [MediaType.IMAGE]: TrackType.IMAGE,
-        [MediaType.VIDEO]: TrackType.VIDEO,
-        [MediaType.AUDIO]: TrackType.AUDIO,
-        [MediaType.PDF]: TrackType.PDF,
-    };
-    const requiredTrackType = requiredTrackTypeByMedia[mediaType];
-    if (requiredTrackType && !hasDefaultContentTrack(tracks, requiredTrackType)) {
-        return `${mediaType} media requires a default ${requiredTrackType} CONTENT track`;
-    }
-
-    return null;
+/** The draft files of a media, in the order the draft lists them. */
+export function draftFileIds(draft: Pick<MediaDraft, "originals" | "cover" | "captions">): string[] {
+    return [...draft.originals, ...(draft.cover ? [draft.cover] : []), ...draft.captions.map((caption) => caption.draft_file_id)];
 }
 
 /**
- * Ensures there are no duplicate draft file references in the media composition tracks.
- * Returns an error message if a duplicate draft file ID is detected, or null if all IDs are unique.
+ * Checks a draft against what its file names allow: originals of a fitting kind, a cover only where covers exist and
+ * only as an image, captions only on audio and video, at most one default caption.
  */
-export function validateNoDuplicateDraftFileIds(tracks: DraftMediaCompositionTrack[]): string | null {
-    const fileIds = new Set<string>();
-    for (const track of tracks) {
-        if (fileIds.has(track.draft_file_id)) {
-            return `Duplicate file reference detected for draft file ${track.draft_file_id}`;
-        }
-        fileIds.add(track.draft_file_id);
+export function draftStructureError(draft: MediaDraft, fileName: (draftFileId: string) => string | undefined): string | null {
+    const fits = (draftFileId: string, allowed: FileCategory[]) => {
+        const name = fileName(draftFileId);
+        return name !== undefined && getFileCategories(name).some((category) => allowed.includes(category));
+    };
+    const misfit = draft.originals.find((id) => !fits(id, ORIGINAL_CATEGORIES[draft.type]));
+    if (misfit) return `${fileName(misfit) ?? misfit} cannot be an original of ${draft.type} media`;
+    if (draft.cover) {
+        if (!COVER_MEDIA_TYPES.has(draft.type)) return `${draft.type} media cannot have a cover`;
+        if (!fits(draft.cover, ["IMAGE"])) return "A cover must be an image";
     }
+    if (draft.captions.length > 0 && !CAPTION_MEDIA_TYPES.has(draft.type)) return `${draft.type} media cannot have captions`;
+    const notCaption = draft.captions.find((caption) => !fits(caption.draft_file_id, ["SUBTITLE"]));
+    if (notCaption) return `${fileName(notCaption.draft_file_id) ?? notCaption.draft_file_id} is not a caption file`;
+    if (draft.captions.filter((caption) => caption.is_default).length > 1) return "Only one caption can be the default";
     return null;
 }
 
-export function validateDraftTrackFileTypes(
-    groups: DraftMediaComposition[],
-    draftFiles: ReadonlyMap<string, DraftFileTypeDescriptor>,
-): string | null {
-    for (const group of groups) {
-        for (const track of group.tracks) {
-            const descriptor = draftFiles.get(track.draft_file_id);
-            if (!descriptor) continue;
-
-            const allowedTypes = getAllowedTrackTypesForFile(descriptor.name, descriptor.mime_type);
-            if (!allowedTypes.includes(track.type)) {
-                return `Track type ${track.type} is not allowed for file ${descriptor.name} (${descriptor.mime_type})`;
-            }
-        }
+/** Checks the drafts of one request: no draft file used twice, and each draft well formed. */
+export function validateDraftMediaGroups(drafts: MediaDraft[], fileName: (draftFileId: string) => string | undefined): string | null {
+    const ids = drafts.flatMap(draftFileIds);
+    const duplicate = ids.find((id, index) => ids.indexOf(id) !== index);
+    if (duplicate) return `Draft file ${duplicate} is used more than once`;
+    for (const draft of drafts) {
+        const error = draftStructureError(draft, fileName);
+        if (error) return `${draft.title.trim() || "Untitled media"}: ${error}`;
     }
     return null;
-}
-
-/** A draft media may carry one image as its cover, which becomes the media cover rather than a track. */
-export function validateDraftCover(mediaType: MediaType, tracks: MediaCompositionTrack[]): string | null {
-    const covers = tracks.filter((track) => track.purpose === TrackPurpose.COVER);
-    if (covers.length === 0) return null;
-    if (!COVER_MEDIA_TYPES.has(mediaType)) return `${mediaType} media cannot have a cover`;
-    if (covers.length > 1) return "A media has at most one cover";
-    if (covers[0]!.type !== TrackType.IMAGE) return "A cover must be an image";
-    return null;
-}
-
-export function validateDraftMediaGroups(groups: DraftMediaComposition[]): string | null {
-    const draftIdError = validateNoDuplicateDraftFileIds(groups.flatMap((group) => group.tracks));
-    if (draftIdError) return draftIdError;
-
-    for (const group of groups) {
-        const compositionError =
-            validateDraftCover(group.type, group.tracks) ??
-            validateMediaComposition(
-                group.type,
-                group.tracks.filter((track) => track.purpose !== TrackPurpose.COVER),
-            );
-        if (compositionError) {
-            const groupName = group.title?.trim() || "Untitled media";
-            return `${groupName}: ${compositionError}`;
-        }
-    }
-
-    return null;
-}
-
-export function assignTrackPriorities<T extends { type: TrackType; purpose: TrackPurpose }>(
-    tracks: T[],
-    existingTracks: PrioritizedTrack[] = [],
-): Array<T & { priority: number }> {
-    const nextPriorityByGroup = new Map<string, number>();
-
-    for (const track of existingTracks) {
-        const key = `${track.type}:${track.purpose}`;
-        nextPriorityByGroup.set(key, Math.max(nextPriorityByGroup.get(key) ?? 0, track.priority + 1));
-    }
-
-    return tracks.map((track) => {
-        const key = `${track.type}:${track.purpose}`;
-        const priority = nextPriorityByGroup.get(key) ?? 0;
-        nextPriorityByGroup.set(key, priority + 1);
-        return { ...track, priority };
-    });
 }

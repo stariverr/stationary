@@ -2313,420 +2313,17 @@
                                 "type": "string",
                                 "nullable": true
                               },
-                              "playback": {
-                                "type": "object",
-                                "properties": {
-                                  "url": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "mime_type": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "protocol": {
-                                    "enum": [
-                                      "DASH",
-                                      "PROGRESSIVE"
-                                    ],
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "track_id": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "variants": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "object",
-                                      "properties": {
-                                        "track_id": {
-                                          "type": "string"
-                                        },
-                                        "url": {
-                                          "type": "string"
-                                        },
-                                        "mime_type": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "quality": {
-                                          "type": "string"
-                                        },
-                                        "label": {
-                                          "type": "string"
-                                        },
-                                        "codec": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "width": {
-                                          "type": "number",
-                                          "nullable": true
-                                        },
-                                        "height": {
-                                          "type": "number",
-                                          "nullable": true
-                                        },
-                                        "bandwidth": {
-                                          "type": "number",
-                                          "nullable": true
-                                        },
-                                        "frame_rate": {
-                                          "type": "number",
-                                          "nullable": true
-                                        }
-                                      },
-                                      "required": [
-                                        "track_id",
-                                        "url",
-                                        "mime_type",
-                                        "quality",
-                                        "label",
-                                        "codec",
-                                        "width",
-                                        "height",
-                                        "bandwidth",
-                                        "frame_rate"
-                                      ]
-                                    }
-                                  },
-                                  "capabilities": {
-                                    "type": "object",
-                                    "properties": {
-                                      "quality_switching": {
-                                        "type": "boolean"
-                                      },
-                                      "audio_switching": {
-                                        "type": "boolean"
-                                      },
-                                      "subtitle_switching": {
-                                        "type": "boolean"
-                                      },
-                                      "protocol_supports_switching": {
-                                        "type": "boolean"
-                                      }
-                                    },
-                                    "required": [
-                                      "quality_switching",
-                                      "audio_switching",
-                                      "subtitle_switching",
-                                      "protocol_supports_switching"
-                                    ]
-                                  },
-                                  "audio_tracks": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "object",
-                                      "properties": {
-                                        "id": {
-                                          "type": "string"
-                                        },
-                                        "track_id": {
-                                          "type": "string"
-                                        },
-                                        "source": {
-                                          "enum": [
-                                            "INTERNAL",
-                                            "EXTERNAL"
-                                          ],
-                                          "type": "string"
-                                        },
-                                        "stream_index": {
-                                          "type": "number",
-                                          "nullable": true
-                                        },
-                                        "url": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "select_url": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "mime_type": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "language": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "label": {
-                                          "type": "string"
-                                        },
-                                        "role": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "codec": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "channels": {
-                                          "type": "number",
-                                          "nullable": true
-                                        },
-                                        "is_default": {
-                                          "type": "boolean"
-                                        },
-                                        "selectable": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      "required": [
-                                        "id",
-                                        "track_id",
-                                        "source",
-                                        "stream_index",
-                                        "url",
-                                        "select_url",
-                                        "mime_type",
-                                        "language",
-                                        "label",
-                                        "role",
-                                        "codec",
-                                        "channels",
-                                        "is_default",
-                                        "selectable"
-                                      ]
-                                    }
-                                  },
-                                  "subtitle_tracks": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "object",
-                                      "properties": {
-                                        "id": {
-                                          "type": "string"
-                                        },
-                                        "track_id": {
-                                          "type": "string"
-                                        },
-                                        "source": {
-                                          "enum": [
-                                            "INTERNAL",
-                                            "EXTERNAL"
-                                          ],
-                                          "type": "string"
-                                        },
-                                        "stream_index": {
-                                          "type": "number",
-                                          "nullable": true
-                                        },
-                                        "url": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "mime_type": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "language": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "label": {
-                                          "type": "string"
-                                        },
-                                        "format": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "selectable": {
-                                          "type": "boolean"
-                                        }
-                                      },
-                                      "required": [
-                                        "id",
-                                        "track_id",
-                                        "source",
-                                        "stream_index",
-                                        "url",
-                                        "mime_type",
-                                        "language",
-                                        "label",
-                                        "format",
-                                        "selectable"
-                                      ]
-                                    }
-                                  }
-                                },
-                                "required": [
-                                  "url",
-                                  "mime_type",
-                                  "protocol",
-                                  "track_id",
-                                  "variants",
-                                  "capabilities",
-                                  "audio_tracks",
-                                  "subtitle_tracks"
-                                ],
+                              "width": {
+                                "type": "number",
                                 "nullable": true
                               },
-                              "audio_tracks": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "id": {
-                                      "type": "string"
-                                    },
-                                    "track_id": {
-                                      "type": "string"
-                                    },
-                                    "source": {
-                                      "enum": [
-                                        "INTERNAL",
-                                        "EXTERNAL"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "stream_index": {
-                                      "type": "number",
-                                      "nullable": true
-                                    },
-                                    "url": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "select_url": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "mime_type": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "language": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "label": {
-                                      "type": "string"
-                                    },
-                                    "role": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "codec": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "channels": {
-                                      "type": "number",
-                                      "nullable": true
-                                    },
-                                    "is_default": {
-                                      "type": "boolean"
-                                    },
-                                    "selectable": {
-                                      "type": "boolean"
-                                    }
-                                  },
-                                  "required": [
-                                    "id",
-                                    "track_id",
-                                    "source",
-                                    "stream_index",
-                                    "url",
-                                    "select_url",
-                                    "mime_type",
-                                    "language",
-                                    "label",
-                                    "role",
-                                    "codec",
-                                    "channels",
-                                    "is_default",
-                                    "selectable"
-                                  ]
-                                }
+                              "height": {
+                                "type": "number",
+                                "nullable": true
                               },
-                              "subtitle_tracks": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "id": {
-                                      "type": "string"
-                                    },
-                                    "track_id": {
-                                      "type": "string"
-                                    },
-                                    "source": {
-                                      "enum": [
-                                        "INTERNAL",
-                                        "EXTERNAL"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "stream_index": {
-                                      "type": "number",
-                                      "nullable": true
-                                    },
-                                    "url": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "mime_type": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "language": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "label": {
-                                      "type": "string"
-                                    },
-                                    "format": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "selectable": {
-                                      "type": "boolean"
-                                    }
-                                  },
-                                  "required": [
-                                    "id",
-                                    "track_id",
-                                    "source",
-                                    "stream_index",
-                                    "url",
-                                    "mime_type",
-                                    "language",
-                                    "label",
-                                    "format",
-                                    "selectable"
-                                  ]
-                                }
-                              },
-                              "subtitles": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "url": {
-                                      "type": "string"
-                                    },
-                                    "language": {
-                                      "type": "string"
-                                    },
-                                    "label": {
-                                      "type": "string"
-                                    },
-                                    "format": {
-                                      "type": "string"
-                                    }
-                                  },
-                                  "required": [
-                                    "url",
-                                    "language",
-                                    "label",
-                                    "format"
-                                  ]
-                                }
+                              "duration": {
+                                "type": "number",
+                                "nullable": true
                               },
                               "previews": {
                                 "type": "object",
@@ -2810,15 +2407,156 @@
                                 ],
                                 "nullable": true
                               },
-                              "width": {
-                                "type": "number",
+                              "playback": {
+                                "type": "object",
+                                "properties": {
+                                  "direct_url": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "direct_mime_type": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "hls_url": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "dash_url": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "duration": {
+                                    "type": "number",
+                                    "nullable": true
+                                  },
+                                  "video": {
+                                    "type": "object",
+                                    "properties": {
+                                      "id": {
+                                        "type": "string"
+                                      },
+                                      "codec": {
+                                        "type": "string"
+                                      },
+                                      "codec_string": {
+                                        "type": "string",
+                                        "nullable": true
+                                      },
+                                      "width": {
+                                        "type": "number"
+                                      },
+                                      "height": {
+                                        "type": "number"
+                                      },
+                                      "rotation": {
+                                        "type": "number",
+                                        "nullable": true
+                                      },
+                                      "frame_rate": {
+                                        "type": "number",
+                                        "nullable": true
+                                      }
+                                    },
+                                    "required": [
+                                      "id",
+                                      "codec",
+                                      "codec_string",
+                                      "width",
+                                      "height",
+                                      "rotation",
+                                      "frame_rate"
+                                    ],
+                                    "nullable": true
+                                  },
+                                  "audio_tracks": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "codec": {
+                                          "type": "string"
+                                        },
+                                        "codec_string": {
+                                          "type": "string",
+                                          "nullable": true
+                                        },
+                                        "language": {
+                                          "type": "string",
+                                          "nullable": true
+                                        },
+                                        "label": {
+                                          "type": "string",
+                                          "nullable": true
+                                        },
+                                        "is_default": {
+                                          "type": "boolean"
+                                        },
+                                        "channels": {
+                                          "type": "number",
+                                          "nullable": true
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "codec",
+                                        "codec_string",
+                                        "language",
+                                        "label",
+                                        "is_default",
+                                        "channels"
+                                      ]
+                                    }
+                                  },
+                                  "captions": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "language": {
+                                          "type": "string",
+                                          "nullable": true
+                                        },
+                                        "label": {
+                                          "type": "string",
+                                          "nullable": true
+                                        },
+                                        "is_default": {
+                                          "type": "boolean"
+                                        },
+                                        "vtt_url": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "language",
+                                        "label",
+                                        "is_default",
+                                        "vtt_url"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "direct_url",
+                                  "direct_mime_type",
+                                  "hls_url",
+                                  "dash_url",
+                                  "duration",
+                                  "video",
+                                  "audio_tracks",
+                                  "captions"
+                                ],
                                 "nullable": true
                               },
-                              "height": {
-                                "type": "number",
-                                "nullable": true
-                              },
-                              "tracks": {
+                              "originals": {
                                 "type": "array",
                                 "items": {
                                   "type": "object",
@@ -2826,229 +2564,111 @@
                                     "id": {
                                       "type": "string"
                                     },
-                                    "file_id": {
-                                      "type": "string"
-                                    },
-                                    "url": {
-                                      "type": "string"
-                                    },
-                                    "type": {
+                                    "kind": {
                                       "enum": [
                                         "IMAGE",
+                                        "PDF",
                                         "VIDEO",
-                                        "AUDIO",
-                                        "SUBTITLE",
-                                        "PDF"
+                                        "AUDIO"
                                       ],
-                                      "type": "string"
-                                    },
-                                    "purpose": {
-                                      "enum": [
-                                        "CONTENT",
-                                        "COVER",
-                                        "THUMBNAIL",
-                                        "PREVIEW"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "is_original": {
-                                      "type": "boolean"
-                                    },
-                                    "quality": {
-                                      "enum": [
-                                        "LOW",
-                                        "MEDIUM",
-                                        "HIGH"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "priority": {
-                                      "type": "integer"
-                                    },
-                                    "metadata": {
-                                      "type": "object",
-                                      "propertyNames": {
-                                        "type": "string"
-                                      },
-                                      "additionalProperties": {}
-                                    },
-                                    "variant_key": {
-                                      "type": "string"
-                                    },
-                                    "is_default": {
-                                      "type": "boolean"
-                                    },
-                                    "is_primary": {
-                                      "type": "boolean"
-                                    },
-                                    "display_name": {
                                       "type": "string",
                                       "nullable": true
                                     },
-                                    "language": {
+                                    "url": {
                                       "type": "string",
                                       "nullable": true
-                                    },
-                                    "codec": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "is_stale": {
-                                      "type": "boolean"
                                     },
                                     "mime_type": {
                                       "type": "string",
                                       "nullable": true
                                     },
-                                    "extension": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "width": {
+                                    "size": {
                                       "type": "number",
                                       "nullable": true
                                     },
-                                    "height": {
-                                      "type": "number",
-                                      "nullable": true
-                                    },
-                                    "container": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "is_fragmented": {
-                                      "type": "boolean",
-                                      "nullable": true
-                                    },
-                                    "stream_layout": {
+                                    "status": {
                                       "enum": [
-                                        "SINGLE",
-                                        "MUXED",
-                                        "VIDEO_ONLY",
-                                        "AUDIO_ONLY",
-                                        "TEXT_ONLY"
+                                        "PENDING",
+                                        "IN_PROGRESS",
+                                        "COMPLETED",
+                                        "FAILED"
                                       ],
+                                      "type": "string"
+                                    },
+                                    "last_error": {
                                       "type": "string",
                                       "nullable": true
-                                    },
-                                    "has_video": {
-                                      "type": "boolean"
-                                    },
-                                    "has_audio": {
-                                      "type": "boolean"
-                                    },
-                                    "streams": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "object",
-                                        "properties": {
-                                          "index": {
-                                            "type": "integer",
-                                            "minimum": 0
-                                          },
-                                          "id": {
-                                            "type": "string",
-                                            "nullable": true
-                                          },
-                                          "type": {
-                                            "enum": [
-                                              "VIDEO",
-                                              "AUDIO",
-                                              "SUBTITLE"
-                                            ],
-                                            "type": "string"
-                                          },
-                                          "codec": {
-                                            "type": "string",
-                                            "nullable": true
-                                          },
-                                          "language": {
-                                            "type": "string",
-                                            "nullable": true
-                                          },
-                                          "label": {
-                                            "type": "string",
-                                            "nullable": true
-                                          },
-                                          "role": {
-                                            "type": "string",
-                                            "nullable": true
-                                          },
-                                          "width": {
-                                            "type": "integer",
-                                            "minimum": 1,
-                                            "nullable": true
-                                          },
-                                          "height": {
-                                            "type": "integer",
-                                            "minimum": 1,
-                                            "nullable": true
-                                          },
-                                          "bandwidth": {
-                                            "type": "number",
-                                            "minimum": 0,
-                                            "nullable": true
-                                          },
-                                          "channels": {
-                                            "type": "integer",
-                                            "minimum": 1,
-                                            "nullable": true
-                                          },
-                                          "sample_rate": {
-                                            "type": "integer",
-                                            "minimum": 1,
-                                            "nullable": true
-                                          },
-                                          "is_default": {
-                                            "type": "boolean"
-                                          }
-                                        },
-                                        "required": [
-                                          "index",
-                                          "type"
-                                        ]
-                                      }
                                     }
                                   },
                                   "required": [
                                     "id",
-                                    "file_id",
+                                    "kind",
                                     "url",
-                                    "type",
-                                    "purpose",
-                                    "is_original",
-                                    "quality",
-                                    "priority",
-                                    "metadata",
-                                    "variant_key",
-                                    "is_default",
-                                    "is_primary",
-                                    "display_name",
-                                    "language",
-                                    "codec",
-                                    "is_stale",
                                     "mime_type",
-                                    "extension",
-                                    "width",
-                                    "height",
-                                    "container",
-                                    "is_fragmented",
-                                    "stream_layout",
-                                    "has_video",
-                                    "has_audio",
-                                    "streams"
+                                    "size",
+                                    "status",
+                                    "last_error"
+                                  ]
+                                }
+                              },
+                              "captions": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "origin": {
+                                      "enum": [
+                                        "FILE",
+                                        "EMBEDDED"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "language": {
+                                      "type": "string",
+                                      "nullable": true
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "nullable": true
+                                    },
+                                    "is_default": {
+                                      "type": "boolean"
+                                    },
+                                    "status": {
+                                      "enum": [
+                                        "PENDING",
+                                        "IN_PROGRESS",
+                                        "COMPLETED",
+                                        "FAILED"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "last_error": {
+                                      "type": "string",
+                                      "nullable": true
+                                    },
+                                    "vtt_url": {
+                                      "type": "string",
+                                      "nullable": true
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "origin",
+                                    "language",
+                                    "label",
+                                    "is_default",
+                                    "status",
+                                    "last_error",
+                                    "vtt_url"
                                   ]
                                 }
                               },
                               "position": {
                                 "type": "integer"
-                              },
-                              "ai_status": {
-                                "type": "string"
-                              },
-                              "ai_error": {
-                                "type": "string",
-                                "nullable": true
                               },
                               "ai": {
                                 "type": "object",
@@ -3148,14 +2768,14 @@
                               "sync_status",
                               "last_error",
                               "url",
-                              "playback",
-                              "audio_tracks",
-                              "subtitle_tracks",
-                              "subtitles",
-                              "previews",
                               "width",
                               "height",
-                              "tracks"
+                              "duration",
+                              "previews",
+                              "cover",
+                              "playback",
+                              "originals",
+                              "captions"
                             ]
                           }
                         },
@@ -4260,420 +3880,17 @@
                           "type": "string",
                           "nullable": true
                         },
-                        "playback": {
-                          "type": "object",
-                          "properties": {
-                            "url": {
-                              "type": "string",
-                              "nullable": true
-                            },
-                            "mime_type": {
-                              "type": "string",
-                              "nullable": true
-                            },
-                            "protocol": {
-                              "enum": [
-                                "DASH",
-                                "PROGRESSIVE"
-                              ],
-                              "type": "string",
-                              "nullable": true
-                            },
-                            "track_id": {
-                              "type": "string",
-                              "nullable": true
-                            },
-                            "variants": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "track_id": {
-                                    "type": "string"
-                                  },
-                                  "url": {
-                                    "type": "string"
-                                  },
-                                  "mime_type": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "quality": {
-                                    "type": "string"
-                                  },
-                                  "label": {
-                                    "type": "string"
-                                  },
-                                  "codec": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "width": {
-                                    "type": "number",
-                                    "nullable": true
-                                  },
-                                  "height": {
-                                    "type": "number",
-                                    "nullable": true
-                                  },
-                                  "bandwidth": {
-                                    "type": "number",
-                                    "nullable": true
-                                  },
-                                  "frame_rate": {
-                                    "type": "number",
-                                    "nullable": true
-                                  }
-                                },
-                                "required": [
-                                  "track_id",
-                                  "url",
-                                  "mime_type",
-                                  "quality",
-                                  "label",
-                                  "codec",
-                                  "width",
-                                  "height",
-                                  "bandwidth",
-                                  "frame_rate"
-                                ]
-                              }
-                            },
-                            "capabilities": {
-                              "type": "object",
-                              "properties": {
-                                "quality_switching": {
-                                  "type": "boolean"
-                                },
-                                "audio_switching": {
-                                  "type": "boolean"
-                                },
-                                "subtitle_switching": {
-                                  "type": "boolean"
-                                },
-                                "protocol_supports_switching": {
-                                  "type": "boolean"
-                                }
-                              },
-                              "required": [
-                                "quality_switching",
-                                "audio_switching",
-                                "subtitle_switching",
-                                "protocol_supports_switching"
-                              ]
-                            },
-                            "audio_tracks": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "track_id": {
-                                    "type": "string"
-                                  },
-                                  "source": {
-                                    "enum": [
-                                      "INTERNAL",
-                                      "EXTERNAL"
-                                    ],
-                                    "type": "string"
-                                  },
-                                  "stream_index": {
-                                    "type": "number",
-                                    "nullable": true
-                                  },
-                                  "url": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "select_url": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "mime_type": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "language": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "label": {
-                                    "type": "string"
-                                  },
-                                  "role": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "codec": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "channels": {
-                                    "type": "number",
-                                    "nullable": true
-                                  },
-                                  "is_default": {
-                                    "type": "boolean"
-                                  },
-                                  "selectable": {
-                                    "type": "boolean"
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "track_id",
-                                  "source",
-                                  "stream_index",
-                                  "url",
-                                  "select_url",
-                                  "mime_type",
-                                  "language",
-                                  "label",
-                                  "role",
-                                  "codec",
-                                  "channels",
-                                  "is_default",
-                                  "selectable"
-                                ]
-                              }
-                            },
-                            "subtitle_tracks": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "id": {
-                                    "type": "string"
-                                  },
-                                  "track_id": {
-                                    "type": "string"
-                                  },
-                                  "source": {
-                                    "enum": [
-                                      "INTERNAL",
-                                      "EXTERNAL"
-                                    ],
-                                    "type": "string"
-                                  },
-                                  "stream_index": {
-                                    "type": "number",
-                                    "nullable": true
-                                  },
-                                  "url": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "mime_type": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "language": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "label": {
-                                    "type": "string"
-                                  },
-                                  "format": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "selectable": {
-                                    "type": "boolean"
-                                  }
-                                },
-                                "required": [
-                                  "id",
-                                  "track_id",
-                                  "source",
-                                  "stream_index",
-                                  "url",
-                                  "mime_type",
-                                  "language",
-                                  "label",
-                                  "format",
-                                  "selectable"
-                                ]
-                              }
-                            }
-                          },
-                          "required": [
-                            "url",
-                            "mime_type",
-                            "protocol",
-                            "track_id",
-                            "variants",
-                            "capabilities",
-                            "audio_tracks",
-                            "subtitle_tracks"
-                          ],
+                        "width": {
+                          "type": "number",
                           "nullable": true
                         },
-                        "audio_tracks": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string"
-                              },
-                              "track_id": {
-                                "type": "string"
-                              },
-                              "source": {
-                                "enum": [
-                                  "INTERNAL",
-                                  "EXTERNAL"
-                                ],
-                                "type": "string"
-                              },
-                              "stream_index": {
-                                "type": "number",
-                                "nullable": true
-                              },
-                              "url": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "select_url": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "mime_type": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "language": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "label": {
-                                "type": "string"
-                              },
-                              "role": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "codec": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "channels": {
-                                "type": "number",
-                                "nullable": true
-                              },
-                              "is_default": {
-                                "type": "boolean"
-                              },
-                              "selectable": {
-                                "type": "boolean"
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "track_id",
-                              "source",
-                              "stream_index",
-                              "url",
-                              "select_url",
-                              "mime_type",
-                              "language",
-                              "label",
-                              "role",
-                              "codec",
-                              "channels",
-                              "is_default",
-                              "selectable"
-                            ]
-                          }
+                        "height": {
+                          "type": "number",
+                          "nullable": true
                         },
-                        "subtitle_tracks": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "string"
-                              },
-                              "track_id": {
-                                "type": "string"
-                              },
-                              "source": {
-                                "enum": [
-                                  "INTERNAL",
-                                  "EXTERNAL"
-                                ],
-                                "type": "string"
-                              },
-                              "stream_index": {
-                                "type": "number",
-                                "nullable": true
-                              },
-                              "url": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "mime_type": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "language": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "label": {
-                                "type": "string"
-                              },
-                              "format": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "selectable": {
-                                "type": "boolean"
-                              }
-                            },
-                            "required": [
-                              "id",
-                              "track_id",
-                              "source",
-                              "stream_index",
-                              "url",
-                              "mime_type",
-                              "language",
-                              "label",
-                              "format",
-                              "selectable"
-                            ]
-                          }
-                        },
-                        "subtitles": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "url": {
-                                "type": "string"
-                              },
-                              "language": {
-                                "type": "string"
-                              },
-                              "label": {
-                                "type": "string"
-                              },
-                              "format": {
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "url",
-                              "language",
-                              "label",
-                              "format"
-                            ]
-                          }
+                        "duration": {
+                          "type": "number",
+                          "nullable": true
                         },
                         "previews": {
                           "type": "object",
@@ -4757,15 +3974,156 @@
                           ],
                           "nullable": true
                         },
-                        "width": {
-                          "type": "number",
+                        "playback": {
+                          "type": "object",
+                          "properties": {
+                            "direct_url": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "direct_mime_type": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "hls_url": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "dash_url": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "duration": {
+                              "type": "number",
+                              "nullable": true
+                            },
+                            "video": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string"
+                                },
+                                "codec": {
+                                  "type": "string"
+                                },
+                                "codec_string": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "width": {
+                                  "type": "number"
+                                },
+                                "height": {
+                                  "type": "number"
+                                },
+                                "rotation": {
+                                  "type": "number",
+                                  "nullable": true
+                                },
+                                "frame_rate": {
+                                  "type": "number",
+                                  "nullable": true
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "codec",
+                                "codec_string",
+                                "width",
+                                "height",
+                                "rotation",
+                                "frame_rate"
+                              ],
+                              "nullable": true
+                            },
+                            "audio_tracks": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "codec": {
+                                    "type": "string"
+                                  },
+                                  "codec_string": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "language": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "is_default": {
+                                    "type": "boolean"
+                                  },
+                                  "channels": {
+                                    "type": "number",
+                                    "nullable": true
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "codec",
+                                  "codec_string",
+                                  "language",
+                                  "label",
+                                  "is_default",
+                                  "channels"
+                                ]
+                              }
+                            },
+                            "captions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "language": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "is_default": {
+                                    "type": "boolean"
+                                  },
+                                  "vtt_url": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "language",
+                                  "label",
+                                  "is_default",
+                                  "vtt_url"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "direct_url",
+                            "direct_mime_type",
+                            "hls_url",
+                            "dash_url",
+                            "duration",
+                            "video",
+                            "audio_tracks",
+                            "captions"
+                          ],
                           "nullable": true
                         },
-                        "height": {
-                          "type": "number",
-                          "nullable": true
-                        },
-                        "tracks": {
+                        "originals": {
                           "type": "array",
                           "items": {
                             "type": "object",
@@ -4773,229 +4131,111 @@
                               "id": {
                                 "type": "string"
                               },
-                              "file_id": {
-                                "type": "string"
-                              },
-                              "url": {
-                                "type": "string"
-                              },
-                              "type": {
+                              "kind": {
                                 "enum": [
                                   "IMAGE",
+                                  "PDF",
                                   "VIDEO",
-                                  "AUDIO",
-                                  "SUBTITLE",
-                                  "PDF"
+                                  "AUDIO"
                                 ],
-                                "type": "string"
-                              },
-                              "purpose": {
-                                "enum": [
-                                  "CONTENT",
-                                  "COVER",
-                                  "THUMBNAIL",
-                                  "PREVIEW"
-                                ],
-                                "type": "string"
-                              },
-                              "is_original": {
-                                "type": "boolean"
-                              },
-                              "quality": {
-                                "enum": [
-                                  "LOW",
-                                  "MEDIUM",
-                                  "HIGH"
-                                ],
-                                "type": "string"
-                              },
-                              "priority": {
-                                "type": "integer"
-                              },
-                              "metadata": {
-                                "type": "object",
-                                "propertyNames": {
-                                  "type": "string"
-                                },
-                                "additionalProperties": {}
-                              },
-                              "variant_key": {
-                                "type": "string"
-                              },
-                              "is_default": {
-                                "type": "boolean"
-                              },
-                              "is_primary": {
-                                "type": "boolean"
-                              },
-                              "display_name": {
                                 "type": "string",
                                 "nullable": true
                               },
-                              "language": {
+                              "url": {
                                 "type": "string",
                                 "nullable": true
-                              },
-                              "codec": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "is_stale": {
-                                "type": "boolean"
                               },
                               "mime_type": {
                                 "type": "string",
                                 "nullable": true
                               },
-                              "extension": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "width": {
+                              "size": {
                                 "type": "number",
                                 "nullable": true
                               },
-                              "height": {
-                                "type": "number",
-                                "nullable": true
-                              },
-                              "container": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "is_fragmented": {
-                                "type": "boolean",
-                                "nullable": true
-                              },
-                              "stream_layout": {
+                              "status": {
                                 "enum": [
-                                  "SINGLE",
-                                  "MUXED",
-                                  "VIDEO_ONLY",
-                                  "AUDIO_ONLY",
-                                  "TEXT_ONLY"
+                                  "PENDING",
+                                  "IN_PROGRESS",
+                                  "COMPLETED",
+                                  "FAILED"
                                 ],
+                                "type": "string"
+                              },
+                              "last_error": {
                                 "type": "string",
                                 "nullable": true
-                              },
-                              "has_video": {
-                                "type": "boolean"
-                              },
-                              "has_audio": {
-                                "type": "boolean"
-                              },
-                              "streams": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "index": {
-                                      "type": "integer",
-                                      "minimum": 0
-                                    },
-                                    "id": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "type": {
-                                      "enum": [
-                                        "VIDEO",
-                                        "AUDIO",
-                                        "SUBTITLE"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "codec": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "language": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "label": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "role": {
-                                      "type": "string",
-                                      "nullable": true
-                                    },
-                                    "width": {
-                                      "type": "integer",
-                                      "minimum": 1,
-                                      "nullable": true
-                                    },
-                                    "height": {
-                                      "type": "integer",
-                                      "minimum": 1,
-                                      "nullable": true
-                                    },
-                                    "bandwidth": {
-                                      "type": "number",
-                                      "minimum": 0,
-                                      "nullable": true
-                                    },
-                                    "channels": {
-                                      "type": "integer",
-                                      "minimum": 1,
-                                      "nullable": true
-                                    },
-                                    "sample_rate": {
-                                      "type": "integer",
-                                      "minimum": 1,
-                                      "nullable": true
-                                    },
-                                    "is_default": {
-                                      "type": "boolean"
-                                    }
-                                  },
-                                  "required": [
-                                    "index",
-                                    "type"
-                                  ]
-                                }
                               }
                             },
                             "required": [
                               "id",
-                              "file_id",
+                              "kind",
                               "url",
-                              "type",
-                              "purpose",
-                              "is_original",
-                              "quality",
-                              "priority",
-                              "metadata",
-                              "variant_key",
-                              "is_default",
-                              "is_primary",
-                              "display_name",
-                              "language",
-                              "codec",
-                              "is_stale",
                               "mime_type",
-                              "extension",
-                              "width",
-                              "height",
-                              "container",
-                              "is_fragmented",
-                              "stream_layout",
-                              "has_video",
-                              "has_audio",
-                              "streams"
+                              "size",
+                              "status",
+                              "last_error"
+                            ]
+                          }
+                        },
+                        "captions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "origin": {
+                                "enum": [
+                                  "FILE",
+                                  "EMBEDDED"
+                                ],
+                                "type": "string"
+                              },
+                              "language": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "label": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "is_default": {
+                                "type": "boolean"
+                              },
+                              "status": {
+                                "enum": [
+                                  "PENDING",
+                                  "IN_PROGRESS",
+                                  "COMPLETED",
+                                  "FAILED"
+                                ],
+                                "type": "string"
+                              },
+                              "last_error": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "vtt_url": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "origin",
+                              "language",
+                              "label",
+                              "is_default",
+                              "status",
+                              "last_error",
+                              "vtt_url"
                             ]
                           }
                         },
                         "position": {
                           "type": "integer"
-                        },
-                        "ai_status": {
-                          "type": "string"
-                        },
-                        "ai_error": {
-                          "type": "string",
-                          "nullable": true
                         },
                         "ai": {
                           "type": "object",
@@ -5095,14 +4335,14 @@
                         "sync_status",
                         "last_error",
                         "url",
-                        "playback",
-                        "audio_tracks",
-                        "subtitle_tracks",
-                        "subtitles",
-                        "previews",
                         "width",
                         "height",
-                        "tracks"
+                        "duration",
+                        "previews",
+                        "cover",
+                        "playback",
+                        "originals",
+                        "captions"
                       ]
                     }
                   },
@@ -5888,7 +5128,7 @@
     },
     "/api/media/{id}/manifest.mpd": {
       "get": {
-        "summary": "Get MPEG-DASH MPD playlist for video",
+        "summary": "MPEG-DASH manifest of a media that has adaptive playback",
         "tags": [
           "Media"
         ],
@@ -5899,7 +5139,7 @@
               "application/json": {
                 "schema": {
                   "type": "string",
-                  "description": "DASH XML manifest file"
+                  "description": "DASH XML manifest"
                 }
               }
             }
@@ -5936,6 +5176,132 @@
         "parameters": [
           {
             "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/media/{id}/manifest.m3u8": {
+      "get": {
+        "summary": "HLS master playlist of a media that has adaptive playback",
+        "tags": [
+          "Media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "description": "HLS master playlist"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized / Not logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 40101
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/media/{id}/hls/{renditionId}/manifest.m3u8": {
+      "get": {
+        "summary": "HLS playlist of one stream or caption of the master playlist",
+        "tags": [
+          "Media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "description": "HLS media playlist"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized / Not logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 40101
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "renditionId",
             "in": "path",
             "required": true,
             "schema": {
@@ -6159,305 +5525,9 @@
         }
       }
     },
-    "/api/media/{id}/tracks": {
+    "/api/media/{id}/originals/{originalId}/download-url": {
       "get": {
-        "summary": "List all playback tracks under Media",
-        "tags": [
-          "Media"
-        ],
-        "responses": {
-          "200": {
-            "description": "Success response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 0,
-                      "description": "Status code, 0 indicates success"
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "success",
-                      "description": "Status description"
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string"
-                          },
-                          "file_id": {
-                            "type": "string"
-                          },
-                          "url": {
-                            "type": "string"
-                          },
-                          "type": {
-                            "enum": [
-                              "IMAGE",
-                              "VIDEO",
-                              "AUDIO",
-                              "SUBTITLE",
-                              "PDF"
-                            ],
-                            "type": "string"
-                          },
-                          "purpose": {
-                            "enum": [
-                              "CONTENT",
-                              "COVER",
-                              "THUMBNAIL",
-                              "PREVIEW"
-                            ],
-                            "type": "string"
-                          },
-                          "is_original": {
-                            "type": "boolean"
-                          },
-                          "quality": {
-                            "enum": [
-                              "LOW",
-                              "MEDIUM",
-                              "HIGH"
-                            ],
-                            "type": "string"
-                          },
-                          "priority": {
-                            "type": "integer"
-                          },
-                          "metadata": {
-                            "type": "object",
-                            "propertyNames": {
-                              "type": "string"
-                            },
-                            "additionalProperties": {}
-                          },
-                          "variant_key": {
-                            "type": "string"
-                          },
-                          "is_default": {
-                            "type": "boolean"
-                          },
-                          "is_primary": {
-                            "type": "boolean"
-                          },
-                          "display_name": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "language": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "codec": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "is_stale": {
-                            "type": "boolean"
-                          },
-                          "mime_type": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "extension": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "width": {
-                            "type": "number",
-                            "nullable": true
-                          },
-                          "height": {
-                            "type": "number",
-                            "nullable": true
-                          },
-                          "container": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "is_fragmented": {
-                            "type": "boolean",
-                            "nullable": true
-                          },
-                          "stream_layout": {
-                            "enum": [
-                              "SINGLE",
-                              "MUXED",
-                              "VIDEO_ONLY",
-                              "AUDIO_ONLY",
-                              "TEXT_ONLY"
-                            ],
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "has_video": {
-                            "type": "boolean"
-                          },
-                          "has_audio": {
-                            "type": "boolean"
-                          },
-                          "streams": {
-                            "type": "array",
-                            "items": {
-                              "type": "object",
-                              "properties": {
-                                "index": {
-                                  "type": "integer",
-                                  "minimum": 0
-                                },
-                                "id": {
-                                  "type": "string",
-                                  "nullable": true
-                                },
-                                "type": {
-                                  "enum": [
-                                    "VIDEO",
-                                    "AUDIO",
-                                    "SUBTITLE"
-                                  ],
-                                  "type": "string"
-                                },
-                                "codec": {
-                                  "type": "string",
-                                  "nullable": true
-                                },
-                                "language": {
-                                  "type": "string",
-                                  "nullable": true
-                                },
-                                "label": {
-                                  "type": "string",
-                                  "nullable": true
-                                },
-                                "role": {
-                                  "type": "string",
-                                  "nullable": true
-                                },
-                                "width": {
-                                  "type": "integer",
-                                  "minimum": 1,
-                                  "nullable": true
-                                },
-                                "height": {
-                                  "type": "integer",
-                                  "minimum": 1,
-                                  "nullable": true
-                                },
-                                "bandwidth": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "nullable": true
-                                },
-                                "channels": {
-                                  "type": "integer",
-                                  "minimum": 1,
-                                  "nullable": true
-                                },
-                                "sample_rate": {
-                                  "type": "integer",
-                                  "minimum": 1,
-                                  "nullable": true
-                                },
-                                "is_default": {
-                                  "type": "boolean"
-                                }
-                              },
-                              "required": [
-                                "index",
-                                "type"
-                              ]
-                            }
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "file_id",
-                          "url",
-                          "type",
-                          "purpose",
-                          "is_original",
-                          "quality",
-                          "priority",
-                          "metadata",
-                          "variant_key",
-                          "is_default",
-                          "is_primary",
-                          "display_name",
-                          "language",
-                          "codec",
-                          "is_stale",
-                          "mime_type",
-                          "extension",
-                          "width",
-                          "height",
-                          "container",
-                          "is_fragmented",
-                          "stream_layout",
-                          "has_video",
-                          "has_audio",
-                          "streams"
-                        ]
-                      }
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized / Not logged in",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 40101
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "Unauthorized"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "CookieAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      }
-    },
-    "/api/media/{id}/tracks/{trackId}/download-url": {
-      "get": {
-        "summary": "Get a short-lived URL that downloads a track file as an attachment",
+        "summary": "Get a short-lived URL that downloads an original as an attachment",
         "tags": [
           "Media"
         ],
@@ -6536,7 +5606,7 @@
             }
           },
           {
-            "name": "trackId",
+            "name": "originalId",
             "in": "path",
             "required": true,
             "schema": {
@@ -6546,9 +5616,9 @@
         ]
       }
     },
-    "/api/media/{id}/tracks/presign-upload": {
+    "/api/media/{id}/originals": {
       "post": {
-        "summary": "Get S3 presigned URL for uploading track",
+        "summary": "Add an original uploaded as a draft file, or replace one with it",
         "tags": [
           "Media"
         ],
@@ -6573,458 +5643,10 @@
                     "data": {
                       "type": "object",
                       "properties": {
-                        "url": {
-                          "type": "string",
-                          "format": "uri"
-                        },
-                        "path": {
-                          "type": "string"
-                        },
-                        "bucket": {
-                          "type": "string"
-                        },
-                        "mime_type": {
-                          "type": "string"
-                        },
-                        "extension": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized / Not logged in",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 40101
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "Unauthorized"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "CookieAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "enum": [
-                      "IMAGE",
-                      "VIDEO",
-                      "AUDIO",
-                      "SUBTITLE",
-                      "PDF"
-                    ],
-                    "type": "string"
-                  },
-                  "purpose": {
-                    "enum": [
-                      "CONTENT",
-                      "COVER",
-                      "THUMBNAIL",
-                      "PREVIEW"
-                    ],
-                    "type": "string"
-                  },
-                  "quality": {
-                    "enum": [
-                      "LOW",
-                      "MEDIUM",
-                      "HIGH"
-                    ],
-                    "type": "string"
-                  },
-                  "priority": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "default": 0
-                  },
-                  "fileName": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "type",
-                  "purpose",
-                  "quality",
-                  "fileName"
-                ]
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/media/{id}/tracks/upsert": {
-      "post": {
-        "summary": "Register/replace specified track and associate physical file",
-        "tags": [
-          "Media"
-        ],
-        "responses": {
-          "200": {
-            "description": "Success response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 0,
-                      "description": "Status code, 0 indicates success"
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "success",
-                      "description": "Status description"
-                    },
-                    "data": {
-                      "type": "object"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized / Not logged in",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 40101
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "Unauthorized"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "CookieAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "enum": [
-                      "IMAGE",
-                      "VIDEO",
-                      "AUDIO",
-                      "SUBTITLE",
-                      "PDF"
-                    ],
-                    "type": "string"
-                  },
-                  "purpose": {
-                    "enum": [
-                      "CONTENT",
-                      "COVER",
-                      "THUMBNAIL",
-                      "PREVIEW"
-                    ],
-                    "type": "string"
-                  },
-                  "quality": {
-                    "enum": [
-                      "LOW",
-                      "MEDIUM",
-                      "HIGH"
-                    ],
-                    "type": "string"
-                  },
-                  "priority": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "default": 0
-                  },
-                  "source_url": {
-                    "type": "string"
-                  },
-                  "metadata": {},
-                  "variant_key": {
-                    "type": "string"
-                  },
-                  "is_default": {
-                    "type": "boolean"
-                  },
-                  "is_primary": {
-                    "type": "boolean"
-                  },
-                  "display_name": {
-                    "type": "string"
-                  },
-                  "language": {
-                    "type": "string",
-                    "nullable": true
-                  },
-                  "codec": {
-                    "type": "string",
-                    "nullable": true
-                  },
-                  "is_stale": {
-                    "type": "boolean"
-                  },
-                  "source_track_id": {
-                    "type": "string",
-                    "nullable": true
-                  },
-                  "container": {
-                    "type": "string",
-                    "nullable": true
-                  },
-                  "is_fragmented": {
-                    "type": "boolean",
-                    "nullable": true
-                  },
-                  "stream_layout": {
-                    "enum": [
-                      "SINGLE",
-                      "MUXED",
-                      "VIDEO_ONLY",
-                      "AUDIO_ONLY",
-                      "TEXT_ONLY"
-                    ],
-                    "type": "string",
-                    "nullable": true
-                  },
-                  "has_video": {
-                    "type": "boolean",
-                    "nullable": true
-                  },
-                  "has_audio": {
-                    "type": "boolean",
-                    "nullable": true
-                  },
-                  "streams": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "index": {
-                          "type": "integer",
-                          "minimum": 0
-                        },
                         "id": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "type": {
-                          "enum": [
-                            "VIDEO",
-                            "AUDIO",
-                            "SUBTITLE"
-                          ],
                           "type": "string"
-                        },
-                        "codec": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "language": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "label": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "role": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "width": {
-                          "type": "integer",
-                          "minimum": 1,
-                          "nullable": true
-                        },
-                        "height": {
-                          "type": "integer",
-                          "minimum": 1,
-                          "nullable": true
-                        },
-                        "bandwidth": {
-                          "type": "number",
-                          "minimum": 0,
-                          "nullable": true
-                        },
-                        "channels": {
-                          "type": "integer",
-                          "minimum": 1,
-                          "nullable": true
-                        },
-                        "sample_rate": {
-                          "type": "integer",
-                          "minimum": 1,
-                          "nullable": true
-                        },
-                        "is_default": {
-                          "type": "boolean"
                         }
-                      },
-                      "required": [
-                        "index",
-                        "type"
-                      ]
-                    },
-                    "nullable": true
-                  },
-                  "file": {
-                    "type": "object",
-                    "properties": {
-                      "path": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "bucket": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "mime_type": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "extension": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "size": {
-                        "type": "integer",
-                        "minimum": 0
-                      },
-                      "width": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "nullable": true
-                      },
-                      "height": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "nullable": true
-                      },
-                      "duration": {
-                        "type": "number",
-                        "nullable": true
                       }
-                    },
-                    "required": [
-                      "path",
-                      "bucket",
-                      "mime_type",
-                      "extension",
-                      "size"
-                    ]
-                  }
-                },
-                "required": [
-                  "type",
-                  "purpose",
-                  "quality",
-                  "file"
-                ]
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/media/{id}/tracks/{trackId}/replace-file": {
-      "post": {
-        "summary": "Replace physical file association of specified track",
-        "tags": [
-          "Media"
-        ],
-        "responses": {
-          "200": {
-            "description": "Success response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 0,
-                      "description": "Status code, 0 indicates success"
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "success",
-                      "description": "Status description"
-                    },
-                    "data": {
-                      "type": "object"
                     }
                   },
                   "required": [
@@ -7067,14 +5689,6 @@
         "parameters": [
           {
             "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "trackId",
             "in": "path",
             "required": true,
             "schema": {
@@ -7089,55 +5703,17 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "file": {
-                    "type": "object",
-                    "properties": {
-                      "path": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "bucket": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "mime_type": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "extension": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "size": {
-                        "type": "integer",
-                        "minimum": 0
-                      },
-                      "width": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "nullable": true
-                      },
-                      "height": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "nullable": true
-                      },
-                      "duration": {
-                        "type": "number",
-                        "nullable": true
-                      }
-                    },
-                    "required": [
-                      "path",
-                      "bucket",
-                      "mime_type",
-                      "extension",
-                      "size"
-                    ]
+                  "draft_file_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "replaces": {
+                    "type": "string",
+                    "format": "uuid"
                   }
                 },
                 "required": [
-                  "file"
+                  "draft_file_id"
                 ]
               }
             }
@@ -7145,9 +5721,9 @@
         }
       }
     },
-    "/api/media/{id}/tracks/{trackId}/delete": {
+    "/api/media/{id}/originals/{originalId}/delete": {
       "post": {
-        "summary": "Delete track record",
+        "summary": "Delete an original, unless the media would be left incomplete",
         "tags": [
           "Media"
         ],
@@ -7170,7 +5746,12 @@
                       "description": "Status description"
                     },
                     "data": {
-                      "type": "object"
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
                     }
                   },
                   "required": [
@@ -7220,7 +5801,7 @@
             }
           },
           {
-            "name": "trackId",
+            "name": "originalId",
             "in": "path",
             "required": true,
             "schema": {
@@ -7230,9 +5811,9 @@
         ]
       }
     },
-    "/api/media/{id}/tracks/{trackId}/update": {
+    "/api/media/{id}/captions": {
       "post": {
-        "summary": "Update track attributes",
+        "summary": "Add a caption uploaded as a draft subtitle file",
         "tags": [
           "Media"
         ],
@@ -7255,7 +5836,124 @@
                       "description": "Status description"
                     },
                     "data": {
-                      "type": "object"
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized / Not logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 40101
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "draft_file_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "language": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "label": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "is_default": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "draft_file_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/{id}/captions/{captionId}/update": {
+      "post": {
+        "summary": "Change a caption's language, label or default",
+        "tags": [
+          "Media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "Status code, 0 indicates success"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "Status description"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
                     }
                   },
                   "required": [
@@ -7305,7 +6003,7 @@
             }
           },
           {
-            "name": "trackId",
+            "name": "captionId",
             "in": "path",
             "required": true,
             "schema": {
@@ -7320,143 +6018,220 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "priority": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "quality": {
-                    "enum": [
-                      "LOW",
-                      "MEDIUM",
-                      "HIGH"
-                    ],
-                    "type": "string"
-                  },
-                  "display_name": {
-                    "type": "string",
-                    "nullable": true
-                  },
-                  "variant_key": {
-                    "type": "string"
-                  },
-                  "is_default": {
-                    "type": "boolean"
-                  },
                   "language": {
                     "type": "string",
                     "nullable": true
                   },
-                  "codec": {
+                  "label": {
                     "type": "string",
                     "nullable": true
                   },
-                  "is_stale": {
+                  "is_default": {
                     "type": "boolean"
-                  },
-                  "metadata": {},
-                  "source_track_id": {
-                    "type": "string",
-                    "nullable": true
-                  },
-                  "container": {
-                    "type": "string",
-                    "nullable": true
-                  },
-                  "is_fragmented": {
-                    "type": "boolean",
-                    "nullable": true
-                  },
-                  "stream_layout": {
-                    "enum": [
-                      "SINGLE",
-                      "MUXED",
-                      "VIDEO_ONLY",
-                      "AUDIO_ONLY",
-                      "TEXT_ONLY"
-                    ],
-                    "type": "string",
-                    "nullable": true
-                  },
-                  "has_video": {
-                    "type": "boolean",
-                    "nullable": true
-                  },
-                  "has_audio": {
-                    "type": "boolean",
-                    "nullable": true
-                  },
-                  "streams": {
-                    "type": "array",
-                    "items": {
+                  }
+                },
+                "required": []
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/media/{id}/captions/{captionId}/delete": {
+      "post": {
+        "summary": "Delete a caption",
+        "tags": [
+          "Media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "Status code, 0 indicates success"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "Status description"
+                    },
+                    "data": {
                       "type": "object",
                       "properties": {
-                        "index": {
-                          "type": "integer",
-                          "minimum": 0
-                        },
                         "id": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "type": {
-                          "enum": [
-                            "VIDEO",
-                            "AUDIO",
-                            "SUBTITLE"
-                          ],
                           "type": "string"
-                        },
-                        "codec": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "language": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "label": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "role": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "width": {
-                          "type": "integer",
-                          "minimum": 1,
-                          "nullable": true
-                        },
-                        "height": {
-                          "type": "integer",
-                          "minimum": 1,
-                          "nullable": true
-                        },
-                        "bandwidth": {
-                          "type": "number",
-                          "minimum": 0,
-                          "nullable": true
-                        },
-                        "channels": {
-                          "type": "integer",
-                          "minimum": 1,
-                          "nullable": true
-                        },
-                        "sample_rate": {
-                          "type": "integer",
-                          "minimum": 1,
-                          "nullable": true
-                        },
-                        "is_default": {
-                          "type": "boolean"
                         }
-                      },
-                      "required": [
-                        "index",
-                        "type"
-                      ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized / Not logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 40101
                     },
+                    "message": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "captionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/media/{id}/audio-tracks/{streamId}/update": {
+      "post": {
+        "summary": "Change an audio track's language or label, or make it the default",
+        "tags": [
+          "Media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "Status code, 0 indicates success"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "Status description"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized / Not logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 40101
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "streamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "language": {
+                    "type": "string",
                     "nullable": true
+                  },
+                  "label": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "is_default": {
+                    "type": "boolean"
                   }
                 },
                 "required": []
@@ -7627,7 +6402,7 @@
                                 ],
                                 "type": "string"
                               },
-                              "tracks": {
+                              "originals": {
                                 "type": "array",
                                 "items": {
                                   "type": "object",
@@ -7636,172 +6411,80 @@
                                       "type": "string",
                                       "minLength": 1
                                     },
-                                    "type": {
-                                      "enum": [
-                                        "IMAGE",
-                                        "VIDEO",
-                                        "AUDIO",
-                                        "SUBTITLE",
-                                        "PDF"
-                                      ],
-                                      "type": "string"
-                                    },
-                                    "purpose": {
-                                      "enum": [
-                                        "CONTENT",
-                                        "COVER",
-                                        "THUMBNAIL",
-                                        "PREVIEW"
-                                      ],
+                                    "source_key": {
                                       "type": "string",
-                                      "default": "CONTENT"
+                                      "minLength": 1
                                     },
-                                    "is_original": {
-                                      "type": "boolean",
-                                      "default": true
-                                    },
-                                    "quality": {
-                                      "enum": [
-                                        "LOW",
-                                        "MEDIUM",
-                                        "HIGH"
-                                      ],
-                                      "type": "string",
-                                      "default": "HIGH"
-                                    },
-                                    "metadata": {
-                                      "type": "object",
-                                      "properties": {
-                                        "format": {
-                                          "type": "string",
-                                          "nullable": true
-                                        },
-                                        "segment_base": {
-                                          "type": "object",
-                                          "properties": {
-                                            "initialization": {
-                                              "type": "string",
-                                              "nullable": true
-                                            },
-                                            "index_range": {
-                                              "type": "string",
-                                              "nullable": true
-                                            }
-                                          },
-                                          "required": [],
-                                          "nullable": true
-                                        }
-                                      },
-                                      "required": [],
-                                      "nullable": true
-                                    },
-                                    "container": {
+                                    "language": {
                                       "type": "string",
                                       "nullable": true
                                     },
-                                    "is_fragmented": {
-                                      "type": "boolean",
-                                      "nullable": true
-                                    },
-                                    "stream_layout": {
-                                      "enum": [
-                                        "SINGLE",
-                                        "MUXED",
-                                        "VIDEO_ONLY",
-                                        "AUDIO_ONLY",
-                                        "TEXT_ONLY"
-                                      ],
+                                    "label": {
                                       "type": "string",
                                       "nullable": true
                                     },
-                                    "has_video": {
+                                    "is_default": {
                                       "type": "boolean",
-                                      "nullable": true
-                                    },
-                                    "has_audio": {
-                                      "type": "boolean",
-                                      "nullable": true
-                                    },
-                                    "streams": {
-                                      "type": "array",
-                                      "items": {
-                                        "type": "object",
-                                        "properties": {
-                                          "index": {
-                                            "type": "integer",
-                                            "minimum": 0
-                                          },
-                                          "id": {
-                                            "type": "string",
-                                            "nullable": true
-                                          },
-                                          "type": {
-                                            "enum": [
-                                              "VIDEO",
-                                              "AUDIO",
-                                              "SUBTITLE"
-                                            ],
-                                            "type": "string"
-                                          },
-                                          "codec": {
-                                            "type": "string",
-                                            "nullable": true
-                                          },
-                                          "language": {
-                                            "type": "string",
-                                            "nullable": true
-                                          },
-                                          "label": {
-                                            "type": "string",
-                                            "nullable": true
-                                          },
-                                          "role": {
-                                            "type": "string",
-                                            "nullable": true
-                                          },
-                                          "width": {
-                                            "type": "integer",
-                                            "minimum": 1,
-                                            "nullable": true
-                                          },
-                                          "height": {
-                                            "type": "integer",
-                                            "minimum": 1,
-                                            "nullable": true
-                                          },
-                                          "bandwidth": {
-                                            "type": "number",
-                                            "minimum": 0,
-                                            "nullable": true
-                                          },
-                                          "channels": {
-                                            "type": "integer",
-                                            "minimum": 1,
-                                            "nullable": true
-                                          },
-                                          "sample_rate": {
-                                            "type": "integer",
-                                            "minimum": 1,
-                                            "nullable": true
-                                          },
-                                          "is_default": {
-                                            "type": "boolean"
-                                          }
-                                        },
-                                        "required": [
-                                          "index",
-                                          "type"
-                                        ]
-                                      },
-                                      "nullable": true
+                                      "default": false
                                     }
                                   },
                                   "required": [
                                     "url",
-                                    "type"
+                                    "source_key"
                                   ]
                                 },
                                 "minItems": 1
+                              },
+                              "cover": {
+                                "type": "object",
+                                "properties": {
+                                  "url": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "source_key": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "url",
+                                  "source_key"
+                                ],
+                                "nullable": true
+                              },
+                              "captions": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "url": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "source_key": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "language": {
+                                      "type": "string",
+                                      "nullable": true
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "nullable": true
+                                    },
+                                    "is_default": {
+                                      "type": "boolean",
+                                      "default": false
+                                    }
+                                  },
+                                  "required": [
+                                    "url",
+                                    "source_key"
+                                  ]
+                                },
+                                "default": []
                               },
                               "tags": {
                                 "type": "array",
@@ -7809,11 +6492,6 @@
                                   "type": "string"
                                 },
                                 "default": []
-                              },
-                              "duration": {
-                                "type": "number",
-                                "minimum": 0,
-                                "nullable": true
                               },
                               "published_time": {
                                 "type": "string"
@@ -7825,7 +6503,7 @@
                             "required": [
                               "external_id",
                               "type",
-                              "tracks"
+                              "originals"
                             ]
                           }
                         },
@@ -8350,73 +7028,6 @@
     "/api/task/sweep-orphan-tags": {
       "post": {
         "summary": "Clean up orphan tags under the media library",
-        "tags": [
-          "Task"
-        ],
-        "responses": {
-          "200": {
-            "description": "Success response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 0,
-                      "description": "Status code, 0 indicates success"
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "success",
-                      "description": "Status description"
-                    },
-                    "data": {
-                      "type": "object"
-                    }
-                  },
-                  "required": [
-                    "code",
-                    "message"
-                  ]
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized / Not logged in",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "integer",
-                      "example": 40101
-                    },
-                    "message": {
-                      "type": "string",
-                      "example": "Unauthorized"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "CookieAuth": []
-          }
-        ]
-      }
-    },
-    "/api/task/sweep-media-track-integrity": {
-      "post": {
-        "summary": "Reconcile logical Media, Track, and File references",
         "tags": [
           "Task"
         ],

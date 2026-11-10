@@ -1,5 +1,5 @@
-import { and, eq, inArray, lt } from "drizzle-orm";
-import { Media, Post, SyncStatus, Track } from "@/db/schema";
+import { and, eq, lt } from "drizzle-orm";
+import { Media, Post, SyncStatus } from "@/db/schema";
 import { db } from "@/global/db";
 
 /** Sweeps every library unless `libraryId` narrows it to one. */
@@ -29,19 +29,5 @@ export async function sweepStuckEntities(thresholdMinutes = 30, libraryId?: stri
         )
         .returning({ id: Media.id });
 
-    const sweptTracks = await db
-        .update(Track)
-        .set({ sync_status: SyncStatus.FAILED, last_error: "Sync timed out (stuck IN_PROGRESS)" })
-        .where(
-            and(
-                eq(Track.sync_status, SyncStatus.IN_PROGRESS),
-                lt(Track.update_time, cutoff),
-                libraryId
-                    ? inArray(Track.media_id, db.select({ id: Media.id }).from(Media).where(eq(Media.library_id, libraryId)))
-                    : undefined,
-            ),
-        )
-        .returning({ id: Track.id });
-
-    return { sweptCount: sweptPosts.length + sweptMedia.length + sweptTracks.length };
+    return { sweptCount: sweptPosts.length + sweptMedia.length };
 }

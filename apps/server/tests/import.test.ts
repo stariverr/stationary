@@ -1,125 +1,118 @@
 import { describe, expect, test } from "bun:test";
-import { DraftFileStatus, MediaType, TrackPurpose, TrackType, DeleteStatus } from "../src/db/schema";
-import {
-    assignTrackPriorities,
-    validateDraftMediaGroups,
-    validateDraftTrackFileTypes,
-    validateDraftCover,
-    validateMediaComposition,
-    type MediaCompositionTrack,
-} from "../src/lib/validation/media-composition";
+import { DraftFileStatus, MediaType, DeleteStatus } from "../src/db/schema";
+import { draftStructureError, validateDraftMediaGroups, type MediaDraft } from "../src/lib/validation/media-composition";
+import { compositionError, originalCountError } from "../src/features/media/originals";
 import { consumeDraftFile, deleteDraftFile, DraftFileUnavailableError } from "../src/features/import/draft-file";
-import { getAllowedTrackTypesForFile, getMimeTypeByExt } from "../src/lib/utils/file";
+import { getFileCategories, getMimeTypeByExt, type FileCategory } from "../src/lib/utils/file";
 
-const primaryTrack = (type: TrackType): MediaCompositionTrack => ({
-    type,
-    purpose: TrackPurpose.CONTENT,
-    is_default: true,
-});
-
-describe("manual media composition", () => {
+describe("media composition (section 4)", () => {
     test.each([
-        [MediaType.IMAGE, TrackType.IMAGE],
-        [MediaType.VIDEO, TrackType.VIDEO],
-        [MediaType.AUDIO, TrackType.AUDIO],
-        [MediaType.PDF, TrackType.PDF],
-    ])("accepts a %s media with its default content track", (mediaType, trackType) => {
-        expect(validateMediaComposition(mediaType, [primaryTrack(trackType)])).toBeNull();
+        [MediaType.IMAGE, ["IMAGE"]],
+        [MediaType.PDF, ["PDF"]],
+        [MediaType.AUDIO, ["AUDIO"]],
+        [MediaType.VIDEO, ["VIDEO"]],
+        [MediaType.VIDEO, ["VIDEO", "AUDIO", "AUDIO"]],
+        [MediaType.LIVE_PHOTO, ["IMAGE", "VIDEO"]],
+    ] as const)("accepts %s made of %p", (type, kinds) => {
+        expect(compositionError(type, [...kinds])).toBeNull();
     });
 
-    test("rejects a subtitle as standalone media", () => {
-        const error = validateMediaComposition(MediaType.IMAGE, [primaryTrack(TrackType.SUBTITLE)]);
-        expect(error).toContain("SUBTITLE CONTENT tracks are not valid for IMAGE media");
+    test.each([
+        [MediaType.VIDEO, ["AUDIO"]],
+        [MediaType.VIDEO, ["VIDEO", "VIDEO"]],
+        [MediaType.AUDIO, ["VIDEO"]],
+        [MediaType.AUDIO, ["AUDIO", "AUDIO"]],
+        [MediaType.LIVE_PHOTO, ["IMAGE"]],
+        [MediaType.IMAGE, ["IMAGE", "IMAGE"]],
+        [MediaType.PDF, ["IMAGE"]],
+    ] as const)("rejects %s made of %p", (type, kinds) => {
+        expect(compositionError(type, [...kinds])).not.toBeNull();
     });
 
-    test("requires both image and video defaults for Live Photos", () => {
-        expect(validateMediaComposition(MediaType.LIVE_PHOTO, [primaryTrack(TrackType.IMAGE)])).toContain("default VIDEO CONTENT track");
-        expect(validateMediaComposition(MediaType.LIVE_PHOTO, [primaryTrack(TrackType.IMAGE), primaryTrack(TrackType.VIDEO)])).toBeNull();
-    });
-
-    test("accepts video, audio, and subtitle content in one video media", () => {
-        expect(
-            validateMediaComposition(MediaType.VIDEO, [
-                primaryTrack(TrackType.VIDEO),
-                primaryTrack(TrackType.AUDIO),
-                primaryTrack(TrackType.SUBTITLE),
-            ]),
-        ).toBeNull();
-    });
-
-    test("rejects multiple defaults in the same track group", () => {
-        expect(validateMediaComposition(MediaType.VIDEO, [primaryTrack(TrackType.VIDEO), primaryTrack(TrackType.VIDEO)])).toContain(
-            "Only one default VIDEO CONTENT track",
-        );
-    });
-
-    test("a cover is never a track", () => {
-        expect(
-            validateMediaComposition(MediaType.VIDEO, [
-                primaryTrack(TrackType.VIDEO),
-                { type: TrackType.IMAGE, purpose: TrackPurpose.COVER, is_default: false },
-            ]),
-        ).toContain("A cover is not a track");
-    });
-
-    test("a draft carries at most one image cover, on media that can have one", () => {
-        const cover = (type: TrackType) => ({ type, purpose: TrackPurpose.COVER, is_default: false });
-        expect(validateDraftCover(MediaType.VIDEO, [primaryTrack(TrackType.VIDEO), cover(TrackType.IMAGE)])).toBeNull();
-        expect(validateDraftCover(MediaType.AUDIO, [cover(TrackType.IMAGE)])).toBeNull();
-        expect(validateDraftCover(MediaType.IMAGE, [cover(TrackType.IMAGE)])).toContain("IMAGE media cannot have a cover");
-        expect(validateDraftCover(MediaType.VIDEO, [cover(TrackType.IMAGE), cover(TrackType.IMAGE)])).toContain("at most one cover");
-        expect(validateDraftCover(MediaType.VIDEO, [cover(TrackType.VIDEO)])).toContain("must be an image");
-    });
-
-    test("rejects PDF tracks outside the content purpose", () => {
-        expect(
-            validateMediaComposition(MediaType.PDF, [{ type: TrackType.PDF, purpose: TrackPurpose.PREVIEW, is_default: true }]),
-        ).toContain("PDF tracks must use the CONTENT purpose");
-    });
-
-    test("rejects reuse of one draft file across media groups", () => {
-        const groups = [MediaType.IMAGE, MediaType.IMAGE].map((type, index) => ({
-            temp_id: `media-${index}`,
-            type,
-            tracks: [
-                {
-                    draft_file_id: "01900000-0000-7000-8000-000000000001",
-                    ...primaryTrack(TrackType.IMAGE),
-                },
-            ],
-        }));
-
-        expect(validateDraftMediaGroups(groups)).toContain("Duplicate file reference detected for draft file");
-    });
-
-    test("assigns independent priorities per track group and continues existing groups", () => {
-        const tracks = assignTrackPriorities(
-            [
-                { type: TrackType.VIDEO, purpose: TrackPurpose.CONTENT },
-                { type: TrackType.AUDIO, purpose: TrackPurpose.CONTENT },
-                { type: TrackType.VIDEO, purpose: TrackPurpose.CONTENT },
-            ],
-            [{ type: TrackType.VIDEO, purpose: TrackPurpose.CONTENT, priority: 2 }],
-        );
-
-        expect(tracks.map((track) => track.priority)).toEqual([3, 0, 4]);
+    test("counts originals before they are probed", () => {
+        expect(originalCountError(MediaType.VIDEO, 3)).toBeNull();
+        expect(originalCountError(MediaType.LIVE_PHOTO, 1)).not.toBeNull();
+        expect(originalCountError(MediaType.IMAGE, 2)).not.toBeNull();
     });
 });
 
-describe("draft file type constraints", () => {
+describe("media drafts", () => {
+    const ids = {
+        video: "01900000-0000-7000-8000-000000000001",
+        audio: "01900000-0000-7000-8000-000000000002",
+        cover: "01900000-0000-7000-8000-000000000003",
+        caption: "01900000-0000-7000-8000-000000000004",
+        caption2: "01900000-0000-7000-8000-000000000005",
+    };
+    const names: Record<string, string> = {
+        [ids.video]: "clip.mp4",
+        [ids.audio]: "dub.m4a",
+        [ids.cover]: "cover.jpg",
+        [ids.caption]: "en.srt",
+        [ids.caption2]: "ja.ass",
+    };
+    const fileName = (id: string) => names[id];
+    const draft = (values: Partial<MediaDraft>): MediaDraft => ({
+        title: "",
+        description: "",
+        type: MediaType.VIDEO,
+        tag_ids: [],
+        originals: [ids.video],
+        cover: null,
+        captions: [],
+        ...values,
+    });
+
+    test("accepts a video with separate audio, a cover and captions", () => {
+        const value = draft({
+            originals: [ids.video, ids.audio],
+            cover: ids.cover,
+            captions: [
+                { draft_file_id: ids.caption, is_default: true },
+                { draft_file_id: ids.caption2, is_default: false },
+            ],
+        });
+        expect(draftStructureError(value, fileName)).toBeNull();
+    });
+
+    test("rejects files that cannot be what the draft uses them as", () => {
+        expect(draftStructureError(draft({ originals: [ids.caption] }), fileName)).toContain("cannot be an original");
+        expect(draftStructureError(draft({ cover: ids.video }), fileName)).toBe("A cover must be an image");
+        expect(draftStructureError(draft({ type: MediaType.IMAGE, originals: [ids.cover], cover: ids.cover }), fileName)).toContain(
+            "cannot have a cover",
+        );
+        expect(draftStructureError(draft({ captions: [{ draft_file_id: ids.cover, is_default: false }] }), fileName)).toContain(
+            "is not a caption file",
+        );
+    });
+
+    test("allows one default caption", () => {
+        const captions = [
+            { draft_file_id: ids.caption, is_default: true },
+            { draft_file_id: ids.caption2, is_default: true },
+        ];
+        expect(draftStructureError(draft({ captions }), fileName)).toBe("Only one caption can be the default");
+    });
+
+    test("rejects reuse of one draft file across media", () => {
+        expect(validateDraftMediaGroups([draft({}), draft({})], fileName)).toContain("is used more than once");
+    });
+});
+
+describe("draft file types", () => {
     test.each([
-        ["track.mp3", "application/octet-stream", [TrackType.AUDIO]],
-        ["track.FLAC", "application/octet-stream", [TrackType.AUDIO]],
-        ["track.ogg", "video/ogg", [TrackType.AUDIO]],
-        ["clip.mov", "application/octet-stream", [TrackType.VIDEO]],
-        ["clip.mp4", "video/mp4", [TrackType.VIDEO, TrackType.AUDIO]],
-        ["segment.m4s", "video/iso.segment", [TrackType.VIDEO, TrackType.AUDIO]],
-        ["cover.avif", "application/octet-stream", [TrackType.IMAGE]],
-        ["cover.jxl", "application/octet-stream", [TrackType.IMAGE]],
-        ["subtitle.srt", "text/plain", [TrackType.SUBTITLE]],
-        ["document.pdf", "application/octet-stream", [TrackType.PDF]],
-    ])("classifies %s from its extension", (name, mimeType, expected) => {
-        expect(getAllowedTrackTypesForFile(name, mimeType)).toEqual(expected);
+        ["track.mp3", "application/octet-stream", ["AUDIO"]],
+        ["track.FLAC", "application/octet-stream", ["AUDIO"]],
+        ["track.ogg", "video/ogg", ["AUDIO"]],
+        ["clip.mov", "application/octet-stream", ["VIDEO"]],
+        ["clip.mp4", "video/mp4", ["VIDEO", "AUDIO"]],
+        ["segment.m4s", "video/iso.segment", ["VIDEO", "AUDIO"]],
+        ["cover.avif", "application/octet-stream", ["IMAGE"]],
+        ["cover.jxl", "application/octet-stream", ["IMAGE"]],
+        ["subtitle.srt", "text/plain", ["SUBTITLE"]],
+        ["document.pdf", "application/octet-stream", ["PDF"]],
+    ] as [string, string, FileCategory[]][])("classifies %s from its extension", (name, mimeType, expected) => {
+        expect(getFileCategories(name, mimeType)).toEqual(expected);
     });
 
     test.each([
@@ -130,46 +123,6 @@ describe("draft file type constraints", () => {
         ["pdf", "application/pdf"],
     ])("maps .%s to %s", (extension, expectedMimeType) => {
         expect(getMimeTypeByExt(extension)).toBe(expectedMimeType);
-    });
-
-    test("rejects a declared track type that does not match the draft file", () => {
-        const draftFileId = "01900000-0000-7000-8000-000000000001";
-        const groups = [
-            {
-                type: MediaType.IMAGE,
-                tracks: [
-                    {
-                        draft_file_id: draftFileId,
-                        type: TrackType.IMAGE,
-                        purpose: TrackPurpose.CONTENT,
-                        is_default: true,
-                    },
-                ],
-            },
-        ];
-        const files = new Map([[draftFileId, { name: "song.mp3", mime_type: "audio/mpeg" }]]);
-
-        expect(validateDraftTrackFileTypes(groups, files)).toContain("Track type IMAGE is not allowed for file song.mp3");
-    });
-
-    test.each([TrackType.VIDEO, TrackType.AUDIO])("accepts an MP4 declared as %s", (type) => {
-        const draftFileId = "01900000-0000-7000-8000-000000000001";
-        const groups = [
-            {
-                type: type === TrackType.VIDEO ? MediaType.VIDEO : MediaType.AUDIO,
-                tracks: [
-                    {
-                        draft_file_id: draftFileId,
-                        type,
-                        purpose: TrackPurpose.CONTENT,
-                        is_default: true,
-                    },
-                ],
-            },
-        ];
-        const files = new Map([[draftFileId, { name: "stream.mp4", mime_type: "video/mp4" }]]);
-
-        expect(validateDraftTrackFileTypes(groups, files)).toBeNull();
     });
 });
 

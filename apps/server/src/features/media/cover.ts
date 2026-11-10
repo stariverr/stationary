@@ -65,7 +65,7 @@ export const CoverService = {
     async setFile(client: DbClient, media: { id: string; type: MediaType }, fileId: string): Promise<void> {
         if (!COVER_MEDIA_TYPES.has(media.type)) throw new CoverNotAllowedError(media.type);
         const existing = await lockCover(client, media.id);
-        const values = { file_id: fileId, source_url: null, status: SyncStatus.COMPLETED, last_error: null, update_time: Temporal.Now.instant() };
+        const values = { file_id: fileId, source_url: null, source_key: null, status: SyncStatus.COMPLETED, last_error: null, update_time: Temporal.Now.instant() };
         await client.insert(MediaCover).values({ media_id: media.id, ...values }).onConflictDoUpdate({ target: MediaCover.media_id, set: values });
         if (existing?.file_id !== fileId) await softDeleteFile(client, existing?.file_id ?? null);
         await markChanged(client, Aspect.MEDIA_COVER, [media.id]);
@@ -89,20 +89,37 @@ export const CoverService = {
     },
 
     /**
-     * Applies the cover a platform import offers. A new URL leaves the cover pending for the download pipeline (the old
-     * file is released now); the same URL changes nothing. Without one, a previously imported cover goes, while a cover
-     * the user uploaded stays. Media types that cannot have a cover ignore it. Returns whether a download is needed.
+     * Applies the cover a platform import offers, matched by its `source_key`. A new key leaves the cover pending for the
+     * download pipeline (the old file is released now); the same key only refreshes the URL, which platforms re-sign.
+     * Without one, a previously imported cover goes, while a cover the user uploaded stays. Media types that cannot
+     * have a cover ignore it. Returns whether a download is needed.
      */
-    async syncImported(client: DbClient, media: { id: string; type: MediaType }, url: string | null): Promise<boolean> {
+    async syncImported(
+        client: DbClient,
+        media: { id: string; type: MediaType },
+        cover: { url: string; source_key: string } | null,
+    ): Promise<boolean> {
         if (!COVER_MEDIA_TYPES.has(media.type)) return false;
         const existing = await lockCover(client, media.id);
-        if (!url) {
-            if (existing?.source_url) await CoverService.remove(client, media.id);
+        if (!cover) {
+            if (existing?.source_key) await CoverService.remove(client, media.id);
             return false;
         }
-        if (existing?.source_url === url) return existing.status !== SyncStatus.COMPLETED;
+        if (existing?.source_key === cover.source_key) {
+            if (existing.source_url !== cover.url) {
+                await client.update(MediaCover).set({ source_url: cover.url, update_time: Temporal.Now.instant() }).where(eq(MediaCover.id, existing.id));
+            }
+            return existing.status !== SyncStatus.COMPLETED;
+        }
 
-        const values = { file_id: null, source_url: url, status: SyncStatus.PENDING, last_error: null, update_time: Temporal.Now.instant() };
+        const values = {
+            file_id: null,
+            source_url: cover.url,
+            source_key: cover.source_key,
+            status: SyncStatus.PENDING,
+            last_error: null,
+            update_time: Temporal.Now.instant(),
+        };
         await client.insert(MediaCover).values({ media_id: media.id, ...values }).onConflictDoUpdate({ target: MediaCover.media_id, set: values });
         if (existing?.file_id) {
             await softDeleteFile(client, existing.file_id);

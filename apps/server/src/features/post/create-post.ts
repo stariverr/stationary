@@ -14,11 +14,7 @@ import { findOwnedLibrary, type LibraryAuth } from "@/features/library/access";
 import { db } from "@/global/db";
 import { replacePostTagsTx } from "./post-service";
 import { DraftFileUnavailableError } from "@/features/import/draft-file";
-import { createMediaFromDraft } from "@/features/media/create-from-draft";
-import {
-    validateDraftMediaGroups,
-    validateDraftTrackFileTypes,
-} from "@/lib/validation/media-composition";
+import { createMediaFromDraft, DraftContentError, prepareDrafts, type PreparedDraft } from "@/features/media/create-from-draft";
 import type { CreatePostInput } from "./schema";
 
 export type CreatePostErrorKind = "NOT_FOUND" | "INVALID_PARAMETER" | "CONFLICT";
@@ -42,13 +38,6 @@ export async function createPost(input: CreatePostInput, auth: LibraryAuth): Pro
     const mediaIds = input.media_items?.filter((item) => item.kind === "existing").map((item) => item.media_id) ?? [];
     const mediaDrafts = input.media_items?.filter((item) => item.kind === "draft").map((item) => item.draft) ?? [];
 
-    if (mediaDrafts.length > 0) {
-        const compositionError = validateDraftMediaGroups(mediaDrafts);
-        if (compositionError) {
-            throw new CreatePostError("INVALID_PARAMETER", compositionError);
-        }
-    }
-
     if (mediaIds.length > 0) {
         const mediaList = await db
             .select()
@@ -64,40 +53,15 @@ export async function createPost(input: CreatePostInput, auth: LibraryAuth): Pro
         }
     }
 
-    const draftIds = mediaDrafts.flatMap((group) => group.tracks.map((track) => track.draft_file_id));
-    if (draftIds.length > 0) {
-        const draftRows = await db
-            .select({ draft: DraftFile, file: DbFile })
-            .from(DraftFile)
-            .innerJoin(DbFile, eq(DraftFile.file_id, DbFile.id))
-            .where(
-                and(
-                    eq(DraftFile.library_id, input.library_id),
-                    eq(DraftFile.status, DraftFileStatus.DRAFT),
-                    inArray(DraftFile.id, draftIds),
-                ),
-            );
-
-        const activeDraftMap = new Map(
-            draftRows.map(({ draft, file }) => [
-                draft.id,
-                {
-                    name: draft.original_name,
-                    mime_type: file.mime_type,
-                },
-            ]),
-        );
-
-        if (draftRows.length !== draftIds.length) {
-            const missingId = draftIds.find((id) => !activeDraftMap.has(id));
-            throw new CreatePostError("INVALID_PARAMETER", `Draft file ${missingId} is invalid or already consumed`);
-        }
-
-        const fileTypeError = validateDraftTrackFileTypes(mediaDrafts, activeDraftMap);
-        if (fileTypeError) {
-            throw new CreatePostError("INVALID_PARAMETER", fileTypeError);
-        }
+    // Drafts are probed before the transaction; each one is matched back to its item by position.
+    let prepared: PreparedDraft[] = [];
+    try {
+        prepared = await prepareDrafts(input.library_id, mediaDrafts);
+    } catch (error) {
+        if (error instanceof DraftContentError) throw new CreatePostError("INVALID_PARAMETER", error.message);
+        throw error;
     }
+    const preparedQueue = [...prepared];
 
     const postId = uuidv7();
 
@@ -155,7 +119,7 @@ export async function createPost(input: CreatePostInput, auth: LibraryAuth): Pro
                 await createMediaFromDraft({
                     tx,
                     libraryId: input.library_id,
-                    draft: item.draft,
+                    prepared: preparedQueue.shift()!,
                     postId,
                     sortOrder: sortOrder++,
                     now,

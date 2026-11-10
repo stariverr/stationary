@@ -1,5 +1,5 @@
-import { and, eq, inArray, ne, or } from "drizzle-orm";
-import { DeleteStatus, Media, Post, SyncStatus, Track } from "@/db/schema";
+import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
+import { DeleteStatus, Media, MediaCaption, MediaCover, MediaOriginal, Post, SyncStatus } from "@/db/schema";
 import { canReachItems, type LibraryAuth } from "@/features/library/access";
 import { db } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
@@ -12,7 +12,7 @@ export async function retrySync(input: RetrySyncInput, auth: LibraryAuth) {
         throw new RetrySyncError("One or more items were not found");
     }
 
-    // Retrying a post retries all of its media; their downloads are queued again, failed tracks included.
+    // Retrying a post retries all of its media; their downloads are queued again, failed sources included.
     return db.transaction(async (tx) => {
         let retriedCount = 0;
         if (input.post_ids?.length) {
@@ -39,17 +39,20 @@ export async function retrySync(input: RetrySyncInput, auth: LibraryAuth) {
 
         const mediaIds = media.map((row) => row.id);
         if (mediaIds.length === 0) return { retriedCount };
+        // Sources that were rejected wait again, so the next download tries them.
+        const retry = { status: SyncStatus.PENDING, last_error: null };
         await tx
-            .update(Track)
-            .set({ sync_status: SyncStatus.PENDING, last_error: null })
-            .where(
-                and(
-                    inArray(Track.media_id, mediaIds),
-                    eq(Track.sync_status, SyncStatus.FAILED),
-                    ne(Track.source_url, ""),
-                    eq(Track.delete_status, DeleteStatus.ACTIVE),
-                ),
-            );
+            .update(MediaOriginal)
+            .set(retry)
+            .where(and(inArray(MediaOriginal.media_id, mediaIds), eq(MediaOriginal.status, SyncStatus.FAILED), isNotNull(MediaOriginal.source_url)));
+        await tx
+            .update(MediaCaption)
+            .set(retry)
+            .where(and(inArray(MediaCaption.media_id, mediaIds), eq(MediaCaption.status, SyncStatus.FAILED), isNotNull(MediaCaption.source_url)));
+        await tx
+            .update(MediaCover)
+            .set(retry)
+            .where(and(inArray(MediaCover.media_id, mediaIds), eq(MediaCover.status, SyncStatus.FAILED), isNotNull(MediaCover.source_url)));
         await markChanged(tx, Aspect.MEDIA_SOURCE, mediaIds);
         return { retriedCount };
     });

@@ -30,10 +30,19 @@ export interface DashAudioRepresentation {
     segment_base: DashSegmentBase;
 }
 
+export interface DashTextRepresentation {
+    id: string;
+    url: string;
+    language: string | null;
+    label: string;
+    is_default: boolean;
+}
+
 export interface DashManifestInput {
     duration: number;
     video: DashVideoRepresentation[];
     audio: DashAudioRepresentation[];
+    text?: DashTextRepresentation[];
 }
 
 export const escapeXml = (value: string | number) =>
@@ -129,6 +138,18 @@ ${representationXml}
     </AdaptationSet>`;
 };
 
+/** A WebVTT caption as a whole-file text AdaptationSet. */
+const textAdaptationSetXml = (text: DashTextRepresentation, index: number) => {
+    const language = text.language ? ` lang="${escapeXml(text.language)}"` : "";
+    return `    <AdaptationSet id="text-${index + 1}" contentType="text" mimeType="text/vtt"${language}>
+      <Label>${escapeXml(text.label)}</Label>
+      <Role schemeIdUri="urn:mpeg:dash:role:2011" value="${text.is_default ? "main" : "subtitle"}" />
+      <Representation id="${escapeXml(text.id)}" bandwidth="256">
+        <BaseURL>${escapeXml(text.url)}</BaseURL>
+      </Representation>
+    </AdaptationSet>`;
+};
+
 export function buildDashManifest(input: DashManifestInput) {
     const duration = Number.isFinite(input.duration) && input.duration > 0 ? input.duration : 0;
     const offset = periodOffset([...input.video, ...input.audio].map((representation) => representation.segment_base));
@@ -136,7 +157,8 @@ export function buildDashManifest(input: DashManifestInput) {
     const audio = groupAudioRepresentations(input.audio)
         .map((group, index) => audioAdaptationSetXml(group, index, offset))
         .join("\n");
-    const audioSection = audio ? `\n${audio}` : "";
+    const text = (input.text ?? []).map(textAdaptationSetXml).join("\n");
+    const audioSection = (audio ? `\n${audio}` : "") + (text ? `\n${text}` : "");
 
     return `<?xml version="1.0" encoding="utf-8"?>
 <MPD xmlns="urn:mpeg:dash:schema:mpd:2011" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011" type="static" mediaPresentationDuration="PT${escapeXml(duration)}S" minBufferTime="PT1.5S">

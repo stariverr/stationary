@@ -10,7 +10,6 @@ import { File as DbFile, DraftFile, DraftFileStatus } from "@/db/schema";
 import { eq, and, lt } from "drizzle-orm";
 
 import { sweepOrphanTags } from "@/scripts/sweep_orphans";
-import { runMediaTrackIntegrityScan } from "@/audit/media-track";
 import { s3 } from "@/global/s3";
 
 import {
@@ -204,19 +203,6 @@ taskApp.post("/sweep-orphan-tags", requireCronSecret, async (c) => {
     } catch (e: any) {
         const errorMsg = e instanceof Error ? e.message : String(e);
         console.error(`[task] Failed to sweep orphan tags: ${errorMsg}`);
-        return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
-    }
-});
-
-// Endpoint to reconcile Media / Track / File logical references
-
-taskApp.post("/sweep-media-track-integrity", requireCronSecret, async (c) => {
-    try {
-        const report = await runMediaTrackIntegrityScan();
-        return c.json(success(Code.SUCCESS, report));
-    } catch (e: any) {
-        const errorMsg = e instanceof Error ? e.message : String(e);
-        console.error(`[task] Failed to reconcile media/track integrity: ${errorMsg}`);
         return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
     }
 });

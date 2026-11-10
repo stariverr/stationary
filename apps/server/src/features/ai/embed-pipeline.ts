@@ -8,7 +8,6 @@ import {
     LibraryEmbeddingSpaceStatus,
     Media,
     ModalityType,
-    Track,
 } from "@/db/schema";
 import { db, type DbClient, type Transaction } from "@/global/db";
 import { LeaseLostError } from "@/infra/queue/store";

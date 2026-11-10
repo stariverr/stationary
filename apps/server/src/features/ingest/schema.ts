@@ -1,7 +1,6 @@
 import * as v from "valibot";
 
-import { TrackType, TrackPurpose, TrackStreamLayout, PostSource, MediaType } from "@/db/schema";
-import { Quality } from "@/lib/types";
+import { PostSource, MediaType } from "@/db/schema";
 
 export const AuthorSchema = v.object({
     name: v.optional(v.string(), ""),
@@ -31,67 +30,38 @@ export const TimestampSchema = v.pipe(
     }),
 );
 
-export const SegmentBaseSchema = v.object({
-    initialization: v.pipe(
-        v.optional(v.nullable(v.string())),
-        v.transform((v) => v ?? undefined),
-    ),
-    index_range: v.pipe(
-        v.optional(v.nullable(v.string())),
-        v.transform((v) => v ?? undefined),
-    ),
+const SourceUrlSchema = v.pipe(v.string(), v.trim(), v.minLength(1, "url is required"));
+/** Names a source within its media, stable across syncs (e.g. `video`, `audio:ja`, `caption:zh-CN`). */
+const SourceKeySchema = v.pipe(v.string(), v.trim(), v.minLength(1, "source_key is required"), v.maxLength(200));
+const DeclaredTextSchema = v.pipe(
+    v.optional(v.nullable(v.pipe(v.string(), v.trim()))),
+    v.transform((value) => value || null),
+);
+
+/** A file of the media as published: its video, separate audio or image. Its streams are probed after download. */
+export const ImportOriginalSchema = v.object({
+    url: SourceUrlSchema,
+    source_key: SourceKeySchema,
+    language: DeclaredTextSchema,
+    label: DeclaredTextSchema,
+    is_default: v.optional(v.boolean(), false),
 });
 
-export const TrackMetadataSchema = v.object({
-    format: v.pipe(
-        v.optional(v.nullable(v.string())),
-        v.transform((v) => v ?? undefined),
-    ),
-    segment_base: v.pipe(
-        v.optional(v.nullable(SegmentBaseSchema)),
-        v.transform((v) => v ?? undefined),
-    ),
+export const ImportCoverSchema = v.object({
+    url: SourceUrlSchema,
+    source_key: SourceKeySchema,
 });
 
-export const TrackStreamSchema = v.object({
-    index: v.pipe(v.number(), v.integer(), v.minValue(0)),
-    id: v.optional(v.nullable(v.string())),
-    type: v.picklist([TrackType.VIDEO, TrackType.AUDIO, TrackType.SUBTITLE]),
-    codec: v.optional(v.nullable(v.string())),
-    language: v.optional(v.nullable(v.string())),
-    label: v.optional(v.nullable(v.string())),
-    role: v.optional(v.nullable(v.string())),
-    width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-    height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-    bandwidth: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
-    channels: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-    sample_rate: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-    is_default: v.optional(v.boolean()),
+export const ImportCaptionSchema = v.object({
+    url: SourceUrlSchema,
+    source_key: SourceKeySchema,
+    language: DeclaredTextSchema,
+    label: DeclaredTextSchema,
+    is_default: v.optional(v.boolean(), false),
 });
 
-export const TrackSchema = v.object({
-    url: v.pipe(v.string(), v.trim(), v.minLength(1, "url is required")),
-    type: v.enum(TrackType),
-    purpose: v.optional(v.enum(TrackPurpose), TrackPurpose.CONTENT),
-    is_original: v.optional(v.boolean(), true),
-    quality: v.optional(v.enum(Quality), Quality.HIGH),
-    language: v.optional(v.nullable(v.string())),
-    codec: v.optional(v.nullable(v.string())),
-    duration: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
-    width: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-    height: v.optional(v.nullable(v.pipe(v.number(), v.integer(), v.minValue(1)))),
-    bandwidth: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
-    metadata: v.pipe(
-        v.optional(v.nullable(TrackMetadataSchema)),
-        v.transform((v) => v ?? {}),
-    ),
-    container: v.optional(v.nullable(v.string())),
-    is_fragmented: v.optional(v.nullable(v.boolean())),
-    stream_layout: v.optional(v.nullable(v.enum(TrackStreamLayout))),
-    has_video: v.optional(v.nullable(v.boolean())),
-    has_audio: v.optional(v.nullable(v.boolean())),
-    streams: v.optional(v.nullable(v.array(TrackStreamSchema))),
-});
+const uniqueKeys = <T extends { source_key: string }>(message: string) =>
+    v.check<T[], string>((items) => new Set(items.map((item) => item.source_key)).size === items.length, message);
 
 export const MediaItemSchema = v.pipe(
     v.object({
@@ -105,9 +75,18 @@ export const MediaItemSchema = v.pipe(
             v.transform((v) => v ?? ""),
         ),
         type: v.enum(MediaType),
-        tracks: v.pipe(v.array(TrackSchema), v.minLength(1, "Each media must have at least one track")),
+        originals: v.pipe(
+            v.array(ImportOriginalSchema),
+            v.minLength(1, "Each media must have at least one original"),
+            uniqueKeys("Original source_key must be unique within a media"),
+        ),
+        cover: v.optional(v.nullable(ImportCoverSchema), null),
+        captions: v.pipe(
+            v.optional(v.array(ImportCaptionSchema), []),
+            uniqueKeys("Caption source_key must be unique within a media"),
+            v.check((captions) => captions.filter((caption) => caption.is_default).length <= 1, "Only one caption can be the default"),
+        ),
         tags: v.optional(v.array(v.string()), []),
-        duration: v.optional(v.nullable(v.pipe(v.number(), v.minValue(0)))),
         create_time: v.optional(TimestampSchema),
         published_time: v.optional(TimestampSchema),
     }),

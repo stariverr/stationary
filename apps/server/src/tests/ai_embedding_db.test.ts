@@ -7,9 +7,7 @@ import {
     File as DbFile,
     JobQueue,
     SyncStatus,
-    Track,
-    TrackPurpose,
-    TrackType,
+    MediaOriginal,
     AiModel,
     AiProvider,
     AssetEmbedding,
@@ -25,7 +23,6 @@ import { db } from "@/global/db";
 import { kv } from "@/global/kv";
 import { secretBox } from "@/global/secrets";
 import { s3, S3ObjectTooLargeError } from "@/global/s3";
-import { Quality } from "@/lib/types";
 import { RECIPE_VERSION } from "@/lib/utils/preview_profiles";
 import { processLibraryAi } from "@/features/ai/actions";
 import { clearModelBindings, getLibraryBindings, getRolesUsingModel, saveLibraryBindings } from "@/features/ai/bindings";
@@ -824,16 +821,7 @@ describe("AI description (PostgreSQL + Redis)", () => {
             path: `ai-enrich/${fileId}.jpg`,
             bucket: "test",
         });
-        await db.insert(Track).values({
-            media_id: mediaId,
-            file_id: fileId,
-            type: TrackType.IMAGE,
-            purpose: TrackPurpose.CONTENT,
-            quality: Quality.HIGH,
-            sync_status: SyncStatus.COMPLETED,
-            variant_key: "original",
-            is_primary: true,
-        });
+        await db.insert(MediaOriginal).values({ media_id: mediaId, file_id: fileId, status: SyncStatus.COMPLETED });
         // AI reads the large preview, which is as unreadable as its source here.
         await db.insert(DbFile).values({
             id: previewFileId,
@@ -858,7 +846,7 @@ describe("AI description (PostgreSQL + Redis)", () => {
         await db.delete(JobQueue).where(eq(JobQueue.library_id, enrichLibraryId));
         await db.delete(AssetAiMetadata).where(eq(AssetAiMetadata.library_id, enrichLibraryId));
         await db.delete(AssetSearchDocument).where(eq(AssetSearchDocument.library_id, enrichLibraryId));
-        await db.delete(Track).where(eq(Track.media_id, mediaId));
+        await db.delete(MediaOriginal).where(eq(MediaOriginal.media_id, mediaId));
         await db.delete(MediaPreview).where(eq(MediaPreview.media_id, mediaId));
         await db.delete(DbFile).where(inArray(DbFile.id, [fileId, previewFileId]));
         await db.delete(Media).where(eq(Media.id, mediaId));

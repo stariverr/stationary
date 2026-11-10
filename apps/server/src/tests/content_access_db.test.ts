@@ -24,13 +24,10 @@ import {
     Tag,
     TagSource,
     TagStatus,
-    TrackPurpose,
-    TrackType,
     User,
 } from "@/db/schema";
 import { ApiTokenService } from "@/features/auth/api-token";
 import { db } from "@/global/db";
-import { Quality } from "@/lib/types";
 
 type Route = [router: Hono<any>, path: string, method?: string, body?: unknown];
 
@@ -130,7 +127,7 @@ describe.skipIf(process.env.RUN_CONTENT_DB_TESTS !== "1")("Content access contro
         const anyId = "018f0000-0000-7000-8000-000000000000";
         const draft = {
             type: MediaType.IMAGE,
-            tracks: [{ draft_file_id: anyId, type: TrackType.IMAGE, purpose: TrackPurpose.CONTENT, quality: Quality.HIGH }],
+            originals: [anyId],
         };
         return [
             [postRouter, `/list?library_id=${id}`],
@@ -180,8 +177,12 @@ describe.skipIf(process.env.RUN_CONTENT_DB_TESTS !== "1")("Content access contro
         [postRouter, `/detail/${postId}`],
         [postRouter, `/${postId}/media`],
         [mediaRouter, `/detail/${mediaId}`],
-        [mediaRouter, `/${mediaId}/tracks`],
-        [mediaRouter, `/${mediaId}/tracks/018f0000-0000-7000-8000-000000000000/download-url`],
+        [mediaRouter, `/${mediaId}/originals/018f0000-0000-7000-8000-000000000000/download-url`],
+        [mediaRouter, `/${mediaId}/originals`, "POST", { draft_file_id: "018f0000-0000-7000-8000-000000000000" }],
+        [mediaRouter, `/${mediaId}/originals/018f0000-0000-7000-8000-000000000000/delete`, "POST"],
+        [mediaRouter, `/${mediaId}/captions`, "POST", { draft_file_id: "018f0000-0000-7000-8000-000000000000" }],
+        [mediaRouter, `/${mediaId}/captions/018f0000-0000-7000-8000-000000000000/delete`, "POST"],
+        [mediaRouter, `/${mediaId}/audio-tracks/018f0000-0000-7000-8000-000000000000/update`, "POST", { label: "x" }],
         [mediaRouter, `/${mediaId}/regenerate-previews`, "POST"],
         [mediaRouter, `/${mediaId}/cover/presign-upload`, "POST", { fileName: "cover.jpg" }],
         [mediaRouter, `/${mediaId}/cover`, "POST", { file: { path: "p", bucket: "b", mime_type: "image/jpeg", extension: "jpg", size: 1 } }],

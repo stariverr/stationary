@@ -8,9 +8,6 @@ import {
     MediaType,
     PreviewSize,
     SyncStatus,
-    Track,
-    TrackPurpose,
-    TrackType,
 } from "@/db/schema";
 import { db, type DbClient, type Transaction } from "@/global/db";
 import { env } from "@/global/env";
@@ -20,6 +17,7 @@ import { uploadToS3 } from "@/lib/utils/media";
 import { renderPreview } from "@/lib/utils/preview_renderer";
 import { RECIPE_VERSION } from "@/lib/utils/preview_profiles";
 import { COVER_MEDIA_TYPES } from "@/lib/validation/media-composition";
+import { kindOfState, loadOriginalStates, type OriginalState } from "./originals";
 
 export const PREVIEW_SIZES = [PreviewSize.SMALL, PreviewSize.MEDIUM, PreviewSize.LARGE] as const;
 
@@ -30,7 +28,6 @@ const CONTENT_PREVIEW_TYPES: ReadonlySet<MediaType> = new Set([MediaType.IMAGE, 
 const UNRENDERABLE_EXTENSIONS = new Set(["vvic", "jxl"]);
 
 type MediaRow = typeof Media.$inferSelect;
-type TrackRow = typeof Track.$inferSelect;
 type FileRow = typeof DbFile.$inferSelect;
 export type PreviewRow = typeof MediaPreview.$inferSelect;
 
@@ -50,33 +47,31 @@ export interface PreviewState {
     activePreviewFileIds: Set<string>;
 }
 
-const contentRank = (row: { track: TrackRow; file: FileRow }) =>
-    [
-        UNRENDERABLE_EXTENSIONS.has((row.file.extension || "").toLowerCase()) ? 1 : 0,
-        row.track.type === TrackType.IMAGE ? 0 : 1,
-        row.track.is_primary ? 0 : 1,
-        row.track.is_default ? 0 : 1,
-        row.track.priority,
-    ] as const;
+/** A content file the renderer can decode: an image or video original, completed and in a known format. */
+interface ContentFile {
+    kind: "IMAGE" | "VIDEO";
+    file: FileRow;
+}
 
-/**
- * The content track a preview is rendered from: renderable formats first, then an image before a video (a live
- * photo's still), primary, default, and lower priority.
- */
-export function pickContentSource(rows: readonly { track: TrackRow; file: FileRow }[]): PreviewSource | null {
-    const candidates = rows.filter(({ track }) => track.type === TrackType.IMAGE || track.type === TrackType.VIDEO);
-    if (candidates.length === 0) return null;
-    const best = [...candidates].sort((a, b) => {
-        const ra = contentRank(a);
-        const rb = contentRank(b);
-        for (let i = 0; i < ra.length; i++) if (ra[i] !== rb[i]) return ra[i]! - rb[i]!;
-        return 0;
-    })[0]!;
+/** The originals a preview can be rendered from. */
+export function contentFiles(states: readonly OriginalState[]): ContentFile[] {
+    return states.flatMap((state) => {
+        const kind = kindOfState(state);
+        return state.file && (kind === "IMAGE" || kind === "VIDEO") ? [{ kind, file: state.file }] : [];
+    });
+}
+
+/** The content a preview is rendered from: renderable formats first, then an image before a video (a live photo's still). */
+export function pickContentSource(contents: readonly ContentFile[]): PreviewSource | null {
+    const rank = (content: ContentFile) =>
+        (UNRENDERABLE_EXTENSIONS.has((content.file.extension || "").toLowerCase()) ? 2 : 0) + (content.kind === "IMAGE" ? 0 : 1);
+    const best = [...contents].sort((a, b) => rank(a) - rank(b))[0];
+    if (!best) return null;
     return {
         fileId: best.file.id,
         path: best.file.path,
         bucket: best.file.bucket,
-        renderAs: best.track.type === TrackType.VIDEO ? MediaType.VIDEO : MediaType.IMAGE,
+        renderAs: best.kind === "VIDEO" ? MediaType.VIDEO : MediaType.IMAGE,
     };
 }
 
@@ -84,7 +79,7 @@ export function pickContentSource(rows: readonly { track: TrackRow; file: FileRo
 export function previewSourceOf(
     type: MediaType,
     cover: FileRow | null,
-    contents: readonly { track: TrackRow; file: FileRow }[],
+    contents: readonly ContentFile[],
 ): PreviewSource | null {
     if (cover && COVER_MEDIA_TYPES.has(type)) {
         return { fileId: cover.id, path: cover.path, bucket: cover.bucket, renderAs: MediaType.IMAGE };
@@ -102,24 +97,13 @@ export async function loadPreviewStates(client: DbClient, mediaIds: readonly str
     if (mediaRows.length === 0) return [];
     const ids = mediaRows.map((media) => media.id);
 
-    const [covers, contents, previews] = await Promise.all([
+    const [covers, statesByMedia, previews] = await Promise.all([
         client
             .select({ mediaId: MediaCover.media_id, file: DbFile })
             .from(MediaCover)
             .innerJoin(DbFile, and(eq(DbFile.id, MediaCover.file_id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
             .where(and(inArray(MediaCover.media_id, ids), eq(MediaCover.status, SyncStatus.COMPLETED))),
-        client
-            .select({ track: Track, file: DbFile })
-            .from(Track)
-            .innerJoin(DbFile, and(eq(DbFile.id, Track.file_id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
-            .where(
-                and(
-                    inArray(Track.media_id, ids),
-                    eq(Track.purpose, TrackPurpose.CONTENT),
-                    eq(Track.delete_status, DeleteStatus.ACTIVE),
-                    eq(Track.sync_status, SyncStatus.COMPLETED),
-                ),
-            ),
+        loadOriginalStates(client, ids),
         client.select().from(MediaPreview).where(inArray(MediaPreview.media_id, ids)),
     ]);
 
@@ -138,7 +122,7 @@ export async function loadPreviewStates(client: DbClient, mediaIds: readonly str
         const source = previewSourceOf(
             media.type,
             cover,
-            contents.filter((row) => row.track.media_id === media.id),
+            contentFiles(statesByMedia.get(media.id) ?? []),
         );
         const own = previews.filter((row) => row.media_id === media.id);
         return {

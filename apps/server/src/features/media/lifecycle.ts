@@ -1,7 +1,7 @@
 import { and, count, eq, inArray, isNotNull, isNull } from "drizzle-orm";
-import { deleteMediaImages } from "@/features/media/cover";
+import { releaseMediaAssets } from "@/features/media/release";
 import { db } from "@/global/db";
-import { DeleteStatus, File, Media, MediaTag, Post, Track } from "@/db/schema";
+import { DeleteStatus, File, Media, MediaTag, Post } from "@/db/schema";
 import { deleteMediaAiData } from "@/features/ai/cleanup";
 import { markRestored } from "@/features/media/restored";
 
@@ -126,13 +126,6 @@ export async function batchDeleteMedia(mediaIds: string[]): Promise<{ mediaUpdat
 
             const validMediaIds = activeMedia.map((m) => m.id);
 
-            const tracks = await tx
-                .select({ file_id: Track.file_id })
-                .from(Track)
-                .where(and(inArray(Track.media_id, validMediaIds), eq(Track.delete_status, DeleteStatus.ACTIVE)));
-
-            const fileIds = Array.from(new Set(tracks.map((t) => t.file_id).filter((fileId): fileId is string => Boolean(fileId))));
-
             await tx.delete(MediaTag).where(inArray(MediaTag.media_id, validMediaIds));
 
             const updatedMedia = await tx
@@ -141,22 +134,8 @@ export async function batchDeleteMedia(mediaIds: string[]): Promise<{ mediaUpdat
                 .where(inArray(Media.id, validMediaIds))
                 .returning({ id: Media.id });
 
-            await tx
-                .update(Track)
-                .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime, update_time: deleteTime })
-                .where(inArray(Track.media_id, validMediaIds));
             await deleteMediaAiData(tx, validMediaIds);
-            await deleteMediaImages(tx, validMediaIds);
-
-            let fileUpdated = 0;
-            if (fileIds.length > 0) {
-                const updatedFiles = await tx
-                    .update(File)
-                    .set({ delete_status: DeleteStatus.DELETED, delete_time: deleteTime })
-                    .where(and(inArray(File.id, fileIds), eq(File.delete_status, DeleteStatus.ACTIVE)))
-                    .returning({ id: File.id });
-                fileUpdated = updatedFiles.length;
-            }
+            const fileUpdated = await releaseMediaAssets(tx, validMediaIds);
 
             const distinctPostIds = Array.from(new Set(activeMedia.map((m) => m.post_id).filter((pid): pid is string => Boolean(pid))));
 

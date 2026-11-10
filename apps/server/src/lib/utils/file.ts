@@ -1,4 +1,3 @@
-import { TrackType } from "@/db/schema";
 
 const ambiguousExtensions = new Set(["mp4", "m4s"]);
 const imageExtensions = new Set(["apng", "avif", "gif", "heic", "heif", "jfif", "jpe", "jpeg", "jpg", "jxl", "png", "svg", "webp"]);
@@ -64,30 +63,33 @@ export function getMimeTypeByExt(extension: string): string {
     return mimeTypesByExtension[normalizeFileExtension(extension)] || "application/octet-stream";
 }
 
-export function getAllowedTrackTypesForFile(fileName: string, mimeType = ""): TrackType[] {
+/** What an uploaded file can be, judged from its name and MIME type. */
+export type FileCategory = "IMAGE" | "VIDEO" | "AUDIO" | "SUBTITLE" | "PDF";
+
+export function getFileCategories(fileName: string, mimeType = ""): FileCategory[] {
     const extension = getFileExtension(fileName);
-    if (ambiguousExtensions.has(extension)) return [TrackType.VIDEO, TrackType.AUDIO];
-    if (imageExtensions.has(extension)) return [TrackType.IMAGE];
-    if (videoExtensions.has(extension)) return [TrackType.VIDEO];
-    if (audioExtensions.has(extension)) return [TrackType.AUDIO];
-    if (subtitleExtensions.has(extension)) return [TrackType.SUBTITLE];
-    if (extension === "pdf") return [TrackType.PDF];
+    if (ambiguousExtensions.has(extension)) return ["VIDEO", "AUDIO"];
+    if (imageExtensions.has(extension)) return ["IMAGE"];
+    if (videoExtensions.has(extension)) return ["VIDEO"];
+    if (audioExtensions.has(extension)) return ["AUDIO"];
+    if (subtitleExtensions.has(extension)) return ["SUBTITLE"];
+    if (extension === "pdf") return ["PDF"];
 
     const normalizedMime = mimeType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-    if (normalizedMime === "application/pdf") return [TrackType.PDF];
+    if (normalizedMime === "application/pdf") return ["PDF"];
     if (normalizedMime === "application/mp4" || normalizedMime.includes("iso.segment")) {
-        return [TrackType.VIDEO, TrackType.AUDIO];
+        return ["VIDEO", "AUDIO"];
     }
-    if (normalizedMime.startsWith("image/")) return [TrackType.IMAGE];
-    if (normalizedMime.startsWith("video/")) return [TrackType.VIDEO];
-    if (normalizedMime.startsWith("audio/")) return [TrackType.AUDIO];
+    if (normalizedMime.startsWith("image/")) return ["IMAGE"];
+    if (normalizedMime.startsWith("video/")) return ["VIDEO"];
+    if (normalizedMime.startsWith("audio/")) return ["AUDIO"];
     if (
         normalizedMime === "text/vtt" ||
         normalizedMime === "application/x-subrip" ||
         normalizedMime.includes("subtitle") ||
         normalizedMime.includes("subrip")
     ) {
-        return [TrackType.SUBTITLE];
+        return ["SUBTITLE"];
     }
     return [];
 }

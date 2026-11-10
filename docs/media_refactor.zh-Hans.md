@@ -115,12 +115,13 @@ media_preview  id, media_id, size (SMALL|MEDIUM|LARGE), source_file_id, recipe_v
 
 ```text
 av_file  id, file_id (unique), container, duration, bitrate,
-         init_range, index_range, timescale, earliest_presentation_time
-         CHECK：后四列同时为空或同时有值
+         init_size, index_offset, index_size, timescale, earliest_presentation_time
+         CHECK：后五列同时为空或同时有值
 ```
 
 - 每个音视频文件一行，包括原件和重封装产物。
-- 后四列来自 sidx，只有带 sidx 的 fMP4 才有。HLS 和 DASH 只引用有这四列的文件。
+- 后五列来自 sidx，只有带 sidx 的 fMP4 才有。HLS 和 DASH 只引用有这五列的文件。
+- 字节位置存成整数：init 段是 `[0, init_size)`，sidx 是 `[index_offset, index_offset + index_size)`。DASH 的 `init_range`、`index_range` 在生成清单时由它们拼出来。
 
 ### 3.7 av_stream
 
@@ -260,7 +261,27 @@ av_rendition  id, media_id, source_stream_id → av_stream, recipe (remux-video|
 
 ffprobe 解不开文件时，按"输入被拒"处理（见 [job_queue.zh-Hans.md](./job_queue.zh-Hans.md) 6.1）：原件记为 `FAILED`，写入 `last_error`。
 
-### 6.3 不在范围内的元数据
+用户手动上传的原件不经过 `download` 流水线：提交草稿或添加原件时，先在事务之外探测，再按探测结果校验组合规则（第 4 节），通过后在一个事务里写入，所以插入时 `status` 就是 `COMPLETED`。探测失败或组合不对，请求直接返回 400，什么都不写。
+
+### 6.3 导入数据格式
+
+采集端（stationary-script）推送给 `POST /api/task/create` 的每个媒体，不再带 `tracks` 数组，改为：
+
+```text
+media item
+  external_id, title, description, type, tags, create_time, published_time   （和现在一样）
+  originals[]   至少 1 个  { url, source_key, language?, label?, is_default? }
+  cover         可选       { url, source_key }
+  captions[]    可选       { url, source_key, language?, label?, is_default? }
+```
+
+- **只给地址和声明，不给流信息。** 编码、宽高、时长、sidx、`segment_base` 都由服务端探测（第 6.2 节），采集端不再推断，`duration`、`quality`、`stream_layout`、`metadata` 等字段一律删除。
+- **只给最高画质。** 平台的低画质版本不推送。
+- **`source_key`** 是这个资源在该媒体里的稳定键，比如 `video`、`audio:ja`、`caption:zh-CN`。同步时按它匹配：键相同就认为是同一个资源，即使 URL 变了（平台的签名 URL 每次都会变）也不重新下载；资源真的变了（比如平台有了更高画质），采集端要换一个键。同一个媒体里，同一类（原件、字幕）的键不能重复。
+- **`language`、`label`、`is_default`** 是导入时的声明（第 3.7 节）：原件上的声明作用于它里面的音频流，字幕上的声明作用于这条字幕。
+- 组合规则（第 4 节）在入口校验，比如 VIDEO 恰好一个含视频的原件，这一点要等探测后才知道，所以入口只校验数量，探测后再校验内容。
+
+### 6.4 不在范围内的元数据
 
 ID3、EXIF 这类描述性标签不提取：
 
@@ -408,6 +429,15 @@ playback
 5. 删除 Track 表。
 
 迁移时不保留旧结构，也不双写（任务书 2.4）。
+
+第 1 阶段没有单独上线，封面的迁移并入这一步。上线顺序（`src/scripts/migrate_media_originals.ts`）：
+
+1. 停掉 worker，运行 `stash`：把 `public.track` 里有效的行复制到 `legacy.track`（枚举列存成文本）。`db:migrate` 只管 public schema，这份副本不会被删掉。
+2. 运行 `bun run db:migrate`，建新表、删掉 `track`。
+3. 运行 `apply`（默认只统计，加 `--apply` 才写入）。它逐个媒体读 `legacy.track`，探测已完成的文件，写入原件、封面和字幕，把不迁移的文件标为 DELETED，删掉旧的 `cover` 队列，并请求每个库扫描 `download` 和 `preview`。已经有原件的媒体会跳过，中断后可以重跑。
+4. 确认无误后运行 `drop`，删掉 `legacy` schema。
+
+导入的原件迁移后 `source_key` 是 `legacy:<类型>:<variant_key>`，采集端不会发这种键，所以下次同步这个帖子时，旧原件会被换成平台当前的最高画质。导入的封面迁移后键是 `cover`，和采集端一致，不会重新下载。
 
 ## 13. 分阶段
 
