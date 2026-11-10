@@ -133,24 +133,13 @@ class _MediaLightboxState extends State<MediaLightbox> {
                 },
                 itemBuilder: (context, index) {
                   final item = widget.mediaList[index];
-                  MediaTrack? liveTrack;
-                  if (item.type == 'LIVE_PHOTO') {
-                    for (final t in item.tracks) {
-                      if (t.type == 'VIDEO' && t.purpose == 'CONTENT') {
-                        liveTrack = t;
-                        break;
-                      }
-                    }
-                  }
 
-                  if (item.type == 'VIDEO' && (item.playback?.url != null || item.url != null)) {
+                  if (item.type == 'VIDEO' && item.playback != null) {
                     return Center(
                       child: PremiumVideoPlayer(
-                        videoUrl: item.playback?.url ?? item.url!,
                         posterUrl: item.previews.poster?.url,
                         autoPlay: index == _currentIndex,
-                        tracks: item.tracks,
-                        playback: item.playback,
+                        playback: item.playback!,
                         borderRadius: BorderRadius.zero,
                         onFullscreen: () {
                           setState(() {
@@ -170,7 +159,7 @@ class _MediaLightboxState extends State<MediaLightbox> {
                     return Center(
                       child: PremiumLivePhotoPlayer(
                         imageUrl: item.url!,
-                        videoUrl: liveTrack?.url,
+                        videoUrl: item.playback?.directUrl,
                         fit: BoxFit.contain,
                       ),
                     );
