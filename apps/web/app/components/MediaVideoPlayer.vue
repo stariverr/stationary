@@ -254,9 +254,7 @@ const dashUrl = computed(() => resolveUrl(props.playback?.dash_url || props.play
 
 // HLS plays through hls.js everywhere (Safari included); the other protocol is chosen from the player settings. A
 // protocol that fails to play is not swapped for the other one automatically.
-// TODO: default to HLS once the server lists HLS segments from the sidx; until then an HLS variant is a single
-// whole-file segment that hls.js downloads completely before the first frame.
-const DEFAULT_PROTOCOL: StreamingProtocol = "DASH";
+const DEFAULT_PROTOCOL: StreamingProtocol = "HLS";
 // Only an explicit choice is stored, so a later change of the default reaches everyone who never picked one.
 const storedProtocol = useStorage<StreamingProtocol>("stationary-player-protocol", DEFAULT_PROTOCOL, undefined, {
     writeDefaults: false,

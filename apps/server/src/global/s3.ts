@@ -30,6 +30,8 @@ const s3Client = new S3Client({
     },
     endpoint: env.S3_ENDPOINT,
     forcePathStyle: true,
+    // A checksum computed by default would sign the empty body into presigned uploads, which stores that reject.
+    requestChecksumCalculation: "WHEN_REQUIRED",
 });
 
 class S3 {
