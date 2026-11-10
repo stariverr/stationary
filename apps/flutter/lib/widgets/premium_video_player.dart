@@ -462,6 +462,12 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     }
     try {
       _platformAudioTracks = await controller.getAudioTracks();
+      // The platform picks a rendition by system language; the media's default
+      // track wins instead, so playback matches the menu and the web player.
+      if (!_canSwitchAudio) return;
+      final index = widget.playback.audioTracks.indexWhere((t) => t.isDefault);
+      if (index < 0 || _platformAudioTracks[index].isSelected) return;
+      await controller.selectAudioTrack(_platformAudioTracks[index].id);
     } catch (_) {
       _platformAudioTracks = const [];
     }

@@ -88,7 +88,7 @@ const emit = defineEmits<{
     (e: "pause"): void;
 }>();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 // Player state comes from the Video.js store; every store change re-syncs this snapshot.
 const playerRef = ref<VideoPlayerElement | null>(null);
@@ -255,8 +255,18 @@ const dashSource = computed<DashSource>(() => ({
 
 const engineRef = ref<HTMLElement | null>(null);
 
+// Captions come from <track> elements, so dash.js drops the manifest's text adaptation sets (as hls.js skips them above).
+const skipManifestText = (representation: { mimeType: string | null }) => representation.mimeType !== "text/vtt";
+
 watch(engineRef, (engine, _previous, onCleanup) => {
-    if (engine?.localName === "dash-video") onCleanup(bridgeDashAudioTracks(engine as DashVideoElement));
+    if (engine?.localName !== "dash-video") return;
+    const dash = engine as DashVideoElement;
+    dash.engine.registerCustomCapabilitiesFilter(skipManifestText);
+    const unbridge = bridgeDashAudioTracks(dash);
+    onCleanup(() => {
+        unbridge();
+        dash.engine.unregisterCustomCapabilitiesFilter(skipManifestText);
+    });
 });
 
 // The server reports every stream's codec and leaves support to the client. A video stream this browser cannot
@@ -299,41 +309,21 @@ const handleLoadedMetadata = () => {
     if (!restore.paused) video.play().catch(() => {});
 };
 
-const formatLanguageLabel = (lang?: string | null, label?: string | null): string => {
-    if (
-        label &&
-        label !== "Subtitle" &&
-        label !== "Audio" &&
-        label !== "unknown" &&
-        label !== "und" &&
-        !/^[a-z]{2}(-[a-z]{2,4})?$/i.test(label)
-    ) {
-        return label;
+/** The localized name of a language tag (ISO 639-1 or 639-2, e.g. `en`, `eng`, `zh-Hans`); null when unknown. */
+const languageName = (code?: string | null): string | null => {
+    if (!code) return null;
+    try {
+        return new Intl.DisplayNames([locale.value], { type: "language", fallback: "none" }).of(code.replace("_", "-")) ?? null;
+    } catch {
+        return null; // not a well-formed language tag
     }
-    const code = (lang || label || "").toLowerCase().replace("_", "-");
-    const langMap: Record<string, string> = {
-        zh: "中文",
-        "zh-cn": "简体中文",
-        "zh-hans": "简体中文",
-        "zh-tw": "繁体中文",
-        "zh-hant": "繁体中文",
-        "zh-hk": "繁体中文",
-        en: "English",
-        "en-us": "English (US)",
-        "en-gb": "English (UK)",
-        ja: "日语",
-        ko: "韩语",
-        fr: "法语",
-        de: "德语",
-        es: "西班牙语",
-        ru: "俄语",
-        it: "意大利语",
-        pt: "葡萄牙语",
-    };
-    const primaryCode = code.split("-")[0] || "";
-    return (
-        langMap[code] || langMap[primaryCode] || (label && label !== "Subtitle" ? label : t("post_detail.viewer.player.default_subtitle"))
-    );
+};
+
+const GENERIC_LABELS = new Set(["Subtitle", "Audio", "unknown", "und"]);
+
+const formatLanguageLabel = (lang?: string | null, label?: string | null): string => {
+    if (label && !GENERIC_LABELS.has(label) && !/^[a-z]{2,3}([-_][a-z0-9]{2,8})?$/i.test(label)) return label;
+    return languageName(lang || label) ?? (label && !GENERIC_LABELS.has(label) ? label : t("post_detail.viewer.player.default_subtitle"));
 };
 
 // Captions load into same-origin blob URLs: a native <track> needs CORS mode on the video for a cross-origin file.
@@ -389,9 +379,10 @@ const audioOptions = computed<SettingsOption[]>(() => {
     );
     const prefix = t("post_detail.viewer.player.audio_tracks");
     return tracks.map((track: PlayerAudioTrack, index: number) => {
-        const languageName = track.language ? formatLanguageLabel(track.language) : "";
-        const isGenerated = /^Audio \d+$/.test(track.label) || track.label === track.language;
-        const label = !isGenerated ? track.label : languageName ? `${prefix} ${index + 1} (${languageName})` : `${prefix} ${index + 1}`;
+        // Engines label a track with its manifest label (and may normalize its language), so name it from the playback.
+        const source = props.playback.audio_tracks.find((item, i) => manifestAudioLabel(item, i) === track.label);
+        const name = languageName(source?.language ?? track.language);
+        const label = source?.label || (name ? `${prefix} ${index + 1} (${name})` : `${prefix} ${index + 1}`);
         return {
             key: track.id,
             label,
