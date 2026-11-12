@@ -300,7 +300,8 @@ playback
   direct_url        原件地址，任何形态都有
   hls_url, dash_url 只在需要清单、而且视频流能进清单时有（第 8.1 节）
   video             { codec, codec_string, width, height, rotation, frame_rate }
-  audio_tracks[]    { id, codec, codec_string, language, label, is_default, channels }
+  audio_tracks[]    { id, codec, codec_string, language, label, is_default, channels, in_direct, in_manifest }
+                    in_direct：direct_url 里有没有这条音轨；in_manifest：清单里有没有（第 16 节）
   captions[]        { id, language, label, is_default, vtt_url }
   lyrics[]          { id, language, label, is_default, timing, lrc_url }
 ```
@@ -400,10 +401,10 @@ playback
 普通 MP4 不能直接进清单：HLS 的分片只能是 MPEG-TS 或 fMP4，DASH 的 `SegmentBase` 要求带 sidx 的 fMP4。而普通 MP4 的样本数据和 fMP4 一样，只是索引集中在 moov 里，样本在 mdat 里交错存放。即时打包就是在请求时，把普通 MP4 里的一条流现做成 fMP4 分片，原件不动，也不存副本。这是点播打包的常见做法，比如 nginx-vod-module、Unified Origin、AWS MediaPackage。
 
 - **输入**：ISO BMFF 的非分片文件（MP4、MOV、M4A），moov 在头或在尾都可以。其他格式不打包（第 16 节）。
-- **分片索引**：用 Range 请求读出 moov，从样本表（`stsz`、`stco`/`co64`、`stsc`、`stts`、`ctts`、`stss`）算出每条流的分片：视频在关键帧处切，目标时长约 6 秒；音频按时间对齐视频的分片边界。结果按文件缓存在 Redis，可以随时重算；原件只增不改（第 2 节），缓存不需要失效。不加表，也不存对象。
+- **分片索引**：用 Range 请求读出 moov，从样本表（`stsz`、`stco`/`co64`、`stsc`、`stts`、`ctts`、`stss`）算出每条流的分片：视频在关键帧处切，目标时长约 6 秒；音频每条单独按约 6 秒切，不对齐视频的分片边界（HLS 和 DASH 都不要求对齐，这样每个文件的索引可以独立计算和缓存）。结果按文件缓存在 Redis，可以随时重算；原件只增不改（第 2 节），缓存不需要失效。不加表，也不存对象。
 - **init 段**：由原件的 `trak` 生成单流的 `moov`，sample entry 原样搬过来，再加上 `mvex`。
 - **分片**：生成 `moof`（`tfdt` 加 `trun`，带样本时长、大小、关键帧标记和 `ctts` 偏移），后面接 `mdat`。`mdat` 的内容就是从原件按字节范围读出来的样本数据，同一个 chunk 里连续的样本合并成一次读取。不解码，也不调用 ffmpeg。
-- **时间对齐**：考虑 `elst`，和 fMP4 原件一样，整个清单共用同一个起始偏移（第 8.2 节），不给每条流单独归零。
+- **时间对齐**：`elst` 换算进 `trun`（version 1）的有符号合成偏移，init 段不带 `edts`，`tfdt` 用原件的解码时间。这样分片的时间轴就是原件的呈现时间轴，各条流不单独归零；清单里即时打包的流起始偏移为 0。
 - **地址**：`/api/media/:id/packaged/:streamId/init.mp4` 和 `.../:segment.m4s`，带和清单相同的播放签名（第 8.5 节）。具体路径在实施时定。
 - **代价**：这些分片的字节要经过服务端转发，不能 302 到 S3。CPU 开销很小，只在需要清单、而且原件不是 fMP4 时才发生（第 8.1 节）。
 - **依赖**：解析 MP4 优先用现成的库（比如 mp4box.js），实施前确认它能在服务端只靠 Range 请求读取 moov 和样本，不必把整个文件读进内存。
