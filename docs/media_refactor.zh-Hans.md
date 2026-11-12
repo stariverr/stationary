@@ -1,16 +1,17 @@
 # 媒体存储与播放重构方案
 
-状态：方案已定，尚未实施（2026-11-09）。
+状态：第 1、2 阶段已实施（2026-11-10）。第 3 阶段于 2026-11-12 修订：去掉存储重封装产物的做法，改为即时打包，并写明支持边界（第 8.7、16 节）。
 
 本文取代 [media_track_improvement_tasks.zh-Hans.md](./media_track_improvement_tasks.zh-Hans.md) 中和 Track 相关的部分：Track 字段边界、Track 元数据重复，以及 Media / Track 组合约束。那份任务书里身份、`eid`、独立媒体和 File 生命周期的约束继续有效，本文沿用。
 
-范围：原件、封面、预览图（取代现在的"低清晰度封面"）、音视频的流信息、字幕、歌词、重封装产物、HLS 和 DASH 播放、Live Photo，以及从 Track 迁移过来的步骤。
+范围：原件、封面、预览图（取代现在的"低清晰度封面"）、音视频的流信息、字幕、歌词、HLS 和 DASH 播放（含即时打包）、Live Photo，以及从 Track 迁移过来的步骤。支持边界和远期选项见第 16、17 节。
 
 怎么读：
 
 - 想了解整体：读第 1、2、3 节。
 - 实施某个阶段：读第 13 节，找到对应的表（第 3 节）和流程（第 5 到 8 节）。
-- 只关心播放：读第 7、8 节。
+- 只关心播放：读第 7、8 节，支持边界看第 16 节。
+- 以后可能做、现在不做的：读第 17 节。
 
 ## 1. 为什么要重构
 
@@ -33,7 +34,7 @@ Track 一张表要同时表示五类东西：原件、平台给的低画质版�
 5. **派生结果表只记录结果：成功或最终失败。** 每一行要么有文件，要么有 `last_error`，二者恰有其一；进度留在任务队列里。这和任务队列"失败看结果行"的约定一致（[job_queue.zh-Hans.md](./job_queue.zh-Hans.md) 6.1）。
 6. **质量由系统判断，不由用户判断。** 用户上传的文件一律是原件，不支持手动上传低清晰度版本；平台导入只取最高画质。
 7. **元数据只分两层。** 媒体层面的元数据只放在 `media` 表；播放打包信息只放在 `av_file` 和 `av_stream`，而且只有播放组装模块读取（第 7 节）。
-8. **这次不做转码。** 以后要做，只需要往 `av_rendition` 里加配方、在清单里加档位，表结构不用改。
+8. **不多存副本。** 播放不依赖任何派生的音视频文件：能直接播放就直接播放原件，需要清单时由服务端即时打包（第 8.7 节）。转码和存储派生文件是远期选项（第 17 节）。
 
 关系一律是逻辑关联，不建物理外键，沿用任务书 2.1：写入前由应用层校验，后台用完整性扫描兜底。下文的 `→` 表示逻辑引用。
 
@@ -43,15 +44,14 @@ Track 一张表要同时表示五类东西：原件、平台给的低画质版�
 
 ```text
 media ─┬─ media_original ── file
-       │       └─(音视频)── av_file ── av_stream ─┬─ av_rendition ── file ── av_file ── av_stream
-       │                                          └─ media_caption（EMBEDDED）
+       │       └─(音视频)── av_file ── av_stream ── media_caption（EMBEDDED）
        ├─ media_cover ── file
        ├─ media_preview ── file
        ├─ media_caption ── file
        └─ media_lyrics ── file
 ```
 
-所有类型都用：`media`、`media_original`、`media_cover`、`media_preview`。只有音视频用：`av_file`、`av_stream`、`media_caption`、`media_lyrics`、`av_rendition`。
+所有类型都用：`media`、`media_original`、`media_cover`、`media_preview`。只有音视频用：`av_file`、`av_stream`、`media_caption`、`media_lyrics`。
 
 ### 3.2 media（新增三列）
 
@@ -119,8 +119,8 @@ av_file  id, file_id (unique), container, duration, bitrate,
          CHECK：后五列同时为空或同时有值
 ```
 
-- 每个音视频文件一行，包括原件和重封装产物。
-- 后五列来自 sidx，只有带 sidx 的 fMP4 才有。HLS 和 DASH 只引用有这五列的文件。
+- 每个音视频原件一行。
+- 后五列来自 sidx，只有带 sidx 的 fMP4 才有。有这五列的文件，清单直接按字节范围引用；普通 MP4 走即时打包（第 8.7 节），打包用的分片索引不存进这张表。
 - 字节位置存成整数：init 段是 `[0, init_size)`，sidx 是 `[index_offset, index_offset + index_size)`。DASH 的 `init_range`、`index_range` 在生成清单时由它们拼出来。
 
 ### 3.7 av_stream
@@ -150,7 +150,7 @@ CHECK 约束：
 - **`codec_string`**：RFC 6381 字符串，比如 `avc1.640028`、`hvc1.2.4.L153.B0`、`av01.0.08M.10`、`mp4a.40.2`、`mp4a.40.5`、`opus`、`ec-3`。
   - 探测时从 init 段里的 sample entry 配置盒（avcC、hvcC、av1C、esds、dOps 等）解析出来，不靠猜。
   - RFC 6381 由 MP4 的 sample entry 定义，所以只有 MP4 或 fMP4 文件里的视频流和音频流才有。MKV 等其他容器里的流没有，这条由探测代码保证，并写在列注释里。
-  - 清单只引用单流 fMP4，所以只要会出现在清单里的流，一定有 `codec_string`。
+  - 进清单的流只来自 MP4 或 fMP4（直接引用或即时打包），所以一定有 `codec_string`。
   - 用途：HLS 的 `CODECS`、DASH 的 `codecs`，以及客户端调用 `MediaSource.isTypeSupported()`。
 - **`width`、`height`**：编码尺寸，HLS、DASH 和解码能力判断都要用它。显示尺寸由宽高和 `rotation` 推出。
 - **`rotation`**：取自视频的 display matrix。手机竖拍的视频通常编码为 1920×1080，旋转 90°。
@@ -194,20 +194,7 @@ media_lyrics  id, media_id, origin (FILE|EMBEDDED), language, label, is_default,
 - **`timing`**：`NONE` 是纯文本，`LINE` 是逐行时间，`WORD` 是逐字时间（enhanced LRC）。
 - 统一转成 LRC 存入 `lrc_file_id`。
 
-### 3.10 av_rendition
-
-```text
-av_rendition  id, media_id, source_stream_id → av_stream, recipe (remux-video|remux-audio),
-              recipe_version, file_id, last_error
-              unique(source_stream_id, recipe)；index(media_id)
-              CHECK ((file_id IS NOT NULL) <> (last_error IS NOT NULL))
-```
-
-- 派生文件。每条都直接引用它来自的那条流，所以不需要 origin 列。
-- 和 `media_preview` 一样，一行要么是成功的结果，要么是最终失败。源流随原件一起删除，所以失败时的输入同样只看 `recipe_version`。
-- 目前只有重封装：`ffmpeg -c copy` 把一条流取出来，写成带 sidx 的单流 fMP4。
-- 产物同样是音视频文件，所以也有自己的 `av_file` 和 `av_stream` 行。
-- 以后加转码时，在这里加 `video-1080`、`audio-aac` 这类配方。
+派生的音视频文件（`av_rendition`）不在这次的表结构里，是远期选项，见第 17.2 节。
 
 ## 4. 组合规则
 
@@ -243,6 +230,7 @@ av_rendition  id, media_id, source_stream_id → av_stream, recipe (remux-video|
 ### 6.1 导入
 
 - 拉取最高画质，外加平台提供的所有语言音轨、字幕、封面和歌词。
+- 平台同一条音轨有多种格式时，优先选 fMP4（m4a）。这样清单可以直接引用原件，不需要即时打包；WebM 不能进 HLS 清单，也不在即时打包的输入范围内（第 8.7 节）。
 - 平台的低画质版本不导入。
 
 ### 6.2 探测
@@ -293,13 +281,14 @@ ID3、EXIF 这类描述性标签不提取：
 
 一个与协议无关的模块，负责所有播放相关的读取。详情 DTO、HLS 清单、DASH 清单都通过它取数据，其他代码不直接连接这些表。它的工作：
 
-1. 按媒体 ID 批量读取原件、`av_file`、`av_stream`、`av_rendition`、字幕、歌词、封面和预览图，每张表一次 `WHERE media_id IN (...)` 查询，在内存里拼起来。
+1. 按媒体 ID 批量读取原件、`av_file`、`av_stream`、字幕、歌词、封面和预览图，每张表一次 `WHERE media_id IN (...)` 查询，在内存里拼起来。
 2. 选出视频流：取含视频的原件里的第一条视频流。
 3. 列出所有音轨，标出默认音轨。
-4. 为每条要放进清单的流找一个可用的单流 fMP4：
-   - 原件本身就是带 sidx 的单流 fMP4，直接用原件；
-   - 否则用它的 `remux-*` 产物；
-   - 两者都没有，这条流先不进清单，等重封装完成。
+4. 判断是否需要清单（第 8.1 节）。需要时，为每条要放进清单的流找来源，按顺序：
+   - 原件本身就是带 sidx 的单流 fMP4：清单直接按字节范围引用原件；
+   - 原件是普通 MP4、MOV 或 M4A（ISO BMFF，非分片）：即时打包（第 8.7 节）；
+   - 其他格式：这条流不进清单（第 16 节）。视频流不能进清单时，整个媒体不给清单，只能直接播放。
+   - 远期有了派生文件（第 17.2 节）时，派生文件排在即时打包之前。
 5. 挂上字幕。
 
 服务端不判断编码兼容性。所有流都带上 `codec_string` 下发，由客户端判断。
@@ -309,7 +298,7 @@ ID3、EXIF 这类描述性标签不提取：
 ```text
 playback
   direct_url        原件地址，任何形态都有
-  hls_url, dash_url 只在需要流式播放时有
+  hls_url, dash_url 只在需要清单、而且视频流能进清单时有（第 8.1 节）
   video             { codec, codec_string, width, height, rotation, frame_rate }
   audio_tracks[]    { id, codec, codec_string, language, label, is_default, channels }
   captions[]        { id, language, label, is_default, vtt_url }
@@ -322,12 +311,23 @@ playback
 
 ### 8.1 播放方式
 
-| 媒体形态 | 播放方式 |
-|---|---|
-| 1 个原件，最多 1 条音轨 | 直接播放原件，不需要派生文件 |
-| 其他情况（多条音轨，或者视频和音频分开存放） | 用 HLS 或 DASH 播放；直接播放原件仍然保留，但只能听到默认音轨 |
+原则：**能直接播放就直接播放原件，直接播放拿不到需要的音轨或文件时，才用清单。** 即时打包只在用到清单、而且原件不是 fMP4 时发生，所以大部分播放仍然直接从 S3 读原件，不经过服务端。
 
-重封装几乎不耗 CPU，所以不设开关，代价是多占一份存储。
+**服务端什么时候给清单。** 服务端不替客户端选择，只给出能用的地址。`direct_url` 一直都有；满足下面任一条件，并且视频流能进清单时，才给 `hls_url`、`dash_url`：
+
+- 有多个原件（外接音轨，或者视频和音频分开存放）；
+- 有多条音轨（包括同一个文件里的多条）；
+- 有字幕。我们自己的播放器直接挂 VTT，用不上清单；但外部播放器只能拿一个 URL，字幕只能写进清单。
+
+**各端怎么选。**
+
+| 媒体形态 | 网页 | Flutter | 外部播放器 |
+|---|---|---|---|
+| 1 个原件，1 条音轨（有没有字幕都一样） | 直接播放，字幕由播放器挂载 | 同左 | 没有字幕时给原件地址；有字幕时给清单地址 |
+| 1 个原件，多条音轨 | 清单（浏览器直接播放时不能切音轨） | 直接播放，在播放器里切换（iOS 待验证，不行就改用清单） | 原件地址，播放器自己能切 |
+| 多个原件（外接音轨、音视频分开） | 清单 | 清单 | 清单地址 |
+
+客户端只判断“直接播放能不能拿到需要的东西”，不判断原件格式；需要打包与否完全由服务端决定。
 
 ### 8.2 两种清单
 
@@ -335,7 +335,8 @@ playback
 
 **DASH**
 
-- 每条流用 `SegmentBase`，写入 `init_range` 和 `index_range`。sidx 由播放器自己读取。
+- fMP4 原件的流用 `SegmentBase`，写入 `init_range` 和 `index_range`。sidx 由播放器自己读取。
+- 即时打包的流用 `SegmentTemplate` 加 `SegmentTimeline`，`initialization` 和 `media` 指向我们的打包地址（第 8.7 节）。
 - 整个 Period 共用同一个 `presentationTimeOffset`：取所有选中流里最小的 EPT（按秒计），再换算成每条流各自的 timescale。不能给每个文件单独归零，那样会抹掉视频和音频之间本来就有的偏移（B 帧、AAC priming），造成音画不同步。
 - 每种语言的音频一个 AdaptationSet，带 `lang`、`Label`，默认音轨带 `Role` main。
 - 字幕作为 `text/vtt` 的 AdaptationSet。
@@ -346,7 +347,9 @@ playback
 - 主列表里，一条 `EXT-X-STREAM-INF` 对应唯一的视频档位，带 `CODECS`、`RESOLUTION`、`BANDWIDTH` 和 `AUDIO` 分组。
 - 每条音轨一条 `EXT-X-MEDIA TYPE=AUDIO`，带 `LANGUAGE`、`NAME` 和 `DEFAULT`。
 - 字幕写成 `EXT-X-MEDIA TYPE=SUBTITLES`，供外部播放器使用。
-- 每个文件一个分片列表：用 `EXT-X-MAP` 指向 init 段，再用 `EXT-X-BYTERANGE` 逐个列出分片。分片列表在请求时生成：读 `index_range` 那一小段 sidx 展开，按文件缓存。`mp4-segment.ts` 已经能解析 sidx。
+- 每条流一个分片列表，在请求时生成：
+  - fMP4 原件：用 `EXT-X-MAP` 指向 init 段，再用 `EXT-X-BYTERANGE` 逐个列出分片。读 `index_range` 那一小段 sidx 展开，按文件缓存。`mp4-segment.ts` 已经能解析 sidx。
+  - 即时打包：`EXT-X-MAP` 和每个分片都指向我们的打包地址，不带字节范围（第 8.7 节）。
 
 ### 8.3 各端使用的协议
 
@@ -384,13 +387,26 @@ playback
 外部播放器只拿到一个 URL，不会带上 cookie，也不会在播放中途刷新清单。所以：
 
 - 清单的 URL 带一个可以撤销的播放 token；
-- 清单里引用的分片地址指向我们自己的稳定地址，由服务端 302 跳转到 S3 预签名 URL，不直接写入会过期的预签名 URL。
+- 清单里引用的分片地址指向我们自己的稳定地址，不直接写入会过期的预签名 URL。fMP4 原件的分片由服务端 302 跳转到 S3 预签名 URL；即时打包的分片由服务端直接返回（第 8.7 节）。
 
 细节等真正对接外部播放器时再定。现在只要求：清单和分片的地址不依赖 cookie。
 
 ### 8.6 清晰度标签
 
 按短边计算，即 `min(width, height)`。竖屏视频旋转前后短边不变，所以不受 `rotation` 影响。
+
+### 8.7 即时打包
+
+普通 MP4 不能直接进清单：HLS 的分片只能是 MPEG-TS 或 fMP4，DASH 的 `SegmentBase` 要求带 sidx 的 fMP4。而普通 MP4 的样本数据和 fMP4 一样，只是索引集中在 moov 里，样本在 mdat 里交错存放。即时打包就是在请求时，把普通 MP4 里的一条流现做成 fMP4 分片，原件不动，也不存副本。这是点播打包的常见做法，比如 nginx-vod-module、Unified Origin、AWS MediaPackage。
+
+- **输入**：ISO BMFF 的非分片文件（MP4、MOV、M4A），moov 在头或在尾都可以。其他格式不打包（第 16 节）。
+- **分片索引**：用 Range 请求读出 moov，从样本表（`stsz`、`stco`/`co64`、`stsc`、`stts`、`ctts`、`stss`）算出每条流的分片：视频在关键帧处切，目标时长约 6 秒；音频按时间对齐视频的分片边界。结果按文件缓存在 Redis，可以随时重算；原件只增不改（第 2 节），缓存不需要失效。不加表，也不存对象。
+- **init 段**：由原件的 `trak` 生成单流的 `moov`，sample entry 原样搬过来，再加上 `mvex`。
+- **分片**：生成 `moof`（`tfdt` 加 `trun`，带样本时长、大小、关键帧标记和 `ctts` 偏移），后面接 `mdat`。`mdat` 的内容就是从原件按字节范围读出来的样本数据，同一个 chunk 里连续的样本合并成一次读取。不解码，也不调用 ffmpeg。
+- **时间对齐**：考虑 `elst`，和 fMP4 原件一样，整个清单共用同一个起始偏移（第 8.2 节），不给每条流单独归零。
+- **地址**：`/api/media/:id/packaged/:streamId/init.mp4` 和 `.../:segment.m4s`，带和清单相同的播放签名（第 8.5 节）。具体路径在实施时定。
+- **代价**：这些分片的字节要经过服务端转发，不能 302 到 S3。CPU 开销很小，只在需要清单、而且原件不是 fMP4 时才发生（第 8.1 节）。
+- **依赖**：解析 MP4 优先用现成的库（比如 mp4box.js），实施前确认它能在服务端只靠 Range 请求读取 moov 和样本，不必把整个文件读进内存。
 
 ## 9. Live Photo
 
@@ -403,7 +419,7 @@ playback
 
 沿用任务书里 File 一对一的生命周期：每个业务记录拥有自己的 File，不复用。
 
-- **删除原件**（包括替换）：在同一个事务里删除它的 `av_file`、`av_stream`、由它派生的 `av_rendition`、`EMBEDDED` 字幕、`EMBEDDED` 歌词、`EMBEDDED` 封面，以及这个媒体的所有预览图（包括失败行）；这些行引用的 `file` 全部标为 DELETED。然后用 `markChanged` 报告原件变化，触发重新生成。
+- **删除原件**（包括替换）：在同一个事务里删除它的 `av_file`、`av_stream`、`EMBEDDED` 字幕、`EMBEDDED` 歌词、`EMBEDDED` 封面，以及这个媒体的所有预览图（包括失败行）；这些行引用的 `file` 全部标为 DELETED。然后用 `markChanged` 报告原件变化，触发重新生成。
 - **删除或替换封面**：删除封面行和所有预览图，对应的 `file` 标为 DELETED。
 - **删除媒体**：沿用现有的软删除，各表的行不动。
 - **清理 S3**：由 DELETED 推进到 PURGED 的清理任务负责，目前还没有实现。
@@ -415,10 +431,9 @@ playback
 | `download` | 产出改为写入 `media_original`、`media_cover`、`media_caption`、`media_lyrics`，下载后在同一步里探测（第 6.2 节） |
 | `cover` | 改名为 `preview`，读 `media.content` 和 `media.cover`，产出 `media.preview`。`recordFailure` 写入预览图的失败行。延续 `cover` 的例外：最终失败或无事可做时，也报告 `media.preview`，避免下游永远等不到它 |
 | `ai.describe`、`ai.image:<空间>` | 读的方面从 `media.cover` 改为 `media.preview`，图片来源改用 LARGE 预览图 |
-| `remux`（新增，第 3 阶段） | 读 `media.content`，为需要流式播放、但原件不是带 sidx 的单流 fMP4 的那些流，生成 `av_rendition`；最终失败写入 `av_rendition` 的失败行。播放在请求时组装，所以它的产出没有下游流水线 |
 
 - 库级的方面 `library.cover_config` 随 `Library.cover_qualities` 一起删除。
-- 新增流水线按 [job_queue.zh-Hans.md](./job_queue.zh-Hans.md) 9.4 节的步骤加入。
+- 即时打包在请求时进行（第 8.7 节），不新增流水线。以后要加流水线（比如第 17 节的派生文件），按 [job_queue.zh-Hans.md](./job_queue.zh-Hans.md) 9.4 节的步骤加入。
 
 ## 12. 迁移
 
@@ -456,22 +471,29 @@ playback
 - 修改客户端用到的 DTO，完成迁移，删除 Track。
 - 这一阶段已经能播放现有的两种形态：直接播放，以及视频和音频分开存放的 fMP4（如 B 站）。
 
-**第 3 阶段：多音轨**
+**第 3 阶段：多音轨与即时打包**
 
-- 新建 `av_rendition`，新增 `remux` 流水线。
-- 导入时开始拉取所有语言的音轨。
-- 网页播放器补上 DASH 的音轨桥接。
+- 先做原型验证：一个普通 MP4 加一个外接 M4A，即时打包成 HLS 和 DASH，在 hls.js、dash.js、AVPlayer 和一款外部播放器（如 Infuse）上验证切换音轨、跳转、音画同步。原型能跑通再正式实施。
+- 实现即时打包（第 8.7 节），接入播放组装第 4 步，按第 8.1 节决定什么时候给清单。
+- 各端按第 8.1 节选择直接播放或清单。
+- 导入时开始拉取所有语言的音轨，优先选 fMP4（第 6.1 节）。
+- 探测时把内嵌的文字字幕提取为 VTT，写入 `media_caption`（第 6.2 节，第 2 阶段尚未实现）。
+- 界面上标出第 16 节里不支持的情况，说明原因，不当作故障。
+- 网页播放器的 DASH 音轨桥接已经在第 2 阶段完成。
 
 **第 4 阶段：歌词**
 
 - 新建 `media_lyrics`。
 
-转码不在计划内。
+转码不在计划内，见第 17 节。
 
 ## 14. 待定
 
 - **外部播放器鉴权的细节**：等真正对接时再定（第 8.5 节）。
 - **预览图生成会不会带上元数据**：需要核实现在的 ffmpeg 命令（第 5 节）。
+- **AVPlayer 能否切换 MP4 内嵌的音轨**：决定 iOS 上单文件多音轨是直接播放还是走清单（第 8.1 节），要在真机上验证。
+- **外部播放器能否读出 HLS 清单里的 VTT 字幕**：决定第 8.1 节“有字幕就给清单”这一条对外部播放器是否有效，要逐款实测。
+- **mp4box.js 能否在服务端只靠 Range 请求工作**：决定即时打包是用它还是自己写解析（第 8.7 节）。
 
 ## 15. 删除清单
 
@@ -483,12 +505,72 @@ playback
 - `media-composition.ts` 里按 Track 组合的规则，由第 4 节的规则取代。
 - 客户端里管理 Track 和变体的界面（`ManageTracksDialog.vue`、`MediaVariantsManager.vue`）：改写或删除，实施时逐个确认。
 
-## 16. 参考
+## 16. 支持边界
+
+支持有边界，不无限兜底。下表是我们自己的播放器（网页、Flutter）和外部播放器（SenPlayer、VidHub、Infuse 等）的正式支持范围。边界之外的情况在界面上说明原因，不当作故障处理。
+
+| 原件情况 | 网页 | Flutter | 外部播放器 |
+|---|---|---|---|
+| MP4，单音轨 | ✓ 直接播放 | ✓ 直接播放 | ✓ 原件地址 |
+| MP4，内嵌多音轨 | ✓ 清单（即时打包） | ✓ 直接播放并切换（iOS 待验证） | ✓ 原件地址 |
+| MP4 + 外接音轨（MP4、M4A 或 fMP4） | ✓ 清单 | ✓ 清单 | ✓ 清单地址 |
+| fMP4 视频 + fMP4 音频（如 B 站） | ✓ 清单 | ✓ 清单 | ✓ 清单地址 |
+| 外挂字幕 | ✓ 播放器挂载 | ✓ 播放器挂载 | 视频能进清单时 ✓ 写进清单；VTT 支持待实测 |
+| 内嵌文字字幕（SRT、ASS、mov_text） | ✓ 提取为 VTT（ASS 丢样式） | ✓ 同左 | ✓ 播放器自己读 |
+| 内嵌图形字幕（PGS、VobSub） | ✗ | ✗ | ✓ 播放器自己读 |
+| MKV 视频 | ✗ 不支持 | Android ✓ 直接播放；iOS ✗ | ✓ 原件地址；外接音轨、外挂字幕拿不到 |
+| 外接音轨是 MP3、FLAC、AAC（ADTS）、Opus/Ogg、MKA | 这条音轨不可用 | 这条音轨不可用 | 这条音轨不可用 |
+| 编码客户端解不了（如 Chrome 上的 AC3） | 不列出这条音轨；视频解不了时提示下载原件 | 同左 | 由播放器决定 |
+
+后两类以后可以逐步补上：单独的音频格式可以按格式加进即时打包（都是“解析帧、套 fMP4 头”的同类工作），编码兼容需要转码（第 17.2 节）。
+
+## 17. 远期选项
+
+都不在当前计划内，只说明方向，并约束现在的实现不要把路堵死。
+
+### 17.1 整理原件（按库开关，默认关闭）
+
+- **只做两件事**：多流合一（把外接音轨、外挂字幕用 `-c copy` 并进主文件），以及 faststart（把 moov 移到文件头）。编码数据不变，不转码，不拆流。
+- **不拆成单流 fMP4**：那样视频文件里没有声音，下载下来是一堆零散文件，原件就不完整了。
+- **只用于用户上传的媒体**：平台导入的媒体同步时按 `source_key` 逐个替换原件，合并后就对不上了。
+- **符合“原件只增不改”**（第 2 节）：整理就是插入新原件、删除旧原件，再重新探测，不需要新表。
+- **现在要守住的**：代码里不要假设原件的字节永远和上传时一致，比如不要按原件哈希去重。
+
+### 17.2 派生文件（`av_rendition`）
+
+主要为分享准备：对方的设备和网络不确定，需要通用编码（H.264、AAC）和更低的码率，大量访问时也要能直接从 S3/CDN 读取，不经过服务端。
+
+```text
+av_rendition  id, media_id, source_stream_id → av_stream, recipe, recipe_version,
+              file_id, last_error
+              unique(source_stream_id, recipe)；index(media_id)
+              CHECK ((file_id IS NOT NULL) <> (last_error IS NOT NULL))
+```
+
+- 配方以转码为主，比如 `video-1080`、`video-720`、`audio-aac`；`remux`（`-c copy` 成单流 fMP4）也可以是一种配方。
+- **只在用户主动选择时生成**，比如创建分享链接时勾选“生成兼容版本”。界面显示占用的空间，可以随时删除。
+- 和 `media_preview` 一样，一行要么是成功的结果，要么是最终失败。产物有自己的 `av_file` 和 `av_stream` 行。删除原件时，由它派生的行一并删除。
+- 播放组装第 4 步里，派生文件排在即时打包之前（第 7 节）。
+- 分享本身（权限、链接、有效期）是另一块功能，不在本文范围内。
+
+### 17.3 WebDAV 虚拟目录
+
+给外部播放器按媒体暴露一个目录（如 `movie.mp4`、`movie.zh.vtt`），由播放器按文件名加载外挂文件，补上“视频不能进清单时外部播放器拿不到外挂字幕”这一块。等对接外部播放器时再评估。
+
+### 17.4 不做的
+
+- **存储重封装副本作为播放前提**：存储翻倍，大部分用户不会接受。
+- **在播放端转换容器**（mp4box.js 喂 MSE、原生合成、换 media_kit）：复杂度分散到每一端，外部播放器还是解决不了。
+- **服务端用 ffmpeg 实时重封装**：要常驻进程按会话代理字节流，和原件直连 S3 的结构冲突；即时打包能做到同样的事，而且不需要 ffmpeg。
+
+## 18. 参考
 
 | 做法 | 来源 |
 |---|---|
 | 媒体对象带摘要（时长、清晰度），逐条流的细节放在下一层 | YouTube Data API 的 `contentDetails` 和 `fileDetails` |
 | 每条流记录旋转角度 | Jellyfin 的 MediaStream |
 | 同一批 CMAF 分片，Web 和 Android 用 DASH，Apple 用 HLS | YouTube |
+| 只存原件，HLS/DASH 分片在请求时从 MP4 打包 | nginx-vod-module、Unified Origin、AWS MediaPackage |
+| 原件能直接播放就直接播放，不能才重封装或转码 | Jellyfin、Plex |
 | 拍摄时间等 EXIF 信息作为单独字段，不和发布时间混用 | Immich、Apple Photos |
 | 上传时去掉 EXIF | X、小红书。我们保留原件不动，所以改为在对外交付时处理 |
