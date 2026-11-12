@@ -34,6 +34,7 @@ import { addCaption, addOriginal, deleteCaption, deleteOriginal, MediaEditError,
 import { loadOriginalStates } from "@/features/media/originals";
 import { mediaStoragePath } from "@/features/media/storage";
 import { buildMediaDashManifest, buildMediaHlsMaster, buildMediaHlsRendition } from "@/features/playback/manifests";
+import { readPackagedPart } from "@/features/playback/packaging";
 import { deleteMedia, restoreMedia, trashMedia } from "@/features/media/lifecycle";
 import { getMediaAiView, summarizeAiStatus } from "@/features/ai/media-view";
 import { coverageFilter, getCoverageTargets } from "@/features/ai/coverage";
@@ -455,7 +456,7 @@ router.get("/:id/manifest.mpd", validate("param", ManifestParamSchema), async (c
     const access = await verifyMediaStreamAccess(c, mediaId);
     if (!access.ok) return access.errorResponse;
 
-    const mpd = await buildMediaDashManifest(mediaId);
+    const mpd = await buildMediaDashManifest(mediaId, querySuffixOf(c));
     if (!mpd) return c.json(error(Code.NOT_FOUND, "This media has no adaptive playback"), 404);
     c.header("Content-Type", "application/dash+xml");
     return c.text(mpd);
@@ -477,9 +478,35 @@ router.get("/:id/hls/:renditionId/manifest.m3u8", validate("param", RenditionPar
     const access = await verifyMediaStreamAccess(c, mediaId, renditionId);
     if (!access.ok) return access.errorResponse;
 
-    const m3u8 = await buildMediaHlsRendition(mediaId, renditionId);
+    const m3u8 = await buildMediaHlsRendition(mediaId, renditionId, querySuffixOf(c));
     if (!m3u8) return c.json(error(Code.NOT_FOUND, "Rendition not found"), 404);
     return c.newResponse(m3u8, 200, { "Content-Type": "application/x-mpegURL" });
+});
+
+const PackagedParamSchema = v.object({
+    id: v.pipe(v.string(), v.uuid()),
+    streamId: v.pipe(v.string(), v.uuid()),
+    name: v.string(),
+});
+
+/**
+ * An init segment (`init.mp4`) or media segment (`<n>.m4s`) packaged at request time (docs/media_refactor.zh-Hans.md,
+ * 8.7). The bytes pass through the server; they never change for a stream, so clients may cache them.
+ */
+router.get("/:id/packaged/:streamId/:name", validate("param", PackagedParamSchema), async (c) => {
+    const { id: mediaId, streamId, name } = c.req.valid("param");
+    const segment = /^(\d{1,6})\.m4s$/.exec(name);
+    if (name !== "init.mp4" && !segment) return c.json(error(Code.NOT_FOUND, "Segment not found"), 404);
+    const access = await verifyMediaStreamAccess(c, mediaId, streamId);
+    if (!access.ok) return access.errorResponse;
+
+    const part = await readPackagedPart(mediaId, streamId, segment ? { kind: "segment", index: Number(segment[1]) } : { kind: "init" });
+    if (!part) return c.json(error(Code.NOT_FOUND, "Segment not found"), 404);
+    return c.newResponse(part.body as Uint8Array<ArrayBuffer> | ReadableStream<Uint8Array>, 200, {
+        "Content-Type": part.contentType,
+        "Content-Length": String(part.size),
+        "Cache-Control": "private, max-age=86400, immutable",
+    });
 });
 
 async function verifyMediaStreamAccess(c: Context, mediaId: string, renditionId?: string): Promise<{ ok: boolean; errorResponse: any }> {

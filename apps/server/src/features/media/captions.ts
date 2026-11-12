@@ -7,7 +7,7 @@ import { AssetOrigin, DeleteStatus, File as DbFile, MediaCaption, SyncStatus } f
 import type { DbClient } from "@/global/db";
 import { env } from "@/global/env";
 import { s3 } from "@/global/s3";
-import { ProbeRejectedError } from "./probe";
+import { ProbeRejectedError, type EmbeddedCaption } from "./probe";
 import { mediaStoragePath } from "./storage";
 
 const CONVERT_TIMEOUT_MS = 120_000;
@@ -81,6 +81,46 @@ export async function insertUploadedCaption(
         .returning({ id: MediaCaption.id });
     if (declared.is_default) await makeDefaultCaption(client, mediaId, caption!.id);
     return caption!.id;
+}
+
+/**
+ * Records the text subtitle streams of a probed original as EMBEDDED captions (6.2): each extracted WebVTT is stored
+ * and the caption points at its stream; a stream that could not be extracted is recorded as FAILED. A stream marked
+ * default becomes the default caption only when the media has none yet.
+ */
+export async function insertEmbeddedCaptions(
+    client: DbClient,
+    media: { id: string; post_id: string | null },
+    streams: { id: string; stream_index: number; language: string | null; label: string | null; is_default: boolean }[],
+    captions: EmbeddedCaption[],
+): Promise<void> {
+    for (const extracted of captions) {
+        const stream = streams.find((item) => item.stream_index === extracted.stream_index);
+        if (!stream) continue;
+        const completed = "vtt" in extracted;
+        const vttFileId = completed ? await storeVtt(client, media, `embedded_${stream.id}`, extracted.vtt) : null;
+        const [caption] = await client
+            .insert(MediaCaption)
+            .values({
+                media_id: media.id,
+                origin: AssetOrigin.EMBEDDED,
+                language: stream.language,
+                label: stream.label,
+                source_stream_id: stream.id,
+                vtt_file_id: vttFileId,
+                status: completed ? SyncStatus.COMPLETED : SyncStatus.FAILED,
+                last_error: completed ? null : extracted.error,
+            })
+            .returning({ id: MediaCaption.id });
+        if (completed && stream.is_default) {
+            const [existing] = await client
+                .select({ id: MediaCaption.id })
+                .from(MediaCaption)
+                .where(and(eq(MediaCaption.media_id, media.id), eq(MediaCaption.is_default, true)))
+                .limit(1);
+            if (!existing) await makeDefaultCaption(client, media.id, caption!.id);
+        }
+    }
 }
 
 /** Deletes captions with their files, which are marked deleted. Returns the deleted caption ids. */

@@ -3,8 +3,6 @@ import type { Mp4Segment } from "./mp4-segment";
 
 export interface HlsVideoVariant {
     track_id: string;
-    stream_index?: number | null;
-    url: string;
     codec: string;
     bandwidth: number;
     width: number;
@@ -14,8 +12,6 @@ export interface HlsVideoVariant {
 
 export interface HlsAudioVariant {
     track_id: string;
-    stream_index?: number | null;
-    url: string;
     codec: string;
     bandwidth: number;
     language: string | null;
@@ -26,8 +22,6 @@ export interface HlsAudioVariant {
 
 export interface HlsSubtitleVariant {
     track_id: string;
-    stream_index?: number | null;
-    url: string;
     language: string | null;
     label: string;
     is_default?: boolean;
@@ -151,6 +145,31 @@ export function buildHlsVariantManifest(input: HlsVariantInput): string {
         lines.push(`#EXTINF:${segment.duration.toFixed(6)},`);
         lines.push(`#EXT-X-BYTERANGE:${segment.length}@${segment.offset}`);
         lines.push(url);
+    }
+    lines.push("#EXT-X-ENDLIST");
+    return lines.join("\n");
+}
+
+export interface HlsPackagedInput {
+    init_url: string;
+    /** One URL per media segment, with its duration in seconds. */
+    segments: { url: string; duration: number }[];
+}
+
+/** A media playlist of segments packaged at request time: each fragment and the init segment have their own URL. */
+export function buildHlsPackagedManifest(input: HlsPackagedInput): string {
+    const targetDuration = Math.max(1, Math.ceil(Math.max(0, ...input.segments.map((segment) => segment.duration))));
+    const lines: string[] = [
+        "#EXTM3U",
+        "#EXT-X-VERSION:6",
+        `#EXT-X-TARGETDURATION:${targetDuration}`,
+        "#EXT-X-MEDIA-SEQUENCE:0",
+        "#EXT-X-PLAYLIST-TYPE:VOD",
+        `#EXT-X-MAP:URI="${input.init_url}"`,
+    ];
+    for (const segment of input.segments) {
+        lines.push(`#EXTINF:${segment.duration.toFixed(6)},`);
+        lines.push(segment.url);
     }
     lines.push("#EXT-X-ENDLIST");
     return lines.join("\n");

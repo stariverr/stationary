@@ -43,12 +43,17 @@ export interface StreamProbe {
     sample_rate: number | null;
 }
 
+/** A text subtitle stream extracted as WebVTT, or why it could not be. */
+export type EmbeddedCaption = { stream_index: number; vtt: Uint8Array } | { stream_index: number; error: string };
+
 export interface AvProbe {
     container: string;
     duration: number | null;
     bitrate: number | null;
     segmentIndex: Mp4SegmentIndex | null;
     streams: StreamProbe[];
+    /** One per text subtitle stream; image subtitles (PGS, VobSub) are not extracted (16). */
+    captions: EmbeddedCaption[];
 }
 
 export type OriginalProbe =
@@ -124,6 +129,58 @@ interface FfprobeOutput {
     streams?: FfprobeStream[];
 }
 
+/** Subtitle codecs that carry text, which ffmpeg converts to WebVTT (ASS loses its styling). */
+const TEXT_SUBTITLE_CODECS = new Set([
+    "subrip",
+    "srt",
+    "ass",
+    "ssa",
+    "mov_text",
+    "webvtt",
+    "text",
+    "microdvd",
+    "subviewer",
+    "subviewer1",
+    "sami",
+    "realtext",
+    "jacosub",
+    "mpl2",
+    "pjs",
+    "vplayer",
+    "stl",
+]);
+
+export const isTextSubtitleCodec = (codec: string) => TEXT_SUBTITLE_CODECS.has(codec);
+
+/**
+ * Extracts every text subtitle stream to WebVTT in one pass over the file. A stream ffmpeg cannot convert is
+ * reported with its error; it does not reject the original.
+ */
+async function extractTextCaptions(url: string, streams: StreamProbe[]): Promise<EmbeddedCaption[]> {
+    const indexes = streams.filter((stream) => stream.type === AvStreamType.SUBTITLE && isTextSubtitleCodec(stream.codec)).map((stream) => stream.stream_index);
+    if (indexes.length === 0) return [];
+    const dir = await mkdtemp(join(tmpdir(), "captions-"));
+    try {
+        const outputs = indexes.flatMap((index) => ["-map", `0:${index}`, "-f", "webvtt", join(dir, `${index}.vtt`)]);
+        const process = Bun.spawn(["ffmpeg", "-hide_banner", "-nostdin", "-v", "error", "-i", url, ...outputs], {
+            stdout: "ignore",
+            stderr: "pipe",
+            timeout: PROBE_TIMEOUT_MS,
+        });
+        const [stderr, code] = await Promise.all([new Response(process.stderr).text(), process.exited]);
+        const failure = process.signalCode ? "caption extraction timed out" : code !== 0 ? stderr.trim().slice(0, 500) || `exit ${code}` : null;
+        return Promise.all(
+            indexes.map(async (index): Promise<EmbeddedCaption> => {
+                const file = Bun.file(join(dir, `${index}.vtt`));
+                if (failure || !(await file.exists())) return { stream_index: index, error: failure ?? "ffmpeg wrote no WebVTT" };
+                return { stream_index: index, vtt: await file.bytes() };
+            }),
+        );
+    } finally {
+        await rm(dir, { recursive: true, force: true });
+    }
+}
+
 const STREAM_TYPES: Record<string, AvStreamType> = { video: AvStreamType.VIDEO, audio: AvStreamType.AUDIO, subtitle: AvStreamType.SUBTITLE };
 
 function toStreamProbe(stream: FfprobeStream, codecStrings: Map<number, string | null>): StreamProbe | null {
@@ -178,6 +235,7 @@ async function probeAv(file: ProbedFile): Promise<AvProbe> {
         bitrate: positiveIntOrNull(output.format?.bit_rate),
         segmentIndex,
         streams,
+        captions: await extractTextCaptions(url, streams),
     };
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildHlsMasterManifest, buildHlsSubtitleManifest, buildHlsVariantManifest } from "@/lib/utils/hls-manifest";
+import { buildHlsMasterManifest, buildHlsPackagedManifest, buildHlsSubtitleManifest, buildHlsVariantManifest } from "@/lib/utils/hls-manifest";
 
 describe("HLS manifest generator", () => {
     test("builds master manifest with clean query parameters and signatures", () => {
@@ -8,7 +8,6 @@ describe("HLS manifest generator", () => {
             video: [
                 {
                     track_id: "track-v1",
-                    url: "https://cdn.example.test/v1.mp4",
                     codec: "avc1.640028",
                     bandwidth: 1_500_000,
                     width: 1280,
@@ -16,7 +15,6 @@ describe("HLS manifest generator", () => {
                 },
                 {
                     track_id: "track-v2",
-                    url: "https://cdn.example.test/v2.mp4",
                     codec: "avc1.640028",
                     bandwidth: 3_000_000,
                     width: 1920,
@@ -26,7 +24,6 @@ describe("HLS manifest generator", () => {
             audio: [
                 {
                     track_id: "track-a1",
-                    url: "https://cdn.example.test/a1.mp4",
                     codec: "mp4a.40.2",
                     bandwidth: 128_000,
                     language: "en",
@@ -44,7 +41,7 @@ describe("HLS manifest generator", () => {
         expect(manifest).not.toContain("??");
     });
 
-    test("marks exactly one audio and one subtitle rendition as default", () => {
+    test("marks exactly one audio rendition as default, and a subtitle only when the media marks one", () => {
         const audio = (track_id: string, is_default: boolean) => ({
             track_id,
             url: `https://cdn.example.test/${track_id}.mp4`,
@@ -65,7 +62,6 @@ describe("HLS manifest generator", () => {
         const video = [
             {
                 track_id: "v",
-                url: "https://cdn.example.test/v.mp4",
                 codec: "avc1.640028",
                 bandwidth: 1_500_000,
                 width: 1280,
@@ -94,7 +90,8 @@ describe("HLS manifest generator", () => {
             subtitle: [subtitle("s1", false), subtitle("s2", false)],
         });
         expect(defaults(unmarked, "AUDIO")).toEqual(["a1"]);
-        expect(defaults(unmarked, "SUBTITLES")).toEqual(["s1"]);
+        // Captions start off unless the media marks one as default.
+        expect(defaults(unmarked, "SUBTITLES")).toEqual([]);
     });
 
     test("lists every sidx segment as a byte range after the init map", () => {
@@ -140,5 +137,28 @@ describe("HLS manifest generator", () => {
         expect(manifest).toContain("#EXT-X-TARGETDURATION:62");
         expect(manifest).toContain("#EXTINF:61.200000,\nhttps://cdn.example.test/sub.vtt?sig=abc");
         expect(manifest).not.toContain("EXT-X-MAP");
+    });
+
+    test("lists packaged segments by their own URLs after the init map", () => {
+        const manifest = buildHlsPackagedManifest({
+            init_url: "/p/init.mp4?sig=a",
+            segments: [
+                { url: "/p/0.m4s?sig=a", duration: 6.016 },
+                { url: "/p/1.m4s?sig=a", duration: 2.5 },
+            ],
+        });
+        expect(manifest.split("\n")).toEqual([
+            "#EXTM3U",
+            "#EXT-X-VERSION:6",
+            "#EXT-X-TARGETDURATION:7",
+            "#EXT-X-MEDIA-SEQUENCE:0",
+            "#EXT-X-PLAYLIST-TYPE:VOD",
+            '#EXT-X-MAP:URI="/p/init.mp4?sig=a"',
+            "#EXTINF:6.016000,",
+            "/p/0.m4s?sig=a",
+            "#EXTINF:2.500000,",
+            "/p/1.m4s?sig=a",
+            "#EXT-X-ENDLIST",
+        ]);
     });
 });

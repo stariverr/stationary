@@ -15,28 +15,25 @@ describe("DASH manifest generator", () => {
             video: [
                 {
                     id: "video-1080",
-                    url: "https://cdn.example.test/video-1080.mp4?token=a&b=c",
                     codec: "avc1.640028",
                     bandwidth: 5_000_000,
                     width: 1920,
                     height: 1080,
                     frame_rate: 30,
-                    segment_base: segmentBase,
+                    segments: { kind: "base", url: "https://cdn.example.test/video-1080.mp4?token=a&b=c", segment_base: segmentBase },
                 },
                 {
                     id: "video-720",
-                    url: "https://cdn.example.test/video-720.mp4",
                     codec: "avc1.4d401f",
                     bandwidth: 2_500_000,
                     width: 1280,
                     height: 720,
-                    segment_base: segmentBase,
+                    segments: { kind: "base", url: "https://cdn.example.test/video-720.mp4", segment_base: segmentBase },
                 },
             ],
             audio: [
                 {
                     id: "audio-en-high",
-                    url: "https://cdn.example.test/audio-en-high.mp4",
                     codec: "mp4a.40.2",
                     bandwidth: 192_000,
                     language: "en",
@@ -44,11 +41,10 @@ describe("DASH manifest generator", () => {
                     role: "main",
                     channels: 2,
                     sample_rate: 48_000,
-                    segment_base: segmentBase,
+                    segments: { kind: "base", url: "https://cdn.example.test/audio-en-high.mp4", segment_base: segmentBase },
                 },
                 {
                     id: "audio-en-low",
-                    url: "https://cdn.example.test/audio-en-low.mp4",
                     codec: "mp4a.40.2",
                     bandwidth: 96_000,
                     language: "en",
@@ -56,18 +52,17 @@ describe("DASH manifest generator", () => {
                     role: "main",
                     channels: 2,
                     sample_rate: 48_000,
-                    segment_base: segmentBase,
+                    segments: { kind: "base", url: "https://cdn.example.test/audio-en-low.mp4", segment_base: segmentBase },
                 },
                 {
                     id: "audio-ja",
-                    url: "https://cdn.example.test/audio-ja.mp4",
                     codec: "mp4a.40.2",
                     bandwidth: 128_000,
                     language: "ja",
                     label: "Japanese",
                     role: "alternate",
                     channels: 6,
-                    segment_base: segmentBase,
+                    segments: { kind: "base", url: "https://cdn.example.test/audio-ja.mp4", segment_base: segmentBase },
                 },
             ],
         });
@@ -90,12 +85,11 @@ describe("DASH manifest generator", () => {
             video: [
                 {
                     id: "video-only",
-                    url: "https://cdn.example.test/video.mp4",
                     codec: "avc1.640028",
                     bandwidth: 1_500_000,
                     width: 1280,
                     height: 720,
-                    segment_base: segmentBase,
+                    segments: { kind: "base", url: "https://cdn.example.test/video.mp4", segment_base: segmentBase },
                 },
             ],
             audio: [],
@@ -114,25 +108,23 @@ describe("DASH manifest generator", () => {
             video: [
                 {
                     id: "video",
-                    url: "https://cdn.example.test/video.mp4",
                     codec: "avc1.640028",
                     bandwidth: 1_500_000,
                     width: 1280,
                     height: 720,
-                    segment_base: { initialization: "0-781", index_range: "782-941", timescale: 15_360, earliest_presentation_time: "1024" },
+                    segments: { kind: "base", url: "https://cdn.example.test/video.mp4", segment_base: { initialization: "0-781", index_range: "782-941", timescale: 15_360, earliest_presentation_time: "1024" } },
                 },
             ],
             audio: [
                 {
                     id: "audio",
-                    url: "https://cdn.example.test/audio.mp4",
                     codec: "mp4a.40.2",
                     bandwidth: 128_000,
                     language: "en",
                     label: "English",
                     role: "main",
                     channels: 2,
-                    segment_base: { initialization: "0-731", index_range: "732-783", timescale: 48_000, earliest_presentation_time: "0" },
+                    segments: { kind: "base", url: "https://cdn.example.test/audio.mp4", segment_base: { initialization: "0-731", index_range: "732-783", timescale: 48_000, earliest_presentation_time: "0" } },
                 },
             ],
         });
@@ -144,14 +136,13 @@ describe("DASH manifest generator", () => {
     test("converts the smallest EPT into each Representation's timescale exactly", () => {
         const representation = (id: string, timescale: number, ept: string) => ({
             id,
-            url: `https://cdn.example.test/${id}.mp4`,
             codec: "mp4a.40.2",
             bandwidth: 128_000,
             language: id,
             label: id,
             role: "main",
             channels: 2,
-            segment_base: { initialization: "0-99", index_range: "100-199", timescale, earliest_presentation_time: ept },
+            segments: { kind: "base" as const, url: `https://cdn.example.test/${id}.mp4`, segment_base: { initialization: "0-99", index_range: "100-199", timescale, earliest_presentation_time: ept } },
         });
         // Video starts at 10 s + 1 tick of a 90 kHz clock; the earliest stream starts at exactly 10 s.
         // Large values on purpose: they are past 2^53 after scaling, where float math would round.
@@ -160,12 +151,11 @@ describe("DASH manifest generator", () => {
             video: [
                 {
                     id: "video",
-                    url: "https://cdn.example.test/video.mp4",
                     codec: "avc1.640028",
                     bandwidth: 1_500_000,
                     width: 1280,
                     height: 720,
-                    segment_base: { initialization: "0-99", index_range: "100-199", timescale: 90_000, earliest_presentation_time: "900001" },
+                    segments: { kind: "base", url: "https://cdn.example.test/video.mp4", segment_base: { initialization: "0-99", index_range: "100-199", timescale: 90_000, earliest_presentation_time: "900001" } },
                 },
             ],
             audio: [representation("a", 48_000, "480000"), representation("b", 1_000_000_007, "10000000071")],
@@ -174,5 +164,47 @@ describe("DASH manifest generator", () => {
         const offsets = [...manifest.matchAll(/presentationTimeOffset="(\d+)"/g)].map((match) => match[1]);
         // video 10 s @ 90 kHz, audio a 10 s @ 48 kHz, audio b 10 s @ 1000000007 Hz
         expect(offsets).toEqual(["900000", "480000", "10000000070"]);
+    });
+
+    test("addresses packaged streams with a SegmentTemplate timeline and zeroes the Period offset", () => {
+        const manifest = buildDashManifest({
+            duration: 14,
+            video: [
+                {
+                    id: "video",
+                    codec: "avc1.640028",
+                    bandwidth: 1_500_000,
+                    width: 1280,
+                    height: 720,
+                    segments: {
+                        kind: "template",
+                        timescale: 15_360,
+                        initialization: "/api/media/m/packaged/video/init.mp4?expires=1&sig=a",
+                        media: "/api/media/m/packaged/video/$Number$.m4s?expires=1&sig=a",
+                        timeline: [
+                            { time: 0, duration: 92_160 },
+                            { time: 92_160, duration: 92_160 },
+                            { time: 184_320, duration: 30_720 },
+                        ],
+                    },
+                },
+            ],
+            audio: [
+                {
+                    id: "audio",
+                    codec: "mp4a.40.2",
+                    bandwidth: 128_000,
+                    language: "ja",
+                    label: "Japanese",
+                    role: "main",
+                    channels: 2,
+                    // An fMP4 original that starts late: with a packaged stream in the Period it keeps its own time.
+                    segments: { kind: "base", url: "https://cdn.example.test/a.mp4", segment_base: { initialization: "0-9", index_range: "10-99", timescale: 48_000, earliest_presentation_time: "4800" } },
+                },
+            ],
+        });
+        expect(manifest).toContain('<SegmentTemplate timescale="15360" initialization="/api/media/m/packaged/video/init.mp4?expires=1&amp;sig=a" media="/api/media/m/packaged/video/$Number$.m4s?expires=1&amp;sig=a" startNumber="0">');
+        expect(manifest).toContain('<S t="0" d="92160" r="1" /><S t="184320" d="30720" />');
+        expect(manifest).not.toContain("presentationTimeOffset");
     });
 });

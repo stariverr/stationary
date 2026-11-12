@@ -234,6 +234,9 @@ const PlaybackAudioTrackResponseSchema = v.object({
     label: v.nullable(v.string()),
     is_default: v.boolean(),
     channels: v.nullable(v.number()),
+    /** Whether hls_url and dash_url carry this track (docs/media_refactor.zh-Hans.md, 16). */
+    in_direct: v.boolean(),
+    in_manifest: v.boolean(),
 });
 
 const PlaybackCaptionResponseSchema = v.object({
@@ -1036,6 +1039,24 @@ const routes: RouteItem[] = [
         paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), renditionId: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: { type: "string", description: "HLS media playlist" },
+    },
+    {
+        path: "/api/media/:id/packaged/:streamId/init.mp4",
+        method: "get",
+        summary: "Init segment of a stream packaged at request time from a non-fragmented MP4, MOV or M4A",
+        tags: ["Media"],
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), streamId: v.pipe(v.string(), v.uuid()) }),
+        requiresAuth: true,
+        responseSchema: { type: "string", format: "binary", description: "fMP4 init segment" },
+    },
+    {
+        path: "/api/media/:id/packaged/:streamId/:segment.m4s",
+        method: "get",
+        summary: "Media segment of a stream packaged at request time; numbered from 0",
+        tags: ["Media"],
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), streamId: v.pipe(v.string(), v.uuid()), segment: v.string() }),
+        requiresAuth: true,
+        responseSchema: { type: "string", format: "binary", description: "fMP4 media segment (moof + mdat)" },
     },
     {
         path: "/api/media/update-info/:id",

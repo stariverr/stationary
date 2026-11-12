@@ -19,6 +19,7 @@ import {
 import type { DbClient } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
+import { insertEmbeddedCaptions } from "./captions";
 import { displaySize, isImageFile, isPdfFile, type AvProbe, type OriginalProbe } from "./probe";
 
 type OriginalRow = typeof MediaOriginal.$inferSelect;
@@ -120,7 +121,10 @@ export interface Declarations {
     is_default?: boolean | null;
 }
 
-/** Records the probe of an original's file: stream facts for audio and video, the displayed size for an image. */
+/**
+ * Records the probe of an original's file: stream facts and embedded text captions for audio and video, the
+ * displayed size for an image.
+ */
 async function storeProbe(
     client: DbClient,
     media: { id: string; type: MediaType },
@@ -131,7 +135,13 @@ async function storeProbe(
     if (probe.kind === "IMAGE" && (media.type === MediaType.IMAGE || media.type === MediaType.LIVE_PHOTO)) {
         await client.update(Media).set({ display_width: probe.width, display_height: probe.height }).where(eq(Media.id, media.id));
     }
-    return probe.kind === "AV" ? insertAvRows(client, fileId, probe.av, declared) : [];
+    if (probe.kind !== "AV") return [];
+    const streams = await insertAvRows(client, fileId, probe.av, declared);
+    if (probe.av.captions.length > 0) {
+        const [row] = await client.select({ id: Media.id, post_id: Media.post_id }).from(Media).where(eq(Media.id, media.id));
+        if (row) await insertEmbeddedCaptions(client, row, streams, probe.av.captions);
+    }
+    return streams;
 }
 
 /** Inserts the `av_file` and `av_stream` rows of a probed file; declarations apply to its audio streams. */

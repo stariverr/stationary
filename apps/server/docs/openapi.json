@@ -2498,6 +2498,12 @@
                                         "channels": {
                                           "type": "number",
                                           "nullable": true
+                                        },
+                                        "in_direct": {
+                                          "type": "boolean"
+                                        },
+                                        "in_manifest": {
+                                          "type": "boolean"
                                         }
                                       },
                                       "required": [
@@ -2507,7 +2513,9 @@
                                         "language",
                                         "label",
                                         "is_default",
-                                        "channels"
+                                        "channels",
+                                        "in_direct",
+                                        "in_manifest"
                                       ]
                                     }
                                   },
@@ -4065,6 +4073,12 @@
                                   "channels": {
                                     "type": "number",
                                     "nullable": true
+                                  },
+                                  "in_direct": {
+                                    "type": "boolean"
+                                  },
+                                  "in_manifest": {
+                                    "type": "boolean"
                                   }
                                 },
                                 "required": [
@@ -4074,7 +4088,9 @@
                                   "language",
                                   "label",
                                   "is_default",
-                                  "channels"
+                                  "channels",
+                                  "in_direct",
+                                  "in_manifest"
                                 ]
                               }
                             },
@@ -5302,6 +5318,150 @@
           },
           {
             "name": "renditionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/media/{id}/packaged/{streamId}/init.mp4": {
+      "get": {
+        "summary": "Init segment of a stream packaged at request time from a non-fragmented MP4, MOV or M4A",
+        "tags": [
+          "Media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary",
+                  "description": "fMP4 init segment"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized / Not logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 40101
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "streamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/media/{id}/packaged/{streamId}/{segment}.m4s": {
+      "get": {
+        "summary": "Media segment of a stream packaged at request time; numbered from 0",
+        "tags": [
+          "Media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary",
+                  "description": "fMP4 media segment (moof + mdat)"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized / Not logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 40101
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "streamId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "segment",
             "in": "path",
             "required": true,
             "schema": {

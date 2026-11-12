@@ -38,7 +38,13 @@ const DeclaredTextSchema = v.pipe(
     v.transform((value) => value || null),
 );
 
-/** A file of the media as published: its video, separate audio or image. Its streams are probed after download. */
+/**
+ * A file of the media as published: its video, separate audio or image. Its streams are probed after download.
+ * When a platform offers one audio track in several formats, send the fMP4 / M4A one (docs/media_refactor.zh-Hans.md,
+ * 6.1): manifests reference it directly or package it at request time, while WebM, MP3, FLAC, ADTS AAC or Ogg audio
+ * cannot go into a manifest and stays unavailable there (16). Send every language's audio track, each with its
+ * `language`, and mark the platform's original audio `is_default`.
+ */
 export const ImportOriginalSchema = v.object({
     url: SourceUrlSchema,
     source_key: SourceKeySchema,
