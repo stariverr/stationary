@@ -162,6 +162,12 @@ class PlaybackAudioTrack {
   final bool isDefault;
   final int channels;
 
+  /// Whether `directUrl` carries this track.
+  final bool inDirect;
+
+  /// Whether the HLS and DASH manifests carry this track.
+  final bool inManifest;
+
   PlaybackAudioTrack({
     required this.id,
     required this.codec,
@@ -170,6 +176,8 @@ class PlaybackAudioTrack {
     this.label,
     required this.isDefault,
     required this.channels,
+    required this.inDirect,
+    required this.inManifest,
   });
 
   factory PlaybackAudioTrack.fromJson(Map<String, dynamic> json) {
@@ -181,6 +189,8 @@ class PlaybackAudioTrack {
       label: json['label'] as String?,
       isDefault: json['is_default'] as bool,
       channels: (json['channels'] as num).toInt(),
+      inDirect: json['in_direct'] as bool,
+      inManifest: json['in_manifest'] as bool,
     );
   }
 }
@@ -254,9 +264,26 @@ class MediaPlayback {
     );
   }
 
-  /// The one source every platform plays: the HLS manifest when the media
-  /// has one (AVPlayer cannot play DASH), else the original itself.
-  String get sourceUrl => hlsUrl ?? directUrl;
+  /// Whether the player streams the HLS manifest (AVPlayer has no DASH):
+  /// only when the original lacks an audio track, i.e. the media has another
+  /// original. Several tracks inside the original play directly and switch in
+  /// the player (docs/media_refactor 8.1).
+  bool get usesManifest =>
+      hlsUrl != null && audioTracks.any((track) => !track.inDirect);
+
+  String get sourceUrl => usesManifest ? hlsUrl! : directUrl;
+
+  /// The audio tracks the played source carries, in the order the platform
+  /// player lists them.
+  List<PlaybackAudioTrack> get playableAudioTracks => audioTracks
+      .where((track) => usesManifest ? track.inManifest : track.inDirect)
+      .toList();
+
+  /// Tracks the played source cannot carry, e.g. an external MP3 the
+  /// manifests cannot hold (docs/media_refactor 16).
+  List<PlaybackAudioTrack> get unavailableAudioTracks => audioTracks
+      .where((track) => !(usesManifest ? track.inManifest : track.inDirect))
+      .toList();
 }
 
 class Media {

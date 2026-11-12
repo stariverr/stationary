@@ -1,9 +1,12 @@
 import 'dart:async';
+
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:http/http.dart' as http;
+
 import '../services/api_service.dart';
 import '../models.dart';
 import 'premium_image.dart';
@@ -71,8 +74,8 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   List<WebVttCue>? _subtitleCues;
   String? _selectedCaptionId;
 
-  // Audio renditions the platform player reports for the HLS manifest, in
-  // manifest order (the order of `playback.audioTracks`).
+  // Audio tracks the platform player reports for the played source, in the
+  // order of `playback.playableAudioTracks`.
   List<VideoAudioTrack> _platformAudioTracks = const [];
   String? _selectedAudioTrackId;
 
@@ -87,10 +90,24 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   }
 
   /// iOS/macOS need HLS (AVPlayer has no DASH); Android plays the same
-  /// manifest so there is one code path. Media without a manifest play their
-  /// original directly (docs/media_refactor §8.3).
+  /// manifest so there is one code path. Everything else plays the original
+  /// directly (docs/media_refactor 8.1).
   void _checkAndInitPlayer() {
-    _initPlayer(_resolveUrl(widget.playback.sourceUrl));
+    final playback = widget.playback;
+    // AVPlayer cannot open Matroska (docs/media_refactor 16).
+    if (!playback.usesManifest &&
+        playback.directMimeType.contains('matroska') &&
+        (defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.macOS)) {
+      setState(() {
+        _isInitializing = false;
+        _error =
+            'MKV videos cannot play on this device. '
+            'Open the original in another player.';
+      });
+      return;
+    }
+    _initPlayer(_resolveUrl(playback.sourceUrl));
   }
 
   Future<void> _initPlayer(String resolvedUrl) async {
@@ -117,8 +134,9 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
       // Listen to events to trigger setState for custom controls updates
       _videoPlayerController!.addListener(_onVideoControllerUpdate);
       await _loadPlatformAudioTracks();
-      final defaultCaption =
-          widget.playback.captions.where((c) => c.isDefault).firstOrNull;
+      final defaultCaption = widget.playback.captions
+          .where((c) => c.isDefault)
+          .firstOrNull;
       if (defaultCaption != null) _selectCaption(defaultCaption);
 
       if (widget.autoPlay) {
@@ -153,7 +171,8 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     if (mounted) {
       if (!_isVideoReadyToPaint && _videoPlayerController != null) {
         final val = _videoPlayerController!.value;
-        if (val.isInitialized && (val.isPlaying || val.position > Duration.zero)) {
+        if (val.isInitialized &&
+            (val.isPlaying || val.position > Duration.zero)) {
           _isVideoReadyToPaint = true;
         }
       }
@@ -443,13 +462,12 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     }
   }
 
-  /// Audio tracks can only be switched inside the HLS manifest; direct play
-  /// carries the default audio alone (docs/media_refactor §8.1).
+  /// Switches between the tracks of the played source: the renditions of the
+  /// manifest, or the tracks inside the original (docs/media_refactor 8.1).
   Future<void> _loadPlatformAudioTracks() async {
     final controller = _videoPlayerController!;
-    if (widget.playback.hlsUrl == null ||
-        widget.playback.audioTracks.length < 2 ||
-        !controller.isAudioTrackSupportAvailable()) {
+    final tracks = widget.playback.playableAudioTracks;
+    if (tracks.length < 2 || !controller.isAudioTrackSupportAvailable()) {
       return;
     }
     try {
@@ -457,7 +475,7 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
       // The platform picks a rendition by system language; the media's default
       // track wins instead, so playback matches the menu and the web player.
       if (!_canSwitchAudio) return;
-      final index = widget.playback.audioTracks.indexWhere((t) => t.isDefault);
+      final index = tracks.indexWhere((t) => t.isDefault);
       if (index < 0 || _platformAudioTracks[index].isSelected) return;
       await controller.selectAudioTrack(_platformAudioTracks[index].id);
     } catch (_) {
@@ -465,14 +483,16 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     }
   }
 
-  /// The manifest lists its renditions in `playback.audioTracks` order, so
-  /// the platform tracks map by position once both lists agree in length.
+  /// The manifest lists its renditions, and the original its tracks, in
+  /// `playback.playableAudioTracks` order, so the platform tracks map by
+  /// position once both lists agree in length.
   bool get _canSwitchAudio =>
-      _platformAudioTracks.length == widget.playback.audioTracks.length &&
+      _platformAudioTracks.length ==
+          widget.playback.playableAudioTracks.length &&
       _platformAudioTracks.length > 1;
 
   PlaybackAudioTrack? get _activeAudioTrack {
-    final tracks = widget.playback.audioTracks;
+    final tracks = widget.playback.playableAudioTracks;
     if (tracks.isEmpty) return null;
     return tracks.where((t) => t.id == _selectedAudioTrackId).firstOrNull ??
         tracks.where((t) => t.isDefault).firstOrNull ??
@@ -480,7 +500,7 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   }
 
   Future<void> _selectAudioTrack(PlaybackAudioTrack track) async {
-    final index = widget.playback.audioTracks.indexOf(track);
+    final index = widget.playback.playableAudioTracks.indexOf(track);
     setState(() => _selectedAudioTrackId = track.id);
     try {
       await _videoPlayerController?.selectAudioTrack(
@@ -499,20 +519,22 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
   }
 
   bool get _hasSettings =>
-      _canSwitchAudio || widget.playback.captions.isNotEmpty;
+      _canSwitchAudio ||
+      widget.playback.unavailableAudioTracks.isNotEmpty ||
+      widget.playback.captions.isNotEmpty;
 
   Widget _buildSettingsTile({
     required String title,
     String? subtitle,
     required bool isActive,
-    required VoidCallback onTap,
+    required VoidCallback? onTap,
   }) {
     const activeTextColor = Colors.white;
     const activeAccentColor = Color(0xFF38BDF8); // Vibrant cyan / sky blue
     final activeBgColor = activeAccentColor.withValues(alpha: 0.15);
     final inactiveTextColor = Colors.white.withValues(alpha: 0.7);
 
-    return Material(
+    final tile = Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
@@ -543,7 +565,9 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                       style: TextStyle(
                         color: isActive ? activeTextColor : inactiveTextColor,
                         fontSize: 13,
-                        fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                        fontWeight: isActive
+                            ? FontWeight.w600
+                            : FontWeight.normal,
                       ),
                     ),
                     if (subtitle != null && subtitle.isNotEmpty) ...[
@@ -572,6 +596,11 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
         ),
       ),
     );
+    // An unselectable track is dimmed; the playing one stays lit even when it
+    // is the only choice.
+    return onTap == null && !isActive
+        ? Opacity(opacity: 0.5, child: tile)
+        : tile;
   }
 
   Widget _buildSettingsContent() {
@@ -618,26 +647,37 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
           ),
           const Divider(color: Colors.white10),
 
-          if (_canSwitchAudio) ...[
+          if (_canSwitchAudio ||
+              playback.unavailableAudioTracks.isNotEmpty) ...[
             sectionTitle('Audio Track'),
             ...playback.audioTracks.indexed.map((entry) {
               final (index, a) = entry;
               final language = _formatLanguageName(a.language);
-              final title = a.label ??
+              final title =
+                  a.label ??
                   (language.isNotEmpty ? language : 'Audio ${index + 1}');
+              // Tracks the played source cannot carry are listed with the
+              // reason (docs/media_refactor 16).
+              final available = playback.playableAudioTracks.contains(a);
+              if (available && !_canSwitchAudio && a.id != activeAudio?.id) {
+                return const SizedBox.shrink();
+              }
               final details = [
                 if (language.isNotEmpty && !title.contains(language)) language,
                 a.codec.toUpperCase(),
                 '${a.channels} ch',
+                if (!available) 'Format not supported',
               ];
               return _buildSettingsTile(
                 title: title,
                 subtitle: details.join(' • '),
-                isActive: a.id == activeAudio?.id,
-                onTap: () {
-                  _selectAudioTrack(a);
-                  setState(() => _showSettingsMenu = false);
-                },
+                isActive: available && a.id == activeAudio?.id,
+                onTap: available && _canSwitchAudio
+                    ? () {
+                        _selectAudioTrack(a);
+                        setState(() => _showSettingsMenu = false);
+                      }
+                    : null,
               );
             }),
             const Divider(color: Colors.white10),
@@ -659,7 +699,8 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
             ...playback.captions.indexed.map((entry) {
               final (index, c) = entry;
               final language = _formatLanguageName(c.language);
-              var title = c.label ??
+              var title =
+                  c.label ??
                   (language.isNotEmpty ? language : 'Caption ${index + 1}');
               if (c.label != null &&
                   language.isNotEmpty &&
@@ -695,7 +736,7 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     final duration = _videoPlayerController != null
         ? _formatDuration(_videoPlayerController!.value.duration)
         : 'Unknown';
-    final formatStr = playback.hlsUrl != null
+    final formatStr = playback.usesManifest
         ? 'HLS'
         : 'Direct (${playback.directMimeType})';
 
@@ -762,9 +803,15 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
           infoRow('Format', formatStr),
           infoRow('Resolution', resolution),
           infoRow('Duration', duration),
-          infoRow('Video Codec', video?.codecString ?? video?.codec ?? 'Unknown'),
+          infoRow(
+            'Video Codec',
+            video?.codecString ?? video?.codec ?? 'Unknown',
+          ),
           if (video?.frameRate != null)
-            infoRow('Frame Rate', '${video!.frameRate!.toStringAsFixed(2)} fps'),
+            infoRow(
+              'Frame Rate',
+              '${video!.frameRate!.toStringAsFixed(2)} fps',
+            ),
           infoRow(
             'Audio Codec',
             activeAudio?.codecString ?? activeAudio?.codec ?? 'None',
@@ -804,7 +851,9 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
       shape: CircleBorder(
         side: (emphasized || isCenterPlay)
             ? BorderSide(
-                color: Colors.white.withValues(alpha: isCenterPlay ? 0.3 : 0.22),
+                color: Colors.white.withValues(
+                  alpha: isCenterPlay ? 0.3 : 0.22,
+                ),
                 width: 1,
               )
             : BorderSide.none,
@@ -815,11 +864,7 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
         child: SizedBox(
           width: buttonSize,
           height: buttonSize,
-          child: Icon(
-            icon,
-            color: Colors.white,
-            size: iconSize,
-          ),
+          child: Icon(icon, color: Colors.white, size: iconSize),
         ),
       ),
     );
@@ -886,10 +931,7 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
           fit: StackFit.expand,
           children: [
             if (widget.posterUrl != null && widget.posterUrl!.isNotEmpty)
-              PremiumImage(
-                imageUrl: widget.posterUrl!,
-                fit: BoxFit.contain,
-              ),
+              PremiumImage(imageUrl: widget.posterUrl!, fit: BoxFit.contain),
             const Center(
               child: SizedBox(
                 width: 28,
@@ -906,7 +948,10 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
     }
 
     final controller = _videoPlayerController!;
-    final showCoverOverlay = !_isVideoReadyToPaint || _isInitializing || !controller.value.isInitialized;
+    final showCoverOverlay =
+        !_isVideoReadyToPaint ||
+        _isInitializing ||
+        !controller.value.isInitialized;
 
     return ClipRRect(
       borderRadius: widget.borderRadius ?? BorderRadius.zero,
@@ -922,11 +967,11 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                       child: VideoPlayer(controller),
                     )
                   : (widget.posterUrl != null && widget.posterUrl!.isNotEmpty
-                      ? PremiumImage(
-                          imageUrl: widget.posterUrl!,
-                          fit: BoxFit.contain,
-                        )
-                      : Container(color: Colors.black)),
+                        ? PremiumImage(
+                            imageUrl: widget.posterUrl!,
+                            fit: BoxFit.contain,
+                          )
+                        : Container(color: Colors.black)),
             ),
 
             if (widget.posterUrl != null && widget.posterUrl!.isNotEmpty)
@@ -1182,9 +1227,7 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                                   overflow: TextOverflow.fade,
                                   softWrap: false,
                                   style: TextStyle(
-                                    color: Colors.white.withValues(
-                                      alpha: 0.9,
-                                    ),
+                                    color: Colors.white.withValues(alpha: 0.9),
                                     fontSize: isCompact ? 10 : 11,
                                     fontWeight: FontWeight.w600,
                                     fontFeatures: const [
@@ -1260,8 +1303,12 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                                 ],
                                 SizedBox(width: spacing),
                                 _buildControlButton(
-                                  icon: _isFullscreen ? LucideIcons.minimize : LucideIcons.maximize,
-                                  tooltip: _isFullscreen ? 'Exit Fullscreen' : 'Fullscreen',
+                                  icon: _isFullscreen
+                                      ? LucideIcons.minimize
+                                      : LucideIcons.maximize,
+                                  tooltip: _isFullscreen
+                                      ? 'Exit Fullscreen'
+                                      : 'Fullscreen',
                                   onPressed: () {
                                     setState(() {
                                       _isFullscreen = !_isFullscreen;
@@ -1270,9 +1317,14 @@ class _PremiumVideoPlayerState extends State<PremiumVideoPlayer> {
                                       widget.onFullscreen!();
                                     }
                                     if (_isFullscreen) {
-                                      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+                                      SystemChrome.setEnabledSystemUIMode(
+                                        SystemUiMode.immersiveSticky,
+                                      );
                                     } else {
-                                      SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
+                                      SystemChrome.setEnabledSystemUIMode(
+                                        SystemUiMode.manual,
+                                        overlays: SystemUiOverlay.values,
+                                      );
                                     }
                                   },
                                 ),

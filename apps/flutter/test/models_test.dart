@@ -43,6 +43,8 @@ void main() {
             'label': null,
             'is_default': false,
             'channels': 2,
+            'in_direct': true,
+            'in_manifest': true,
           },
           {
             'id': 'a2',
@@ -52,6 +54,8 @@ void main() {
             'label': 'Japanese',
             'is_default': true,
             'channels': 6,
+            'in_direct': false,
+            'in_manifest': true,
           },
         ],
         'captions': [
@@ -112,6 +116,57 @@ void main() {
     expect(playback.video?.rotation, 90);
     expect(playback.audioTracks.map((a) => a.isDefault), [false, true]);
     expect(playback.captions.single.vttUrl, 'https://cdn.test/c1.vtt');
+  });
+
+  test('several tracks in the original play directly despite a manifest', () {
+    PlaybackAudioTrack track(String id, {bool inManifest = true}) =>
+        PlaybackAudioTrack(
+          id: id,
+          codec: 'aac',
+          isDefault: id == 'a1',
+          channels: 2,
+          inDirect: true,
+          inManifest: inManifest,
+        );
+    final playback = MediaPlayback(
+      directUrl: 'https://cdn.test/video.mp4',
+      directMimeType: 'video/mp4',
+      hlsUrl: '/api/media/m1/manifest.m3u8?sig=x',
+      audioTracks: [track('a1'), track('a2')],
+      captions: const [],
+    );
+    expect(playback.sourceUrl, 'https://cdn.test/video.mp4');
+    expect(playback.playableAudioTracks.map((a) => a.id), ['a1', 'a2']);
+    expect(playback.unavailableAudioTracks, isEmpty);
+
+    final external = MediaPlayback(
+      directUrl: 'https://cdn.test/video.mp4',
+      directMimeType: 'video/mp4',
+      hlsUrl: '/api/media/m1/manifest.m3u8?sig=x',
+      audioTracks: [
+        track('a1'),
+        PlaybackAudioTrack(
+          id: 'mp3',
+          codec: 'mp3',
+          isDefault: false,
+          channels: 2,
+          inDirect: false,
+          inManifest: false,
+        ),
+        PlaybackAudioTrack(
+          id: 'm4a',
+          codec: 'aac',
+          isDefault: false,
+          channels: 2,
+          inDirect: false,
+          inManifest: true,
+        ),
+      ],
+      captions: const [],
+    );
+    expect(external.sourceUrl, '/api/media/m1/manifest.m3u8?sig=x');
+    expect(external.playableAudioTracks.map((a) => a.id), ['a1', 'm4a']);
+    expect(external.unavailableAudioTracks.single.id, 'mp3');
   });
 
   test('media without a manifest plays its original directly', () {
