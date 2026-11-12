@@ -879,7 +879,8 @@
             "pdf_document": "PDF 文件",
             "open_pdf": "在新分頁中開啟 PDF",
             "player": {
-                "unsupported_codec": "此瀏覽器無法播放該影片的格式。請下載原始檔案觀看。"
+                "unsupported_codec": "此瀏覽器無法播放該影片的格式。請下載原始檔案觀看。",
+                "audio_track_unavailable": "格式不支援"
             }
         },
         "toasts": {

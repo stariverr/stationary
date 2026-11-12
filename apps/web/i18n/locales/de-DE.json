@@ -101,7 +101,8 @@
             "pdf_document": "PDF-Dokument",
             "open_pdf": "PDF in neuem Tab öffnen",
             "player": {
-                "unsupported_codec": "Dieser Browser kann das Format dieses Videos nicht abspielen. Lade die Originaldatei herunter, um es anzusehen."
+                "unsupported_codec": "Dieser Browser kann das Format dieses Videos nicht abspielen. Lade die Originaldatei herunter, um es anzusehen.",
+                "audio_track_unavailable": "Format nicht unterstützt"
             }
         },
         "toasts": {

@@ -1002,7 +1002,8 @@
                 "audio_tracks": "Audio Tracks",
                 "default_subtitle": "Default Subtitle",
                 "protocol": "Streaming Protocol",
-                "unsupported_codec": "This browser can't play this video's format. Download the original file to watch it."
+                "unsupported_codec": "This browser can't play this video's format. Download the original file to watch it.",
+                "audio_track_unavailable": "Format not supported"
             },
             "download": "Download",
             "open_original": "Open original in new tab"

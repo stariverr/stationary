@@ -101,7 +101,8 @@
             "pdf_document": "Documento PDF",
             "open_pdf": "Abrir PDF num novo separador",
             "player": {
-                "unsupported_codec": "Este navegador não consegue reproduzir o formato deste vídeo. Transfira o ficheiro original para o ver."
+                "unsupported_codec": "Este navegador não consegue reproduzir o formato deste vídeo. Transfira o ficheiro original para o ver.",
+                "audio_track_unavailable": "Formato não suportado"
             }
         },
         "toasts": {

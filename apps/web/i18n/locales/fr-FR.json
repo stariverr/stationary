@@ -101,7 +101,8 @@
             "pdf_document": "Document PDF",
             "open_pdf": "Ouvrir le PDF dans un nouvel onglet",
             "player": {
-                "unsupported_codec": "Ce navigateur ne peut pas lire le format de cette vidéo. Téléchargez le fichier original pour la regarder."
+                "unsupported_codec": "Ce navigateur ne peut pas lire le format de cette vidéo. Téléchargez le fichier original pour la regarder.",
+                "audio_track_unavailable": "Format non pris en charge"
             }
         },
         "toasts": {

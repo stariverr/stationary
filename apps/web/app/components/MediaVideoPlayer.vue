@@ -65,6 +65,7 @@ interface SettingsOption {
     label: string;
     hint?: string;
     selected: boolean;
+    disabled?: boolean;
     select: () => void;
 }
 
@@ -209,14 +210,17 @@ const resolveUrl = (url: string) => {
     return import.meta.client ? new URL(url, window.location.origin).toString() : url;
 };
 
-// A media that needs a manifest (separate video and audio, or several audio tracks) streams over HLS or DASH;
-// anything else plays its original directly.
+// The server offers manifests whenever a client might need one (8.1); this browser takes one only when the original
+// alone lacks an audio track it can play: a track in another original, or a second track (browsers cannot switch the
+// tracks of a file). Anything else plays the original directly, captions included.
 const protocolUrls = computed<Partial<Record<StreamingProtocol, string>>>(() => ({
     ...(props.playback.hls_url ? { HLS: resolveUrl(props.playback.hls_url) } : {}),
     ...(props.playback.dash_url ? { DASH: resolveUrl(props.playback.dash_url) } : {}),
 }));
 const availableProtocols = computed(() => (["HLS", "DASH"] as const).filter((protocol) => Boolean(protocolUrls.value[protocol])));
-const isStreaming = computed(() => availableProtocols.value.length > 0);
+const playableAudioTracks = computed(() => props.playback.audio_tracks.filter((track) => isCodecSupported("audio", track.codec_string)));
+const needsManifest = computed(() => playableAudioTracks.value.length > 1 || playableAudioTracks.value.some((track) => !track.in_direct));
+const isStreaming = computed(() => availableProtocols.value.length > 0 && needsManifest.value);
 const directSrc = computed(() => resolveUrl(props.playback.direct_url));
 
 // HLS plays through hls.js everywhere (Safari included); DASH is chosen from the player settings. A protocol that
@@ -233,7 +237,7 @@ const preferredProtocol = computed<StreamingProtocol>({
     },
 });
 
-const canChooseProtocol = computed(() => availableProtocols.value.length > 1);
+const canChooseProtocol = computed(() => isStreaming.value && availableProtocols.value.length > 1);
 const activeProtocol = computed<StreamingProtocol>(() =>
     availableProtocols.value.includes(preferredProtocol.value)
         ? preferredProtocol.value
@@ -250,7 +254,17 @@ const hlsSource = computed<HlsSource>(() => ({
 
 const dashSource = computed<DashSource>(() => ({
     src: protocolUrls.value.DASH ?? "",
-    engine: { dashJs: { streaming: { cmcd: { enabled: false } } } },
+    // dash.js otherwise restores the audio language last picked on any video (cached in localStorage) ahead of the
+    // manifest's main role; each media starts on its own default audio track instead.
+    engine: {
+        dashJs: {
+            streaming: {
+                cmcd: { enabled: false },
+                lastMediaSettingsCachingInfo: { enabled: false },
+                saveLastMediaSettingsForCurrentStreamingSession: false,
+            },
+        },
+    },
 }));
 
 const engineRef = ref<HTMLElement | null>(null);
@@ -270,9 +284,13 @@ watch(engineRef, (engine, _previous, onCleanup) => {
 });
 
 // The server reports every stream's codec and leaves support to the client. A video stream this browser cannot
-// decode is not played at all; audio tracks it cannot decode are left out of the audio menu.
+// decode is not played at all; audio tracks it cannot decode are left out of the audio menu. An original in a
+// container the browser cannot open (MKV, 16) plays only through a manifest.
 const isVideoSupported = computed(() => {
-    const { video, audio_tracks } = props.playback;
+    const { video, audio_tracks, direct_mime_type } = props.playback;
+    if (!isStreaming.value && /matroska/i.test(direct_mime_type) && document.createElement("video").canPlayType(direct_mime_type) === "") {
+        return false;
+    }
     if (video) return isCodecSupported("video", video.codec_string);
     return audio_tracks.length === 0 || audio_tracks.some((track) => isCodecSupported("audio", track.codec_string));
 });
@@ -392,7 +410,23 @@ const audioOptions = computed<SettingsOption[]>(() => {
     });
 });
 
-const audioAvailable = computed(() => audioOptions.value.length > 1);
+// Tracks the chosen way of playing cannot carry (16): an audio format the manifests cannot hold, or a track outside
+// the original when no manifest is offered. They are listed so the menu says why they cannot be picked.
+const unavailableAudioOptions = computed<SettingsOption[]>(() =>
+    playableAudioTracks.value
+        .filter((track) => !(isStreaming.value ? track.in_manifest : track.in_direct))
+        .map((track) => ({
+            key: `unavailable:${track.id}`,
+            label: formatLanguageLabel(track.language, track.label),
+            hint: t("post_detail.viewer.player.audio_track_unavailable"),
+            selected: false,
+            disabled: true,
+            select: () => {},
+        })),
+);
+
+const audioMenuOptions = computed(() => [...audioOptions.value, ...unavailableAudioOptions.value]);
+const audioAvailable = computed(() => audioMenuOptions.value.length > 1);
 
 const subtitleOptions = computed<SettingsOption[]>(() => {
     const tracks: PlayerTextTrack[] = playerState.value?.textTrackList ?? [];
@@ -437,7 +471,7 @@ const speedSettingsOptions = computed<SettingsOption[]>(() =>
 const settingsOptions = computed<SettingsOption[] | null>(() => {
     switch (activeSettingsTab.value) {
         case "audio":
-            return audioAvailable.value ? audioOptions.value : null;
+            return audioAvailable.value ? audioMenuOptions.value : null;
         case "subtitles":
             if (subtitleOptions.value.length === 0) return null;
             return [
@@ -809,6 +843,7 @@ onBeforeUnmount(() => {
                                                     class="settings-radio"
                                                     :aria-checked="option.selected"
                                                     :data-checked="option.selected || undefined"
+                                                    :disabled="option.disabled"
                                                     @click.stop="option.select()"
                                                 >
                                                     <span class="settings-radio-label">{{ option.label }}</span>
@@ -1142,7 +1177,12 @@ onBeforeUnmount(() => {
     transition: all 120ms ease;
 }
 
-.settings-radio:hover {
+.settings-radio:disabled {
+    cursor: default;
+    opacity: 0.5;
+}
+
+.settings-radio:not(:disabled):hover {
     background: rgba(0, 0, 0, 0.08);
     color: #000000;
 }

@@ -1002,7 +1002,8 @@
                 "audio_tracks": "音轨",
                 "default_subtitle": "默认字幕",
                 "protocol": "播放协议",
-                "unsupported_codec": "此浏览器无法播放该视频的格式。请下载原始文件观看。"
+                "unsupported_codec": "此浏览器无法播放该视频的格式。请下载原始文件观看。",
+                "audio_track_unavailable": "格式不支持"
             },
             "download": "下载",
             "open_original": "在新标签页打开原文件"

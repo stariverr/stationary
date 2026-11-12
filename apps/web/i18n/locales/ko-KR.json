@@ -101,7 +101,8 @@
             "pdf_document": "PDF 문서",
             "open_pdf": "새 탭에서 PDF 열기",
             "player": {
-                "unsupported_codec": "이 브라우저에서는 이 동영상 형식을 재생할 수 없습니다. 원본 파일을 다운로드해 시청하세요."
+                "unsupported_codec": "이 브라우저에서는 이 동영상 형식을 재생할 수 없습니다. 원본 파일을 다운로드해 시청하세요.",
+                "audio_track_unavailable": "지원되지 않는 형식"
             }
         },
         "toasts": {

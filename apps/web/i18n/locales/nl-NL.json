@@ -101,7 +101,8 @@
             "pdf_document": "PDF-document",
             "open_pdf": "PDF in een nieuw tabblad openen",
             "player": {
-                "unsupported_codec": "Deze browser kan het formaat van deze video niet afspelen. Download het originele bestand om hem te bekijken."
+                "unsupported_codec": "Deze browser kan het formaat van deze video niet afspelen. Download het originele bestand om hem te bekijken.",
+                "audio_track_unavailable": "Indeling niet ondersteund"
             }
         },
         "toasts": {

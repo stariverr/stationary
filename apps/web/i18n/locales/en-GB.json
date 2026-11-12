@@ -173,7 +173,8 @@
             "pdf_document": "PDF document",
             "open_pdf": "Open PDF in a new tab",
             "player": {
-                "unsupported_codec": "This browser can't play this video's format. Download the original file to watch it."
+                "unsupported_codec": "This browser can't play this video's format. Download the original file to watch it.",
+                "audio_track_unavailable": "Format not supported"
             }
         },
         "toasts": {

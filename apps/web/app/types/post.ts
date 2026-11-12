@@ -50,6 +50,10 @@ export const PlaybackAudioTrackSchema = v.object({
     label: v.nullable(v.string()),
     is_default: v.boolean(),
     channels: v.number(),
+    /** Whether `direct_url` carries this track. */
+    in_direct: v.boolean(),
+    /** Whether the HLS and DASH manifests carry this track. */
+    in_manifest: v.boolean(),
 });
 export type PlaybackAudioTrack = v.InferOutput<typeof PlaybackAudioTrackSchema>;
 

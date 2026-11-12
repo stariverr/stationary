@@ -101,7 +101,8 @@
             "pdf_document": "PDF ドキュメント",
             "open_pdf": "PDF を新しいタブで開く",
             "player": {
-                "unsupported_codec": "このブラウザではこの動画の形式を再生できません。オリジナルファイルをダウンロードして視聴してください。"
+                "unsupported_codec": "このブラウザではこの動画の形式を再生できません。オリジナルファイルをダウンロードして視聴してください。",
+                "audio_track_unavailable": "非対応の形式"
             }
         },
         "toasts": {
