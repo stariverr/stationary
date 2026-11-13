@@ -20,6 +20,7 @@ import {
 import type { DashSource, DashVideoElement } from "@videojs/html/media/dash-video";
 import type { HlsSource } from "@videojs/html/media/hlsjs-video";
 import type { VideoPlayerElement } from "@videojs/html/video";
+import { formatTime } from "@videojs/utils/time";
 
 import "@videojs/html/video/player";
 import "@videojs/html/ui/container";
@@ -72,7 +73,7 @@ interface SettingsOption {
 type PlayerState = VideoPlayerElement["store"]["state"];
 type PlayerAudioTrack = PlayerState["audioTrackList"][number];
 type PlayerTextTrack = PlayerState["textTrackList"][number];
-type SettingsTab = "all" | "volume" | "speed" | "subtitles" | "audio" | "protocol";
+type SettingsTab = "all" | "volume" | "speed" | "subtitles" | "audio" | "playback";
 type StreamingProtocol = "HLS" | "DASH";
 type SubtitleFontSize = "small" | "normal" | "large" | "xlarge";
 type SubtitleBgStyle = "shadow" | "box";
@@ -109,7 +110,10 @@ watch(playerRef, (player, _previous, onCleanup) => {
     onCleanup(player.store.subscribe(sync));
 });
 
-const isPlaying = computed(() => (playerState.value ? !playerState.value.paused : false));
+// During a switch between sources the play state is the old source's (see sourceSwitch).
+const isPlaying = computed(() =>
+    sourceSwitch.value ? !sourceSwitch.value.paused : playerState.value ? !playerState.value.paused : false,
+);
 const isBuffering = computed(() => Boolean(playerState.value?.waiting));
 const isMuted = computed(() => Boolean(playerState.value?.muted) || playerState.value?.volume === 0);
 const volumeLevel = computed(() => Math.round((playerState.value?.volume ?? 1) * 100));
@@ -143,6 +147,7 @@ const handleMediaPause = () => {
 const handleMediaPlaying = () => {
     isAutoplayAttempting.value = false;
     isFirstFramePainted.value = true;
+    if (sourceSwitch.value?.restored) endSourceSwitch();
 };
 
 const handleMediaTimeUpdate = () => {
@@ -183,8 +188,8 @@ const settingsTitle = computed(() => {
             return t("post_detail.viewer.player.subtitles");
         case "audio":
             return t("post_detail.viewer.player.audio_tracks");
-        case "protocol":
-            return t("post_detail.viewer.player.protocol");
+        case "playback":
+            return t("post_detail.viewer.player.playback_mode");
         default:
             return t("common.more");
     }
@@ -210,21 +215,56 @@ const resolveUrl = (url: string) => {
     return import.meta.client ? new URL(url, window.location.origin).toString() : url;
 };
 
-// The server offers manifests whenever a client might need one (8.1); this browser takes one only when the original
-// alone lacks an audio track it can play: a track in another original, or a second track (browsers cannot switch the
-// tracks of a file). Anything else plays the original directly, captions included.
+type PlaybackAudioTrack = MediaPlayback["audio_tracks"][number];
+/** The audio tracks of the original as the browser lists them on a directly played file (Safari only, 2026). */
+type FileAudioTracks = ArrayLike<{ enabled: boolean }>;
+
+// The server offers manifests whenever a client might need one (8.1). This browser plays the original directly,
+// captions included, whenever the picked audio track is in the original and the browser can play it from there; any
+// other track plays through a manifest. Picking a track the original gives again goes back to the original.
 const protocolUrls = computed<Partial<Record<StreamingProtocol, string>>>(() => ({
     ...(props.playback.hls_url ? { HLS: resolveUrl(props.playback.hls_url) } : {}),
     ...(props.playback.dash_url ? { DASH: resolveUrl(props.playback.dash_url) } : {}),
 }));
 const availableProtocols = computed(() => (["HLS", "DASH"] as const).filter((protocol) => Boolean(protocolUrls.value[protocol])));
 const playableAudioTracks = computed(() => props.playback.audio_tracks.filter((track) => isCodecSupported("audio", track.codec_string)));
-const needsManifest = computed(() => playableAudioTracks.value.length > 1 || playableAudioTracks.value.some((track) => !track.in_direct));
-const isStreaming = computed(() => availableProtocols.value.length > 0 && needsManifest.value);
+const defaultAudioTrack = computed(() => playableAudioTracks.value.find((track) => track.is_default) ?? playableAudioTracks.value[0] ?? null);
+// The tracks of the original in file order, which is the order the browser lists them in.
+const originalAudioTracks = computed(() => props.playback.audio_tracks.filter((track) => track.in_direct));
+const canSwitchFileAudio = import.meta.client && "audioTracks" in HTMLMediaElement.prototype;
+// An original in a container the browser cannot open (MKV, 16) plays only through a manifest.
+const canOpenOriginal = computed(() => {
+    const mime = props.playback.direct_mime_type;
+    return !/matroska/i.test(mime) || document.createElement("video").canPlayType(mime) !== "";
+});
+
+/**
+ * Where a track plays from: the original (switched in place, or its first track, which plays without switching), a
+ * manifest, or nowhere.
+ */
+const audioSource = (track: PlaybackAudioTrack): "original" | "manifest" | null => {
+    if (track.in_direct && canOpenOriginal.value && (canSwitchFileAudio || track.id === originalAudioTracks.value[0]?.id)) {
+        return "original";
+    }
+    if (track.in_manifest && availableProtocols.value.length > 0) return "manifest";
+    return null;
+};
+
+// The audio track the viewer picked; null means the default track.
+const chosenAudioId = ref<string | null>(null);
+const chosenAudioTrack = computed(
+    () => playableAudioTracks.value.find((track) => track.id === chosenAudioId.value) ?? defaultAudioTrack.value,
+);
+
+const isStreaming = computed(
+    () =>
+        availableProtocols.value.length > 0 &&
+        (chosenAudioTrack.value ? audioSource(chosenAudioTrack.value) !== "original" : !canOpenOriginal.value),
+);
 const directSrc = computed(() => resolveUrl(props.playback.direct_url));
 
-// HLS plays through hls.js everywhere (Safari included); DASH is chosen from the player settings. A protocol that
-// fails to play is not swapped for the other one automatically.
+// HLS plays through hls.js everywhere (Safari included). DASH is an advanced choice in the player settings; a
+// protocol that fails to play is not swapped for the other one automatically.
 const DEFAULT_PROTOCOL: StreamingProtocol = "HLS";
 // Only an explicit choice is stored, so a later change of the default reaches everyone who never picked one.
 const storedProtocol = useStorage<StreamingProtocol>("stationary-player-protocol", DEFAULT_PROTOCOL, undefined, {
@@ -237,19 +277,81 @@ const preferredProtocol = computed<StreamingProtocol>({
     },
 });
 
-const canChooseProtocol = computed(() => isStreaming.value && availableProtocols.value.length > 1);
+const canChooseProtocol = computed(() => availableProtocols.value.length > 1);
 const activeProtocol = computed<StreamingProtocol>(() =>
     availableProtocols.value.includes(preferredProtocol.value)
         ? preferredProtocol.value
         : (availableProtocols.value[0] ?? DEFAULT_PROTOCOL),
 );
 
+/** The label each audio track carries in the manifests (apps/server/src/features/playback/manifests.ts). */
+const manifestAudioLabel = (track: PlaybackAudioTrack) =>
+    track.label || track.language || `Audio ${props.playback.audio_tracks.indexOf(track) + 1}`;
+
+/**
+ * A switch between sources (the original, HLS, DASH): the new source resumes where the old one was. Until it plays
+ * there, the last frame, the time and the play state stay as they were, so the switch looks like a short buffering.
+ */
+interface SourceSwitch {
+    time: number;
+    duration: number;
+    paused: boolean;
+    rate: number;
+    /** The position has been restored on the new source. */
+    restored: boolean;
+}
+const sourceSwitch = shallowRef<SourceSwitch | null>(null);
+const freezeFrameRef = ref<HTMLCanvasElement | null>(null);
+// Where hls.js starts and which audio track it loads first: set when a switch begins, so the engine created for it
+// loads the right segments and track at once instead of starting at 0 on the manifest's default track.
+const hlsStart = shallowRef<{ position: number; audioName: string | null }>({ position: -1, audioName: null });
+
+const beginSourceSwitch = (audio: PlaybackAudioTrack | null) => {
+    const video = videoRef.value;
+    if (!video) return;
+    sourceSwitch.value = {
+        time: video.currentTime,
+        duration: video.duration || props.playback.duration || 0,
+        paused: video.paused,
+        rate: video.playbackRate,
+        restored: false,
+    };
+    hlsStart.value = { position: video.currentTime, audioName: audio ? manifestAudioLabel(audio) : null };
+    const canvas = freezeFrameRef.value;
+    if (canvas && video.videoWidth > 0) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        // A cross-origin frame taints the canvas, which only forbids reading it back; it still shows.
+        canvas.getContext("2d")?.drawImage(video, 0, 0);
+    }
+};
+
+const endSourceSwitch = () => {
+    sourceSwitch.value = null;
+};
+
+watch(
+    () => props.playback.direct_url,
+    () => {
+        chosenAudioId.value = null;
+        sourceSwitch.value = null;
+        hlsStart.value = { position: -1, audioName: null };
+    },
+);
+
 const hlsSource = computed<HlsSource>(() => ({
     src: protocolUrls.value.HLS ?? "",
     type: "application/x-mpegURL",
     preferPlayback: "mse",
-    // Captions come from <track> elements under both protocols, so hls.js skips the manifest's subtitle group.
-    engine: { hlsJs: { enableWebVTT: false, enableIMSC1: false } },
+    engine: {
+        hlsJs: {
+            // Captions come from <track> elements under both protocols, so hls.js skips the manifest's subtitle group.
+            enableWebVTT: false,
+            enableIMSC1: false,
+            startPosition: hlsStart.value.position,
+            ...(hlsStart.value.audioName ? { audioPreference: { name: hlsStart.value.audioName } } : {}),
+        },
+    },
 }));
 
 const dashSource = computed<DashSource>(() => ({
@@ -284,47 +386,41 @@ watch(engineRef, (engine, _previous, onCleanup) => {
 });
 
 // The server reports every stream's codec and leaves support to the client. A video stream this browser cannot
-// decode is not played at all; audio tracks it cannot decode are left out of the audio menu. An original in a
-// container the browser cannot open (MKV, 16) plays only through a manifest.
+// decode is not played at all; audio tracks it cannot decode are left out of the audio menu.
 const isVideoSupported = computed(() => {
-    const { video, audio_tracks, direct_mime_type } = props.playback;
-    if (!isStreaming.value && /matroska/i.test(direct_mime_type) && document.createElement("video").canPlayType(direct_mime_type) === "") {
-        return false;
-    }
+    const { video, audio_tracks } = props.playback;
+    if (!isStreaming.value && !canOpenOriginal.value) return false;
     if (video) return isCodecSupported("video", video.codec_string);
     return audio_tracks.length === 0 || audio_tracks.some((track) => isCodecSupported("audio", track.codec_string));
 });
 
-/** The label each audio track carries in the manifests (apps/server/src/features/playback/manifests.ts). */
-const manifestAudioLabel = (track: MediaPlayback["audio_tracks"][number], index: number) =>
-    track.label || track.language || `Audio ${index + 1}`;
-
-const supportedAudioLabels = computed(
-    () =>
-        new Set(
-            props.playback.audio_tracks
-                .map((track, index) => ({ track, label: manifestAudioLabel(track, index) }))
-                .filter(({ track }) => isCodecSupported("audio", track.codec_string))
-                .map(({ label }) => label),
-        ),
-);
-
-// Switching the streaming protocol resumes where the old engine was.
-let pendingSourceRestore: { time: number; paused: boolean; rate: number } | null = null;
-
-const rememberPlaybackPosition = () => {
-    const video = videoRef.value;
-    if (video) pendingSourceRestore = { time: video.currentTime, paused: video.paused, rate: video.playbackRate };
+/** Enables one track of the directly played original and disables the others. */
+const enableFileAudioTrack = (id: string) => {
+    const tracks = (videoRef.value as (HTMLVideoElement & { audioTracks?: FileAudioTracks }) | null)?.audioTracks;
+    const index = originalAudioTracks.value.findIndex((track) => track.id === id);
+    if (!tracks || index < 0 || index >= tracks.length) return;
+    for (let i = 0; i < tracks.length; i++) tracks[i]!.enabled = i === index;
 };
 
 const handleLoadedMetadata = () => {
     const video = videoRef.value;
-    const restore = pendingSourceRestore;
-    pendingSourceRestore = null;
-    if (!video || !restore) return;
-    video.currentTime = restore.time;
+    if (!video) return;
+    // The browser starts a file on its first enabled track, which need not be the picked one.
+    if (!isStreaming.value && canSwitchFileAudio && chosenAudioTrack.value) enableFileAudioTrack(chosenAudioTrack.value.id);
+    const restore = sourceSwitch.value;
+    if (!restore || restore.restored) return;
+    restore.restored = true;
+    // hls.js already starts at the position; the original and DASH seek to it.
+    if (Math.abs(video.currentTime - restore.time) > 0.5) video.currentTime = restore.time;
     video.playbackRate = restore.rate;
-    if (!restore.paused) video.play().catch(() => {});
+    // pause() also clears the element's autoplay, which would otherwise start it once enough data is in.
+    if (restore.paused) video.pause();
+    else video.play().catch(() => endSourceSwitch());
+};
+
+// The switch ends when the new source plays at the old position, or, while paused, can show the frame there.
+const handleMediaCanPlay = () => {
+    if (sourceSwitch.value?.restored && sourceSwitch.value.paused) endSourceSwitch();
 };
 
 /** The localized name of a language tag (ISO 639-1 or 639-2, e.g. `en`, `eng`, `zh-Hans`); null when unknown. */
@@ -391,33 +487,50 @@ const loadCaptions = async (captions: MediaPlayback["captions"]) => {
 
 watch(() => props.playback.captions, loadCaptions, { deep: true, immediate: true });
 
-const audioOptions = computed<SettingsOption[]>(() => {
-    const tracks = (playerState.value?.audioTrackList ?? []).filter((track: PlayerAudioTrack) =>
-        supportedAudioLabels.value.has(track.label),
-    );
+const audioTrackName = (label: string | null | undefined, language: string | null | undefined, index: number) => {
+    if (label) return label;
     const prefix = t("post_detail.viewer.player.audio_tracks");
-    return tracks.map((track: PlayerAudioTrack, index: number) => {
-        // Engines label a track with its manifest label (and may normalize its language), so name it from the playback.
-        const source = props.playback.audio_tracks.find((item, i) => manifestAudioLabel(item, i) === track.label);
-        const name = languageName(source?.language ?? track.language);
-        const label = source?.label || (name ? `${prefix} ${index + 1} (${name})` : `${prefix} ${index + 1}`);
-        return {
-            key: track.id,
-            label,
-            selected: track.enabled,
-            select: () => playerRef.value?.store.selectAudioTrack(track.id),
-        };
-    });
+    const name = languageName(language);
+    return name ? `${prefix} ${index + 1} (${name})` : `${prefix} ${index + 1}`;
+};
+
+const selectAudioTrack = (track: PlaybackAudioTrack) => {
+    if (track.id === chosenAudioTrack.value?.id) return;
+    const streams = audioSource(track) !== "original";
+    if (streams !== isStreaming.value) beginSourceSwitch(track);
+    chosenAudioId.value = track.id;
+    if (!streams) enableFileAudioTrack(track.id);
+};
+
+// While a manifest plays, its engine plays the picked track. hls.js usually starts on it already (hlsStart); DASH,
+// and a pick while a manifest plays, select it once the engine lists it.
+watch([playerState, chosenAudioTrack, isStreaming], () => {
+    const chosen = chosenAudioTrack.value;
+    if (!isStreaming.value || !chosen) return;
+    const label = manifestAudioLabel(chosen);
+    const track = playerState.value?.audioTrackList.find((item: PlayerAudioTrack) => item.label === label);
+    if (track && !track.enabled) playerRef.value?.store.selectAudioTrack(track.id);
 });
 
-// Tracks the chosen way of playing cannot carry (16): an audio format the manifests cannot hold, or a track outside
-// the original when no manifest is offered. They are listed so the menu says why they cannot be picked.
+const audioOptions = computed<SettingsOption[]>(() =>
+    playableAudioTracks.value
+        .filter((track) => audioSource(track) !== null)
+        .map((track, index) => ({
+            key: track.id,
+            label: audioTrackName(track.label, track.language, index),
+            selected: track.id === chosenAudioTrack.value?.id,
+            select: () => selectAudioTrack(track),
+        })),
+);
+
+// Tracks neither the original nor a manifest gives (16), such as an audio format the manifests cannot hold. They are
+// listed so the menu says why they cannot be picked.
 const unavailableAudioOptions = computed<SettingsOption[]>(() =>
     playableAudioTracks.value
-        .filter((track) => !(isStreaming.value ? track.in_manifest : track.in_direct))
-        .map((track) => ({
+        .filter((track) => audioSource(track) === null)
+        .map((track, index) => ({
             key: `unavailable:${track.id}`,
-            label: formatLanguageLabel(track.language, track.label),
+            label: audioTrackName(track.label, track.language, audioOptions.value.length + index),
             hint: t("post_detail.viewer.player.audio_track_unavailable"),
             selected: false,
             disabled: true,
@@ -442,9 +555,20 @@ const subtitleOptions = computed<SettingsOption[]>(() => {
 
 const selectProtocol = (protocol: StreamingProtocol) => {
     if (protocol === activeProtocol.value) return;
-    rememberPlaybackPosition();
+    if (isStreaming.value) beginSourceSwitch(chosenAudioTrack.value);
     preferredProtocol.value = protocol;
 };
+
+/** How the media plays right now: the original, or a manifest over the active protocol. */
+const playbackModeLabel = computed(() =>
+    isStreaming.value ? activeProtocol.value : t("post_detail.viewer.player.playback_original"),
+);
+
+// While sources switch, the progress bar stays at the old position (the new source reports 0 until it loads).
+const switchFill = computed(() => {
+    const restore = sourceSwitch.value;
+    return restore && restore.duration > 0 ? `${((restore.time / restore.duration) * 100).toFixed(3)}%` : "0%";
+});
 
 const protocolOptions = computed<SettingsOption[]>(() =>
     (["HLS", "DASH"] as const).map((protocol) => ({
@@ -485,7 +609,7 @@ const settingsOptions = computed<SettingsOption[] | null>(() => {
             ];
         case "speed":
             return speedSettingsOptions.value;
-        case "protocol":
+        case "playback":
             return canChooseProtocol.value ? protocolOptions.value : null;
         default:
             return null;
@@ -558,6 +682,8 @@ onBeforeUnmount(() => {
                             @playing="handleMediaPlaying"
                             @timeupdate="handleMediaTimeUpdate"
                             @loadedmetadata="handleLoadedMetadata"
+                            @canplay="handleMediaCanPlay"
+                            @error="endSourceSwitch"
                         >
                             <track
                                 v-for="caption in loadedCaptions"
@@ -582,6 +708,8 @@ onBeforeUnmount(() => {
                         @playing="handleMediaPlaying"
                         @timeupdate="handleMediaTimeUpdate"
                         @loadedmetadata="handleLoadedMetadata"
+                        @canplay="handleMediaCanPlay"
+                        @error="endSourceSwitch"
                     >
                         <track
                             v-for="caption in loadedCaptions"
@@ -602,6 +730,14 @@ onBeforeUnmount(() => {
                         aria-hidden="true"
                     />
 
+                    <!-- The old source's last frame, shown while the media switches sources -->
+                    <canvas
+                        v-show="sourceSwitch"
+                        ref="freezeFrameRef"
+                        class="pointer-events-none absolute inset-0 z-20 h-full w-full object-contain"
+                        aria-hidden="true"
+                    />
+
                     <media-gesture type="tap" action="togglePaused" :disabled="isSettingsOpen" />
                     <media-gesture type="doubletap" action="seekStep" value="-10" region="left" :disabled="isSettingsOpen" />
                     <media-gesture type="doubletap" action="seekStep" value="10" region="right" :disabled="isSettingsOpen" />
@@ -618,7 +754,7 @@ onBeforeUnmount(() => {
                     <media-hotkey keys="ArrowDown" action="volumeStep" value="-5" />
 
                     <div
-                        v-if="isBuffering || (isAutoplayAttempting && !isPlaying)"
+                        v-if="sourceSwitch || isBuffering || (isAutoplayAttempting && !isPlaying)"
                         class="buffering-indicator pointer-events-none absolute top-1/2 left-1/2 z-25 grid h-15 w-15 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-white/20 bg-[rgba(15,15,18,0.72)] text-white shadow-2xl backdrop-blur-md"
                         aria-hidden="true"
                     >
@@ -631,7 +767,7 @@ onBeforeUnmount(() => {
                     >
                         <!-- Center play button lives inside the controls so it fades out with them -->
                         <media-play-button
-                            v-if="!isPlaying && !isBuffering"
+                            v-if="!isPlaying && !isBuffering && !sourceSwitch"
                             class="center-play-button pointer-events-auto absolute top-1/2 left-1/2 z-25 grid h-13 w-13 sm:h-14 sm:w-14 -translate-x-1/2 -translate-y-1/2 cursor-pointer place-items-center rounded-full border border-white/25 bg-black/50 text-white shadow-xl backdrop-blur-md transition-all duration-200 hover:scale-108 hover:border-white/40 hover:bg-black/75 hover:shadow-[0_0_24px_rgba(255,255,255,0.2)]"
                             :aria-label="$t('post_detail.viewer.player.play')"
                         >
@@ -750,17 +886,16 @@ onBeforeUnmount(() => {
                                         </button>
 
                                         <button
-                                            v-if="canChooseProtocol"
                                             type="button"
                                             class="flex w-full items-center justify-between rounded-xl bg-neutral-100/80 px-3.5 py-2.5 text-xs font-medium text-neutral-800 transition-all hover:bg-neutral-200/80 hover:text-neutral-900"
-                                            @click.stop="activeSettingsTab = 'protocol'"
+                                            @click.stop="activeSettingsTab = 'playback'"
                                         >
                                             <span class="flex items-center gap-2">
                                                 <Network class="h-4 w-4 text-neutral-500" />
-                                                <span>{{ $t("post_detail.viewer.player.protocol") }}</span>
+                                                <span>{{ $t("post_detail.viewer.player.playback_mode") }}</span>
                                             </span>
                                             <span class="flex items-center gap-1 text-neutral-500 font-semibold text-xs">
-                                                <span>{{ activeProtocol }}</span>
+                                                <span>{{ playbackModeLabel }}</span>
                                                 <ChevronRight class="h-4 w-4" />
                                             </span>
                                         </button>
@@ -833,6 +968,19 @@ onBeforeUnmount(() => {
 
                                     <!-- Audio / subtitles / speed / protocol pages -->
                                     <template v-else>
+                                        <p v-if="activeSettingsTab === 'playback'" class="px-1 pb-1 text-xs text-neutral-600">
+                                            {{
+                                                isStreaming
+                                                    ? $t("post_detail.viewer.player.playback_status_manifest", { protocol: activeProtocol })
+                                                    : $t("post_detail.viewer.player.playback_status_original")
+                                            }}
+                                        </p>
+                                        <div
+                                            v-if="activeSettingsTab === 'playback' && settingsOptions"
+                                            class="settings-subheading px-1 pt-2 text-xs font-semibold uppercase tracking-wider text-neutral-400"
+                                        >
+                                            {{ $t("post_detail.viewer.player.protocol") }}
+                                        </div>
                                         <section v-if="settingsOptions" class="settings-section">
                                             <div role="radiogroup" :aria-label="settingsTitle" class="flex w-full flex-col gap-1">
                                                 <button
@@ -850,6 +998,9 @@ onBeforeUnmount(() => {
                                                     <span v-if="option.hint" class="settings-radio-hint">{{ option.hint }}</span>
                                                 </button>
                                             </div>
+                                            <p v-if="activeSettingsTab === 'playback'" class="px-1 pt-2 text-xs text-neutral-400">
+                                                {{ $t("post_detail.viewer.player.protocol_hint") }}
+                                            </p>
                                         </section>
 
                                         <section v-if="activeSettingsTab === 'subtitles'" class="settings-section">
@@ -915,6 +1066,8 @@ onBeforeUnmount(() => {
                         <!-- Bottom controls: scrubber + button row -->
                         <div class="bottom-controls-cluster mt-auto pointer-events-auto flex w-full flex-col gap-1 shrink-0">
                             <media-time-slider
+                                :data-switching="sourceSwitch ? '' : undefined"
+                                :style="{ '--switch-fill': switchFill }"
                                 class="time-slider relative flex h-5 w-full cursor-pointer items-center touch-none select-none box-border px-0.5"
                             >
                                 <media-slider-track class="slider-track">
@@ -939,9 +1092,16 @@ onBeforeUnmount(() => {
                                     <div
                                         class="time-display flex min-w-0 items-center gap-1 ml-1.5 sm:ml-2.5 text-xs sm:text-sm font-semibold text-white/95 tabular-nums drop-shadow-xs"
                                     >
-                                        <media-time type="current" />
-                                        <span aria-hidden="true" class="opacity-70">/</span>
-                                        <media-time type="duration" />
+                                        <template v-if="sourceSwitch">
+                                            <span>{{ formatTime(sourceSwitch.time, sourceSwitch.duration) }}</span>
+                                            <span aria-hidden="true" class="opacity-70">/</span>
+                                            <span>{{ formatTime(sourceSwitch.duration) }}</span>
+                                        </template>
+                                        <template v-else>
+                                            <media-time type="current" />
+                                            <span aria-hidden="true" class="opacity-70">/</span>
+                                            <media-time type="duration" />
+                                        </template>
                                     </div>
                                 </div>
 
@@ -1094,6 +1254,12 @@ onBeforeUnmount(() => {
 .time-slider:hover .slider-track,
 .time-slider[data-dragging] .slider-track {
     height: 5px;
+}
+
+/* While sources switch, the progress bar holds the old position (--switch-fill) instead of the new source's 0. */
+.time-slider[data-switching] {
+    --media-slider-fill: var(--switch-fill) !important;
+    --media-slider-buffer: var(--switch-fill) !important;
 }
 
 .slider-buffer,

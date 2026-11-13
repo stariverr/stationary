@@ -20,6 +20,7 @@
         "@videojs/dash-video": "10.3.0",
         "@videojs/hlsjs-video": "10.3.0",
         "@videojs/html": "10.3.0",
+        "@videojs/utils": "10.3.0",
         "@vueuse/core": "^15.0.0",
         "better-auth": "^1.7.17",
         "class-variance-authority": "^0.7.1",

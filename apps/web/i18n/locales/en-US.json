@@ -1002,6 +1002,11 @@
                 "audio_tracks": "Audio Tracks",
                 "default_subtitle": "Default Subtitle",
                 "protocol": "Streaming Protocol",
+                "playback_mode": "Playback",
+                "playback_original": "Original",
+                "playback_status_original": "Playing the original file directly.",
+                "playback_status_manifest": "Playing through the {protocol} manifest, packaged by the server.",
+                "protocol_hint": "Used only for audio tracks the original file can't give this browser. HLS is recommended.",
                 "unsupported_codec": "This browser can't play this video's format. Download the original file to watch it.",
                 "audio_track_unavailable": "Format not supported"
             },

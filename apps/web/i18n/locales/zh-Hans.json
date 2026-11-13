@@ -1002,6 +1002,11 @@
                 "audio_tracks": "音轨",
                 "default_subtitle": "默认字幕",
                 "protocol": "播放协议",
+                "playback_mode": "播放方式",
+                "playback_original": "原件",
+                "playback_status_original": "正在直接播放原件。",
+                "playback_status_manifest": "正在通过 {protocol} 清单播放，由服务端打包。",
+                "protocol_hint": "只在选了原件给不了的音轨时使用，建议用 HLS。",
                 "unsupported_codec": "此浏览器无法播放该视频的格式。请下载原始文件观看。",
                 "audio_track_unavailable": "格式不支持"
             },
