@@ -197,6 +197,41 @@ function byteRuns(track: PackagedTrack, first: number, end: number) {
     return runs;
 }
 
+/** One range read of the original and the parts of it that go into the mdat, as [offset, length) within the read. */
+interface PlannedRead {
+    start: number;
+    length: number;
+    parts: { offset: number; length: number }[];
+}
+
+/**
+ * Groups byte runs into range reads. Muxers interleave tracks, often sample by sample, so the runs of one track sit
+ * between the other tracks' samples: a read spans the gaps up to `MAX_READ_GAP_BYTES` (reading the skipped bytes is
+ * cheaper than another request) and is cut at `READ_PIECE_BYTES`, so the first bytes go out before the rest is read.
+ */
+export function planReads(runs: readonly { start: number; length: number }[]): PlannedRead[] {
+    const reads: PlannedRead[] = [];
+    for (const run of runs) {
+        for (let done = 0; done < run.length; ) {
+            const start = run.start + done;
+            const last = reads[reads.length - 1];
+            const lastEnd = last ? last.start + last.length : 0;
+            const room = last && start >= lastEnd && start - lastEnd <= MAX_READ_GAP_BYTES ? READ_PIECE_BYTES - (start - last.start) : 0;
+            if (last && room > 0) {
+                const length = Math.min(room, run.length - done);
+                last.parts.push({ offset: start - last.start, length });
+                last.length = start - last.start + length;
+                done += length;
+            } else {
+                const length = Math.min(READ_PIECE_BYTES, run.length - done);
+                reads.push({ start, length, parts: [{ offset: 0, length }] });
+                done += length;
+            }
+        }
+    }
+    return reads;
+}
+
 /** Writes `moof` (mfhd, traf: tfhd, tfdt, trun) for samples [first, end) of a track. */
 function writeMoof(track: PackagedTrack, sequence: number, first: number, end: number, decodeTime: number): Uint8Array {
     const count = end - first;
@@ -242,28 +277,25 @@ function writeMoof(track: PackagedTrack, sequence: number, first: number, end: n
     return bytes;
 }
 
-/** Builds media segment `index` of a track: the moof, then an mdat filled from the original by range reads. */
-/** Byte ranges are read in pieces of at most this size, so the first bytes go out before the whole segment is read. */
+/** A read covers at most this many bytes, so the first bytes go out before the whole segment is read. */
 const READ_PIECE_BYTES = 1024 * 1024;
-/** Pieces read ahead of the one being sent. */
-const READS_AHEAD = 4;
+/** Gaps between a track's runs up to this size are read through rather than split into another request. */
+const MAX_READ_GAP_BYTES = 32 * 1024;
+/** Reads in flight ahead of the one being sent: many small ones for a track whose runs stay apart, few large ones. */
+const MAX_READS_AHEAD = 32;
+const MAX_BYTES_AHEAD = 4 * READ_PIECE_BYTES;
 
 /**
  * A media segment (moof + mdat) of a track: its size and a stream of its bytes. The moof goes out at once, then the
- * samples' byte ranges of the original in order, read a few pieces ahead; cancelling the stream stops the reads.
+ * samples' bytes, read from the original in ranges ahead of the one being sent; cancelling the stream stops the reads.
  */
 export function packageSegment(track: PackagedTrack, index: number, read: RangeReader): { size: number; body: ReadableStream<Uint8Array> } {
     if (!Number.isInteger(index) || index < 0 || index >= segmentCount(track)) throw new RangeError(`no segment ${index}`);
     const first = track.segmentSamples[index]!;
     const end = track.segmentSamples[index + 1]!;
     const moof = writeMoof(track, index + 1, first, end, track.segmentTimes[index]!);
-    const pieces = byteRuns(track, first, end).flatMap((run) =>
-        Array.from({ length: Math.ceil(run.length / READ_PIECE_BYTES) }, (_, i) => ({
-            start: run.start + i * READ_PIECE_BYTES,
-            length: Math.min(READ_PIECE_BYTES, run.length - i * READ_PIECE_BYTES),
-        })),
-    );
-    const payload = pieces.reduce((total, piece) => total + piece.length, 0);
+    const plan = planReads(byteRuns(track, first, end));
+    const payload = plan.reduce((total, piece) => total + piece.parts.reduce((sum, part) => sum + part.length, 0), 0);
 
     const head = new Uint8Array(moof.byteLength + 8);
     head.set(moof, 0);
@@ -271,27 +303,31 @@ export function packageSegment(track: PackagedTrack, index: number, read: RangeR
     head.set([0x6d, 0x64, 0x61, 0x74], moof.byteLength + 4); // "mdat"
 
     const reads: Promise<Uint8Array>[] = [];
-    const readAhead = (upTo: number) => {
-        for (let i = reads.length; i < Math.min(upTo, pieces.length); i++) {
-            const piece = pieces[i]!;
+    let next = 0;
+    const readAhead = () => {
+        let bytes = 0;
+        for (let i = next; i < reads.length; i++) bytes += plan[i]!.length;
+        while (reads.length < plan.length && reads.length - next < MAX_READS_AHEAD && bytes < MAX_BYTES_AHEAD) {
+            const piece = plan[reads.length]!;
             const pending = read(piece.start, piece.start + piece.length - 1);
             pending.catch(() => {}); // surfaced when the piece is sent
             reads.push(pending);
+            bytes += piece.length;
         }
     };
-    let next = 0;
     const body = new ReadableStream<Uint8Array>({
         start(controller) {
             controller.enqueue(head);
-            readAhead(READS_AHEAD);
+            readAhead();
         },
         async pull(controller) {
-            if (next === pieces.length) return controller.close();
+            if (next === plan.length) return controller.close();
+            const piece = plan[next]!;
             const chunk = await reads[next]!;
-            if (chunk.byteLength !== pieces[next]!.length) throw new Error(`read ${chunk.byteLength} of ${pieces[next]!.length} bytes`);
+            if (chunk.byteLength !== piece.length) throw new Error(`read ${chunk.byteLength} of ${piece.length} bytes`);
             next++;
-            readAhead(next + READS_AHEAD);
-            controller.enqueue(chunk);
+            readAhead();
+            for (const part of piece.parts) controller.enqueue(chunk.subarray(part.offset, part.offset + part.length));
         },
     });
     return { size: head.byteLength + payload, body };

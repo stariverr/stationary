@@ -86,6 +86,25 @@ describe("just-in-time MP4 packaging", () => {
         expect(packets(await packageAll(path, english!, "a.mp4"), "0:a")).toEqual(packets(path, "0:a:1"));
     });
 
+    test("reads an interleaved file in a few ranges per segment, not one per sample", async () => {
+        const path = await encode("interleaved.mp4", [...VIDEO, ...tone(1000), ...H264, ...AAC]);
+        const [video, audio] = (await index(path)).tracks;
+        for (const track of [video!, audio!]) {
+            let reads = 0;
+            const { read } = reader(path);
+            const counting = (start: number, end: number) => {
+                reads++;
+                return read(start, end);
+            };
+            const { body } = packageSegment(track, 0, counting);
+            await new Response(body).bytes();
+            // ffmpeg interleaves sample by sample here: ~180 runs per 6 s segment, which now share a handful of reads.
+            expect(reads).toBeLessThanOrEqual(3);
+        }
+        expect(packets(await packageAll(path, video!, "iv.mp4"), "0:v")).toEqual(packets(path, "0:v"));
+        expect(packets(await packageAll(path, audio!, "ia.mp4"), "0:a")).toEqual(packets(path, "0:a"));
+    });
+
     test("applies the edit list so B-frame video presents from 0 like the original", async () => {
         const path = await encode("faststart.mp4", [...VIDEO, ...tone(1000), ...H264, ...AAC, "-movflags", "+faststart"]);
         const [video, audio] = (await index(path)).tracks;
