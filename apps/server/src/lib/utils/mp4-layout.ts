@@ -1,6 +1,7 @@
 /**
  * Reads the top-level box layout of an MP4 file through byte-range reads, without downloading the media data:
- * the `moov` box (for codec strings, wherever it sits) and, in an fMP4, the `sidx` that follows the init segment.
+ * the `moov` box (for codec strings, wherever it sits), whether the file is fragmented, and, in an fMP4, the `sidx` that
+ * follows the init segment.
  */
 
 /** Reads the inclusive byte range [start, end] of the file. */
@@ -19,6 +20,8 @@ export interface Mp4SegmentIndex {
 
 export interface Mp4Layout {
     moov: Uint8Array | null;
+    /** The moov has an `mvex`: the samples are in movie fragments, not in the moov's sample tables. */
+    fragmented: boolean;
     segmentIndex: Mp4SegmentIndex | null;
 }
 
@@ -27,6 +30,21 @@ const MAX_BOXES = 256;
 const MAX_MOOV_BYTES = 64 * 1024 * 1024;
 
 const fourcc = (bytes: Uint8Array, at: number) => String.fromCharCode(bytes[at]!, bytes[at + 1]!, bytes[at + 2]!, bytes[at + 3]!);
+
+/** Whether a moov box (header included) has an `mvex` child. */
+function hasMvex(moov: Uint8Array): boolean {
+    const view = new DataView(moov.buffer, moov.byteOffset, moov.byteLength);
+    let offset = view.getUint32(0) === 1 ? 16 : 8;
+    while (offset + 8 <= moov.byteLength) {
+        let size = view.getUint32(offset);
+        if (size === 1 && offset + 16 <= moov.byteLength) size = Number(view.getBigUint64(offset + 8));
+        else if (size === 0) size = moov.byteLength - offset;
+        if (fourcc(moov, offset + 4) === "mvex") return true;
+        if (size < 8) return false;
+        offset += size;
+    }
+    return false;
+}
 
 /** Reads the timescale and earliest presentation time from the start of a sidx box. */
 function readSidxHeader(bytes: Uint8Array): { timescale: number; earliest_presentation_time: number } {
@@ -71,5 +89,5 @@ export async function readMp4Layout(read: RangeReader, size: number): Promise<Mp
         offset += boxSize;
     }
 
-    return { moov, segmentIndex };
+    return { moov, fragmented: moov !== null && hasMvex(moov), segmentIndex };
 }

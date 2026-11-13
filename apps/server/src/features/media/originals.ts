@@ -153,6 +153,7 @@ export async function insertAvRows(client: DbClient, fileId: string, av: AvProbe
             container: av.container,
             duration: av.duration,
             bitrate: av.bitrate,
+            fragmented: av.fragmented,
             init_size: av.segmentIndex?.init_size ?? null,
             index_offset: av.segmentIndex?.index_offset ?? null,
             index_size: av.segmentIndex?.index_size ?? null,

@@ -547,6 +547,8 @@ export const AvFile = pgTable(
         container: text("container").notNull(),
         duration: real("duration"),
         bitrate: integer("bitrate"),
+        /** An fMP4 (the moov has an `mvex`); a sidx below implies it. Fragmented files are not packaged just in time. */
+        fragmented: boolean("fragmented").notNull(),
         /** The init segment is bytes [0, init_size). */
         init_size: integer("init_size"),
         /** The sidx box is bytes [index_offset, index_offset + index_size). */
@@ -564,6 +566,7 @@ export const AvFile = pgTable(
                 AND (${table.init_size} IS NULL) = (${table.timescale} IS NULL)
                 AND (${table.init_size} IS NULL) = (${table.earliest_presentation_time} IS NULL)`,
         ),
+        check("av_file_segment_index_fragmented", sql`${table.init_size} IS NULL OR ${table.fragmented}`),
     ],
 );
 

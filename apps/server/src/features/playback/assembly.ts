@@ -103,7 +103,7 @@ function manifestSource(state: OriginalState, stream: AvStreamRow): ManifestStre
     if (avFile.init_size !== null) {
         if (state.streams.length !== 1) return null;
         source = { kind: "sidx", avFile: avFile as SidxAvFile, url: buildCdnUrl(file.bucket, file.path) };
-    } else if (isPackageableContainer(avFile.container)) {
+    } else if (!avFile.fragmented && isPackageableContainer(avFile.container)) {
         source = { kind: "packaged" };
     } else {
         return null;

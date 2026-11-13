@@ -50,6 +50,8 @@ export interface AvProbe {
     container: string;
     duration: number | null;
     bitrate: number | null;
+    /** An fMP4: its samples are in movie fragments, so it cannot be packaged just in time (8.7). */
+    fragmented: boolean;
     segmentIndex: Mp4SegmentIndex | null;
     streams: StreamProbe[];
     /** One per text subtitle stream; image subtitles (PGS, VobSub) are not extracted (16). */
@@ -219,11 +221,13 @@ async function probeAv(file: ProbedFile): Promise<AvProbe> {
     if (!container) throw new ProbeRejectedError("ffprobe found no container");
 
     let segmentIndex: Mp4SegmentIndex | null = null;
+    let fragmented = false;
     const codecStrings = new Map<number, string | null>();
     if (/\bmp4\b|\bmov\b/.test(container) && file.size) {
         const read = (start: number, end: number) => s3.read(file.path, { bucket: file.bucket, maxBytes: end - start + 1, range: { start, end } });
         const layout = await readMp4Layout(read, file.size);
         segmentIndex = layout.segmentIndex;
+        fragmented = layout.fragmented;
         if (layout.moov) for (const track of readMp4TrackCodecs(layout.moov)) codecStrings.set(track.track_id, track.codec_string);
     }
 
@@ -233,6 +237,7 @@ async function probeAv(file: ProbedFile): Promise<AvProbe> {
         container,
         duration: numberOrNull(output.format?.duration),
         bitrate: positiveIntOrNull(output.format?.bit_rate),
+        fragmented,
         segmentIndex,
         streams,
         captions: await extractTextCaptions(url, streams),

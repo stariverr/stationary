@@ -119,4 +119,15 @@ describe("just-in-time MP4 packaging", () => {
         const path = await encode("frag.mp4", [...tone(440), ...AAC, "-movflags", "frag_keyframe+empty_moov"]);
         await expect(index(path)).rejects.toThrow("fragmented");
     });
+
+    test("the layout tells fragmented files from plain ones, with or without a sidx", async () => {
+        const layout = async (name: string, movflags: string) => {
+            const { read, size } = reader(await encode(name, [...tone(440), ...AAC, "-movflags", movflags]));
+            const { fragmented, segmentIndex } = await readMp4Layout(read, size);
+            return { fragmented, sidx: segmentIndex !== null };
+        };
+        expect(await layout("plain.m4a", "+faststart")).toEqual({ fragmented: false, sidx: false });
+        expect(await layout("frag-no-sidx.m4a", "frag_keyframe+empty_moov")).toEqual({ fragmented: true, sidx: false });
+        expect(await layout("frag-sidx.m4a", "frag_keyframe+empty_moov+global_sidx")).toEqual({ fragmented: true, sidx: true });
+    });
 });

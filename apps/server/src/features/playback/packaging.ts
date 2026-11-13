@@ -27,7 +27,7 @@ const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60;
 /** A playing file asks for its index on every segment; keep the few files being watched in memory. */
 const memoryCache = createPromiseCache<PackagedFile>(30 * 60 * 1000, 16);
 
-/** ISO BMFF that is not an fMP4 with a sidx: the inputs of just-in-time packaging (7, step 4). */
+/** An MP4 or MOV container; only unfragmented ones are packaged just in time (7, step 4). */
 export const isPackageableContainer = (container: string) => /\b(mov|mp4)\b/.test(container);
 
 const rangeReader = (file: Pick<FileRow, "bucket" | "path">) => (start: number, end: number) =>
