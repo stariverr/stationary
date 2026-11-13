@@ -776,7 +776,7 @@
         "merge_tracks_tooltip": "Combine selected files into a single media asset (e.g. video + audio track)",
         "delete_btn": "Delete",
         "delete_tooltip": "Remove selected files from drafts permanently",
-        "uploading_background_tasks": "Uploading Background Tasks...",
+        "uploading": "Uploading",
         "uploading_and_registering": "Uploading files to Draft Box & registering tracks...",
         "unselect_all_btn": "Unselect All",
         "select_all_btn": "Select All",
@@ -1057,9 +1057,51 @@
     },
     "jobs": {
         "nav_title": "Background Tasks",
+        "load_error": "Couldn't load background tasks. Retrying…",
+        "paused_notice": "Background tasks in this library are paused. Running tasks will finish, new ones stay queued, and work continues when you resume.",
+        "summary": {
+            "processing": "Processing · {count} left",
+            "scanning": "Scanning the library",
+            "paused": "Paused · {count} left",
+            "failed": "{count} failed",
+            "idle": "All caught up"
+        },
         "actions": {
+            "pause": "Pause",
+            "resume": "Resume",
+            "more": "More actions",
             "sweep": "Fix stuck tasks",
             "sweep_hint": "Reset tasks whose worker stopped responding"
+        },
+        "groups": {
+            "media": "Media",
+            "ai": "AI"
+        },
+        "table": {
+            "caption": "Background pipelines in this library",
+            "pipeline": "Pipeline",
+            "queued": "Queued",
+            "running": "Running",
+            "retrying": "Retrying",
+            "failed": "Failed",
+            "oldest": "Oldest wait"
+        },
+        "states": {
+            "legend": "Legend",
+            "active": "Processing",
+            "paused": "Paused",
+            "blocked": "Provider unavailable",
+            "failed": "Has failures",
+            "idle": "Up to date"
+        },
+        "inspector": {
+            "close": "Close details",
+            "scanning": "scanning the library",
+            "oldest": "oldest waiting {wait}",
+            "failures": "Failures",
+            "retry_all": "Retry all",
+            "no_failures": "No failures",
+            "failures_error": "Couldn't load failures."
         },
         "pipelines": {
             "scanning": "scanning",
@@ -1074,27 +1116,22 @@
                     "image": "Image vectors"
                 }
             },
-            "retry_failed": "Retry",
-            "retry_done": "Queued {count} items to retry",
-            "retry_error": "Failed to retry",
-            "failures_error": "Failed to load failures",
-            "label": "Pipelines",
-            "up_to_date": "Up to date",
-            "count_queued": "{count} queued",
-            "count_running": "{count} running",
-            "count_retrying": "{count} retrying",
-            "count_failed": "{count} failed",
+            "about": {
+                "download": "Downloads media files from their source into the library.",
+                "avatar": "Downloads author avatars.",
+                "cover": "Generates covers for media at the qualities this library uses.",
+                "ai": {
+                    "describe": "Writes a text description of each media with AI.",
+                    "index": "Builds the search document from descriptions, titles and tags.",
+                    "text": "Turns search documents into text vectors for semantic search.",
+                    "image": "Turns images and covers into image vectors for visual search."
+                }
+            },
             "blocked": "Provider unavailable, trying again in about {minutes} min",
-            "oldest": "Oldest waiting {minutes} min",
-            "failures_title": "Recent failures: {name}",
-            "hide_failures": "Hide failures",
-            "no_failures": "No failures recorded",
-            "pause": "Pause",
-            "resume": "Resume",
-            "paused": "Paused",
-            "paused_notice": "Background tasks in this library are paused. Running tasks will finish, new ones stay queued, and work continues when you resume."
+            "paused": "Paused"
         },
         "toast": {
+            "retried": "Queued {count} to retry",
             "swept": "Stuck tasks were reset",
             "action_failed": "Couldn't complete the action. Try again."
         },

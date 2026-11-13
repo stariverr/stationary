@@ -683,7 +683,7 @@
         "merge_tracks_tooltip": "將選中的檔案合併為單個媒體資产（例如影片+音訊軌道）",
         "delete_btn": "刪除",
         "delete_tooltip": "永久刪除選中的草稿檔案",
-        "uploading_background_tasks": "後台任務正在上傳...",
+        "uploading": "正在上傳",
         "uploading_and_registering": "正在上傳檔案到草稿箱並註冊軌道...",
         "unselect_all_btn": "取消全選",
         "select_all_btn": "全選",
@@ -953,9 +953,51 @@
     },
     "jobs": {
         "nav_title": "背景任務",
+        "load_error": "無法載入背景任務，正在重試…",
+        "paused_notice": "此庫的背景任務已暫停：執行中的任務會跑完，新任務繼續排隊，恢復後接著處理。",
+        "summary": {
+            "processing": "處理中 · 剩餘 {count} 項",
+            "scanning": "正在掃描媒體庫",
+            "paused": "已暫停 · 剩餘 {count} 項",
+            "failed": "{count} 項失敗",
+            "idle": "全部已是最新"
+        },
         "actions": {
+            "pause": "暫停",
+            "resume": "恢復",
+            "more": "更多操作",
             "sweep": "修復卡住的任務",
             "sweep_hint": "重設工作程序已失去回應的任務"
+        },
+        "groups": {
+            "media": "媒體",
+            "ai": "AI"
+        },
+        "table": {
+            "caption": "此庫的背景流水線",
+            "pipeline": "流水線",
+            "queued": "排隊",
+            "running": "執行",
+            "retrying": "等待重試",
+            "failed": "失敗",
+            "oldest": "最久等待"
+        },
+        "states": {
+            "legend": "圖例",
+            "active": "處理中",
+            "paused": "已暫停",
+            "blocked": "服務商受阻",
+            "failed": "有失敗",
+            "idle": "已是最新"
+        },
+        "inspector": {
+            "close": "關閉詳情",
+            "scanning": "正在掃描媒體庫",
+            "oldest": "最久已等 {wait}",
+            "failures": "失敗記錄",
+            "retry_all": "全部重試",
+            "no_failures": "沒有失敗",
+            "failures_error": "無法載入失敗記錄。"
         },
         "pipelines": {
             "scanning": "掃描中",
@@ -970,27 +1012,22 @@
                     "image": "圖像向量"
                 }
             },
-            "retry_failed": "重試",
-            "retry_done": "已將 {count} 項加入重試",
-            "retry_error": "重試失敗",
-            "failures_error": "載入失敗清單出錯",
-            "label": "管線",
-            "up_to_date": "已是最新",
-            "count_queued": "{count} 排隊中",
-            "count_running": "{count} 執行中",
-            "count_retrying": "{count} 等待重試",
-            "count_failed": "{count} 失敗",
+            "about": {
+                "download": "把媒體檔案從來源下載到庫中。",
+                "avatar": "下載作者頭像。",
+                "cover": "依此庫設定的清晰度為媒體產生封面。",
+                "ai": {
+                    "describe": "用 AI 為每個媒體寫一段文字描述。",
+                    "index": "把描述、標題和標籤整理成搜尋文件。",
+                    "text": "把搜尋文件轉成文字向量，用於語意搜尋。",
+                    "image": "把圖片和封面轉成圖像向量，用於以圖搜圖。"
+                }
+            },
             "blocked": "服務商暫不可用，約 {minutes} 分鐘後再試",
-            "oldest": "最久已等 {minutes} 分鐘",
-            "failures_title": "最近失敗：{name}",
-            "hide_failures": "收合失敗明細",
-            "no_failures": "暫無失敗記錄",
-            "pause": "暫停",
-            "resume": "恢復",
-            "paused": "已暫停",
-            "paused_notice": "此庫的背景任務已暫停：執行中的任務會跑完，新任務繼續排隊，恢復後接著處理。"
+            "paused": "已暫停"
         },
         "toast": {
+            "retried": "已將 {count} 項加入重試",
             "swept": "已重設卡住的任務",
             "action_failed": "操作沒有完成，請重試。"
         },

@@ -776,7 +776,7 @@
         "merge_tracks_tooltip": "将选中的文件合并为单个媒体资产（例如视频+音频轨道）",
         "delete_btn": "删除",
         "delete_tooltip": "永久删除选中的草稿文件",
-        "uploading_background_tasks": "后台任务正在上传...",
+        "uploading": "正在上传",
         "uploading_and_registering": "正在上传文件到草稿箱并注册轨道...",
         "unselect_all_btn": "取消全选",
         "select_all_btn": "全选",
@@ -1057,9 +1057,51 @@
     },
     "jobs": {
         "nav_title": "后台任务",
+        "load_error": "无法加载后台任务，正在重试…",
+        "paused_notice": "此库的后台任务已暂停：运行中的任务会跑完，新任务继续排队，恢复后接着处理。",
+        "summary": {
+            "processing": "处理中 · 剩余 {count} 项",
+            "scanning": "正在扫描媒体库",
+            "paused": "已暂停 · 剩余 {count} 项",
+            "failed": "{count} 项失败",
+            "idle": "全部已是最新"
+        },
         "actions": {
+            "pause": "暂停",
+            "resume": "恢复",
+            "more": "更多操作",
             "sweep": "修复卡住的任务",
             "sweep_hint": "重置工作进程已失去响应的任务"
+        },
+        "groups": {
+            "media": "媒体",
+            "ai": "AI"
+        },
+        "table": {
+            "caption": "此库的后台流水线",
+            "pipeline": "流水线",
+            "queued": "排队",
+            "running": "运行",
+            "retrying": "等待重试",
+            "failed": "失败",
+            "oldest": "最久等待"
+        },
+        "states": {
+            "legend": "图例",
+            "active": "处理中",
+            "paused": "已暂停",
+            "blocked": "服务商受阻",
+            "failed": "有失败",
+            "idle": "已是最新"
+        },
+        "inspector": {
+            "close": "关闭详情",
+            "scanning": "正在扫描媒体库",
+            "oldest": "最久已等 {wait}",
+            "failures": "失败记录",
+            "retry_all": "全部重试",
+            "no_failures": "没有失败",
+            "failures_error": "无法加载失败记录。"
         },
         "pipelines": {
             "scanning": "扫描中",
@@ -1074,27 +1116,22 @@
                     "image": "图像向量"
                 }
             },
-            "retry_failed": "重试",
-            "retry_done": "已将 {count} 项加入重试",
-            "retry_error": "重试失败",
-            "failures_error": "加载失败列表出错",
-            "label": "管线",
-            "up_to_date": "已是最新",
-            "count_queued": "{count} 排队中",
-            "count_running": "{count} 运行中",
-            "count_retrying": "{count} 等待重试",
-            "count_failed": "{count} 失败",
+            "about": {
+                "download": "把媒体文件从来源下载到库中。",
+                "avatar": "下载作者头像。",
+                "cover": "按此库设置的清晰度为媒体生成封面。",
+                "ai": {
+                    "describe": "用 AI 为每个媒体写一段文字描述。",
+                    "index": "把描述、标题和标签整理成搜索文档。",
+                    "text": "把搜索文档转成文本向量，用于语义搜索。",
+                    "image": "把图片和封面转成图像向量，用于以图搜图。"
+                }
+            },
             "blocked": "服务商暂不可用，约 {minutes} 分钟后再试",
-            "oldest": "最久已等 {minutes} 分钟",
-            "failures_title": "最近失败：{name}",
-            "hide_failures": "收起失败明细",
-            "no_failures": "暂无失败记录",
-            "pause": "暂停",
-            "resume": "恢复",
-            "paused": "已暂停",
-            "paused_notice": "此库的后台任务已暂停：运行中的任务会跑完，新任务继续排队，恢复后接着处理。"
+            "paused": "已暂停"
         },
         "toast": {
+            "retried": "已将 {count} 项加入重试",
             "swept": "已重置卡住的任务",
             "action_failed": "操作没有完成，请重试。"
         },
