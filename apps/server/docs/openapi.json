@@ -2550,6 +2550,47 @@
                                         "vtt_url"
                                       ]
                                     }
+                                  },
+                                  "lyrics": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "id": {
+                                          "type": "string"
+                                        },
+                                        "language": {
+                                          "type": "string",
+                                          "nullable": true
+                                        },
+                                        "label": {
+                                          "type": "string",
+                                          "nullable": true
+                                        },
+                                        "is_default": {
+                                          "type": "boolean"
+                                        },
+                                        "timing": {
+                                          "enum": [
+                                            "NONE",
+                                            "LINE",
+                                            "WORD"
+                                          ],
+                                          "type": "string"
+                                        },
+                                        "lrc_url": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "id",
+                                        "language",
+                                        "label",
+                                        "is_default",
+                                        "timing",
+                                        "lrc_url"
+                                      ]
+                                    }
                                   }
                                 },
                                 "required": [
@@ -2560,7 +2601,8 @@
                                   "duration",
                                   "video",
                                   "audio_tracks",
-                                  "captions"
+                                  "captions",
+                                  "lyrics"
                                 ],
                                 "nullable": true
                               },
@@ -4125,6 +4167,47 @@
                                   "vtt_url"
                                 ]
                               }
+                            },
+                            "lyrics": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "language": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "is_default": {
+                                    "type": "boolean"
+                                  },
+                                  "timing": {
+                                    "enum": [
+                                      "NONE",
+                                      "LINE",
+                                      "WORD"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "lrc_url": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "language",
+                                  "label",
+                                  "is_default",
+                                  "timing",
+                                  "lrc_url"
+                                ]
+                              }
                             }
                           },
                           "required": [
@@ -4135,7 +4218,8 @@
                             "duration",
                             "video",
                             "audio_tracks",
-                            "captions"
+                            "captions",
+                            "lyrics"
                           ],
                           "nullable": true
                         },

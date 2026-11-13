@@ -66,6 +66,17 @@ export const PlaybackCaptionSchema = v.object({
 });
 export type PlaybackCaption = v.InferOutput<typeof PlaybackCaptionSchema>;
 
+/** Lyrics as LRC; `NONE` timing is plain lines without timestamps. */
+export const PlaybackLyricsSchema = v.object({
+    id: v.string(),
+    language: v.nullable(v.string()),
+    label: v.nullable(v.string()),
+    is_default: v.boolean(),
+    timing: v.picklist(["NONE", "LINE", "WORD"]),
+    lrc_url: v.string(),
+});
+export type PlaybackLyrics = v.InferOutput<typeof PlaybackLyricsSchema>;
+
 /** How a VIDEO, AUDIO or LIVE_PHOTO media plays. The manifest URLs are relative signed API paths. */
 export const MediaPlaybackSchema = v.object({
     direct_url: v.string(),
@@ -76,6 +87,7 @@ export const MediaPlaybackSchema = v.object({
     video: v.nullable(PlaybackVideoSchema),
     audio_tracks: v.array(PlaybackAudioTrackSchema),
     captions: v.array(PlaybackCaptionSchema),
+    lyrics: v.array(PlaybackLyricsSchema),
 });
 export type MediaPlayback = v.InferOutput<typeof MediaPlaybackSchema>;
 

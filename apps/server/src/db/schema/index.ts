@@ -673,6 +673,62 @@ export const MediaCaption = pgTable(
     ],
 );
 
+/** How lyrics are timed: plain text, per line, or per word (enhanced LRC). */
+export enum LyricsTiming {
+    NONE = "NONE",
+    LINE = "LINE",
+    WORD = "WORD",
+}
+export const LyricsTimingEnum = pgEnum("lyrics_timing", [LyricsTiming.NONE, LyricsTiming.LINE, LyricsTiming.WORD]);
+
+/**
+ * Lyrics of an audio or video media (3.9), served as LRC. FILE lyrics keep the imported or uploaded file in
+ * `source_file_id` and its conversion in `lrc_file_id`; EMBEDDED lyrics are read from the tags of an original, which
+ * are not streams, so they point at the original.
+ * - [Hard Delete] Files are soft deleted; EMBEDDED ones go with their original.
+ */
+export const MediaLyrics = pgTable(
+    "media_lyrics",
+    {
+        id: uuid("id")
+            .primaryKey()
+            .notNull()
+            .$defaultFn(() => uuidv7.generate()),
+        media_id: uuid("media_id").notNull(),
+        origin: AssetOriginEnum("origin").notNull(),
+        language: text("language"),
+        label: text("label"),
+        is_default: boolean("is_default").default(false).notNull(),
+        timing: LyricsTimingEnum("timing").notNull(),
+        lrc_file_id: uuid("lrc_file_id"),
+        source_file_id: uuid("source_file_id"),
+        original_id: uuid("original_id"),
+        source_url: text("source_url"),
+        source_key: text("source_key"),
+        status: SyncStatusEnum("status").notNull(),
+        last_error: text("last_error"),
+        create_time: temporal("create_time")
+            .default(sql`now()`)
+            .notNull(),
+        update_time: temporal("update_time")
+            .default(sql`now()`)
+            .notNull(),
+    },
+    (table) => [
+        index("media_lyrics_media_idx").on(table.media_id),
+        uniqueIndex("media_lyrics_media_default_unique").on(table.media_id).where(sql`${table.is_default}`),
+        uniqueIndex("media_lyrics_media_source_key_unique").on(table.media_id, table.source_key).where(sql`${table.source_key} IS NOT NULL`),
+        check("media_lyrics_embedded_original", sql`(${table.origin} = 'EMBEDDED') = (${table.original_id} IS NOT NULL)`),
+        check("media_lyrics_file_source_only", sql`${table.origin} = 'FILE' OR ${table.source_file_id} IS NULL`),
+        check("media_lyrics_lrc_when_completed", sql`(${table.status} = 'COMPLETED') = (${table.lrc_file_id} IS NOT NULL)`),
+        check(
+            "media_lyrics_file_source_when_completed",
+            sql`${table.origin} = 'EMBEDDED' OR ${table.status} <> 'COMPLETED' OR ${table.source_file_id} IS NOT NULL`,
+        ),
+        check("media_lyrics_source_pair", sql`(${table.source_url} IS NULL) = (${table.source_key} IS NULL)`),
+    ],
+);
+
 // External API Token
 export const ExternalApiToken = pgTable("external_api_token", {
     id: uuid("id")

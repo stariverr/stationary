@@ -1,6 +1,6 @@
 import * as v from "valibot";
 import { toJsonSchema } from "@valibot/to-json-schema";
-import { AssetOrigin, MediaType, PostSource, SyncStatus } from "@/db/schema";
+import { AssetOrigin, LyricsTiming, MediaType, PostSource, SyncStatus } from "@/db/schema";
 
 // FormTimestampSchema helper
 const FormTimestampSchema = v.optional(v.nullable(v.union([v.string(), v.number()])));
@@ -247,6 +247,16 @@ const PlaybackCaptionResponseSchema = v.object({
     vtt_url: v.string(),
 });
 
+/** Lyrics as LRC; `NONE` timing is plain lines without timestamps (docs/media_refactor.zh-Hans.md, 3.9). */
+const PlaybackLyricsResponseSchema = v.object({
+    id: v.string(),
+    language: v.nullable(v.string()),
+    label: v.nullable(v.string()),
+    is_default: v.boolean(),
+    timing: v.enum(LyricsTiming),
+    lrc_url: v.string(),
+});
+
 /** How to play a media: direct play of its one original, or adaptive manifests over its streams. */
 const MediaPlaybackResponseSchema = v.object({
     direct_url: v.nullable(v.string()),
@@ -257,6 +267,7 @@ const MediaPlaybackResponseSchema = v.object({
     video: v.nullable(PlaybackVideoResponseSchema),
     audio_tracks: v.array(PlaybackAudioTrackResponseSchema),
     captions: v.array(PlaybackCaptionResponseSchema),
+    lyrics: v.array(PlaybackLyricsResponseSchema),
 });
 
 const PreviewImageResponseSchema = v.nullable(v.object({ url: v.string(), width: v.number(), height: v.number() }));
