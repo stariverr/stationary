@@ -37,7 +37,7 @@
 
 - 🎨 **Card-on-Canvas 美学设计**：融合 Apple 风格的空间卡片画布层级与 Linear 级别的桌面精细度，采用 HSL 色调与高密度布局。
 - 📸 **Live Photo 与原生多媒体支持**：原生支持 Live Photo 交互播放与浏览器端 HEIC/HEIF 图像解码。
-- 🎬 **统一 DASH 分片流播**：针对音视频分离的多轨媒体源，在后台解析 `sidx` 索引块范围并生成 SegmentBase 元数据，通过 `dash.js` 实现免转码、低延迟流播。
+- 🎬 **原件优先的播放**：视频直接播放原件；切换其他音轨或外接音轨时，改用请求时生成的 HLS 或 DASH 清单，普通 MP4 即时打包成 fMP4 分片，不存储转码副本。
 - 🏷️ **多租户媒体库与标签管理**：基于 Library 的物理隔离，支持 RBAC 细粒度授权（`VIEWER` / `EDITOR` / `ADMIN`），提供标签别名映射与规范化审核流。
 - 🔍 **AI 混合检索与富化**：结合 SQL Trigram 模糊匹配、Gemini 文本向量 (`text-embedding-004`) 与视觉向量 (`multimodal-embedding-004`)，使用倒数排序融合 (RRF) 算法实现精准检索与 AI 标注。
 - ⚡ **自研持久化任务队列**：基于 PostgreSQL 的调和队列，利用 `SKIP LOCKED` 租约与 fencing、指数退避重试，以及每小时补漏的巡检，零依赖高可靠运行。
@@ -79,7 +79,7 @@ stationary/
 | 应用/组件 | 技术栈 | 职责与功能 |
 | :--- | :--- | :--- |
 | **`apps/server`** | Bun, Hono, Drizzle ORM, PostgreSQL, Redis, `@ai-sdk/google` | RESTful API、Better Auth 鉴权、异步任务引擎、S3 资产管理 |
-| **`apps/web`** | Nuxt 4, Vue 3, Pinia, Vue Query, Tailwind CSS v4, dash.js | Web 客户端、Card-on-Canvas 布局系统、DASH 播放器、HEIC 渲染 |
+| **`apps/web`** | Nuxt 4, Vue 3, Pinia, Vue Query, Tailwind CSS v4, Video.js, hls.js, dash.js | Web 客户端、Card-on-Canvas 布局系统、视频播放器（直接播放、HLS、DASH）、HEIC 渲染 |
 | **`apps/flutter`** | Flutter, Dart, Chewie, PhotoView | 移动端与桌面端跨平台客户端 |
 
 ---
@@ -180,7 +180,7 @@ kubectl apply -f deploy/argocd/application.yaml
 - 🔌 **[媒体元数据同步工作流 & API 契约](./external_api.contract.zh-Hans.md)** - 客户端对接规范、`external_id` 生成逻辑与 API 结构。
 - 🔄 **[Metadata 物理保存与清理流程详细说明](./save_metadata_flow.zh-Hans.md)** - `saveMetadata` 执行流程、差异检测与 S3 软删除清扫。
 - 🔍 **[多空间 AI 混合检索架构规范](./ai_hybrid_search.zh-Hans.md)** - 向量空间隔离、pgvector HNSW 索引与 RRF 排序融合。
-- ⚖️ **[系统架构设计取舍与 Trade-offs](./trade-offs.zh-Hans.md)** - Multi-Track 设计与 DASH 分片解析的取舍考量。
+- ⚖️ **[系统架构设计取舍与 Trade-offs](./trade-offs.zh-Hans.md)** - 媒体模型与原件优先播放的取舍考量。
 - 📜 **[TypeScript 编写规范与避坑指南](./code.rule.zh-Hans.md)** - Temporal API、Web API Streams 和 `bun:File` 强制编码规范。
 
 ---

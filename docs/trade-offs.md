@@ -16,23 +16,25 @@ Stationary uses a **Multi-Track model**:
 
 ### Rationales
 - **Extensibility**: Allows media items to dynamically attach new files (such as multilingual subtitles, varying quality tracks, or AI-generated previews) without executing database migrations.
-- **DASH Playback Integration**: Separate video and audio tracks are stored as individual `Track` rows and merged at playback time via a dynamically generated DASH manifest, avoiding expensive video merging or transcoding tasks on the backend.
 - **Granular Change Detection**: If a secondary asset (such as an audio track or a subtitle file) changes or has an anti-leech token rotation, only that specific `Track` is updated, avoiding re-downloading the large primary video file.
 
 ---
 
-## 2. Single-File DASH Video Playback & Dynamic SegmentBase Extraction
+## 2. Playback: Original First, Manifests and Just-in-Time Packaging When Needed
 
 ### Context & Decision
-To play separate audio and video tracks synchronously without combining them into a single file on the server, Stationary uses the DASH protocol (`dash.js` player). For single-file DASH tracks, the player needs the `SegmentBase` metadata (the byte ranges for `Initialization` and `Index` boxes) to request segments on demand using HTTP Range requests.
+A video may come as one plain MP4, as an MP4 with several audio tracks inside, or as a video plus separate audio files (MP4, M4A, fMP4) and captions. Stationary never stores a transcoded or remuxed copy. It plays the original whenever that gives the viewer what they need, and only otherwise uses an HLS or DASH manifest built at request time. Details are in [media_refactor.zh-Hans.md](./media_refactor.zh-Hans.md) §8 (Chinese).
 
-Rather than requiring the external sync clients to compute these ranges or downloading the entire file to the server's disk to parse it, we use an **online dynamic streaming extraction** approach in the `TaskService.processMedia` workflow.
+- **The server offers, the client chooses.** `direct_url` is always present. `hls_url` and `dash_url` are added when there are several originals, several audio tracks or captions, and the video stream can go into a manifest.
+- **Manifest sources.** A single-stream fMP4 with a `sidx` is referenced by byte range straight from the CDN. A plain MP4/MOV/M4A is packaged just in time: the server reads `moov` with Range requests, writes `moof` itself and streams the sample bytes from S3 as fMP4 segments. Other formats (MP3, MKV, fMP4 without `sidx`) stay out of manifests. The `sidx` and fragmentation facts are found at probe time with Range requests and stored on `av_file`; per-segment indexes are cached in Redis.
+- **Web player.** The picked audio track decides the source. A track the original gives plays from the original in a plain `<video>`: Safari switches embedded tracks in place (`audioTracks`), other browsers only play a file's first audio track. Any other track plays through the manifest (hls.js; dash.js is an advanced setting). Switching goes both ways and resumes at the same position, with the last frame, time and play state held until the new source plays.
+- **Flutter and external players.** Flutter plays one original directly, switching embedded tracks in the player, and uses HLS for external tracks (AVPlayer has no DASH). External players get the original's address, or the manifest address when there are external tracks or captions.
 
 ### Rationales & Trade-offs
-- **Fixed Memory Buffering**: During stream piping from source to S3, we intercept and buffer only the **first 32KB of data** in memory. This is enough to parse the `sidx` box structure and extract the initialization and index ranges, storing them in `Track.metadata.segment_base`. Once parsed, the stream is reconstructed and written to S3.
-- **Resource Efficiency**: Buffering only 32KB eliminates OOM risks for multi-gigabyte videos and avoids temporary disk writes.
-- **No Performance Penalty**: The parsing logic completes in under 0.05ms, causing no noticeable delay in download speeds.
-- **Silent Fallback**: For standard non-fragmented files (like progressive MP4s or JPEGs), the stream parser gracefully aborts and resumes normal piping after 32KB, ensuring zero operational issues.
+- **Most playback never touches the server.** The original streams from the CDN with HTTP Range requests. Packaged segments, by contrast, pass through the server and cost bandwidth there; only media that needs a manifest pays this.
+- **No stored copies.** Originals are never modified and no derived audio/video files exist, so there is nothing to keep in sync or migrate. The packaging index can be recomputed any time.
+- **Interleaved originals are read in a few ranges.** ffmpeg interleaves audio and video sample by sample, so one 6-second segment is scattered over ~180 byte runs. Runs less than 32 KiB apart are merged into reads of up to 1 MiB, read ahead in parallel. This takes a segment from about 6 s down to 0.2–0.4 s.
+- **Clear support boundaries.** Formats outside them are listed in the player as unavailable, with the reason, rather than being worked around (media_refactor §16). Transcoding is a later option.
 
 ---
 

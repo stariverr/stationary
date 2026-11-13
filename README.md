@@ -37,7 +37,7 @@
 
 - 🎨 **Card-on-Canvas Design System**: Built on Apple-inspired spatial depth layers and Linear-class desktop refinement with clean HSL palettes.
 - 📸 **Native Live Photo & Interactive Media**: Support for Live Photo interactive playback and browser-native HEIC/HEIF decoding.
-- 🎬 **Unified DASH Streaming**: Audio/video split streams from multi-track media sources are parsed on-the-fly via dynamic `sidx` SegmentBase extraction and streamed smoothly with `dash.js`.
+- 🎬 **Original-First Playback**: Videos play straight from the original file. Extra audio tracks and external audio switch to HLS or DASH manifests built on request, with plain MP4s packaged into fMP4 segments just in time. No transcoded copies are stored.
 - 🏷️ **Multi-Tenant Library Management**: Physical asset isolation per Library, fine-grained RBAC (`VIEWER`, `EDITOR`, `ADMIN`), and reconstructive tag normalization with alias mapping.
 - 🔍 **Hybrid AI Search & Enrichment**: Reciprocal Rank Fusion (RRF) combining SQL trigram text search, Gemini text embeddings (`text-embedding-004`), and visual similarity vectors (`multimodal-embedding-004`).
 - ⚡ **Durable Job Queue**: In-house PostgreSQL reconcile queue with `SKIP LOCKED` leases and fencing, exponential backoff retries, and hourly patrols that pick up missed work.
@@ -80,7 +80,7 @@ stationary/
 | Component | Stack | Responsibilities |
 | :--- | :--- | :--- |
 | **`apps/server`** | Bun, Hono, Drizzle ORM, PostgreSQL, Redis, `@ai-sdk/google` | REST APIs, authentication (Better Auth), task execution engine, S3 asset handling |
-| **`apps/web`** | Nuxt 4, Vue 3, Pinia, Vue Query, Tailwind CSS v4, dash.js | Web desktop client, Card-on-Canvas layout, DASH video player, HEIC renderer |
+| **`apps/web`** | Nuxt 4, Vue 3, Pinia, Vue Query, Tailwind CSS v4, Video.js, hls.js, dash.js | Web desktop client, Card-on-Canvas layout, video player (direct, HLS, DASH), HEIC renderer |
 | **`apps/flutter`** | Flutter, Dart, Chewie, PhotoView | Mobile and desktop cross-platform application |
 | **`apps/apple`** | SwiftUI, Swift 6, AVKit, Liquid Glass Theme | Native iOS/iPadOS/macOS multiplatform app with Liquid Glass UI, Post List & Detail |
 
@@ -179,7 +179,7 @@ Detailed specifications and architectural guides are available in the [`docs/`](
 - 🔌 **[Metadata Sync & API Contracts](./docs/external_api.contract.md)** - Integration client schemas, `external_id` deduplication rules, and sync payloads.
 - 🔄 **[Metadata Ingestion Pipeline](./docs/save_metadata_flow.md)** - Execution flow of `saveMetadata`, change detection, and S3 soft-delete lifecycle.
 - 🔍 **[Multi-Space Hybrid Search Spec](./docs/ai_hybrid_search.md)** - Vector space segregation, pgvector HNSW indexing, and RRF rank fusion.
-- ⚖️ **[Architectural Trade-offs](./docs/trade-offs.md)** - Design rationale behind Multi-Track schemas and DASH segment parsing.
+- ⚖️ **[Architectural Trade-offs](./docs/trade-offs.md)** - Design rationale behind the media model and original-first playback.
 - 📜 **[TypeScript & Bun Guidelines](./docs/code.rule.md)** - Mandatory standards for Temporal API, Web API streams, and `bun:File`.
 
 ---
