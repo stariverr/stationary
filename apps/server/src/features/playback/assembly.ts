@@ -1,6 +1,6 @@
 /**
- * Playback assembly (docs/media_refactor.zh-Hans.md, 7): the one place that reads originals, streams and captions to
- * decide how a media plays. The detail DTO, the HLS playlists and the DASH manifest all come from here.
+ * Playback assembly (docs/media_refactor.zh-Hans.md, 7): the one place that reads originals, streams, captions and
+ * lyrics to decide how a media plays. The detail DTO, the HLS playlists and the DASH manifest all come from here.
  *
  * The server does not judge codec support: every stream carries its codec string and clients decide.
  */
@@ -11,8 +11,10 @@ import {
     File as DbFile,
     Media,
     MediaCaption,
+    MediaLyrics,
     MediaType,
     SyncStatus,
+    type LyricsTiming,
     type AvFile,
     type AvStream,
 } from "@/db/schema";
@@ -58,6 +60,15 @@ export interface PlaybackCaption {
     vtt_url: string;
 }
 
+export interface PlaybackLyrics {
+    id: string;
+    language: string | null;
+    label: string | null;
+    is_default: boolean;
+    timing: LyricsTiming;
+    lrc_url: string;
+}
+
 /** How a media plays (7.1). */
 export interface MediaPlayback {
     /** The original that plays as is: the video original of a VIDEO or LIVE_PHOTO, the original of an AUDIO. */
@@ -70,6 +81,7 @@ export interface MediaPlayback {
     video: PlaybackVideo | null;
     audio_tracks: PlaybackAudioTrack[];
     captions: PlaybackCaption[];
+    lyrics: PlaybackLyrics[];
 }
 
 /** The sidx facts of a single-stream fMP4 original. */
@@ -122,6 +134,7 @@ function assemble(
     media: { id: string; type: MediaType; duration: number | null },
     states: OriginalState[],
     captions: PlaybackCaption[],
+    lyrics: PlaybackLyrics[],
 ): AssembledPlayback | null {
     if (media.type !== MediaType.VIDEO && media.type !== MediaType.AUDIO && media.type !== MediaType.LIVE_PHOTO) return null;
     const completed = states.filter((state) => state.file && state.avFile);
@@ -178,6 +191,7 @@ function assemble(
                 in_manifest: manifest?.audio.some((source) => source.stream.id === stream.id) ?? false,
             })),
             captions,
+            lyrics,
         },
     };
 }
@@ -187,7 +201,7 @@ export async function assemblePlayback(mediaIds: readonly string[]): Promise<Map
     const result = new Map<string, AssembledPlayback>();
     if (mediaIds.length === 0) return result;
     const ids = [...mediaIds];
-    const [media, states, captionRows] = await Promise.all([
+    const [media, states, captionRows, lyricsRows] = await Promise.all([
         db.select({ id: Media.id, type: Media.type, duration: Media.duration }).from(Media).where(inArray(Media.id, ids)),
         loadOriginalStates(db, ids),
         db
@@ -196,6 +210,12 @@ export async function assemblePlayback(mediaIds: readonly string[]): Promise<Map
             .innerJoin(DbFile, and(eq(DbFile.id, MediaCaption.vtt_file_id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
             .where(and(inArray(MediaCaption.media_id, ids), eq(MediaCaption.status, SyncStatus.COMPLETED)))
             .orderBy(asc(MediaCaption.create_time)),
+        db
+            .select({ lyrics: MediaLyrics, file: DbFile })
+            .from(MediaLyrics)
+            .innerJoin(DbFile, and(eq(DbFile.id, MediaLyrics.lrc_file_id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
+            .where(and(inArray(MediaLyrics.media_id, ids), eq(MediaLyrics.status, SyncStatus.COMPLETED)))
+            .orderBy(asc(MediaLyrics.create_time), asc(MediaLyrics.id)),
     ]);
     for (const row of media) {
         const captions = captionRows
@@ -207,7 +227,17 @@ export async function assemblePlayback(mediaIds: readonly string[]): Promise<Map
                 is_default: caption.is_default,
                 vtt_url: buildCdnUrl(file.bucket, file.path),
             }));
-        const assembled = assemble(row, states.get(row.id) ?? [], captions);
+        const lyrics = lyricsRows
+            .filter(({ lyrics }) => lyrics.media_id === row.id)
+            .map(({ lyrics, file }) => ({
+                id: lyrics.id,
+                language: lyrics.language,
+                label: lyrics.label,
+                is_default: lyrics.is_default,
+                timing: lyrics.timing,
+                lrc_url: buildCdnUrl(file.bucket, file.path),
+            }));
+        const assembled = assemble(row, states.get(row.id) ?? [], captions, lyrics);
         if (assembled) result.set(row.id, assembled);
     }
     return result;

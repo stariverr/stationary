@@ -221,6 +221,37 @@ class PlaybackCaption {
   }
 }
 
+/// Lyrics as LRC. [timing] is `NONE` (plain lines without timestamps),
+/// `LINE` or `WORD` (docs/media_refactor 3.9).
+class PlaybackLyrics {
+  final String id;
+  final String? language;
+  final String? label;
+  final bool isDefault;
+  final String timing;
+  final String lrcUrl;
+
+  PlaybackLyrics({
+    required this.id,
+    this.language,
+    this.label,
+    required this.isDefault,
+    required this.timing,
+    required this.lrcUrl,
+  });
+
+  factory PlaybackLyrics.fromJson(Map<String, dynamic> json) {
+    return PlaybackLyrics(
+      id: json['id'] as String,
+      language: json['language'] as String?,
+      label: json['label'] as String?,
+      isDefault: json['is_default'] as bool,
+      timing: json['timing'] as String,
+      lrcUrl: json['lrc_url'] as String,
+    );
+  }
+}
+
 /// How a VIDEO, AUDIO or LIVE_PHOTO media plays (docs/media_refactor §7–8).
 ///
 /// [hlsUrl] and [dashUrl] are signed API paths, set only when the media needs
@@ -235,6 +266,7 @@ class MediaPlayback {
   final PlaybackVideo? video;
   final List<PlaybackAudioTrack> audioTracks;
   final List<PlaybackCaption> captions;
+  final List<PlaybackLyrics> lyrics;
 
   MediaPlayback({
     required this.directUrl,
@@ -245,6 +277,7 @@ class MediaPlayback {
     this.video,
     required this.audioTracks,
     required this.captions,
+    required this.lyrics,
   });
 
   factory MediaPlayback.fromJson(Map<String, dynamic> json) {
@@ -261,6 +294,7 @@ class MediaPlayback {
           : null,
       audioTracks: _list(json['audio_tracks'], PlaybackAudioTrack.fromJson),
       captions: _list(json['captions'], PlaybackCaption.fromJson),
+      lyrics: _list(json['lyrics'], PlaybackLyrics.fromJson),
     );
   }
 

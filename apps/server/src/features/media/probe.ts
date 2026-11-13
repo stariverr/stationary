@@ -46,6 +46,17 @@ export interface StreamProbe {
 /** A text subtitle stream extracted as WebVTT, or why it could not be. */
 export type EmbeddedCaption = { stream_index: number; vtt: Uint8Array } | { stream_index: number; error: string };
 
+/**
+ * Unsynced lyrics read from a tag (6.2): ID3 USLT, M4A ©lyr, Vorbis LYRICS. Synced ID3 SYLT is not read; ffmpeg does
+ * not expose it.
+ */
+export interface EmbeddedLyrics {
+    language: string | null;
+    /** The USLT content descriptor, when there is one. */
+    label: string | null;
+    text: string;
+}
+
 export interface AvProbe {
     container: string;
     duration: number | null;
@@ -56,6 +67,7 @@ export interface AvProbe {
     streams: StreamProbe[];
     /** One per text subtitle stream; image subtitles (PGS, VobSub) are not extracted (16). */
     captions: EmbeddedCaption[];
+    lyrics: EmbeddedLyrics[];
 }
 
 export type OriginalProbe =
@@ -126,8 +138,8 @@ interface FfprobeStream {
     side_data_list?: { rotation?: number }[];
 }
 
-interface FfprobeOutput {
-    format?: { format_name?: string; duration?: string; bit_rate?: string };
+export interface FfprobeOutput {
+    format?: { format_name?: string; duration?: string; bit_rate?: string; tags?: Record<string, string> };
     streams?: FfprobeStream[];
 }
 
@@ -181,6 +193,39 @@ async function extractTextCaptions(url: string, streams: StreamProbe[]): Promise
     } finally {
         await rm(dir, { recursive: true, force: true });
     }
+}
+
+/**
+ * How ffprobe names lyric tags: ID3 USLT as `lyrics-<lang>` or `lyrics-<descriptor>-<lang>` (TXXX frames written by
+ * ffmpeg read back the same way), M4A ©lyr as `lyrics`, Vorbis comments as `LYRICS` or `UNSYNCEDLYRICS`.
+ */
+const LYRICS_TAG = /^(?:unsynced)?lyrics(?:-(.*))?$/i;
+/** ID3 placeholders for "no language". */
+const NO_LANGUAGE = new Set(["xxx", "und", "zxx"]);
+
+function lyricsTagParts(suffix: string | undefined): { language: string | null; label: string | null } {
+    if (!suffix) return { language: null, label: null };
+    const cut = suffix.lastIndexOf("-");
+    const language = (cut < 0 ? suffix : suffix.slice(cut + 1)).toLowerCase();
+    const label = cut < 0 ? null : suffix.slice(0, cut) || null;
+    return { language: /^[a-z]{3}$/.test(language) && !NO_LANGUAGE.has(language) ? language : null, label };
+}
+
+/**
+ * The lyrics in a file's tags. They sit in the format tags, or in the stream tags for Ogg; the same text found twice
+ * is kept once. Line breaks become `\n`, and blank lyrics are skipped.
+ */
+export function readTagLyrics(output: FfprobeOutput): EmbeddedLyrics[] {
+    const tags = [output.format?.tags, ...(output.streams ?? []).map((stream) => stream.tags)];
+    const lyrics: EmbeddedLyrics[] = [];
+    for (const [key, value] of tags.flatMap((list) => Object.entries(list ?? {}))) {
+        const match = LYRICS_TAG.exec(key);
+        if (!match) continue;
+        const text = value.replace(/\r\n?/g, "\n").trim();
+        if (!text || lyrics.some((item) => item.text === text)) continue;
+        lyrics.push({ ...lyricsTagParts(match[1]), text });
+    }
+    return lyrics;
 }
 
 const STREAM_TYPES: Record<string, AvStreamType> = { video: AvStreamType.VIDEO, audio: AvStreamType.AUDIO, subtitle: AvStreamType.SUBTITLE };
@@ -241,6 +286,7 @@ async function probeAv(file: ProbedFile): Promise<AvProbe> {
         segmentIndex,
         streams,
         captions: await extractTextCaptions(url, streams),
+        lyrics: readTagLyrics(output),
     };
 }
 

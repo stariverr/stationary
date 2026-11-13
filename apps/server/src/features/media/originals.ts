@@ -20,6 +20,7 @@ import type { DbClient } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
 import { insertEmbeddedCaptions } from "./captions";
+import { deleteEmbeddedLyrics, insertEmbeddedLyrics } from "./lyrics";
 import { displaySize, isImageFile, isPdfFile, type AvProbe, type OriginalProbe } from "./probe";
 
 type OriginalRow = typeof MediaOriginal.$inferSelect;
@@ -122,13 +123,13 @@ export interface Declarations {
 }
 
 /**
- * Records the probe of an original's file: stream facts and embedded text captions for audio and video, the
- * displayed size for an image.
+ * Records the probe of an original's file: stream facts, embedded text captions and tag lyrics for audio and video,
+ * the displayed size for an image.
  */
 async function storeProbe(
     client: DbClient,
     media: { id: string; type: MediaType },
-    fileId: string,
+    original: { id: string; file_id: string },
     probe: OriginalProbe,
     declared: Declarations,
 ): Promise<AvStreamRow[]> {
@@ -136,10 +137,13 @@ async function storeProbe(
         await client.update(Media).set({ display_width: probe.width, display_height: probe.height }).where(eq(Media.id, media.id));
     }
     if (probe.kind !== "AV") return [];
-    const streams = await insertAvRows(client, fileId, probe.av, declared);
-    if (probe.av.captions.length > 0) {
+    const streams = await insertAvRows(client, original.file_id, probe.av, declared);
+    if (probe.av.captions.length > 0 || probe.av.lyrics.length > 0) {
         const [row] = await client.select({ id: Media.id, post_id: Media.post_id }).from(Media).where(eq(Media.id, media.id));
-        if (row) await insertEmbeddedCaptions(client, row, streams, probe.av.captions);
+        if (row) {
+            await insertEmbeddedCaptions(client, row, streams, probe.av.captions);
+            await insertEmbeddedLyrics(client, row, original.id, probe.av.lyrics);
+        }
     }
     return streams;
 }
@@ -227,7 +231,7 @@ export async function completeOriginal(
         .where(eq(MediaOriginal.id, originalId))
         .returning();
     if (!original) return;
-    const streams = await storeProbe(client, media, fileId, probe, {
+    const streams = await storeProbe(client, media, { id: original.id, file_id: fileId }, probe, {
         language: original.declared_language,
         label: original.declared_label,
         is_default: original.declared_default,
@@ -248,7 +252,7 @@ export async function insertUploadedOriginal(
         .insert(MediaOriginal)
         .values({ media_id: media.id, file_id: fileId, status: SyncStatus.COMPLETED })
         .returning({ id: MediaOriginal.id });
-    await storeProbe(client, media, fileId, probe, {});
+    await storeProbe(client, media, { id: original!.id, file_id: fileId }, probe, {});
     await settleAfterOriginalChange(client, media);
     return original!.id;
 }
@@ -269,14 +273,15 @@ async function softDeleteFiles(client: DbClient, fileIds: (string | null)[]) {
 }
 
 /**
- * Deletes originals with everything that hangs off them (10): their stream rows and the captions extracted from
- * them; their files are marked deleted. Previews follow through the content change. Returns the affected media.
+ * Deletes originals with everything that hangs off them (10): their stream rows and the captions and lyrics extracted
+ * from them; their files are marked deleted. Previews follow through the content change. Returns the affected media.
  */
 export async function deleteOriginals(client: DbClient, where: { ids?: readonly string[]; mediaIds?: readonly string[] }): Promise<string[]> {
     const condition = where.ids ? inArray(MediaOriginal.id, [...where.ids]) : inArray(MediaOriginal.media_id, [...(where.mediaIds ?? [])]);
     if ((where.ids ?? where.mediaIds ?? []).length === 0) return [];
     const originals = await client.delete(MediaOriginal).where(condition).returning();
     if (originals.length === 0) return [];
+    await deleteEmbeddedLyrics(client, originals.map((original) => original.id));
     const fileIds = originals.map((original) => original.file_id).filter((id): id is string => Boolean(id));
     if (fileIds.length > 0) {
         const avFiles = await client.delete(AvFile).where(inArray(AvFile.file_id, fileIds)).returning({ id: AvFile.id });

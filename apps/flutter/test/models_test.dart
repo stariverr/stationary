@@ -67,6 +67,16 @@ void main() {
             'vtt_url': 'https://cdn.test/c1.vtt',
           },
         ],
+        'lyrics': [
+          {
+            'id': 'l1',
+            'language': 'jpn',
+            'label': null,
+            'is_default': true,
+            'timing': 'NONE',
+            'lrc_url': 'https://cdn.test/l1.lrc',
+          },
+        ],
       },
       'originals': [
         {
@@ -116,6 +126,8 @@ void main() {
     expect(playback.video?.rotation, 90);
     expect(playback.audioTracks.map((a) => a.isDefault), [false, true]);
     expect(playback.captions.single.vttUrl, 'https://cdn.test/c1.vtt');
+    expect(playback.lyrics.single.lrcUrl, 'https://cdn.test/l1.lrc');
+    expect(playback.lyrics.single.timing, 'NONE');
   });
 
   test('several tracks in the original play directly despite a manifest', () {
@@ -134,6 +146,7 @@ void main() {
       hlsUrl: '/api/media/m1/manifest.m3u8?sig=x',
       audioTracks: [track('a1'), track('a2')],
       captions: const [],
+      lyrics: const [],
     );
     expect(playback.sourceUrl, 'https://cdn.test/video.mp4');
     expect(playback.playableAudioTracks.map((a) => a.id), ['a1', 'a2']);
@@ -163,6 +176,7 @@ void main() {
         ),
       ],
       captions: const [],
+      lyrics: const [],
     );
     expect(external.sourceUrl, '/api/media/m1/manifest.m3u8?sig=x');
     expect(external.playableAudioTracks.map((a) => a.id), ['a1', 'm4a']);
@@ -179,6 +193,7 @@ void main() {
       'video': null,
       'audio_tracks': [],
       'captions': [],
+      'lyrics': [],
     });
     expect(playback.sourceUrl, 'https://cdn.test/video.mp4');
   });
