@@ -53,6 +53,8 @@ import { CAPTION_MEDIA_TYPES, COVER_MEDIA_TYPES } from "@/lib/validation/media-c
 const command = process.argv[2];
 const apply = process.argv.includes("--apply");
 const BATCH_SIZE = 200;
+/** Media migrated at once. Reading their files takes most of the time; the writes share the connection pool. */
+const CONCURRENCY = 24;
 const LOG = "[migrate_media_originals]";
 
 /** A row of `legacy.track`, with the enum columns as text. */
@@ -404,28 +406,33 @@ async function migrate() {
             (fileIds.length > 0 ? await db.select().from(DbFile).where(inArray(DbFile.id, fileIds)) : []).map((file) => [file.id, file]),
         );
 
-        for (const media of batch) {
-            counts.media++;
-            if (migrated.has(media.id)) {
-                counts.skipped++;
-                continue;
-            }
-            try {
-                const plan = await planMedia(
-                    media,
-                    tracks.filter((track) => track.media_id === media.id),
-                    files,
-                );
-                if (!apply) {
-                    report(plan);
+        // Media are independent of each other, and most of the time goes to reading their files from storage.
+        let next = 0;
+        const worker = async () => {
+            for (let media = batch[next++]; media; media = batch[next++]) {
+                counts.media++;
+                if (migrated.has(media.id)) {
+                    counts.skipped++;
                     continue;
                 }
-                await db.transaction((tx) => writeMedia(tx, plan));
-            } catch (error) {
-                console.error(`${LOG} media ${media.id} failed: ${getErrorMessage(error)}`);
-                throw error;
+                try {
+                    const plan = await planMedia(
+                        media,
+                        tracks.filter((track) => track.media_id === media.id),
+                        files,
+                    );
+                    if (!apply) {
+                        report(plan);
+                        continue;
+                    }
+                    await db.transaction((tx) => writeMedia(tx, plan));
+                } catch (error) {
+                    console.error(`${LOG} media ${media.id} failed: ${getErrorMessage(error)}`);
+                    throw error;
+                }
             }
-        }
+        };
+        await Promise.all(Array.from({ length: CONCURRENCY }, worker));
         console.log(`${LOG} ${counts.media} media`);
     }
 

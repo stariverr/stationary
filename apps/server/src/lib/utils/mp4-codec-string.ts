@@ -53,7 +53,7 @@ function codecString(entry: Box): string | null {
         case "vp09":
             return vp9Codec(child(visualChildren(entry), "vpcC"));
         case "mp4a":
-            return mp4aCodec(child(audioChildren(entry), "esds"));
+            return mp4aCodec(esdsOf(audioChildren(entry)));
         case "Opus":
             return "opus";
         case "ac-3":
@@ -215,6 +215,15 @@ function visualChildren(entry: Box): Uint8Array {
 function audioChildren(entry: Box): Uint8Array {
     const version = dataView(entry.data).getUint16(8);
     return entry.data.subarray(28 + (version === 1 ? 16 : version === 2 ? 36 : 0));
+}
+
+/** The `esds` box of an mp4a sample entry. QuickTime sound descriptions put it inside a `wave` box. */
+function esdsOf(children: Uint8Array): Uint8Array {
+    for (const box of boxes(children)) {
+        if (box.type === "esds") return box.data;
+        if (box.type === "wave") return child(box.data, "esds");
+    }
+    throw new Error("MP4 box esds not found");
 }
 
 function child(bytes: Uint8Array, type: string): Uint8Array {
