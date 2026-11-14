@@ -157,11 +157,22 @@ export async function renderPreview(
  * Attempts to render a resized AVIF preview directly from a static image file (HEIC, JPEG, PNG, WEBP, etc.)
  * using ImageMagick. Applies the EXIF orientation, then strips all metadata. (`heif-enc` is not a fallback: it
  * copies EXIF, GPS included, into its output and ignores the orientation.)
+ *
+ * ImageMagick keeps 4-byte float channels (Q16-HDRI) and sizes its memory limit by the host's memory, not the
+ * container's, so a 48 MP photo would take about 700 MiB. A JPEG is decoded at no more than twice the preview size
+ * instead, and the pixel cache of other large images goes to disk past the limits below.
  */
 async function tryImageMagickPreview(inputPath: string, profile: PreviewProfile, outputPath: string, signal?: AbortSignal): Promise<boolean> {
     const maxDim = `${profile.maxEdge}x${profile.maxEdge}>`;
+    const decodeSize = `${profile.maxEdge * 2}x${profile.maxEdge * 2}`;
     const cliCandidates = [
-        ["magick", inputPath, "-auto-orient", "-strip", "-resize", maxDim, "-quality", String(profile.quality), outputPath],
+        [
+            "magick",
+            ...["-limit", "memory", "256MiB", "-limit", "map", "512MiB"],
+            ...["-define", `jpeg:size=${decodeSize}`],
+            inputPath,
+            ...["-auto-orient", "-strip", "-resize", maxDim, "-quality", String(profile.quality), outputPath],
+        ],
     ];
 
     for (const cmd of cliCandidates) {

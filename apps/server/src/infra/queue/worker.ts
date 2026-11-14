@@ -3,7 +3,7 @@ import { DeleteStatus, Library } from "@/db/schema";
 import { db } from "@/global/db";
 import { getErrorMessage } from "@/lib/utils/error";
 import { markChanged, requestScan } from "@/infra/queue/changes";
-import { PIPELINE_NAMES, parseQueueName, queueName, type QueueName } from "@/infra/queue/pipelines";
+import { PIPELINE_NAMES, parseQueueName, queueName, type PipelineName, type QueueName } from "@/infra/queue/pipelines";
 import {
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_RUN_TIMEOUT_MS,
@@ -20,6 +20,7 @@ import {
     advance,
     claim,
     claimBatch,
+    claimSubjects,
     defer,
     enqueue,
     fence,
@@ -41,6 +42,13 @@ export interface QueueWorkerOptions {
     readonly maxStuckRuns?: number;
     /** Called when more runs are stuck than `maxStuckRuns`: the process should restart, the only way to end them. */
     readonly onTooManyStuckRuns?: () => void;
+}
+
+/** How many subject runs of a pipeline may go at once, and how many do. */
+interface RunLimit {
+    readonly pipeline: PipelineName;
+    readonly limit: number;
+    active: number;
 }
 
 /** Why a run past its deadline was aborted. Named like the platform's timeouts, so errors are classified the same way. */
@@ -96,6 +104,9 @@ export class QueueWorker {
     private readonly maxStuckRuns: number;
     private readonly onTooManyStuckRuns?: () => void;
     private readonly active = new Set<Promise<void>>();
+    /** Pipelines that limit their own runs (SubjectPipelineHandler.concurrency). */
+    private readonly limited: RunLimit[];
+    private readonly limitedPipelines: PipelineName[];
     private readonly runs = new Set<AbortController>();
     private stuckRuns = 0;
     private running = false;
@@ -114,6 +125,12 @@ export class QueueWorker {
         this.stuckAfterMs = options.stuckAfterMs ?? STUCK_AFTER_MS;
         this.maxStuckRuns = options.maxStuckRuns ?? MAX_STUCK_RUNS;
         this.onTooManyStuckRuns = options.onTooManyStuckRuns;
+        this.limited = PIPELINE_NAMES.flatMap((pipeline) => {
+            const handler = handlers[pipeline];
+            const limit = "reconcile" in handler ? handler.concurrency : undefined;
+            return limit === undefined ? [] : [{ pipeline, limit, active: 0 }];
+        });
+        this.limitedPipelines = this.limited.map((limited) => limited.pipeline);
     }
 
     start(): void {
@@ -158,11 +175,20 @@ export class QueueWorker {
                 const free = this.concurrency - this.active.size;
                 if (free <= 0) break;
 
-                const rows = await claim(free);
+                // A limited pipeline is claimed on its own, up to its limit; the general claim leaves its rows alone.
+                const rows: ClaimedRow[] = [];
+                for (const limited of this.limited) {
+                    const room = Math.min(free - rows.length, limited.limit - limited.active);
+                    if (room > 0) rows.push(...(await claimSubjects(limited.pipeline, room)));
+                }
+                rows.push(...(await claim(free - rows.length, this.limitedPipelines)));
                 for (const row of rows) {
+                    const limited = this.limitedOf(row);
+                    if (limited) limited.active += 1;
                     const run = this.run(row)
                         .catch((error: unknown) => console.error(`[Queue] ${row.pipeline}/${row.subjectId} failed unexpectedly:`, error))
                         .finally(() => {
+                            if (limited) limited.active -= 1;
                             this.active.delete(run);
                             this.wake();
                         });
@@ -177,6 +203,13 @@ export class QueueWorker {
             // A wake that arrived after the loop's last check must not be lost.
             if (this.wakeRequested && this.running && this.active.size < this.concurrency) void this.pump();
         }
+    }
+
+    /** The limit a claimed row counts against: a subject row of a limited pipeline. Scans are not limited. */
+    private limitedOf(row: ClaimedRow): RunLimit | undefined {
+        const name = parseQueueName(row.pipeline);
+        if (!name || name.scan) return undefined;
+        return this.limited.find((limited) => limited.pipeline === name.pipeline);
     }
 
     /** Tracks a run's abort signal, keeps its leases alive (`rows` may grow) and enforces its deadline until `stop` is called. */

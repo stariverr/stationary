@@ -2,7 +2,7 @@ import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { JobQueue, Library } from "@/db/schema";
 import { db, type DbClient, type Transaction } from "@/global/db";
-import { KNOWN_QUEUE_PATTERNS, queueLockOrder } from "@/infra/queue/pipelines";
+import { KNOWN_QUEUE_PATTERNS, queueLockOrder, subjectQueuePattern, type PipelineName } from "@/infra/queue/pipelines";
 import { LEASE_SECONDS } from "@/infra/queue/policy";
 
 export interface EnqueueRow {
@@ -153,9 +153,18 @@ async function claimWhere(filter: SQL, limit: number): Promise<ClaimedRow[]> {
     }));
 }
 
-/** Leases up to `limit` due rows, highest priority first, leaving out every library the user put on hold. Expired leases are reclaimed here; there is no sweeper. */
-export function claim(limit: number): Promise<ClaimedRow[]> {
-    return claimWhere(sql`true`, limit);
+/**
+ * Leases up to `limit` due rows, highest priority first, leaving out every library the user put on hold and the subject
+ * rows of the `except` pipelines. Expired leases are reclaimed here; there is no sweeper.
+ */
+export function claim(limit: number, except: readonly PipelineName[] = []): Promise<ClaimedRow[]> {
+    if (except.length === 0) return claimWhere(sql`true`, limit);
+    return claimWhere(sql`NOT (pipeline LIKE ANY (${sql.param(except.map(subjectQueuePattern))}::text[]))`, limit);
+}
+
+/** Leases up to `limit` due subject rows of one pipeline, for a pipeline that limits how many of its runs go at once. */
+export function claimSubjects(pipeline: PipelineName, limit: number): Promise<ClaimedRow[]> {
+    return claimWhere(sql`pipeline LIKE ${subjectQueuePattern(pipeline)}`, limit);
 }
 
 /**

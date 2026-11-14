@@ -23,6 +23,10 @@ const failedPreviews = (libraryIds: readonly string[]) =>
  * the media is queued here, and would otherwise never be queued again.
  */
 export const previewPipeline: SubjectPipelineHandler = {
+    // A render may need about 800 MiB: libheif decoding a 48 MP HEIC, or FFmpeg and SVT-AV1 on a 4K frame. Two at once
+    // beside the server already fill a 2 GiB container.
+    concurrency: 1,
+
     async reconcile(ctx) {
         // Reported as the queue row goes: AI work waits while the media is queued here, so the last report must come
         // once it no longer is.

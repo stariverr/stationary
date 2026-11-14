@@ -89,6 +89,11 @@ interface PipelineHandlerBase {
  * `maxAttempts`, then `recordFailure` stores it on the result rows.
  */
 export interface SubjectPipelineHandler extends PipelineHandlerBase {
+    /**
+     * At most this many runs of the pipeline at once in one worker, for runs that need a lot of memory. The rest stay in
+     * the queue rather than take a slot of the worker while they wait. Unlimited when omitted.
+     */
+    readonly concurrency?: number;
     reconcile(ctx: ReconcileContext): Promise<ReconcileResult>;
 }
 

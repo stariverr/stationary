@@ -590,6 +590,55 @@ describe("QueueWorker", () => {
         expect(reconciled.sort()).toEqual([running, running, next].sort());
     });
 
+    databaseTest("a pipeline with a concurrency limit runs that many at once and leaves the other slots to other pipelines", async () => {
+        const previews = [subject(), subject(), subject()];
+        const avatars = [subject(), subject()];
+        let releasePreview = Promise.withResolvers<void>();
+        let running = 0;
+        let mostAtOnce = 0;
+        const done: string[] = [];
+        const preview: SubjectPipelineHandler = {
+            ...idleHandler,
+            concurrency: 1,
+            async reconcile(ctx) {
+                running += 1;
+                mostAtOnce = Math.max(mostAtOnce, running);
+                await releasePreview.promise;
+                running -= 1;
+                done.push(ctx.subjectId);
+                return { kind: "done" };
+            },
+        };
+        const avatar: SubjectPipelineHandler = {
+            ...idleHandler,
+            async reconcile(ctx) {
+                done.push(ctx.subjectId);
+                return { kind: "done" };
+            },
+        };
+        await queue("preview", previews);
+        worker({ ...everyPipeline(idleHandler), preview, avatar }, 3).start();
+        await until(() => running === 1);
+
+        // The previews still queued must not hold the free slots: the avatars get through while one preview runs.
+        await queue("avatar", avatars);
+        await until(() => avatars.every((id) => done.includes(id)));
+        expect(running).toBe(1);
+        const leased = await db
+            .select({ subject: JobQueue.subject_id })
+            .from(JobQueue)
+            .where(and(eq(JobQueue.library_id, libraryId), eq(JobQueue.pipeline, "preview"), sql`${JobQueue.lease_token} IS NOT NULL`));
+        expect(leased).toHaveLength(1);
+
+        for (let left = previews.length; left > 0; left--) {
+            const current = releasePreview;
+            releasePreview = Promise.withResolvers<void>();
+            current.resolve();
+            await until(() => previews.filter((id) => done.includes(id)).length === previews.length - left + 1);
+        }
+        expect(mostAtOnce).toBe(1);
+    });
+
     databaseTest("runs queued subjects to completion and records a rejected input at once", async () => {
         const ok = [subject(), subject()];
         const bad = subject();

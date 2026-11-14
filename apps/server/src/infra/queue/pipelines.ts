@@ -96,12 +96,17 @@ export function scanQueueName(pipeline: PipelineName, space: string | null = nul
     return `${SCAN_PREFIX}${queueName(pipeline, space)}`;
 }
 
+/** LIKE pattern matching the queue names of a pipeline's subject rows, in every space of a per-space pipeline. */
+export function subjectQueuePattern(pipeline: PipelineName): string {
+    return spaceRoleOf(pipeline) ? `${pipeline}:_%` : pipeline;
+}
+
 /**
  * LIKE patterns matching exactly the queue names parseQueueName accepts. Claims use them so a worker of an older
  * version, briefly running beside a newer one, leaves the rows of a pipeline it does not know alone.
  */
 export const KNOWN_QUEUE_PATTERNS = PIPELINE_NAMES.flatMap((pipeline) => {
-    const own = spaceRoleOf(pipeline) ? `${pipeline}:_%` : pipeline;
+    const own = subjectQueuePattern(pipeline);
     return [own, `${SCAN_PREFIX}${own}`];
 });
 

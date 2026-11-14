@@ -225,6 +225,8 @@ media_lyrics  id, media_id, origin (FILE|EMBEDDED), language, label, is_default,
 - 封面或原件发生变化时，删除这个媒体的所有预览图，由 `preview` 流水线重新生成。
 - 截哪一帧、怎么缩放，都写在配方代码里，由 `recipe_version` 管理，不存进数据库。
 - 生成时显式加上 `-map_metadata -1`，避免把原图的 EXIF（包括 GPS）带进预览图。
+- **每个进程同一时间只生成一张预览图**（`preview` 流水线的 `concurrency: 1`，见 [job_queue.zh-Hans.md](./job_queue.zh-Hans.md) 4.2 节）。一次生成最多要 800 MiB 左右：libheif 解码 48 MP 的 HEIC 约 750 MiB，FFmpeg 加 SVT-AV1 处理一帧 4K 视频约 810 MiB，这些内存 ImageMagick 的 `-limit` 管不到。2026-11-14 线上 2 GiB 的容器因为同时跑好几个 `magick` 被 OOM 杀掉。
+- ImageMagick 读 JPEG 时加 `-define jpeg:size=<预览边长的两倍>`，按缩小的尺寸解码：48 MP 的 JPEG 生成大图从约 700 MiB 降到约 200 MiB，输出几乎不变（PSNR 58 dB）。另外加 `-limit memory 256MiB -limit map 512MiB`，其他格式的大图超出后像素缓存落到磁盘。Alpine 的 ImageMagick 是 Q16-HDRI（每个通道 4 字节浮点），默认内存上限按宿主机内存算，不看容器的限制，所以不加的话永远不会落盘。
 
 ## 6. 导入与探测
 
