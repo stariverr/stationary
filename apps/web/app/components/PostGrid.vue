@@ -479,7 +479,7 @@ const handleKeydown = (e: KeyboardEvent) => {
     if (currentIndex === -1) {
         const firstPost = postsArray[0];
         if (firstPost) {
-            selectPost(firstPost.id);
+            selectPost(firstPost.id, { replace: true });
         }
         return;
     }
@@ -495,7 +495,7 @@ const handleKeydown = (e: KeyboardEvent) => {
     if (nextIndex >= 0 && nextIndex < postsArray.length) {
         const nextPost = postsArray[nextIndex];
         if (nextPost) {
-            selectPost(nextPost.id);
+            selectPost(nextPost.id, { replace: true });
 
             nextTick(() => {
                 const container = gridContainer.value;
