@@ -7,10 +7,12 @@ const props = defineProps<{
     mode: "login" | "register";
 }>();
 
-const config = useRuntimeConfig();
-const router = useRouter();
+const route = useRoute();
 const { t } = useI18n();
 const { $auth } = useNuxtApp();
+
+// Page to return to after signing in (set by the auth middleware)
+const redirectTarget = computed(() => authRedirectTarget(route.query.redirect));
 
 // Mode state
 const currentMode = ref(props.mode);
@@ -43,7 +45,7 @@ watch(currentMode, () => {
 const setMode = (newMode: "login" | "register") => {
     if (currentMode.value !== newMode) {
         currentMode.value = newMode;
-        navigateTo(newMode === "login" ? "/login" : "/register", { replace: true });
+        navigateTo({ path: newMode === "login" ? "/login" : "/register", query: route.query }, { replace: true });
     }
 };
 
@@ -51,14 +53,14 @@ const setMode = (newMode: "login" | "register") => {
 const loginWithGithub = async () => {
     await $auth.signIn.social({
         provider: "github",
-        callbackURL: config.public.appUrl as string | undefined,
+        callbackURL: redirectTarget.value,
     });
 };
 
 const loginWithGoogle = async () => {
     await $auth.signIn.social({
         provider: "google",
-        callbackURL: config.public.appUrl as string | undefined,
+        callbackURL: redirectTarget.value,
     });
 };
 
@@ -154,7 +156,7 @@ const handleSignIn = async () => {
             }
         } else {
             toast.success(t("auth.toast_welcome_back"));
-            navigateTo("/");
+            navigateTo(redirectTarget.value);
         }
     } catch (err: any) {
         toast.error(err.message || t("auth.toast_unexpected_error"));

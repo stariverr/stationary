@@ -1,6 +1,9 @@
 const publicRoutes = ["/login", "/register", "/verify-email", "/forgot-password", "/terms", "/privacy"];
 const authOnlyRoutes = ["/login", "/register", "/verify-email", "/forgot-password"];
 
+// Remember the page the user asked for, so signing in lands back on it.
+const loginRoute = (fullPath: string) => (fullPath === "/" ? "/login" : { path: "/login", query: { redirect: fullPath } });
+
 export default defineNuxtRouteMiddleware(async (to) => {
     const { $auth } = useNuxtApp();
 
@@ -17,16 +20,16 @@ export default defineNuxtRouteMiddleware(async (to) => {
             if (publicRoutes.includes(to.path)) {
                 return;
             }
-            return navigateTo("/login");
+            return navigateTo(loginRoute(to.fullPath));
         }
 
         if (authOnlyRoutes.includes(to.path)) {
-            return navigateTo("/");
+            return navigateTo(authRedirectTarget(to.query.redirect));
         }
     } catch (e) {
         console.error("Middleware Error:", e);
         if (!publicRoutes.includes(to.path)) {
-            return navigateTo("/login");
+            return navigateTo(loginRoute(to.fullPath));
         }
     }
 });

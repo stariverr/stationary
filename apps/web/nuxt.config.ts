@@ -95,7 +95,6 @@ export default defineNuxtConfig({
             // Browser-facing API base URL (same-origin gateway).
             apiBaseUrl: process.env.NUXT_PUBLIC_API_BASE_URL || "/api",
             cdnBaseUrl: process.env.NUXT_PUBLIC_CDN_BASE_URL || "http://localhost:9400",
-            appUrl: process.env.NUXT_PUBLIC_APP_URL || "http://localhost:4000",
             turnstileSiteKey: process.env.NUXT_PUBLIC_TURNSTILE_SITE_KEY || "1x00000000000000000000AA",
         },
     },

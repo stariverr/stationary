@@ -14,7 +14,6 @@ data:
   TRUSTED_ORIGINS: "https://stationary.stariver.xyz,http://localhost:4000,http://localhost:9400"
   NUXT_API_BASE_URL: "http://127.0.0.1:9400/api"
   NUXT_PUBLIC_API_BASE_URL: "/api"
-  NUXT_PUBLIC_APP_URL: "/"
   NUXT_PUBLIC_CDN_BASE_URL: "/api"
   S3_REGION: "auto"
   STORAGE_IS_PUBLIC: "false"
