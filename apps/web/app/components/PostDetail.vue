@@ -40,9 +40,8 @@ import {
 import OrphanMediaPickerDialog from "./OrphanMediaPickerDialog.vue";
 import MediaEditorDialog from "./MediaEditorDialog.vue";
 
-const { selectedPost, selectedPostId } = usePosts();
+const { selectedPost, selectedPostId, closePost } = usePosts();
 const { t } = useI18n();
-const route = useRoute();
 const queryClient = useQueryClient();
 
 const {
@@ -403,10 +402,9 @@ const closeDetail = () => {
     if (typeof document !== "undefined" && document.fullscreenElement) {
         document.exitFullscreen().catch(() => {});
     }
-    selectedPostId.value = null;
     isMediaOnly.value = false;
     resetZoomRotate();
-    if ("id" in route.params) navigateTo("/");
+    closePost();
 };
 
 const handleResize = () => {

@@ -14,7 +14,11 @@ export const usePostStore = defineStore("posts", () => {
     const libraryStore = useLibraryStore();
 
     // Pinia State for UI - Initialized from URL
-    const selectedPostId = ref<string | number | null>(null);
+    // The open post lives in the URL (/posts/:id), so it survives reloads and can be shared.
+    const selectedPostId = computed(() => {
+        const id = route.name === "posts-id" ? route.params.id : undefined;
+        return typeof id === "string" && id ? id : null;
+    });
     const keyword = ref((route.query.keyword as string) || "");
     const searchKeyword = ref(keyword.value);
     const source = ref<string | undefined>((route.query.source as string) || undefined);
@@ -408,8 +412,13 @@ export const usePostStore = defineStore("posts", () => {
         return { ...listPost, ...detailPost, media: listPost.media };
     });
 
-    const selectPost = (id: string | number) => {
-        selectedPostId.value = id;
+    // Keep the list filters (query) when moving between the list and a post.
+    const selectPost = (id: string | number, options: { replace?: boolean } = {}) => {
+        return router[options.replace ? "replace" : "push"]({ path: `/posts/${id}`, query: route.query });
+    };
+
+    const closePost = () => {
+        return router.push({ path: "/posts", query: route.query });
     };
 
     const retrySync = async (postIds: string[]) => {
@@ -485,6 +494,7 @@ export const usePostStore = defineStore("posts", () => {
         authors,
         // Actions
         selectPost,
+        closePost,
         refetchPosts,
         retrySync,
         queueAi,

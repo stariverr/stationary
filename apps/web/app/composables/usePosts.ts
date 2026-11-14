@@ -12,10 +12,7 @@ export const usePosts = () => {
     return {
         posts: computed(() => store.posts),
         selectedPost: computed(() => store.selectedPost),
-        selectedPostId: computed({
-            get: () => store.selectedPostId,
-            set: (val) => (store.selectedPostId = val),
-        }),
+        selectedPostId: computed(() => store.selectedPostId),
         selectedPostDetail: computed(() => store.selectedPost), // Alias for compatibility
         keyword: computed({
             get: () => store.keyword,
@@ -52,6 +49,7 @@ export const usePosts = () => {
         }),
         authors: computed(() => store.authors),
         selectPost: store.selectPost,
+        closePost: store.closePost,
         fetchPosts: async (
             params: {
                 page?: number;
