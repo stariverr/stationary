@@ -166,7 +166,7 @@ onUnmounted(() => {
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-2 font-medium text-zinc-800 dark:text-zinc-200">
                         <Loader2 class="w-4 h-4 animate-spin text-zinc-900 dark:text-zinc-100" />
-                        <span>{{ $t("draft_box.uploading_background_tasks") }}</span>
+                        <span>{{ $t("draft_box.uploading") }}</span>
                         <span
                             class="text-xs bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-full font-semibold text-zinc-600 dark:text-zinc-300"
                         >
