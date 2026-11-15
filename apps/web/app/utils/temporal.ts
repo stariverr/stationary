@@ -1,4 +1,3 @@
-import { Temporal } from "@js-temporal/polyfill";
 
 /**
  * Format an ISO 8601 timestamp string into a localized date-time representation using Temporal API.

@@ -34,7 +34,6 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PaginationRoot, PaginationList, PaginationListItem, PaginationPrev, PaginationNext, PaginationEllipsis } from "reka-ui";
 import { toast } from "vue-sonner";
-import { Temporal } from "@js-temporal/polyfill";
 import { getMediaTypeLabel } from "@/utils/media";
 
 const { t, te, locale } = useI18n();

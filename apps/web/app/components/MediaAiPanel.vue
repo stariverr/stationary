@@ -2,7 +2,6 @@
 import { computed } from "vue";
 import { Copy, Sparkles } from "@lucide/vue";
 import { toast } from "vue-sonner";
-import { Temporal } from "@js-temporal/polyfill";
 import type { MediaAiView } from "@/types/ai";
 
 const props = defineProps<{ ai: MediaAiView }>();

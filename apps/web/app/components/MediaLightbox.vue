@@ -27,7 +27,6 @@ import { toast } from "vue-sonner";
 import { storeToRefs } from "pinia";
 import { Swiper, SwiperSlide } from "swiper/vue";
 import "swiper/css";
-import { Temporal } from "@js-temporal/polyfill";
 import { useApi } from "@/composables/useApi";
 import type { MediaAiView } from "@/types/ai";
 
