@@ -45,7 +45,6 @@ import {
 import { apiErrorMessage } from "@/composables/useApi";
 import { formatBytes } from "@/utils/media";
 import { toast } from "vue-sonner";
-import { Temporal } from "@js-temporal/polyfill";
 
 const { t, locale } = useI18n();
 const importStore = useImportStore();

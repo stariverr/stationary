@@ -1,5 +1,4 @@
 import { defineStore } from "pinia";
-import { Temporal } from "@js-temporal/polyfill";
 import { useQuery, keepPreviousData, useQueryClient } from "@tanstack/vue-query";
 import { useLibraryStore } from "@/stores/library";
 import { previewPosterUrl, previewSrcset, previewThumbnailUrl } from "@/utils/media";

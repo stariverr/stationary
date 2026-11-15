@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { Temporal } from "@js-temporal/polyfill";
 import { toast } from "vue-sonner";
 import { Key, Copy, Plus, Check, Loader2, Trash2, AlertTriangle, Calendar, Layers } from "@lucide/vue";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";

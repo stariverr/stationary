@@ -2,7 +2,6 @@
 import { ref, watch } from "vue";
 import { Edit3, Link as LinkIcon, Loader2, Tag as TagIcon, User } from "@lucide/vue";
 import { useQueryClient } from "@tanstack/vue-query";
-import { Temporal } from "@js-temporal/polyfill";
 import { toast } from "vue-sonner";
 import { type Post } from "@/types/post";
 import { usePostStore } from "@/stores/posts";

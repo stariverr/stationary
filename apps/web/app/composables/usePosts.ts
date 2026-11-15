@@ -1,4 +1,3 @@
-import { Temporal } from "@js-temporal/polyfill";
 import { type Post, Platform, type PostMedia } from "@/types/post";
 
 export { Platform };

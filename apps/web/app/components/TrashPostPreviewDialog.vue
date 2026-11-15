@@ -21,7 +21,6 @@ import type { TrashItem, TrashPostItem } from "@/stores/trash";
 import type { MediaDetail, MediaPreviews, MediaType } from "@/types/post";
 import { useApi } from "@/composables/useApi";
 import { getMediaTypeLabel, previewLargestUrl, previewPosterUrl, previewThumbnailUrl } from "@/utils/media";
-import { Temporal } from "@js-temporal/polyfill";
 
 const props = defineProps<{
     open: boolean;
