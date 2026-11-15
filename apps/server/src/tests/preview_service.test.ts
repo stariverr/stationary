@@ -3,6 +3,7 @@ import { DeleteStatus, File as DbFile, Media, MediaPreview, MediaType, PreviewSi
 import { pickContentSource, planPreviews, previewSourceOf, previewsNeedWork, type PreviewState } from "@/features/media/preview";
 import { detectFormatStrategy } from "@/lib/utils/preview_renderer";
 import { PREVIEW_PROFILES, RECIPE_VERSION } from "@/lib/utils/preview_profiles";
+import { readVvic } from "@/lib/utils/vvic";
 
 type FileRow = typeof DbFile.$inferSelect;
 
@@ -44,6 +45,7 @@ describe("preview source", () => {
     test("prefers a renderable image over a video frame", () => {
         expect(pickContentSource([content("video", "VIDEO"), content("image", "IMAGE")])).toMatchObject({ fileId: "image", renderAs: MediaType.IMAGE });
         expect(pickContentSource([content("jxl", "IMAGE", "jxl"), content("video", "VIDEO")])).toMatchObject({ fileId: "video", renderAs: MediaType.VIDEO });
+        expect(pickContentSource([content("video", "VIDEO"), content("vvic", "IMAGE", "vvic")])).toMatchObject({ fileId: "vvic", renderAs: MediaType.IMAGE });
         expect(pickContentSource([])).toBeNull();
     });
 
@@ -105,6 +107,10 @@ describe("format strategy", () => {
             category: "HEIF_IMAGE",
             requiresLocalDownload: true,
         });
+        expect(detectFormatStrategy("https://example.com/photo.vvic", MediaType.IMAGE)).toMatchObject({
+            category: "VVIC_IMAGE",
+            requiresLocalDownload: true,
+        });
         expect(detectFormatStrategy("https://example.com/image.jpg", MediaType.IMAGE)).toMatchObject({
             category: "STANDARD_IMAGE",
             requiresLocalDownload: false,
@@ -113,5 +119,53 @@ describe("format strategy", () => {
             category: "VIDEO_CONTAINER",
             seekOptions: ["-ss", "00:00:00.500"],
         });
+    });
+});
+
+describe("vvic", () => {
+    const bytes = (...parts: (number | number[] | Uint8Array | string)[]) =>
+        Uint8Array.from(parts.flatMap((part) => (typeof part === "string" ? [...part].map((char) => char.charCodeAt(0)) : typeof part === "number" ? [part] : [...part])));
+    const u16 = (value: number) => [value >> 8, value & 255];
+    const u32 = (value: number) => [0, 0, ...u16(value)];
+    const box = (type: string, ...parts: (number | number[] | Uint8Array | string)[]) => {
+        const payload = bytes(...parts);
+        return bytes(u32(payload.length + 8), type, payload);
+    };
+
+    const SPS = [0x00, 0x79, 0xaa];
+    const PPS = [0x00, 0x81, 0xbb];
+    const PICTURE = [0x00, 0x39, 0xcc, 0xdd];
+    // Douyin's vvcC: no version and flags, a draft profile-tier-level record, then the parameter set arrays.
+    const vvcC = box("vvcC", [0xff, 0x00, 0x11, 0x1f, 0x04, 0x09, 0xa4, 0x00, 0x00], u16(1440), u16(1920), u16(0), 2, [0x0f, ...u16(1), ...u16(3), ...SPS], [0x10, ...u16(1), ...u16(3), ...PPS]);
+
+    const vvic = (itemType = "vvc1", properties: Uint8Array[] = []) => {
+        const meta = (pictureOffset: number) =>
+            box(
+                "meta",
+                u32(0),
+                box("pitm", u32(0), u16(1)),
+                box("iinf", u32(0), u16(1), box("infe", [2, 0, 0, 0], u16(1), u16(0), itemType, 0)),
+                box(
+                    "iprp",
+                    box("ipco", vvcC, box("ispe", u32(0), u32(1440), u32(1920)), ...properties),
+                    box("ipma", u32(0), u32(1), u16(1), 2 + properties.length, 0x81, 2, properties.map((_, index) => 3 + index)),
+                ),
+                box("iloc", u32(0), [0x44, 0x00], u16(1), u16(1), u16(0), u16(1), u32(pictureOffset), u32(PICTURE.length + 4)),
+            );
+        const ftyp = box("ftyp", "vvic", u32(0), "mif1vvic");
+        return bytes(ftyp, meta(ftyp.length + meta(0).length + 8), box("mdat", u32(PICTURE.length), PICTURE));
+    };
+
+    test("reads the size and the picture as an Annex B stream", () => {
+        expect(readVvic(vvic())).toEqual({
+            width: 1440,
+            height: 1920,
+            annexB: Uint8Array.from([0, 0, 0, 1, ...SPS, 0, 0, 0, 1, ...PPS, 0, 0, 0, 1, ...PICTURE]),
+        });
+    });
+
+    test("rejects a tiled image and a transformed picture", () => {
+        expect(() => readVvic(vvic("grid"))).toThrow("grid");
+        expect(() => readVvic(vvic("vvc1", [box("irot", 1)]))).toThrow("irot");
     });
 });

@@ -227,6 +227,18 @@ media_lyrics  id, media_id, origin (FILE|EMBEDDED), language, label, is_default,
 - 生成时显式加上 `-map_metadata -1`，避免把原图的 EXIF（包括 GPS）带进预览图。
 - **每个进程同一时间只生成一张预览图**（`preview` 流水线的 `concurrency: 1`，见 [job_queue.zh-Hans.md](./job_queue.zh-Hans.md) 4.2 节）。一次生成最多要 800 MiB 左右：libheif 解码 48 MP 的 HEIC 约 750 MiB，FFmpeg 加 SVT-AV1 处理一帧 4K 视频约 810 MiB，这些内存 ImageMagick 的 `-limit` 管不到。2026-11-14 线上 2 GiB 的容器因为同时跑好几个 `magick` 被 OOM 杀掉。
 - ImageMagick 读 JPEG 时加 `-define jpeg:size=<预览边长的两倍>`，按缩小的尺寸解码：48 MP 的 JPEG 生成大图从约 700 MiB 降到约 200 MiB，输出几乎不变（PSNR 58 dB）。另外加 `-limit memory 256MiB -limit map 512MiB`，其他格式的大图超出后像素缓存落到磁盘。Alpine 的 ImageMagick 是 Q16-HDRI（每个通道 4 字节浮点），默认内存上限按宿主机内存算，不看容器的限制，所以不加的话永远不会落盘。
+- **`.vvic`（`image/vvic`，抖音的 VVC/H.266 静态图）可以作为图片原件。** 它是一个 HEIF 文件，主图是一张 VVC 帧内图（`vvc1` 条目）。ImageMagick 和 FFmpeg 都打不开这个容器：Alpine 的 libheif 没有 VVC 解码插件，而且抖音的 `vvcC` 是按标准草案写的（没有 version/flags，profile-tier-level 的布局也不同），libheif 直接拒绝；FFmpeg 的 MP4 解复用器不认 `vvc1` 条目。但 FFmpeg 自带的 VVC 解码器能解裸码流，所以 `lib/utils/vvic.ts` 自己读容器：从 `ispe` 取宽高（探测用），把 `vvcC` 里的参数集和 `iloc` 指向的图像数据拼成 Annex B 码流，写成临时的 `.vvc` 文件交给 FFmpeg 缩放并编码成 AVIF。不需要新增软件包。
+  - 实测（Alpine 3.24、FFmpeg 8.1.3、1 GiB 内存上限的容器，1440×1920、44 KB 的样本）：三档预览图是 270×360（6 KB）、540×720（22 KB）、1080×1440（75 KB），每张 0.15～0.25 秒；FFmpeg 的内存峰值分别约 160、270、460 MiB，其中解码本身约 140 MiB。
+  - 没有用 libheif：libheif 能通过 vvdec 插件解 VVC，但 Alpine 没有 `vvdec` 包，要自己编译 vvdec 和带插件的 libheif；而且抖音的 `vvcC` 在读容器这一步就被拒绝（`ptl_present_flag=0 is not supported`），装了解码器也得先改写文件。libvips 读 HEIF 同样经过 libheif，也不行。
+  - 局限，目前都没处理：
+    - **只支持单张图。** 主图必须是一个 `vvc1` 条目。`grid` 拼图、带 `irot`、`imir`、`clap` 变换的图都会被拒绝（原件 FAILED）；alpha 等辅助图直接忽略。线上 `.vvic` 里有没有这些情况还没统计过，只验证过一个样本。
+    - **`vvcC` 是猜着读的。** 抖音的布局不符合正式标准，代码没有逐字段解析，而是找一个起点，使参数集数组恰好读到盒子末尾、并且每个 NAL 的类型都对得上。换一版抖音编码器写法不同就可能读不出来。
+    - **探测不解码。** 探测只读 `ispe` 里的宽高，不解码，也不和码流里的尺寸核对；码流损坏的文件能通过探测，到生成预览时才失败。
+    - **颜色。** 码流里没有色彩信息，色彩只在 ICC 里（样本是 Display P3）。预览图不带 ICC，也没有色彩标记，广色域的图可能偏淡。
+    - **画质档位和其他图片不同。** 走的是 FFmpeg + SVT-AV1 的 `crf`，不是 ImageMagick 的 `quality`；宽高会取偶数，可能和其他图片差 1 像素。
+    - **类型只看扩展名。** 渲染器按文件的扩展名选 `VVIC_IMAGE`，探测按 mime 或扩展名。mime 是 `image/vvic` 而扩展名不是 `.vvic` 的文件能通过探测，但渲染会走错路径。
+    - **原图本身没法直接看。** 浏览器和 Flutter 都不能显示 `.vvic`，所以 `.vvic` 的画质优势目前只体现在预览图上（最大长边 1440）；要给客户端看原图，需要另外转码。
+    - **测试只覆盖容器解析。** 单元测试用的是合成的字节；真实解码只在 Alpine 容器里手动测过 arm64，没测过 x86_64 和更大的图。
 
 ## 6. 导入与探测
 

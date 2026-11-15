@@ -25,7 +25,7 @@ export const PREVIEW_SIZES = [PreviewSize.SMALL, PreviewSize.MEDIUM, PreviewSize
 const CONTENT_PREVIEW_TYPES: ReadonlySet<MediaType> = new Set([MediaType.IMAGE, MediaType.LIVE_PHOTO, MediaType.VIDEO]);
 
 /** Content formats the renderer cannot decode; a media with nothing else gets no preview. */
-const UNRENDERABLE_EXTENSIONS = new Set(["vvic", "jxl"]);
+const UNRENDERABLE_EXTENSIONS = new Set(["jxl"]);
 
 type MediaRow = typeof Media.$inferSelect;
 type FileRow = typeof DbFile.$inferSelect;

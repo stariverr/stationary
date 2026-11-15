@@ -9,6 +9,7 @@ import { AvStreamType } from "@/db/schema";
 import { s3 } from "@/global/s3";
 import { readMp4TrackCodecs } from "@/lib/utils/mp4-codec-string";
 import { readMp4Layout, type Mp4SegmentIndex } from "@/lib/utils/mp4-layout";
+import { readVvic } from "@/lib/utils/vvic";
 
 /** The file cannot be probed: the input is rejected, so retrying will not help. */
 export class ProbeRejectedError extends Error {
@@ -79,7 +80,7 @@ const PROBE_TIMEOUT_MS = 120_000;
 /** Images are read whole to find their orientation; anything larger is not an image we accept. */
 const MAX_IMAGE_BYTES = 512 * 1024 * 1024;
 
-const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "avif", "heic", "heif", "jxl", "bmp", "tif", "tiff"]);
+const IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "gif", "webp", "avif", "heic", "heif", "jxl", "vvic", "bmp", "tif", "tiff"]);
 
 export function isImageFile(file: { mime_type: string; extension: string | null }): boolean {
     return file.mime_type.startsWith("image/") || IMAGE_EXTENSIONS.has((file.extension ?? "").toLowerCase());
@@ -293,8 +294,22 @@ async function probeAv(file: ProbedFile): Promise<AvProbe> {
 /** EXIF orientations 5 to 8 turn the image a quarter, which swaps its displayed width and height. */
 const QUARTER_TURN_ORIENTATIONS = new Set(["LeftTop", "RightTop", "RightBottom", "LeftBottom"]);
 
+const isVvicFile = (file: { mime_type: string; extension: string | null }) => file.mime_type === "image/vvic" || (file.extension ?? "").toLowerCase() === "vvic";
+
+/** ImageMagick has no decoder for `.vvic`; the size is read from the container (5). */
+function probeVvic(bytes: Uint8Array): { width: number; height: number } {
+    try {
+        const { width, height } = readVvic(bytes);
+        if (!width || !height) throw new Error("The image has no size");
+        return { width, height };
+    } catch (error) {
+        throw new ProbeRejectedError(`The .vvic image could not be read: ${error instanceof Error ? error.message : String(error)}`);
+    }
+}
+
 async function probeImage(file: ProbedFile): Promise<{ width: number; height: number }> {
     const bytes = await s3.read(file.path, { bucket: file.bucket, maxBytes: MAX_IMAGE_BYTES });
+    if (isVvicFile(file)) return probeVvic(bytes);
     const dir = await mkdtemp(join(tmpdir(), "probe-"));
     try {
         const path = join(dir, `image.${file.extension || "bin"}`);
