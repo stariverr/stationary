@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { MediaType, PreviewSize } from "@/db/schema";
 import { PREVIEW_PROFILES, type PreviewProfile } from "@/lib/utils/preview_profiles";
+import { readVvic } from "@/lib/utils/vvic";
 
 const DEFAULT_USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
@@ -24,7 +25,7 @@ export interface RenderedPreview {
     size: number;
 }
 
-export type MediaFormatCategory = "HEIF_IMAGE" | "STANDARD_IMAGE" | "VIDEO_CONTAINER" | "UNKNOWN";
+export type MediaFormatCategory = "HEIF_IMAGE" | "VVIC_IMAGE" | "STANDARD_IMAGE" | "VIDEO_CONTAINER" | "UNKNOWN";
 
 export interface MediaFormatStrategy {
     category: MediaFormatCategory;
@@ -37,6 +38,7 @@ export interface MediaFormatStrategy {
  * Detects format category and returns format-specific rendering strategy.
  * Different formats require distinct FFmpeg input flags and network download behaviors:
  * - HEIF/HEIC (ISOBMFF): Requires local download to allow FFmpeg's mov/heif demuxer to seek into metadata atoms.
+ * - VVIC_IMAGE (VVC picture in HEIF): Downloaded, then its picture is handed to FFmpeg as a raw VVC stream.
  * - STANDARD_IMAGE (JPEG, PNG, WEBP, AVIF, GIF): Direct image decoding without video seeking flags.
  * - VIDEO_CONTAINER (MP4, MOV, WEBM, MKV with AV1/HEVC/AVC): Fast video stream seeking (-ss 00:00:00.500) before -i.
  */
@@ -46,6 +48,15 @@ export function detectFormatStrategy(sourceUrl: string, mediaType: MediaType): M
     if (ext === "heic" || ext === "heif") {
         return {
             category: "HEIF_IMAGE",
+            extension: ext,
+            requiresLocalDownload: true,
+            seekOptions: [],
+        };
+    }
+
+    if (ext === "vvic") {
+        return {
+            category: "VVIC_IMAGE",
             extension: ext,
             requiresLocalDownload: true,
             seekOptions: [],
@@ -96,6 +107,7 @@ export async function renderPreview(
     const strategy = detectFormatStrategy(sourceUrl, mediaType);
     const tempFilePath = join(tmpdir(), `preview-${size.toLowerCase()}-${crypto.randomUUID()}.avif`);
     let tempSourcePath: string | null = null;
+    let tempVvcPath: string | null = null;
 
     try {
         const isRemoteUrl = sourceUrl.startsWith("http://") || sourceUrl.startsWith("https://");
@@ -105,6 +117,13 @@ export async function renderPreview(
         if (isRemoteUrl && strategy.requiresLocalDownload) {
             tempSourcePath = await downloadRemoteToTempFile(sourceUrl, signal);
             effectiveSource = tempSourcePath;
+        }
+
+        // Only FFmpeg decodes VVC, and only as a raw stream: take the picture out of its HEIF container.
+        if (strategy.category === "VVIC_IMAGE") {
+            tempVvcPath = join(tmpdir(), `source-${crypto.randomUUID()}.vvc`);
+            await Bun.write(tempVvcPath, readVvicPicture(await Bun.file(effectiveSource).bytes()));
+            effectiveSource = tempVvcPath;
         }
 
         // 1. Direct ImageMagick / HEIC CLI rendering for static image formats (HEIC, HEIF, JPEG, PNG, WEBP, AVIF, GIF)
@@ -149,6 +168,9 @@ export async function renderPreview(
         await safeDeleteFile(tempFilePath);
         if (tempSourcePath) {
             await safeDeleteFile(tempSourcePath);
+        }
+        if (tempVvcPath) {
+            await safeDeleteFile(tempVvcPath);
         }
     }
 }
@@ -201,6 +223,15 @@ async function tryImageMagickPreview(inputPath: string, profile: PreviewProfile,
     }
 
     return false;
+}
+
+/** The raw VVC stream of a `.vvic` image. A container that cannot be read will not read on a retry either. */
+function readVvicPicture(bytes: Uint8Array): Uint8Array {
+    try {
+        return readVvic(bytes).annexB;
+    } catch (error) {
+        throw new UndecodableSourceError(`The .vvic image could not be read: ${error instanceof Error ? error.message : String(error)}`);
+    }
 }
 
 /**

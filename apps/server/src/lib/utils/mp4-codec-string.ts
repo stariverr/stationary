@@ -226,7 +226,7 @@ function esdsOf(children: Uint8Array): Uint8Array {
     throw new Error("MP4 box esds not found");
 }
 
-function child(bytes: Uint8Array, type: string): Uint8Array {
+export function child(bytes: Uint8Array, type: string): Uint8Array {
     for (const box of boxes(bytes)) {
         if (box.type === type) return box.data;
     }
@@ -234,7 +234,7 @@ function child(bytes: Uint8Array, type: string): Uint8Array {
 }
 
 /** Yields the sibling boxes in `bytes`, each with its payload after the header. */
-function* boxes(bytes: Uint8Array): Generator<Box> {
+export function* boxes(bytes: Uint8Array): Generator<Box> {
     const view = dataView(bytes);
     let offset = 0;
     while (offset + 8 <= bytes.length) {
