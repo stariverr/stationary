@@ -376,14 +376,15 @@ function buildFFmpegCommand(sourcePath: string, strategy: MediaFormatStrategy, p
     // 3. Format-specific seek options (e.g. -ss 00:00:00.500 for VIDEO_CONTAINER)
     const seekOptions = strategy.seekOptions;
 
-    // 4. Input file source
-    const inputOptions = ["-i", sourcePath];
+    // 4. Input file source. The decoder and SVT-AV1 size their threads, and with them their frame buffers, by the cores
+    // the host has rather than the container's CPU limit: uncapped, one 8K HEVC frame took 1.9 GiB, capped 0.7 GiB.
+    const inputOptions = ["-threads", "2", "-i", sourcePath];
 
     // 5. Video filter: Uses -filter_complex instead of -vf with explicit stream map for tile decoding and auto-rotation
     const filterOptions = ["-filter_complex", `[0:v]${buildScaleFilter(profile.maxEdge)}[outv]`, "-map", "[outv]"];
 
     // 6. Encoder settings: Capture a single frame using SVT-AV1 still-picture mode
-    const encoderOptions = ["-frames:v", "1", "-map_metadata", "-1", "-c:v", "libsvtav1", "-crf", String(profile.crf), "-f", "avif"];
+    const encoderOptions = ["-frames:v", "1", "-map_metadata", "-1", "-c:v", "libsvtav1", "-svtav1-params", "lp=1", "-crf", String(profile.crf), "-f", "avif"];
 
     // 7. Output file target: Overwrite output path
     const outputOptions = ["-y", outputPath];

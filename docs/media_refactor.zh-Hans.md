@@ -225,7 +225,10 @@ media_lyrics  id, media_id, origin (FILE|EMBEDDED), language, label, is_default,
 - 封面或原件发生变化时，删除这个媒体的所有预览图，由 `preview` 流水线重新生成。
 - 截哪一帧、怎么缩放，都写在配方代码里，由 `recipe_version` 管理，不存进数据库。
 - 生成时显式加上 `-map_metadata -1`，避免把原图的 EXIF（包括 GPS）带进预览图。
-- **每个进程同一时间只生成一张预览图**（`preview` 流水线的 `concurrency: 1`，见 [job_queue.zh-Hans.md](./job_queue.zh-Hans.md) 4.2 节）。一次生成最多要 800 MiB 左右：libheif 解码 48 MP 的 HEIC 约 750 MiB，FFmpeg 加 SVT-AV1 处理一帧 4K 视频约 810 MiB，这些内存 ImageMagick 的 `-limit` 管不到。2026-11-14 线上 2 GiB 的容器因为同时跑好几个 `magick` 被 OOM 杀掉。
+- **每个进程同一时间最多生成两张预览图**（`preview` 流水线的 `concurrency: 2`，见 [job_queue.zh-Hans.md](./job_queue.zh-Hans.md) 4.2 节）。2026-11-14 线上 2 GiB 的容器因为同时跑好几个 `magick` 被 OOM 杀掉，之后先降到 1。
+  - FFmpeg 加 `-threads 2`（解码）和 `-svtav1-params lp=1`（编码）。解码器和 SVT-AV1 按宿主机的核数开线程，不看容器的 CPU 限制，每个线程都带自己的帧缓冲。实测（Alpine、FFmpeg 8.1.3、SVT-AV1 4.1.0、可见 10 核、限 2 CPU，生成大图）：8K HEVC 从 1917 MiB 降到 679 MiB，4K HEVC 10-bit 从 1046 降到 398，4K H.264 从 816 降到 267，48 MP 图片走 FFmpeg 回退时从约 650 降到 240～380。耗时基本不变，因为 CPU 本来就只有 2 个。
+  - ImageMagick 加了下面的限制后，48 MP 的 JPEG、PNG、WebP、JXL、AVIF 和单图 HEIC 峰值都在 400 MiB 以内。iPhone 那种 512×512 分块的 HEIC 没测过，以前估计 libheif 解码要约 750 MiB。
+  - 在 2 GiB、2 CPU 的容器里按匿名内存（不算页缓存）测：各种格式混在一起，并发 1、2、3 的峰值是 572、864、918 MiB；最坏情况是同时渲染 8K HEVC，两个 1360 MiB，三个 1977 MiB，再加上服务进程就超了。CPU 只有 2 个，并发超过 2 吞吐也上不去。不限线程时并发 2 就被 OOM 杀了 5 次。
 - ImageMagick 读 JPEG 时加 `-define jpeg:size=<预览边长的两倍>`，按缩小的尺寸解码：48 MP 的 JPEG 生成大图从约 700 MiB 降到约 200 MiB，输出几乎不变（PSNR 58 dB）。另外加 `-limit memory 256MiB -limit map 512MiB`，其他格式的大图超出后像素缓存落到磁盘。Alpine 的 ImageMagick 是 Q16-HDRI（每个通道 4 字节浮点），默认内存上限按宿主机内存算，不看容器的限制，所以不加的话永远不会落盘。
 - **`.vvic`（`image/vvic`，抖音的 VVC/H.266 静态图）可以作为图片原件。** 它是一个 HEIF 文件，主图是一张 VVC 帧内图（`vvc1` 条目）。ImageMagick 和 FFmpeg 都打不开这个容器：Alpine 的 libheif 没有 VVC 解码插件，而且抖音的 `vvcC` 是按标准草案写的（没有 version/flags，profile-tier-level 的布局也不同），libheif 直接拒绝；FFmpeg 的 MP4 解复用器不认 `vvc1` 条目。但 FFmpeg 自带的 VVC 解码器能解裸码流，所以 `lib/utils/vvic.ts` 自己读容器：从 `ispe` 取宽高（探测用），把 `vvcC` 里的参数集和 `iloc` 指向的图像数据拼成 Annex B 码流，写成临时的 `.vvc` 文件交给 FFmpeg 缩放并编码成 AVIF。不需要新增软件包。
   - 实测（Alpine 3.24、FFmpeg 8.1.3、1 GiB 内存上限的容器，1440×1920、44 KB 的样本）：三档预览图是 270×360（6 KB）、540×720（22 KB）、1080×1440（75 KB），每张 0.15～0.25 秒；FFmpeg 的内存峰值分别约 160、270、460 MiB，其中解码本身约 140 MiB。

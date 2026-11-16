@@ -24,10 +24,11 @@ const failedPreviews = (libraryIds: readonly string[]) =>
  * the media is queued here, and would otherwise never be queued again.
  */
 export const previewPipeline: SubjectPipelineHandler = {
-    // A render may need about 800 MiB: libheif decoding a 48 MP HEIC, or FFmpeg and SVT-AV1 on a 4K frame. Two at once
-    // beside the server already fill a 2 GiB container.
-    concurrency: 1,
-    // Keep head-of-line blocking bounded for this concurrency-1 pipeline; each step also has its own timeout.
+    // With FFmpeg's threads capped, a render peaks at about 700 MiB (an 8K HEVC frame) and most stay under 400 MiB, so two
+    // fit beside the server in the 2 GiB, 2-CPU container. Three 8K frames took 2 GiB, and a third run adds no throughput
+    // on 2 CPUs (docs/media_refactor.zh-Hans.md, 5).
+    concurrency: 2,
+    // Keep head-of-line blocking bounded for this low-concurrency pipeline; each step also has its own timeout.
     timeoutMs: 3 * 60_000,
 
     async reconcile(ctx) {
