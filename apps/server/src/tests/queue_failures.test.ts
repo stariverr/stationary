@@ -90,4 +90,45 @@ describe("renderPreview", () => {
         await expect(renderPreview(path, MediaType.VIDEO, PreviewSize.SMALL)).rejects.toBeInstanceOf(UndecodableSourceError);
         await Bun.file(path).delete();
     });
+
+    test.skipIf(!Bun.which("magick") || !Bun.which("ffprobe"))("renders only the first frame for animated GIF inputs", async () => {
+        const path = join(tmpdir(), `anim-${crypto.randomUUID()}.gif`);
+        const avifPath = join(tmpdir(), `anim-out-${crypto.randomUUID()}.avif`);
+        const mk = Bun.spawn({
+            cmd: ["magick", "-size", "32x32", "xc:red", "xc:blue", "-loop", "0", path],
+            stdout: "ignore",
+            stderr: "ignore",
+        });
+        expect(await mk.exited).toBe(0);
+        try {
+            const rendered = await renderPreview(path, MediaType.IMAGE, PreviewSize.SMALL);
+            expect(rendered.width).toBe(32);
+            expect(rendered.height).toBe(32);
+            await Bun.write(avifPath, rendered.buffer);
+            const probe = Bun.spawn({
+                cmd: [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "stream=nb_read_frames",
+                    "-count_frames",
+                    "-of",
+                    "default=nw=1:nk=1",
+                    avifPath,
+                ],
+                stdout: "pipe",
+                stderr: "ignore",
+            });
+            const [frames] = await Promise.all([new Response(probe.stdout).text(), probe.exited]);
+            expect(frames.trim()).toBe("1");
+        } finally {
+            await Bun.file(path)
+                .delete()
+                .catch(() => {});
+            await Bun.file(avifPath)
+                .delete()
+                .catch(() => {});
+        }
+    });
 });

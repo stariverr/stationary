@@ -26,7 +26,10 @@ const preview = (size: PreviewSize, values: Partial<typeof MediaPreview.$inferSe
         ...values,
     }) as typeof MediaPreview.$inferSelect;
 
-const state = (previews: (typeof MediaPreview.$inferSelect)[], activeFileIds = previews.flatMap((row) => (row.file_id ? [row.file_id] : []))): PreviewState => ({
+const state = (
+    previews: (typeof MediaPreview.$inferSelect)[],
+    activeFileIds = previews.flatMap((row) => (row.file_id ? [row.file_id] : [])),
+): PreviewState => ({
     media: { id: "m", type: MediaType.IMAGE } as typeof Media.$inferSelect,
     source: { fileId: "src", path: "p/src.jpg", bucket: "b", renderAs: MediaType.IMAGE },
     previews,
@@ -43,9 +46,18 @@ describe("preview profiles", () => {
 
 describe("preview source", () => {
     test("prefers a renderable image over a video frame", () => {
-        expect(pickContentSource([content("video", "VIDEO"), content("image", "IMAGE")])).toMatchObject({ fileId: "image", renderAs: MediaType.IMAGE });
-        expect(pickContentSource([content("jxl", "IMAGE", "jxl"), content("video", "VIDEO")])).toMatchObject({ fileId: "video", renderAs: MediaType.VIDEO });
-        expect(pickContentSource([content("video", "VIDEO"), content("vvic", "IMAGE", "vvic")])).toMatchObject({ fileId: "vvic", renderAs: MediaType.IMAGE });
+        expect(pickContentSource([content("video", "VIDEO"), content("image", "IMAGE")])).toMatchObject({
+            fileId: "image",
+            renderAs: MediaType.IMAGE,
+        });
+        expect(pickContentSource([content("jxl", "IMAGE", "jxl"), content("video", "VIDEO")])).toMatchObject({
+            fileId: "video",
+            renderAs: MediaType.VIDEO,
+        });
+        expect(pickContentSource([content("video", "VIDEO"), content("vvic", "IMAGE", "vvic")])).toMatchObject({
+            fileId: "vvic",
+            renderAs: MediaType.IMAGE,
+        });
         expect(pickContentSource([])).toBeNull();
     });
 
@@ -113,7 +125,7 @@ describe("format strategy", () => {
         });
         expect(detectFormatStrategy("https://example.com/image.jpg", MediaType.IMAGE)).toMatchObject({
             category: "STANDARD_IMAGE",
-            requiresLocalDownload: false,
+            requiresLocalDownload: true,
         });
         expect(detectFormatStrategy("https://example.com/video.mp4", MediaType.VIDEO)).toMatchObject({
             category: "VIDEO_CONTAINER",
@@ -124,7 +136,11 @@ describe("format strategy", () => {
 
 describe("vvic", () => {
     const bytes = (...parts: (number | number[] | Uint8Array | string)[]) =>
-        Uint8Array.from(parts.flatMap((part) => (typeof part === "string" ? [...part].map((char) => char.charCodeAt(0)) : typeof part === "number" ? [part] : [...part])));
+        Uint8Array.from(
+            parts.flatMap((part) =>
+                typeof part === "string" ? [...part].map((char) => char.charCodeAt(0)) : typeof part === "number" ? [part] : [...part],
+            ),
+        );
     const u16 = (value: number) => [value >> 8, value & 255];
     const u32 = (value: number) => [0, 0, ...u16(value)];
     const box = (type: string, ...parts: (number | number[] | Uint8Array | string)[]) => {
@@ -136,7 +152,16 @@ describe("vvic", () => {
     const PPS = [0x00, 0x81, 0xbb];
     const PICTURE = [0x00, 0x39, 0xcc, 0xdd];
     // Douyin's vvcC: no version and flags, a draft profile-tier-level record, then the parameter set arrays.
-    const vvcC = box("vvcC", [0xff, 0x00, 0x11, 0x1f, 0x04, 0x09, 0xa4, 0x00, 0x00], u16(1440), u16(1920), u16(0), 2, [0x0f, ...u16(1), ...u16(3), ...SPS], [0x10, ...u16(1), ...u16(3), ...PPS]);
+    const vvcC = box(
+        "vvcC",
+        [0xff, 0x00, 0x11, 0x1f, 0x04, 0x09, 0xa4, 0x00, 0x00],
+        u16(1440),
+        u16(1920),
+        u16(0),
+        2,
+        [0x0f, ...u16(1), ...u16(3), ...SPS],
+        [0x10, ...u16(1), ...u16(3), ...PPS],
+    );
 
     const vvic = (itemType = "vvc1", properties: Uint8Array[] = []) => {
         const meta = (pictureOffset: number) =>
@@ -148,7 +173,16 @@ describe("vvic", () => {
                 box(
                     "iprp",
                     box("ipco", vvcC, box("ispe", u32(0), u32(1440), u32(1920)), ...properties),
-                    box("ipma", u32(0), u32(1), u16(1), 2 + properties.length, 0x81, 2, properties.map((_, index) => 3 + index)),
+                    box(
+                        "ipma",
+                        u32(0),
+                        u32(1),
+                        u16(1),
+                        2 + properties.length,
+                        0x81,
+                        2,
+                        properties.map((_, index) => 3 + index),
+                    ),
                 ),
                 box("iloc", u32(0), [0x44, 0x00], u16(1), u16(1), u16(0), u16(1), u32(pictureOffset), u32(PICTURE.length + 4)),
             );

@@ -1,20 +1,11 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
-import {
-    DeleteStatus,
-    File as DbFile,
-    Media,
-    MediaCover,
-    MediaPreview,
-    MediaType,
-    PreviewSize,
-    SyncStatus,
-} from "@/db/schema";
+import { DeleteStatus, File as DbFile, Media, MediaCover, MediaPreview, MediaType, PreviewSize, SyncStatus } from "@/db/schema";
 import { db, type DbClient, type Transaction } from "@/global/db";
 import { env } from "@/global/env";
 import { s3 } from "@/global/s3";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { uploadToS3 } from "@/lib/utils/media";
-import { renderPreview } from "@/lib/utils/preview_renderer";
+import { renderPreview, type PreparedPreviewSource } from "@/lib/utils/preview_renderer";
 import { RECIPE_VERSION } from "@/lib/utils/preview_profiles";
 import { COVER_MEDIA_TYPES } from "@/lib/validation/media-composition";
 import { kindOfState, loadOriginalStates, type OriginalState } from "./originals";
@@ -76,11 +67,7 @@ export function pickContentSource(contents: readonly ContentFile[]): PreviewSour
 }
 
 /** What a media's previews are rendered from: its completed cover, else (for visual media) its content. */
-export function previewSourceOf(
-    type: MediaType,
-    cover: FileRow | null,
-    contents: readonly ContentFile[],
-): PreviewSource | null {
+export function previewSourceOf(type: MediaType, cover: FileRow | null, contents: readonly ContentFile[]): PreviewSource | null {
     if (cover && COVER_MEDIA_TYPES.has(type)) {
         return { fileId: cover.id, path: cover.path, bucket: cover.bucket, renderAs: MediaType.IMAGE };
     }
@@ -119,17 +106,15 @@ export async function loadPreviewStates(client: DbClient, mediaIds: readonly str
 
     return mediaRows.map((media) => {
         const cover = covers.find((row) => row.mediaId === media.id)?.file ?? null;
-        const source = previewSourceOf(
-            media.type,
-            cover,
-            contentFiles(statesByMedia.get(media.id) ?? []),
-        );
+        const source = previewSourceOf(media.type, cover, contentFiles(statesByMedia.get(media.id) ?? []));
         const own = previews.filter((row) => row.media_id === media.id);
         return {
             media,
             source,
             previews: own,
-            activePreviewFileIds: new Set(own.flatMap((row) => (row.file_id && activePreviewFileIds.has(row.file_id) ? [row.file_id] : []))),
+            activePreviewFileIds: new Set(
+                own.flatMap((row) => (row.file_id && activePreviewFileIds.has(row.file_id) ? [row.file_id] : [])),
+            ),
         };
     });
 }
@@ -224,6 +209,8 @@ export interface RenderPreviewParams {
     state: PreviewState & { source: PreviewSource };
     size: PreviewSize;
     signal?: AbortSignal;
+    /** Reuses an already-opened source across sizes so one media only downloads once. */
+    preparedSource?: PreparedPreviewSource;
     /** Runs last in the transaction that stores the preview (the queue's fence goes here). */
     afterPersist?: (tx: Transaction) => Promise<void>;
 }
@@ -233,10 +220,16 @@ export interface RenderPreviewParams {
  * when the media was recycled or deleted, or its preview source changed, meanwhile. Throws UndecodableSourceError when
  * the source cannot be decoded.
  */
-export async function renderAndStorePreview({ state, size, signal, afterPersist }: RenderPreviewParams): Promise<boolean> {
+export async function renderAndStorePreview({ state, size, signal, preparedSource, afterPersist }: RenderPreviewParams): Promise<boolean> {
     const { media, source } = state;
-    const sourceUrl = await s3.getPresignedUrl(source.path, { bucket: source.bucket, expiresInSeconds: 900 });
-    const rendered = await renderPreview(sourceUrl, source.renderAs, size, signal);
+    const rendered = preparedSource
+        ? await preparedSource.render(size)
+        : await renderPreview(
+              await s3.getPresignedUrl(source.path, { bucket: source.bucket, expiresInSeconds: 900 }),
+              source.renderAs,
+              size,
+              signal,
+          );
     signal?.throwIfAborted();
 
     const key = previewKey(media, size, source.fileId);
@@ -252,7 +245,13 @@ export async function renderAndStorePreview({ state, size, signal, afterPersist 
             .values({ path: key, mime_type: "image/avif", extension: "avif", bucket: env.S3_BUCKET, size: rendered.size })
             .onConflictDoUpdate({
                 target: DbFile.path,
-                set: { mime_type: "image/avif", extension: "avif", size: rendered.size, delete_status: DeleteStatus.ACTIVE, delete_time: null },
+                set: {
+                    mime_type: "image/avif",
+                    extension: "avif",
+                    size: rendered.size,
+                    delete_status: DeleteStatus.ACTIVE,
+                    delete_time: null,
+                },
             })
             .returning({ id: DbFile.id });
         await upsertPreview(tx, media.id, size, {
@@ -301,7 +300,13 @@ export async function loadPreviewImages(mediaIds: readonly string[]): Promise<Ma
     const result = new Map<string, PreviewImages>(mediaIds.map((id) => [id, { ...NO_PREVIEWS }]));
     if (mediaIds.length === 0) return result;
     const rows = await db
-        .select({ mediaId: MediaPreview.media_id, size: MediaPreview.size, width: MediaPreview.width, height: MediaPreview.height, file: DbFile })
+        .select({
+            mediaId: MediaPreview.media_id,
+            size: MediaPreview.size,
+            width: MediaPreview.width,
+            height: MediaPreview.height,
+            file: DbFile,
+        })
         .from(MediaPreview)
         .innerJoin(DbFile, and(eq(DbFile.id, MediaPreview.file_id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
         .where(inArray(MediaPreview.media_id, [...mediaIds]));

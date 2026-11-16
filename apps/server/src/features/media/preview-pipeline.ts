@@ -1,10 +1,11 @@
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { DeleteStatus, Media, MediaPreview } from "@/db/schema";
 import { db } from "@/global/db";
+import { s3 } from "@/global/s3";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
 import type { SubjectPipelineHandler } from "@/infra/queue/types";
-import { UndecodableSourceError } from "@/lib/utils/preview_renderer";
+import { openPreviewSource, UndecodableSourceError, type PreparedPreviewSource } from "@/lib/utils/preview_renderer";
 import { clearPreviews, loadPreviewStates, planPreviews, previewsNeedWork, renderAndStorePreview, storePreviewFailure } from "./preview";
 
 const failedPreviews = (libraryIds: readonly string[]) =>
@@ -26,6 +27,8 @@ export const previewPipeline: SubjectPipelineHandler = {
     // A render may need about 800 MiB: libheif decoding a 48 MP HEIC, or FFmpeg and SVT-AV1 on a 4K frame. Two at once
     // beside the server already fill a 2 GiB container.
     concurrency: 1,
+    // Keep head-of-line blocking bounded for this concurrency-1 pipeline; each step also has its own timeout.
+    timeoutMs: 3 * 60_000,
 
     async reconcile(ctx) {
         // Reported as the queue row goes: AI work waits while the media is queued here, so the last report must come
@@ -44,20 +47,29 @@ export const previewPipeline: SubjectPipelineHandler = {
             return finished;
         }
 
-        for (const size of planPreviews(state, false)) {
-            try {
+        const sizes = planPreviews(state, false);
+        if (sizes.length === 0) return finished;
+
+        let preparedSource: PreparedPreviewSource | undefined;
+        try {
+            const sourceUrl = await s3.getPresignedUrl(state.source.path, { bucket: state.source.bucket, expiresInSeconds: 900 });
+            preparedSource = await openPreviewSource(sourceUrl, state.source.renderAs, ctx.signal);
+            for (const size of sizes) {
                 const stored = await renderAndStorePreview({
                     state: { ...state, source: state.source },
                     size,
                     signal: ctx.signal,
+                    preparedSource,
                     afterPersist: ctx.fence,
                 });
                 // The media or its source changed meanwhile; that change queues this media again.
                 if (!stored) return finished;
-            } catch (error) {
-                if (error instanceof UndecodableSourceError) return { kind: "rejected", error: error.message };
-                throw error;
             }
+        } catch (error) {
+            if (error instanceof UndecodableSourceError) return { kind: "rejected", error: error.message };
+            throw error;
+        } finally {
+            await preparedSource?.dispose();
         }
         return finished;
     },

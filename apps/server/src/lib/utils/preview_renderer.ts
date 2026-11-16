@@ -7,6 +7,10 @@ import { readVvic } from "@/lib/utils/vvic";
 const DEFAULT_USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+const DOWNLOAD_TIMEOUT_MS = 60_000;
+const DEFAULT_RENDER_TIMEOUT_MS = 45_000;
+const FFPROBE_TIMEOUT_MS = 15_000;
+
 /** What FFmpeg says when the bytes it read cannot be decoded, as opposed to a read that failed or a broken environment. */
 const UNDECODABLE_SOURCE = /invalid data found|moov atom not found|could not find codec parameters|does not contain any stream/i;
 
@@ -70,7 +74,7 @@ export function detectFormatStrategy(sourceUrl: string, mediaType: MediaType): M
         return {
             category: "STANDARD_IMAGE",
             extension: ext,
-            requiresLocalDownload: false,
+            requiresLocalDownload: true,
             seekOptions: [],
         };
     }
@@ -92,28 +96,38 @@ export function detectFormatStrategy(sourceUrl: string, mediaType: MediaType): M
     };
 }
 
+export interface PreparedPreviewSource {
+    render(size: PreviewSize, timeoutMs?: number): Promise<RenderedPreview>;
+    dispose(): Promise<void>;
+}
+
 /**
- * Renders an AVIF preview of an image or of a video frame, scaled to the size's longest edge with the aspect ratio
- * kept. The output carries no metadata (EXIF, GPS, XMP), so a preview never leaks what the original holds.
+ * Prepares a media source once so multiple preview sizes can be rendered without re-downloading or re-unpacking it.
+ * Call `dispose()` in a `finally` block to remove any temporary source files.
  */
-export async function renderPreview(
-    sourceUrl: string,
-    mediaType: MediaType,
-    size: PreviewSize,
-    signal?: AbortSignal,
-    timeoutMs = 45000,
-): Promise<RenderedPreview> {
-    const profile = PREVIEW_PROFILES[size];
+export async function openPreviewSource(sourceUrl: string, mediaType: MediaType, signal?: AbortSignal): Promise<PreparedPreviewSource> {
     const strategy = detectFormatStrategy(sourceUrl, mediaType);
-    const tempFilePath = join(tmpdir(), `preview-${size.toLowerCase()}-${crypto.randomUUID()}.avif`);
+    const isRemoteUrl = sourceUrl.startsWith("http://") || sourceUrl.startsWith("https://");
     let tempSourcePath: string | null = null;
     let tempVvcPath: string | null = null;
+    let effectiveSource = sourceUrl;
+
+    const dispose = async () => {
+        if (tempSourcePath) {
+            const path = tempSourcePath;
+            tempSourcePath = null;
+            await safeDeleteFile(path);
+        }
+        if (tempVvcPath) {
+            const path = tempVvcPath;
+            tempVvcPath = null;
+            await safeDeleteFile(path);
+        }
+    };
 
     try {
-        const isRemoteUrl = sourceUrl.startsWith("http://") || sourceUrl.startsWith("https://");
-        let effectiveSource = sourceUrl;
-
-        // Format-specific pre-downloading (e.g. HEIC/HEIF container images require local random seeking)
+        // Images are downloaded first: HEIC/HEIF need local random seeking, and ImageMagick in the release image cannot
+        // fetch a URL, so every remote image would fall through to FFmpeg, which is much slower on a storage URL.
         if (isRemoteUrl && strategy.requiresLocalDownload) {
             tempSourcePath = await downloadRemoteToTempFile(sourceUrl, signal);
             effectiveSource = tempSourcePath;
@@ -125,53 +139,80 @@ export async function renderPreview(
             await Bun.write(tempVvcPath, readVvicPicture(await Bun.file(effectiveSource).bytes()));
             effectiveSource = tempVvcPath;
         }
+    } catch (error) {
+        await dispose();
+        throw error;
+    }
 
-        // 1. Direct ImageMagick / HEIC CLI rendering for static image formats (HEIC, HEIF, JPEG, PNG, WEBP, AVIF, GIF)
-        if (strategy.category === "HEIF_IMAGE" || strategy.category === "STANDARD_IMAGE") {
-            const ok = await tryImageMagickPreview(effectiveSource, profile, tempFilePath, signal);
-            signal?.throwIfAborted();
-            if (ok) {
+    return {
+        async render(size: PreviewSize, timeoutMs = DEFAULT_RENDER_TIMEOUT_MS): Promise<RenderedPreview> {
+            const profile = PREVIEW_PROFILES[size];
+            const tempFilePath = join(tmpdir(), `preview-${size.toLowerCase()}-${crypto.randomUUID()}.avif`);
+
+            try {
+                // 1. Direct ImageMagick rendering for static image formats (HEIC, HEIF, JPEG, PNG, WEBP, AVIF, GIF)
+                if (strategy.category === "HEIF_IMAGE" || strategy.category === "STANDARD_IMAGE") {
+                    const ok = await tryImageMagickPreview(effectiveSource, profile, tempFilePath, timeoutMs, signal);
+                    signal?.throwIfAborted();
+                    if (ok) {
+                        const buffer = await readAndValidateAvif(tempFilePath);
+                        const { width, height } = await probeImageDimensions(tempFilePath);
+                        return { buffer, width, height, size: buffer.length };
+                    }
+                }
+
+                // 2. FFmpeg execution (for VIDEO_CONTAINER or fallback for images if ImageMagick fails or is missing)
+                try {
+                    const cmd = buildFFmpegCommand(effectiveSource, strategy, profile, tempFilePath);
+                    await executeFFmpeg(cmd, timeoutMs, sourceUrl, signal);
+                } catch (err) {
+                    signal?.throwIfAborted();
+                    if (isRemoteUrl && !tempSourcePath) {
+                        console.warn(
+                            `[PREVIEW_RENDERER] Direct remote FFmpeg execution failed for ${strategy.category} (${redactUrl(sourceUrl)}), downloading local temp file fallback...`,
+                        );
+                        tempSourcePath = await downloadRemoteToTempFile(sourceUrl, signal);
+                        effectiveSource = tempSourcePath;
+                        const cmd = buildFFmpegCommand(effectiveSource, strategy, profile, tempFilePath);
+                        await executeFFmpeg(cmd, timeoutMs, sourceUrl, signal);
+                    } else {
+                        throw err;
+                    }
+                }
+
                 const buffer = await readAndValidateAvif(tempFilePath);
                 const { width, height } = await probeImageDimensions(tempFilePath);
-                return { buffer, width, height, size: buffer.length };
+
+                return {
+                    buffer,
+                    width,
+                    height,
+                    size: buffer.length,
+                };
+            } finally {
+                await safeDeleteFile(tempFilePath);
             }
-        }
+        },
+        dispose,
+    };
+}
 
-        // 2. FFmpeg execution (for VIDEO_CONTAINER or fallback for images if ImageMagick is missing)
-        try {
-            const cmd = buildFFmpegCommand(effectiveSource, strategy, profile, tempFilePath);
-            await executeFFmpeg(cmd, timeoutMs, sourceUrl, signal);
-        } catch (err) {
-            signal?.throwIfAborted();
-            if (isRemoteUrl && !tempSourcePath) {
-                console.warn(
-                    `[PREVIEW_RENDERER] Direct remote FFmpeg execution failed for ${strategy.category} (${redactUrl(sourceUrl)}), downloading local temp file fallback...`,
-                );
-                tempSourcePath = await downloadRemoteToTempFile(sourceUrl, signal);
-                const cmd = buildFFmpegCommand(tempSourcePath, strategy, profile, tempFilePath);
-                await executeFFmpeg(cmd, timeoutMs, sourceUrl, signal);
-            } else {
-                throw err;
-            }
-        }
-
-        const buffer = await readAndValidateAvif(tempFilePath);
-        const { width, height } = await probeImageDimensions(tempFilePath);
-
-        return {
-            buffer,
-            width,
-            height,
-            size: buffer.length,
-        };
+/**
+ * Renders an AVIF preview of an image or of a video frame, scaled to the size's longest edge with the aspect ratio
+ * kept. The output carries no metadata (EXIF, GPS, XMP), so a preview never leaks what the original holds.
+ */
+export async function renderPreview(
+    sourceUrl: string,
+    mediaType: MediaType,
+    size: PreviewSize,
+    signal?: AbortSignal,
+    timeoutMs = DEFAULT_RENDER_TIMEOUT_MS,
+): Promise<RenderedPreview> {
+    const source = await openPreviewSource(sourceUrl, mediaType, signal);
+    try {
+        return await source.render(size, timeoutMs);
     } finally {
-        await safeDeleteFile(tempFilePath);
-        if (tempSourcePath) {
-            await safeDeleteFile(tempSourcePath);
-        }
-        if (tempVvcPath) {
-            await safeDeleteFile(tempVvcPath);
-        }
+        await source.dispose();
     }
 }
 
@@ -184,42 +225,69 @@ export async function renderPreview(
  * container's, so a 48 MP photo would take about 700 MiB. A JPEG is decoded at no more than twice the preview size
  * instead, and the pixel cache of other large images goes to disk past the limits below.
  */
-async function tryImageMagickPreview(inputPath: string, profile: PreviewProfile, outputPath: string, signal?: AbortSignal): Promise<boolean> {
+async function tryImageMagickPreview(
+    inputPath: string,
+    profile: PreviewProfile,
+    outputPath: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+): Promise<boolean> {
     const maxDim = `${profile.maxEdge}x${profile.maxEdge}>`;
     const decodeSize = `${profile.maxEdge * 2}x${profile.maxEdge * 2}`;
-    const cliCandidates = [
-        [
-            "magick",
-            ...["-limit", "memory", "256MiB", "-limit", "map", "512MiB"],
-            ...["-define", `jpeg:size=${decodeSize}`],
-            inputPath,
-            ...["-auto-orient", "-strip", "-resize", maxDim, "-quality", String(profile.quality), outputPath],
-        ],
+    const cmd = [
+        "magick",
+        "-limit",
+        "memory",
+        "256MiB",
+        "-limit",
+        "map",
+        "512MiB",
+        "-define",
+        `jpeg:size=${decodeSize}`,
+        // [0] takes only the first frame so animated GIF/WebP inputs do not render into multi-frame AVIFs.
+        `${inputPath}[0]`,
+        "-auto-orient",
+        "-strip",
+        "-resize",
+        maxDim,
+        "-quality",
+        String(profile.quality),
+        outputPath,
     ];
 
-    for (const cmd of cliCandidates) {
-        try {
-            const process = Bun.spawn({
-                cmd,
-                stdout: "pipe",
-                stderr: "pipe",
-                signal,
-            });
-            const exitCode = await process.exited;
-            if (signal?.aborted) return false;
-            if (exitCode === 0 && (await Bun.file(outputPath).exists())) {
-                const bytes = await Bun.file(outputPath).bytes();
-                if (bytes.byteLength > 0 && isValidAvifSignature(bytes)) {
-                    return true;
-                }
-            }
-        } catch (e: unknown) {
-            if (e instanceof Error) {
-                console.error("[Magick]: " + e.message);
-            }
-            console.error("[Magick]: failed to generate preview using ImageMagick");
-            // Binary not installed or failed, try next candidate
+    let process: Bun.Subprocess;
+    try {
+        process = Bun.spawn({
+            cmd,
+            stdout: "ignore",
+            stderr: "pipe",
+            timeout: timeoutMs,
+            signal,
+        });
+    } catch (e: unknown) {
+        console.error("[Magick]: failed to spawn ImageMagick:", e instanceof Error ? e.message : String(e));
+        return false;
+    }
+
+    const [stderr, exitCode] = await Promise.all([
+        process.stderr && typeof process.stderr !== "number" ? new Response(process.stderr).text() : Promise.resolve(""),
+        process.exited,
+    ]);
+    signal?.throwIfAborted();
+
+    if (process.signalCode !== null) {
+        throw new Error(`ImageMagick preview rendering timed out after ${timeoutMs}ms`);
+    }
+
+    if (exitCode === 0 && (await Bun.file(outputPath).exists())) {
+        const bytes = await Bun.file(outputPath).bytes();
+        if (bytes.byteLength > 0 && isValidAvifSignature(bytes)) {
+            return true;
         }
+    }
+
+    if (stderr.trim()) {
+        console.warn(`[Magick]: failed with exit ${exitCode}: ${stderr.trim().slice(0, 300)}`);
     }
 
     return false;
@@ -235,23 +303,42 @@ function readVvicPicture(bytes: Uint8Array): Uint8Array {
 }
 
 /**
- * Downloads a remote file to a temporary file on disk using Bun's native streaming write.
+ * Downloads a remote file to a temporary file on disk using a Web API stream and Bun's FileSink.
  */
-async function downloadRemoteToTempFile(url: string, signal?: AbortSignal): Promise<string> {
+async function downloadRemoteToTempFile(url: string, signal?: AbortSignal, timeoutMs = DOWNLOAD_TIMEOUT_MS): Promise<string> {
     const ext = extractExtensionFromUrl(url);
     const tempPath = join(tmpdir(), `source-${crypto.randomUUID()}.${ext}`);
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
+    const downloadSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+
     const response = await fetch(url, {
         headers: {
             "User-Agent": DEFAULT_USER_AGENT,
         },
-        signal,
+        signal: downloadSignal,
     });
     if (!response.ok) {
         throw new Error(`Failed to download remote media for preview rendering: HTTP ${response.status} ${response.statusText}`);
     }
-    const arrayBuffer = await response.arrayBuffer();
-    await Bun.write(tempPath, arrayBuffer);
-    return tempPath;
+    if (!response.body) {
+        await Bun.write(tempPath, new Uint8Array());
+        return tempPath;
+    }
+
+    const writer = Bun.file(tempPath).writer();
+    try {
+        for await (const chunk of response.body) {
+            writer.write(chunk);
+        }
+        await writer.end();
+        return tempPath;
+    } catch (error) {
+        try {
+            await writer.end();
+        } catch {}
+        await safeDeleteFile(tempPath);
+        throw error;
+    }
 }
 
 /**
@@ -282,11 +369,9 @@ function buildFFmpegCommand(sourcePath: string, strategy: MediaFormatStrategy, p
     const globalOptions = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"];
 
     // 2. Network resilience: Disguise User-Agent and enable auto-reconnect for remote S3/R2 presigned URLs.
-    // NOTE: -reconnect_streamed 1 is intentionally omitted as it forces HTTP streams to be marked non-seekable,
-    // breaking ISOBMFF/MOV/MP4/HEIC demuxing.
-    const networkOptions = isRemoteUrl
-        ? ["-user_agent", DEFAULT_USER_AGENT, "-reconnect", "1", "-reconnect_at_eof", "1", "-reconnect_delay_max", "5"]
-        : [];
+    // NOTE: -reconnect_streamed 1 marks HTTP streams non-seekable (breaking ISOBMFF/MP4 demuxing), and
+    // -reconnect_at_eof 1 causes FFmpeg to treat normal S3/R2 EOF as a disconnect and hang/fail with I/O errors.
+    const networkOptions = isRemoteUrl ? ["-user_agent", DEFAULT_USER_AGENT, "-reconnect", "1", "-reconnect_delay_max", "5"] : [];
 
     // 3. Format-specific seek options (e.g. -ss 00:00:00.500 for VIDEO_CONTAINER)
     const seekOptions = strategy.seekOptions;
@@ -332,7 +417,7 @@ async function executeFFmpeg(cmd: string[], timeoutMs: number, sourceUrl: string
     try {
         process = Bun.spawn({
             cmd,
-            stdout: "pipe",
+            stdout: "ignore",
             stderr: "pipe",
             timeout: timeoutMs,
             signal,
@@ -343,7 +428,10 @@ async function executeFFmpeg(cmd: string[], timeoutMs: number, sourceUrl: string
         );
     }
 
-    const exitCode = await process.exited;
+    const [stderrRaw, exitCode] = await Promise.all([
+        process.stderr && typeof process.stderr !== "number" ? new Response(process.stderr).text() : Promise.resolve(""),
+        process.exited,
+    ]);
     signal?.throwIfAborted();
 
     if (process.signalCode !== null) {
@@ -351,10 +439,7 @@ async function executeFFmpeg(cmd: string[], timeoutMs: number, sourceUrl: string
     }
 
     if (exitCode !== 0) {
-        let stderr = "";
-        if (process.stderr && typeof process.stderr !== "number") {
-            stderr = (await new Response(process.stderr).text()).trim();
-        }
+        const stderr = stderrRaw.trim();
         const message = `FFmpeg failed with exit status ${exitCode}. Stderr: ${stderr}`;
         throw UNDECODABLE_SOURCE.test(stderr) ? new UndecodableSourceError(message) : new Error(message);
     }
@@ -400,10 +485,11 @@ async function probeImageDimensions(filePath: string): Promise<{ width: number; 
                 filePath,
             ],
             stdout: "pipe",
-            stderr: "pipe",
+            stderr: "ignore",
+            timeout: FFPROBE_TIMEOUT_MS,
         });
 
-        const output = await new Response(process.stdout).text();
+        const [output] = await Promise.all([new Response(process.stdout).text(), process.exited]);
         const [wStr, hStr] = output.trim().split("x");
         const width = Number.parseInt(wStr ?? "", 10);
         const height = Number.parseInt(hStr ?? "", 10);
