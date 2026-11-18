@@ -1045,10 +1045,7 @@
         },
         "actions": {
             "pause": "Pause",
-            "resume": "Resume",
-            "more": "More actions",
-            "sweep": "Fix stuck tasks",
-            "sweep_hint": "Reset tasks whose worker stopped responding"
+            "resume": "Resume"
         },
         "groups": {
             "media": "Media",
@@ -1109,7 +1106,6 @@
         },
         "toast": {
             "retried": "Queued {count} to retry",
-            "swept": "Stuck tasks were reset",
             "action_failed": "Couldn't complete the action. Try again."
         },
         "provider_blocked": {

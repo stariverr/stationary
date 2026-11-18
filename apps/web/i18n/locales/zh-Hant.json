@@ -994,10 +994,7 @@
         },
         "actions": {
             "pause": "暫停",
-            "resume": "恢復",
-            "more": "更多操作",
-            "sweep": "修復卡住的任務",
-            "sweep_hint": "重設工作程序已失去回應的任務"
+            "resume": "恢復"
         },
         "groups": {
             "media": "媒體",
@@ -1058,7 +1055,6 @@
         },
         "toast": {
             "retried": "已將 {count} 項加入重試",
-            "swept": "已重設卡住的任務",
             "action_failed": "操作沒有完成，請重試。"
         },
         "provider_blocked": {

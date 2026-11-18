@@ -21,9 +21,8 @@ import {
     type WorkflowPayload,
 } from "@/features/ingest/schema";
 import { RetrySyncError } from "@/features/sync/errors";
-import { RetrySyncSchema, SweepStuckLibrarySchema } from "@/features/sync/schema";
+import { RetrySyncSchema } from "@/features/sync/schema";
 import { retrySync } from "@/features/sync/retry-sync";
-import { sweepStuckEntities } from "@/features/sync/sweep-stuck";
 import { purgeExpiredFiles } from "@/features/trash/purge-expired-files";
 
 export { CreateTaskSchema };
@@ -147,51 +146,6 @@ taskApp.post("/retry-sync", requireAuth, validate("json", RetrySyncSchema), asyn
 
         const message = cause instanceof Error ? cause.message : String(cause);
         return c.json(error(Code.INTERNAL_SERVER_ERROR, message), 500);
-    }
-});
-
-/**
- * User-triggered recovery of one library: marks its Post, Media and Track records stuck in IN_PROGRESS as FAILED.
- * The reconcile queue recovers its own expired leases.
- */
-taskApp.post("/sweep-stuck-library", requireAuth, validate("json", SweepStuckLibrarySchema), async (c) => {
-    const user = c.get("user");
-    if (!user) {
-        return c.json(error(Code.UNAUTHORIZED, "Unauthorized"), 401);
-    }
-
-    const { library_id } = c.req.valid("json");
-    const library = await ownedLibrary(c, user.id, library_id);
-    if (!library) {
-        return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
-    }
-
-    const { sweptCount } = await sweepStuckEntities(30, library_id);
-    return c.json(success(Code.SUCCESS, { stuck_entities_swept: sweptCount }));
-});
-
-/**
- * Sweeps entity records (Post, Media, Track) stuck in IN_PROGRESS past the threshold and marks them FAILED. The
- * reconcile queue recovers its own expired leases.
- */
-taskApp.post("/sweep-stuck-tasks", requireCronSecret, async (c) => {
-    let thresholdMinutes = 30;
-    try {
-        const body = await c.req.json();
-        if (body && typeof body.threshold_minutes === "number") {
-            thresholdMinutes = body.threshold_minutes;
-        }
-    } catch {
-        // Fallback to default
-    }
-
-    try {
-        const entityResult = await sweepStuckEntities(thresholdMinutes);
-        return c.json(success(Code.SUCCESS, { stuck_entities_swept: entityResult.sweptCount }));
-    } catch (e: any) {
-        const errorMsg = e instanceof Error ? e.message : String(e);
-        console.error(`[task] Failed to sweep stuck tasks: ${errorMsg}`);
-        return c.json(error(Code.INTERNAL_SERVER_ERROR, errorMsg), 500);
     }
 });
 

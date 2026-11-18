@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { Ellipsis, Pause, Play, Sidebar, Wrench } from "@lucide/vue";
+import { Pause, Play, Sidebar } from "@lucide/vue";
 import { onKeyStroke } from "@vueuse/core";
 import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import PipelineInspector from "@/components/jobs/PipelineInspector.vue";
 import PipelineTable from "@/components/jobs/PipelineTable.vue";
 import { useAppLayout } from "@/composables/useAppLayout";
@@ -17,7 +16,7 @@ const { t } = useI18n();
 const libraryStore = useLibraryStore();
 const libraryId = computed(() => libraryStore.activeLibrary?.id ?? null);
 
-const { query, setPaused, retryFailed, sweepStuck } = useLibraryPipelines(libraryId);
+const { query, setPaused, retryFailed } = useLibraryPipelines(libraryId);
 const pipelines = computed(() => query.data.value?.pipelines);
 const paused = computed(() => query.data.value?.paused ?? false);
 
@@ -75,15 +74,6 @@ async function retrySelected() {
         retrying.value = false;
     }
 }
-
-async function sweep() {
-    try {
-        await sweepStuck();
-        toast.success(t("jobs.toast.swept"));
-    } catch (e) {
-        actionFailed(e);
-    }
-}
 </script>
 
 <template>
@@ -121,27 +111,6 @@ async function sweep() {
                     <component :is="paused ? Play : Pause" class="size-3.5" />
                     {{ paused ? $t("jobs.actions.resume") : $t("jobs.actions.pause") }}
                 </Button>
-                <DropdownMenu>
-                    <DropdownMenuTrigger as-child>
-                        <Button
-                            variant="ghost"
-                            size="sm"
-                            class="h-8 w-8 p-0 text-zinc-500 rounded-lg active:scale-[0.96]"
-                            :aria-label="$t('jobs.actions.more')"
-                        >
-                            <Ellipsis class="size-4" />
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent class="w-64" align="end" :side-offset="6">
-                        <DropdownMenuItem class="items-start cursor-pointer" @select="sweep">
-                            <Wrench class="mt-0.5" />
-                            <span class="flex flex-col gap-0.5">
-                                <span class="text-sm font-medium">{{ $t("jobs.actions.sweep") }}</span>
-                                <span class="text-xs leading-snug text-muted-foreground">{{ $t("jobs.actions.sweep_hint") }}</span>
-                            </span>
-                        </DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
             </div>
         </header>
 

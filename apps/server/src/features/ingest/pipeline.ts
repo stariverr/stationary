@@ -1,5 +1,4 @@
 import { db } from "@/global/db";
-import { refreshPostSyncStatus } from "@/features/media/composition";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
 import type { PostItemData } from "./schema";
@@ -33,7 +32,7 @@ export const IngestPipeline = {
                 await markChanged(tx, Aspect.MEDIA_SOURCE, saved.mediaIds);
                 // The post's metadata describes its media in search.
                 await markChanged(tx, Aspect.MEDIA_META, saved.mediaIds);
-            } else await refreshPostSyncStatus(tx, saved.postId, Temporal.Now.instant());
+            }
             return saved;
         });
 

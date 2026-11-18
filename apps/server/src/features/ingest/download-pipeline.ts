@@ -3,7 +3,7 @@ import { DeleteStatus, File, Media, MediaCaption, MediaCover, MediaOriginal, Syn
 import { db, type DbClient, type Transaction } from "@/global/db";
 import { env } from "@/global/env";
 import { convertToVtt, makeDefaultCaption, storeVtt } from "@/features/media/captions";
-import { getMediaCompletionError, refreshPostSyncStatus } from "@/features/media/composition";
+import { getMediaCompletionError, lockPosts, refreshPostSyncStatus } from "@/features/media/composition";
 import { completeOriginal } from "@/features/media/originals";
 import { probeOriginal, ProbeRejectedError } from "@/features/media/probe";
 import { mediaStoragePath } from "@/features/media/storage";
@@ -162,10 +162,11 @@ async function recordSourceError(
     });
 }
 
-async function setMediaFailed(tx: Transaction, media: Pick<MediaRow, "id" | "post_id">, error: string) {
+/** Call after lockPosts, which returned `postIds`. */
+async function setMediaFailed(tx: Transaction, mediaId: string, postIds: readonly string[], error: string) {
     const now = Temporal.Now.instant();
-    await tx.update(Media).set({ sync_status: SyncStatus.FAILED, last_error: error, update_time: now }).where(activeMedia(media.id));
-    if (media.post_id) await refreshPostSyncStatus(tx, media.post_id, now);
+    await tx.update(Media).set({ sync_status: SyncStatus.FAILED, last_error: error, update_time: now }).where(activeMedia(mediaId));
+    await refreshPostSyncStatus(tx, postIds, now);
 }
 
 const failedMedia = (libraryIds: readonly string[]) =>
@@ -242,9 +243,10 @@ export const downloadPipeline: SubjectPipelineHandler = {
         if (failure) return failure;
 
         await db.transaction(async (tx) => {
+            const postIds = await lockPosts(tx, { mediaIds: [media.id] });
             const completionError = await getMediaCompletionError(tx, media);
             if (completionError) {
-                await setMediaFailed(tx, media, completionError);
+                await setMediaFailed(tx, media.id, postIds, completionError);
                 await ctx.fence(tx);
                 return;
             }
@@ -253,7 +255,7 @@ export const downloadPipeline: SubjectPipelineHandler = {
                 .update(Media)
                 .set({ sync_status: SyncStatus.COMPLETED, last_error: null, update_time: now })
                 .where(and(activeMedia(media.id), ne(Media.sync_status, SyncStatus.COMPLETED)));
-            if (media.post_id) await refreshPostSyncStatus(tx, media.post_id, now);
+            await refreshPostSyncStatus(tx, postIds, now);
             await ctx.fence(tx);
         });
         return { kind: "done" };
@@ -261,7 +263,8 @@ export const downloadPipeline: SubjectPipelineHandler = {
 
     /** Marks the media failed, and its sources still waiting for a download too, so scans leave them until a requeue. */
     async recordFailure(tx, { subjectId: mediaId, error }) {
-        const [media] = await tx.select({ id: Media.id, post_id: Media.post_id }).from(Media).where(activeMedia(mediaId)).limit(1);
+        const postIds = await lockPosts(tx, { mediaIds: [mediaId] });
+        const [media] = await tx.select({ id: Media.id }).from(Media).where(activeMedia(mediaId)).limit(1);
         if (!media) return;
         for (const table of SOURCE_TABLES) {
             await tx
@@ -269,7 +272,7 @@ export const downloadPipeline: SubjectPipelineHandler = {
                 .set({ status: SyncStatus.FAILED, update_time: Temporal.Now.instant() })
                 .where(and(eq(table.media_id, mediaId), pendingSource(table, false)));
         }
-        await setMediaFailed(tx, media, error);
+        await setMediaFailed(tx, mediaId, postIds, error);
     },
 
     async scanPage(libraryId, cursor, limit) {

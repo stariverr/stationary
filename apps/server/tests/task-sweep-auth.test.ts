@@ -20,15 +20,12 @@ Object.assign(process.env, {
 
 const { env } = await import("@/global/env");
 const { db } = await import("@/global/db");
-const { ApiTokenService } = await import("@/features/auth/api-token");
-const { Library, Media, MediaType, Post, SyncStatus, User } = await import("@/db/schema");
 const { default: taskApp } = await import("@/api/task");
-const { eq, inArray } = await import("drizzle-orm");
 
 const databaseTest = databaseUrl && env.DB_URL === databaseUrl ? test : test.skip;
 
 const secret = "test-cron-secret";
-const cronRoutes = ["/purge-stale-pending-drafts", "/sweep-stuck-tasks", "/sweep-orphan-tags"];
+const cronRoutes = ["/purge-stale-pending-drafts", "/sweep-orphan-tags"];
 const post = (route: string, headers: Record<string, string> = {}) => taskApp.request(route, { method: "POST", headers });
 const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
 
@@ -85,119 +82,5 @@ describe.each(cronRoutes)("POST /task%s", (route) => {
 
         expect(res.status).toBe(200);
         expect(await res.json()).toMatchObject({ success: true });
-    });
-});
-
-describe("POST /task/sweep-stuck-library", () => {
-    const sweep = (libraryId: string, headers: Record<string, string> = {}) =>
-        taskApp.request("/sweep-stuck-library", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...headers },
-            body: JSON.stringify({ library_id: libraryId }),
-        });
-
-    test("refuses a request with no user", async () => {
-        const res = await sweep(crypto.randomUUID());
-
-        expect(res.status).toBe(401);
-    });
-
-    databaseTest("does not accept the cron secret", async () => {
-        const verifyToken = spyOn(ApiTokenService, "verifyToken").mockResolvedValue(null);
-        const originalSecret = env.CRON_SECRET;
-        env.CRON_SECRET = secret;
-
-        try {
-            expect((await sweep(crypto.randomUUID(), bearer(secret))).status).toBe(401);
-        } finally {
-            env.CRON_SECRET = originalSecret;
-            verifyToken.mockRestore();
-        }
-    });
-
-    databaseTest("sweeps only stuck items of the caller's own library", async () => {
-        const stale = Temporal.Now.instant().subtract({ hours: 2 });
-        const [owner, stranger] = await db
-            .insert(User)
-            .values(["owner", "stranger"].map((name) => ({ name, auth_id: crypto.randomUUID() })))
-            .returning();
-        const [own, other, foreign] = await db
-            .insert(Library)
-            .values([
-                { name: "own", description: "", owner_id: owner!.id },
-                { name: "other", description: "", owner_id: owner!.id },
-                { name: "foreign", description: "", owner_id: stranger!.id },
-            ])
-            .returning();
-
-        const seed = async (libraryId: string) => {
-            const [stuckPost] = await db
-                .insert(Post)
-                .values({
-                    eid: crypto.randomUUID(),
-                    title: "stuck",
-                    description: "",
-                    media_count: 1,
-                    library_id: libraryId,
-                    sync_status: SyncStatus.IN_PROGRESS,
-                    update_time: stale,
-                })
-                .returning();
-            const [stuckMedia] = await db
-                .insert(Media)
-                .values({
-                    sort_order: 0,
-                    eid: crypto.randomUUID(),
-                    post_id: stuckPost!.id,
-                    library_id: libraryId,
-                    title: "stuck",
-                    description: "",
-                    type: MediaType.VIDEO,
-                    sync_status: SyncStatus.IN_PROGRESS,
-                    update_time: stale,
-                })
-                .returning();
-            return { postId: stuckPost!.id, mediaId: stuckMedia!.id };
-        };
-
-        const statuses = async ({ postId, mediaId }: Awaited<ReturnType<typeof seed>>) => {
-            const [postRow] = await db.select().from(Post).where(eq(Post.id, postId));
-            const [mediaRow] = await db.select().from(Media).where(eq(Media.id, mediaId));
-            return [postRow!.sync_status, mediaRow!.sync_status];
-        };
-
-        const ownItems = await seed(own!.id);
-        const otherItems = await seed(other!.id);
-        const foreignItems = await seed(foreign!.id);
-        const stuck = [SyncStatus.IN_PROGRESS, SyncStatus.IN_PROGRESS];
-        const token = (libraryId: string | null) =>
-            spyOn(ApiTokenService, "verifyToken").mockResolvedValue({ owner_id: owner!.id, library_id: libraryId } as never);
-
-        const unscoped = token(null);
-        try {
-            const res = await sweep(own!.id, bearer("st_test"));
-
-            expect(res.status).toBe(200);
-            expect(await res.json()).toMatchObject({ success: true, data: { stuck_entities_swept: 2 } });
-            expect(await statuses(ownItems)).toEqual([SyncStatus.FAILED, SyncStatus.FAILED]);
-            expect(await statuses(otherItems)).toEqual(stuck);
-
-            expect((await sweep(foreign!.id, bearer("st_test"))).status).toBe(404);
-            expect((await sweep(crypto.randomUUID(), bearer("st_test"))).status).toBe(404);
-            expect(await statuses(foreignItems)).toEqual(stuck);
-
-            unscoped.mockRestore();
-            const scoped = token(own!.id);
-            expect((await sweep(other!.id, bearer("st_test"))).status).toBe(404);
-            expect(await statuses(otherItems)).toEqual(stuck);
-            scoped.mockRestore();
-        } finally {
-            unscoped.mockRestore();
-            const items = [ownItems, otherItems, foreignItems];
-            await db.delete(Media).where(inArray(Media.id, items.map((item) => item.mediaId)));
-            await db.delete(Post).where(inArray(Post.id, items.map((item) => item.postId)));
-            await db.delete(Library).where(inArray(Library.id, [own!.id, other!.id, foreign!.id]));
-            await db.delete(User).where(inArray(User.id, [owner!.id, stranger!.id]));
-        }
     });
 });
