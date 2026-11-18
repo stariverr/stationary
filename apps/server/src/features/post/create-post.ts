@@ -14,6 +14,7 @@ import { findOwnedLibrary, type LibraryAuth } from "@/features/library/access";
 import { db } from "@/global/db";
 import { replacePostTagsTx } from "./post-service";
 import { DraftFileUnavailableError } from "@/features/import/draft-file";
+import { refreshPostSyncStatus } from "@/features/media/composition";
 import { createMediaFromDraft, DraftContentError, prepareDrafts, type PreparedDraft } from "@/features/media/create-from-draft";
 import type { CreatePostInput } from "./schema";
 
@@ -126,20 +127,7 @@ export async function createPost(input: CreatePostInput, auth: LibraryAuth): Pro
                 });
             }
 
-            const activeMedias = await tx
-                .select({ sync_status: Media.sync_status })
-                .from(Media)
-                .where(and(eq(Media.post_id, postId), eq(Media.delete_status, DeleteStatus.ACTIVE)));
-
-            if (activeMedias.every((media) => media.sync_status === SyncStatus.COMPLETED)) {
-                await tx
-                    .update(Post)
-                    .set({
-                        sync_status: SyncStatus.COMPLETED,
-                        update_time: now,
-                    })
-                    .where(eq(Post.id, postId));
-            }
+            await refreshPostSyncStatus(tx, [postId], now);
         });
     } catch (error) {
         if (error instanceof DraftFileUnavailableError) {

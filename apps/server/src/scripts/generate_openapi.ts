@@ -420,10 +420,6 @@ const RetrySyncSchema = v.object({
     library_id: v.pipe(v.string(), v.uuid()),
 });
 
-const SweepStuckLibrarySchema = v.object({
-    library_id: v.pipe(v.string(), v.uuid()),
-});
-
 const QueueAiSchema = v.object({
     library_id: v.pipe(v.string(), v.uuid()),
     entity_type: v.picklist(["post", "media"]),
@@ -1204,23 +1200,6 @@ const routes: RouteItem[] = [
         path: "/api/task/purge-stale-pending-drafts",
         method: "post",
         summary: "Clean up pending uploads that were never confirmed",
-        tags: ["Task"],
-        requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
-    },
-    {
-        path: "/api/task/sweep-stuck-library",
-        method: "post",
-        summary: "Mark stuck sync items of a library as failed",
-        tags: ["Task"],
-        bodySchema: SweepStuckLibrarySchema,
-        requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
-    },
-    {
-        path: "/api/task/sweep-stuck-tasks",
-        method: "post",
-        summary: "Clean up and recover stuck tasks",
         tags: ["Task"],
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),

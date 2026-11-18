@@ -2,6 +2,7 @@ import { type Transaction } from "@/global/db";
 import { Post, Media, Author, DeleteStatus, SyncStatus, TagSource } from "@/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { avatarOrigin } from "@/features/author/avatar-pipeline";
+import { refreshPostSyncStatus } from "@/features/media/composition";
 import { originalCountError } from "@/features/media/originals";
 import { releaseMediaAssets } from "@/features/media/release";
 import { markChanged } from "@/infra/queue/changes";
@@ -232,15 +233,9 @@ export async function saveIngestMetadata(postData: PostItemData, targetLibraryId
     }
 
     if (hasPendingTasks && existingPost) {
-        await tx
-            .update(Post)
-            .set({
-                sync_status: SyncStatus.IN_PROGRESS,
-                workflow_run_id: workflowRunId,
-                last_error: null,
-            })
-            .where(eq(Post.id, postId));
+        await tx.update(Post).set({ workflow_run_id: workflowRunId }).where(eq(Post.id, postId));
     }
+    await refreshPostSyncStatus(tx, [postId]);
 
     return {
         postId,

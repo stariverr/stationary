@@ -38,17 +38,7 @@ export function useLibraryPipelines(libraryId: Ref<string | null>) {
         return res?.data?.retried ?? 0;
     };
 
-    /** Resets work whose worker stopped answering. */
-    const sweepStuck = async () => {
-        const res = await useApi<ApiResponse<unknown>>("/task/sweep-stuck-library", {
-            method: "POST",
-            body: { library_id: libraryId.value },
-        });
-        if (!res?.success) throw new Error(res?.message);
-        await refresh();
-    };
-
-    return { query, setPaused, retryFailed, sweepStuck };
+    return { query, setPaused, retryFailed };
 }
 
 /** Recent failures of one pipeline; refetched whenever the failure count it was loaded for changes. */

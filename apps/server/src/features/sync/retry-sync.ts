@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { DeleteStatus, Media, MediaCaption, MediaCover, MediaOriginal, Post, SyncStatus } from "@/db/schema";
+import { lockPosts, refreshPostSyncStatus } from "@/features/media/composition";
 import { canReachItems, type LibraryAuth } from "@/features/library/access";
 import { db } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
@@ -14,13 +15,10 @@ export async function retrySync(input: RetrySyncInput, auth: LibraryAuth) {
 
     // Retrying a post retries all of its media; their downloads are queued again, failed sources included.
     return db.transaction(async (tx) => {
+        const postIds = await lockPosts(tx, { postIds: input.post_ids, mediaIds: input.media_ids });
         let retriedCount = 0;
         if (input.post_ids?.length) {
-            const posts = await tx
-                .update(Post)
-                .set({ sync_status: SyncStatus.PENDING, last_error: null })
-                .where(inArray(Post.id, input.post_ids))
-                .returning({ id: Post.id });
+            const posts = await tx.select({ id: Post.id }).from(Post).where(inArray(Post.id, input.post_ids));
             retriedCount += posts.length;
         }
 
@@ -36,6 +34,7 @@ export async function retrySync(input: RetrySyncInput, auth: LibraryAuth) {
             .where(and(or(...mediaFilters), eq(Media.delete_status, DeleteStatus.ACTIVE)))
             .returning({ id: Media.id });
         if (input.media_ids?.length) retriedCount += media.filter((row) => input.media_ids!.includes(row.id)).length;
+        await refreshPostSyncStatus(tx, postIds);
 
         const mediaIds = media.map((row) => row.id);
         if (mediaIds.length === 0) return { retriedCount };

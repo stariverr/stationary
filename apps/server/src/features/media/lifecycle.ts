@@ -3,12 +3,14 @@ import { releaseMediaAssets } from "@/features/media/release";
 import { db } from "@/global/db";
 import { DeleteStatus, File, Media, MediaTag, Post } from "@/db/schema";
 import { deleteMediaAiData } from "@/features/ai/cleanup";
+import { lockPosts, refreshPostSyncStatus } from "@/features/media/composition";
 import { markRestored } from "@/features/media/restored";
 
 export async function trashMedia(mediaId: string) {
     const recycleTime = Temporal.Now.instant();
 
     return db.transaction(async (tx) => {
+        const postIds = await lockPosts(tx, { mediaIds: [mediaId] });
         const [media] = await tx
             .select({
                 id: Media.id,
@@ -59,6 +61,7 @@ export async function trashMedia(mediaId: string) {
 
             await tx.update(Post).set({ media_count: remainingMedia.length, update_time: recycleTime }).where(eq(Post.id, media.post_id));
         }
+        await refreshPostSyncStatus(tx, postIds, recycleTime);
 
         return { mediaUpdated: updatedMedia.length };
     });
@@ -115,6 +118,7 @@ export async function batchDeleteMedia(mediaIds: string[]): Promise<{ mediaUpdat
         const deleteTime = Temporal.Now.instant();
 
         const result = await db.transaction(async (tx) => {
+            const postIds = await lockPosts(tx, { mediaIds: chunk });
             const activeMedia = await tx
                 .select({ id: Media.id, post_id: Media.post_id })
                 .from(Media)
@@ -137,9 +141,7 @@ export async function batchDeleteMedia(mediaIds: string[]): Promise<{ mediaUpdat
             await deleteMediaAiData(tx, validMediaIds);
             const fileUpdated = await releaseMediaAssets(tx, validMediaIds);
 
-            const distinctPostIds = Array.from(new Set(activeMedia.map((m) => m.post_id).filter((pid): pid is string => Boolean(pid))));
-
-            for (const postId of distinctPostIds) {
+            for (const postId of postIds) {
                 const [activeCount] = await tx
                     .select({ count: count() })
                     .from(Media)
@@ -149,6 +151,7 @@ export async function batchDeleteMedia(mediaIds: string[]): Promise<{ mediaUpdat
                     .set({ media_count: activeCount?.count ?? 0, update_time: deleteTime })
                     .where(eq(Post.id, postId));
             }
+            await refreshPostSyncStatus(tx, postIds, deleteTime);
 
             return { mediaUpdated: updatedMedia.length, fileUpdated };
         });

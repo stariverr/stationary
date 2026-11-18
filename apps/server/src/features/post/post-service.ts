@@ -1,6 +1,7 @@
 import { and, count, eq, isNull, inArray, sql } from "drizzle-orm";
 import { db, Transaction } from "@/global/db";
 import { DeleteStatus, Media, Post, PostTag, Tag } from "@/db/schema";
+import { refreshPostSyncStatus } from "@/features/media/composition";
 import { markMediaMetaChanged, markPostMetaChanged } from "@/features/media/meta-changes";
 
 /**
@@ -241,6 +242,7 @@ export const PostService = {
                     update_time: Temporal.Now.instant(),
                 })
                 .where(eq(Post.id, postId));
+            await refreshPostSyncStatus(tx, [postId]);
 
             return { success: true, attached: attachedIds.length, total: totalActiveCount };
         });
@@ -384,6 +386,7 @@ export const PostService = {
                     update_time: Temporal.Now.instant(),
                 })
                 .where(eq(Post.id, postId));
+            await refreshPostSyncStatus(tx, [postId]);
 
             return { success: true, remaining: remainingMedias.length };
         });

@@ -1045,10 +1045,7 @@
         },
         "actions": {
             "pause": "暂停",
-            "resume": "恢复",
-            "more": "更多操作",
-            "sweep": "修复卡住的任务",
-            "sweep_hint": "重置工作进程已失去响应的任务"
+            "resume": "恢复"
         },
         "groups": {
             "media": "媒体",
@@ -1109,7 +1106,6 @@
         },
         "toast": {
             "retried": "已将 {count} 项加入重试",
-            "swept": "已重置卡住的任务",
             "action_failed": "操作没有完成，请重试。"
         },
         "provider_blocked": {
