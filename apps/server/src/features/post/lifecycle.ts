@@ -3,6 +3,7 @@ import { releaseMediaAssets } from "@/features/media/release";
 import { db } from "@/global/db";
 import { DeleteStatus, File, Media, MediaTag, Post, PostTag } from "@/db/schema";
 import { deleteMediaAiData } from "@/features/ai/cleanup";
+import { lockPosts, refreshPostSyncStatus } from "@/features/media/composition";
 import { markRestored } from "@/features/media/restored";
 
 export async function trashPost(postId: string) {
@@ -64,6 +65,7 @@ export async function batchRestorePost(postIds: string[]): Promise<{
         const now = Temporal.Now.instant();
 
         const result = await db.transaction(async (tx) => {
+            await lockPosts(tx, { postIds: chunk });
             const validPosts = await tx
                 .select({ id: Post.id, recycle_time: Post.recycle_time })
                 .from(Post)
@@ -92,6 +94,8 @@ export async function batchRestorePost(postIds: string[]): Promise<{
                 tx,
                 restoredMedias.map((media) => media.id),
             );
+            // The status was left alone while the post was in the trash.
+            await refreshPostSyncStatus(tx, validPostIds, now);
 
             return {
                 postUpdated: restoredPosts.length,

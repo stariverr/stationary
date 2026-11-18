@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { eq, inArray } from "drizzle-orm";
 import { Library, Media, MediaType, Post, SyncStatus } from "@/db/schema";
 import { refreshPostSyncStatus } from "@/features/media/composition";
+import { restorePost, trashPost } from "@/features/post/lifecycle";
 import { db } from "@/global/db";
 
 const databaseTest = process.env.RUN_POST_STATUS_DB_TESTS === "1" ? test : test.skip;
@@ -57,6 +58,21 @@ describe("refreshPostSyncStatus", () => {
 
         await db.update(Media).set({ recycle_time: Temporal.Now.instant() }).where(inArray(Media.id, mediaIds.slice(1)));
         await db.transaction((tx) => refreshPostSyncStatus(tx, [postId]));
+        expect(await postStatus(postId)).toEqual({ status: SyncStatus.COMPLETED, error: null });
+    });
+
+    databaseTest("leaves a post in the trash alone and refreshes it on restore", async () => {
+        const { postId, mediaIds } = await postWith([SyncStatus.FAILED]);
+        await db.transaction((tx) => refreshPostSyncStatus(tx, [postId]));
+        await trashPost(postId);
+
+        // Its media went to the trash with it, so they read as none; the post keeps its status anyway.
+        await db.transaction((tx) => refreshPostSyncStatus(tx, [postId]));
+        expect(await postStatus(postId)).toEqual({ status: SyncStatus.FAILED, error: `Media item ${mediaIds[0]} failed to process: error 0` });
+
+        // Changed while in the trash, picked up on restore.
+        await db.update(Media).set({ sync_status: SyncStatus.COMPLETED, last_error: null }).where(eq(Media.id, mediaIds[0]!));
+        await restorePost(postId);
         expect(await postStatus(postId)).toEqual({ status: SyncStatus.COMPLETED, error: null });
     });
 

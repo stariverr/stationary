@@ -53,9 +53,18 @@ export async function lockPosts(tx: Transaction, { postIds = [], mediaIds = [] }
  * right: two transactions that each complete one media of a post would otherwise both read the other media as
  * unfinished and leave the post IN_PROGRESS for good. With it, the second waits for the first, and its read, a new
  * statement under READ COMMITTED, sees the first one's media.
+ *
+ * A post in the trash keeps the status it had: its media went to the trash with it, so they would read as none.
+ * Restoring the post refreshes it.
  */
 export async function refreshPostSyncStatus(tx: Transaction, postIds: readonly string[], now = Temporal.Now.instant()) {
-    const ids = await lockPosts(tx, { postIds });
+    const locked = await lockPosts(tx, { postIds });
+    if (locked.length === 0) return;
+    const live = await tx
+        .select({ id: Post.id })
+        .from(Post)
+        .where(and(inArray(Post.id, locked), eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time)));
+    const ids = live.map((post) => post.id).sort();
     if (ids.length === 0) return;
     const medias = await tx
         .select({ id: Media.id, post_id: Media.post_id, sync_status: Media.sync_status, last_error: Media.last_error })
@@ -78,6 +87,6 @@ export async function refreshPostSyncStatus(tx: Transaction, postIds: readonly s
                 last_error: failed ? `Media item ${failed.id} failed to process: ${failed.last_error ?? "unknown error"}` : null,
                 update_time: now,
             })
-            .where(and(eq(Post.id, postId), eq(Post.delete_status, DeleteStatus.ACTIVE)));
+            .where(eq(Post.id, postId));
     }
 }
