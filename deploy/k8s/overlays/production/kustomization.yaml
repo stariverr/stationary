@@ -9,4 +9,4 @@ resources:
 images:
 - name: ghcr.io/stariverr/stationary
   newName: ghcr.io/stariverr/stationary
-  newTag: df3431f
+  newTag: d1b98a1
