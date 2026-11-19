@@ -280,11 +280,13 @@ describe("download failures", () => {
             })
             .where(eq(MediaOriginal.media_id, mediaId));
         const before = await originalOf(mediaId);
+        // A live photo takes both kinds, so the key may change its kind.
+        await db.update(Media).set({ type: MediaType.LIVE_PHOTO }).where(eq(Media.id, mediaId));
         const sync = (kind: "IMAGE" | "VIDEO") =>
             db.transaction((tx) =>
                 syncImportedSources(
                     tx,
-                    { id: mediaId, type: MediaType.IMAGE },
+                    { id: mediaId, type: MediaType.LIVE_PHOTO, excluded_source_keys: [] },
                     {
                         originals: [
                             {

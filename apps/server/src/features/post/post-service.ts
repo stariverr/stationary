@@ -1,8 +1,9 @@
 import { and, count, eq, isNull, inArray, sql } from "drizzle-orm";
 import { db, Transaction } from "@/global/db";
-import { DeleteStatus, Media, Post, PostTag, Tag } from "@/db/schema";
+import { DeleteStatus, Media, Post, POST_EDITABLE_FIELDS, PostTag, Tag } from "@/db/schema";
 import { refreshPostSyncStatus } from "@/features/media/composition";
 import { markMediaMetaChanged, markPostMetaChanged } from "@/features/media/meta-changes";
+import { changedFields, withValues } from "@/features/media/ownership";
 
 /**
  * Transactional helper to replace post tags.
@@ -89,12 +90,17 @@ export const PostService = {
         if (fields.url !== undefined) updateFields.url = fields.url;
 
         return db.transaction(async (tx) => {
+            const active = and(eq(Post.id, id), eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time));
+            const [current] = await tx.select().from(Post).where(active).for("update");
+            if (!current) return undefined;
+            // What the edit changes is the user's from now on: imports leave it (docs/failure_handling.zh-Hans.md, 8.2).
+            const edited = changedFields(current, fields, POST_EDITABLE_FIELDS);
             const [updated] = await tx
                 .update(Post)
-                .set(updateFields)
-                .where(and(eq(Post.id, id), eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time)))
+                .set({ ...updateFields, user_edited_fields: withValues(Post.user_edited_fields, edited) })
+                .where(active)
                 .returning();
-            if (updated) await markPostMetaChanged(tx, [id]);
+            await markPostMetaChanged(tx, [id]);
             return updated;
         });
     },

@@ -31,6 +31,10 @@ export enum FileCategory {
 export const SyncStatusSchema = v.picklist(["PENDING", "IN_PROGRESS", "COMPLETED", "FAILED"]);
 export type SyncStatus = v.InferOutput<typeof SyncStatusSchema>;
 
+/** Why an imported source failed on its current URL (docs/failure_handling.zh-Hans.md, 5); only NETWORK and INTERNAL can be retried. */
+export const SourceErrorKindSchema = v.picklist(["NETWORK", "SOURCE_UNAVAILABLE", "KIND_MISMATCH", "UNREADABLE", "INTERNAL"]);
+export type SourceErrorKind = v.InferOutput<typeof SourceErrorKindSchema>;
+
 export const PlaybackVideoSchema = v.object({
     id: v.string(),
     codec: v.string(),
@@ -91,7 +95,7 @@ export const MediaPlaybackSchema = v.object({
 });
 export type MediaPlayback = v.InferOutput<typeof MediaPlaybackSchema>;
 
-/** A file of a media as uploaded or imported; `kind` is null until the server has probed it. */
+/** A file of a media as uploaded or imported; `kind` is probed once it completed, declared by the import until then. */
 export const MediaOriginalSchema = v.object({
     id: v.string(),
     kind: v.nullable(v.picklist(["IMAGE", "PDF", "VIDEO", "AUDIO"])),
@@ -100,6 +104,7 @@ export const MediaOriginalSchema = v.object({
     size: v.nullable(v.number()),
     status: SyncStatusSchema,
     last_error: v.nullable(v.string()),
+    error_kind: v.nullable(SourceErrorKindSchema),
 });
 export type MediaOriginal = v.InferOutput<typeof MediaOriginalSchema>;
 
@@ -111,6 +116,7 @@ export const MediaCaptionSchema = v.object({
     is_default: v.boolean(),
     status: SyncStatusSchema,
     last_error: v.nullable(v.string()),
+    error_kind: v.nullable(SourceErrorKindSchema),
     vtt_url: v.nullable(v.string()),
 });
 export type MediaCaption = v.InferOutput<typeof MediaCaptionSchema>;
@@ -137,6 +143,14 @@ export const MediaCoverSchema = v.object({
 });
 export type MediaCover = v.InferOutput<typeof MediaCoverSchema>;
 
+/** The download state of an imported cover. */
+export const MediaCoverSourceSchema = v.object({
+    status: SyncStatusSchema,
+    last_error: v.nullable(v.string()),
+    error_kind: v.nullable(SourceErrorKindSchema),
+});
+export type MediaCoverSource = v.InferOutput<typeof MediaCoverSourceSchema>;
+
 /** A media with its originals, captions and playback: the items of `/post/:id/media` and `/media/detail/:id`. */
 export const MediaDetailSchema = v.object({
     id: v.pipe(v.string(), v.uuid()),
@@ -158,6 +172,8 @@ export const MediaDetailSchema = v.object({
     duration: v.nullable(v.number()),
     previews: MediaPreviewsSchema,
     cover: v.nullable(MediaCoverSchema),
+    /** Null for an uploaded cover or none. */
+    cover_source: v.nullable(MediaCoverSourceSchema),
     playback: v.nullable(MediaPlaybackSchema),
     originals: v.array(MediaOriginalSchema),
     captions: v.array(MediaCaptionSchema),

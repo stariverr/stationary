@@ -121,6 +121,7 @@ export function usePostMediaQuery(
                     height: null,
                     duration: null,
                     cover: null,
+                    cover_source: null,
                     playback: null,
                     originals: [],
                     captions: [],

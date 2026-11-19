@@ -112,6 +112,18 @@ export type OriginalKind = (typeof ORIGINAL_KINDS)[number];
 export const OriginalKindEnum = pgEnum("original_kind", ORIGINAL_KINDS);
 
 /**
+ * Fields of a media or post the user edited (docs/failure_handling.zh-Hans.md, 8.2): imports leave them as the user
+ * set them. Only a media has `type`.
+ */
+export const MEDIA_EDITABLE_FIELDS = ["type", "title", "description", "published_time"] as const;
+export type MediaEditableField = (typeof MEDIA_EDITABLE_FIELDS)[number];
+export const POST_EDITABLE_FIELDS = ["title", "description", "published_time"] as const;
+export type PostEditableField = (typeof POST_EDITABLE_FIELDS)[number];
+
+const editedFieldsCheck = (name: string, column: AnyPgColumn, fields: readonly string[]) =>
+    check(name, sql`${column} <@ ARRAY[${sql.raw(fields.map((field) => `'${field}'`).join(", "))}]::text[]`);
+
+/**
  * The error columns of a source row and their checks (docs/failure_handling.zh-Hans.md, 4): `last_error`,
  * `error_kind` and `error_source_url` are the latest error on the row's current source, all set or all null. An error
  * of an imported source names the URL it happened on, which must be the current one, so a new URL cannot keep a stale
@@ -123,7 +135,16 @@ const sourceErrorColumns = () => ({
     error_source_url: text("error_source_url"),
 });
 
-function sourceErrorChecks(name: string, table: { status: AnyPgColumn; last_error: AnyPgColumn; error_kind: AnyPgColumn; error_source_url: AnyPgColumn; source_url: AnyPgColumn }) {
+function sourceErrorChecks(
+    name: string,
+    table: {
+        status: AnyPgColumn;
+        last_error: AnyPgColumn;
+        error_kind: AnyPgColumn;
+        error_source_url: AnyPgColumn;
+        source_url: AnyPgColumn;
+    },
+) {
     return [
         check(`${name}_error_kind_pair`, sql`(${table.last_error} IS NULL) = (${table.error_kind} IS NULL)`),
         check(
@@ -325,6 +346,12 @@ export const Post = pgTable(
         /** Source Platform URL */
         url: text("url").default(""),
         sync_status: SyncStatusEnum("sync_status").default(SyncStatus.PENDING).notNull(),
+        /** What the user edited of the post; imports leave those fields alone (docs/failure_handling.zh-Hans.md, 8.2). */
+        user_edited_fields: text("user_edited_fields")
+            .array()
+            .$type<PostEditableField>()
+            .default(sql`'{}'`)
+            .notNull(),
         workflow_run_id: text("workflow_run_id"),
         library_id: uuid("library_id").notNull(),
         create_time: temporal("create_time")
@@ -337,6 +364,7 @@ export const Post = pgTable(
     },
     (table) => [
         check("post_eid_non_empty", sql`btrim(${table.eid}) <> ''`),
+        editedFieldsCheck("post_user_edited_fields", table.user_edited_fields, POST_EDITABLE_FIELDS),
         uniqueIndex("post_source_eid_unique").on(table.source, table.eid),
         index("post_library_delete_time_idx").on(table.library_id, table.delete_time),
     ],
@@ -428,6 +456,20 @@ export const Media = pgTable(
         // TODO: Change it to not null
         published_time: temporal("published_time"),
         sync_status: SyncStatusEnum("sync_status").default(SyncStatus.PENDING).notNull(),
+        /**
+         * Imported sources the user deleted or replaced (docs/failure_handling.zh-Hans.md, 8.1), as `original:<key>`,
+         * `caption:<key>` or `cover:<key>` (sourceKeyOf); imports skip them.
+         */
+        excluded_source_keys: text("excluded_source_keys")
+            .array()
+            .default(sql`'{}'`)
+            .notNull(),
+        /** What the user edited of the media; imports leave those fields alone (8.2). */
+        user_edited_fields: text("user_edited_fields")
+            .array()
+            .$type<MediaEditableField>()
+            .default(sql`'{}'`)
+            .notNull(),
         workflow_run_id: text("workflow_run_id"),
         create_time: temporal("create_time")
             .default(sql`now()`)
@@ -438,6 +480,7 @@ export const Media = pgTable(
         recycle_time: temporal("recycle_time"),
     },
     (table) => [
+        editedFieldsCheck("media_user_edited_fields", table.user_edited_fields, MEDIA_EDITABLE_FIELDS),
         uniqueIndex("media_post_source_eid_active_unique")
             .on(table.post_id, table.source, table.eid)
             .where(sql`${table.post_id} IS NOT NULL AND ${table.delete_status} = 'ACTIVE'`),
@@ -577,7 +620,9 @@ export const MediaOriginal = pgTable(
     },
     (table) => [
         index("media_original_media_idx").on(table.media_id),
-        uniqueIndex("media_original_media_source_key_unique").on(table.media_id, table.source_key).where(sql`${table.source_key} IS NOT NULL`),
+        uniqueIndex("media_original_media_source_key_unique")
+            .on(table.media_id, table.source_key)
+            .where(sql`${table.source_key} IS NOT NULL`),
         check("media_original_file_when_completed", sql`(${table.status} = 'COMPLETED') = (${table.file_id} IS NOT NULL)`),
         check("media_original_source_pair", sql`(${table.source_url} IS NULL) = (${table.source_key} IS NULL)`),
         check("media_original_declared_kind", sql`(${table.source_key} IS NULL) = (${table.declared_kind} IS NULL)`),
@@ -717,8 +762,12 @@ export const MediaCaption = pgTable(
     },
     (table) => [
         index("media_caption_media_idx").on(table.media_id),
-        uniqueIndex("media_caption_media_default_unique").on(table.media_id).where(sql`${table.is_default}`),
-        uniqueIndex("media_caption_media_source_key_unique").on(table.media_id, table.source_key).where(sql`${table.source_key} IS NOT NULL`),
+        uniqueIndex("media_caption_media_default_unique")
+            .on(table.media_id)
+            .where(sql`${table.is_default}`),
+        uniqueIndex("media_caption_media_source_key_unique")
+            .on(table.media_id, table.source_key)
+            .where(sql`${table.source_key} IS NOT NULL`),
         check("media_caption_embedded_stream", sql`(${table.origin} = 'EMBEDDED') = (${table.source_stream_id} IS NOT NULL)`),
         check("media_caption_file_source_only", sql`${table.origin} = 'FILE' OR ${table.source_file_id} IS NULL`),
         check("media_caption_vtt_when_completed", sql`(${table.status} = 'COMPLETED') = (${table.vtt_file_id} IS NOT NULL)`),
@@ -774,8 +823,12 @@ export const MediaLyrics = pgTable(
     },
     (table) => [
         index("media_lyrics_media_idx").on(table.media_id),
-        uniqueIndex("media_lyrics_media_default_unique").on(table.media_id).where(sql`${table.is_default}`),
-        uniqueIndex("media_lyrics_media_source_key_unique").on(table.media_id, table.source_key).where(sql`${table.source_key} IS NOT NULL`),
+        uniqueIndex("media_lyrics_media_default_unique")
+            .on(table.media_id)
+            .where(sql`${table.is_default}`),
+        uniqueIndex("media_lyrics_media_source_key_unique")
+            .on(table.media_id, table.source_key)
+            .where(sql`${table.source_key} IS NOT NULL`),
         check("media_lyrics_embedded_original", sql`(${table.origin} = 'EMBEDDED') = (${table.original_id} IS NOT NULL)`),
         check("media_lyrics_file_source_only", sql`${table.origin} = 'FILE' OR ${table.source_file_id} IS NULL`),
         check("media_lyrics_lrc_when_completed", sql`(${table.status} = 'COMPLETED') = (${table.lrc_file_id} IS NOT NULL)`),

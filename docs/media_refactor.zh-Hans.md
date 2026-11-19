@@ -68,6 +68,8 @@ media  （现有列）+ display_width, display_height, duration
 - 适用的类型下为空，只表示还没探测完。
 - 由探测步骤写入（第 6 节）。每一列都由某个确定的原件探测得到，没有"保留旧值"的情况。
 - 用途：列表、排序、筛选只读 `media` 表，再按 `(media_id, size)` 连一次 `media_preview` 取缩略图。
+- 用户改了类型时（[failure_handling.zh-Hans.md](./failure_handling.zh-Hans.md) 第 9.1 节），新类型"必须为空"的列在同一条语句里清空，其余的按剩下的原件重算。
+- `media` 和 `post` 还各有一列 `user_edited_fields`，`media` 另有 `excluded_source_keys`，记录用户改过的字段和删掉、替换掉的导入来源，再次导入不撤销它们（[failure_handling.zh-Hans.md](./failure_handling.zh-Hans.md) 第 8 节）。
 
 ### 3.3 media_original
 
@@ -97,6 +99,7 @@ media_cover  id, media_id (unique), origin (FILE|EMBEDDED), file_id, original_id
 - `EMBEDDED`：从原件里提取的封面，比如音频的专辑封面。只在提取完成后才插入。
 - 一个媒体最多一个封面。两种来源都有时，用 `FILE` 的那个，`EMBEDDED` 的那行不保留。
 - 只有 VIDEO、AUDIO、PDF 能有封面，图片和 Live Photo 不能有。这条在应用层校验。
+- 用户上传的封面优先：有它时，导入的封面既不覆盖它，也不插入（[failure_handling.zh-Hans.md](./failure_handling.zh-Hans.md) 第 8.3 节）。
 
 ### 3.5 media_preview
 
@@ -274,7 +277,7 @@ ffprobe 解不开文件时，按"输入被拒"处理（见 [job_queue.zh-Hans.md
 
 导入的原件探测完还要过准入校验：探测出的类型必须等于 `declared_kind`。不一致时软删除刚上传的文件，什么都不写，原件记为 `FAILED`、`KIND_MISMATCH`（[failure_handling.zh-Hans.md](./failure_handling.zh-Hans.md) 第 7 节）。
 
-用户手动上传的原件不经过 `download` 流水线：提交草稿或添加原件时，先在事务之外探测，再按探测结果校验组合规则（第 4 节），通过后在一个事务里写入，所以插入时 `status` 就是 `COMPLETED`。探测失败或组合不对，请求直接返回 400，什么都不写。
+用户手动上传的原件不经过 `download` 流水线：提交草稿或添加原件时，先在事务之外探测，再按探测结果校验组合规则（第 4 节），通过后在一个事务里写入，所以插入时 `status` 就是 `COMPLETED`。探测失败或组合不对，请求直接返回 400，什么都不写。编辑时，还没下载完的导入原件按声明的 `kind` 计入组合，所以失败的原件也能替换、删除。
 
 ### 6.3 导入数据格式
 
@@ -294,6 +297,7 @@ media item
 - **`kind`** 是原件的类型：`VIDEO`（含视频流）、`AUDIO`（只有音频）、`IMAGE` 或 `PDF`。原件按键和 `kind` 一起匹配：同一个键换了 `kind`，就当作新的原件，旧的删掉，新的重新下载、重新核对。
 - **`language`、`label`、`is_default`** 是导入时的声明（第 3.7 节）：原件上的声明作用于它里面的音频流，字幕上的声明作用于这条字幕。
 - 组合规则（第 4 节）在入口按声明的 `kind` 校验，比如 VIDEO 恰好一个 `VIDEO` 原件，加上任意个 `AUDIO` 原件。不通过的请求返回 400，错误里写明是哪个帖子、哪个媒体。
+- **同步不撤销用户的修改**（[failure_handling.zh-Hans.md](./failure_handling.zh-Hans.md) 第 8 节）：用户删除或替换过的来源键不再同步；用户改过的类型、标题、描述、发布时间不覆盖；来源按生效的类型取舍，用户上传的原件和封面占着的位置，导入的不再插入。
 
 ### 6.4 不在范围内的元数据
 
@@ -469,6 +473,7 @@ playback
 
 - **删除原件**（包括替换）：在同一个事务里删除它的 `av_file`、`av_stream`、`EMBEDDED` 字幕、`EMBEDDED` 歌词、`EMBEDDED` 封面，以及这个媒体的所有预览图（包括失败行）；这些行引用的 `file` 全部标为 DELETED。然后用 `markChanged` 报告原件变化，触发重新生成。
 - **删除或替换封面**：删除封面行和所有预览图，对应的 `file` 标为 DELETED。
+- 用户删除或替换的是导入的原件、字幕或封面时，它的键记入 `media.excluded_source_keys`，下次导入不会再加回来（[failure_handling.zh-Hans.md](./failure_handling.zh-Hans.md) 第 8.1 节）。
 - **删除媒体**：沿用现有的软删除，各表的行不动。
 - **清理 S3**：由 DELETED 推进到 PURGED 的清理任务负责，目前还没有实现。
 

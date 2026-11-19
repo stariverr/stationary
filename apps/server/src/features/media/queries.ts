@@ -5,7 +5,7 @@ import { buildCdnUrl } from "@/lib/utils/cdn";
 import { toIsoTimestamp } from "@/lib/utils/time";
 import { assemblePlayback } from "@/features/playback/assembly";
 import { CoverService } from "./cover";
-import { kindOfState, loadOriginalStates, type OriginalKind, type OriginalState } from "./originals";
+import { kindOfOriginal, kindOfState, loadOriginalStates, type OriginalKind, type OriginalState } from "./originals";
 import { loadPreviewImages, NO_PREVIEWS } from "./preview";
 
 /** The original a media is shown by: its image (IMAGE, LIVE_PHOTO), video, audio or PDF. */
@@ -28,9 +28,10 @@ export const MediaService = {
     async getDetails(mediaList: Array<typeof Media.$inferSelect>, startPosition = 0) {
         if (!mediaList.length) return [];
         const mediaIds = mediaList.map((m) => m.id);
-        const [previewsByMedia, coversByMedia, statesByMedia, playbackByMedia, captionRows] = await Promise.all([
+        const [previewsByMedia, coversByMedia, coverSources, statesByMedia, playbackByMedia, captionRows] = await Promise.all([
             loadPreviewImages(mediaIds),
             CoverService.loadUrls(mediaIds),
+            CoverService.loadSources(mediaIds),
             loadOriginalStates(db, mediaIds),
             assemblePlayback(mediaIds),
             db
@@ -61,10 +62,11 @@ export const MediaService = {
                 duration: media.duration,
                 previews: previewsByMedia.get(media.id) ?? NO_PREVIEWS,
                 cover: coversByMedia.get(media.id) ?? null,
+                cover_source: coverSources.get(media.id) ?? null,
                 playback: playbackByMedia.get(media.id)?.playback ?? null,
                 originals: states.map((state) => ({
                     id: state.original.id,
-                    kind: kindOfState(state),
+                    kind: kindOfOriginal(state),
                     url: fileUrl(state.file),
                     mime_type: state.file?.mime_type ?? null,
                     size: state.file?.size ?? null,

@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import { DeleteStatus, File as DbFile, MediaCover, MediaType, SyncStatus } from "@/db/schema";
 import { db, type DbClient } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
@@ -9,6 +9,7 @@ import { clearPreviews } from "./preview";
 import { NO_SOURCE_ERROR, refreshSource } from "./source-rows";
 
 type CoverRow = typeof MediaCover.$inferSelect;
+type CoverSource = Pick<CoverRow, "status" | "last_error" | "error_kind">;
 
 export interface UploadedCoverFile {
     path: string;
@@ -66,8 +67,18 @@ export const CoverService = {
     async setFile(client: DbClient, media: { id: string; type: MediaType }, fileId: string, priority: number): Promise<void> {
         if (!COVER_MEDIA_TYPES.has(media.type)) throw new CoverNotAllowedError(media.type);
         const existing = await lockCover(client, media.id);
-        const values = { file_id: fileId, source_url: null, source_key: null, status: SyncStatus.COMPLETED, ...NO_SOURCE_ERROR, update_time: Temporal.Now.instant() };
-        await client.insert(MediaCover).values({ media_id: media.id, ...values }).onConflictDoUpdate({ target: MediaCover.media_id, set: values });
+        const values = {
+            file_id: fileId,
+            source_url: null,
+            source_key: null,
+            status: SyncStatus.COMPLETED,
+            ...NO_SOURCE_ERROR,
+            update_time: Temporal.Now.instant(),
+        };
+        await client
+            .insert(MediaCover)
+            .values({ media_id: media.id, ...values })
+            .onConflictDoUpdate({ target: MediaCover.media_id, set: values });
         if (existing?.file_id !== fileId) await softDeleteFile(client, existing?.file_id ?? null);
         await markChanged(client, Aspect.MEDIA_COVER, [media.id], priority);
     },
@@ -77,7 +88,13 @@ export const CoverService = {
         if (!COVER_MEDIA_TYPES.has(media.type)) throw new CoverNotAllowedError(media.type);
         const [file] = await client
             .insert(DbFile)
-            .values({ path: upload.path, bucket: upload.bucket, mime_type: upload.mime_type, extension: upload.extension, size: upload.size })
+            .values({
+                path: upload.path,
+                bucket: upload.bucket,
+                mime_type: upload.mime_type,
+                extension: upload.extension,
+                size: upload.size,
+            })
             .returning({ id: DbFile.id });
         await CoverService.setFile(client, media, file!.id, priority);
     },
@@ -93,8 +110,9 @@ export const CoverService = {
      * Applies the cover a platform import offers, matched by its `source_key`. A new key leaves the cover pending for the
      * download pipeline (the old file is released now); the same key only refreshes the URL, which platforms re-sign
      * (see refreshSource).
-     * Without one, a previously imported cover goes, while a cover the user uploaded stays. Media types that cannot
-     * have a cover ignore it. Returns whether a download is needed.
+     * Without one, a previously imported cover goes. A cover the user uploaded stays and keeps out the imported one
+     * (docs/failure_handling.zh-Hans.md, 8.3); so do media types that cannot have a cover. Returns whether a download is
+     * needed.
      */
     async syncImported(
         client: DbClient,
@@ -104,6 +122,7 @@ export const CoverService = {
     ): Promise<boolean> {
         if (!COVER_MEDIA_TYPES.has(media.type)) return false;
         const existing = await lockCover(client, media.id);
+        if (existing && !existing.source_key) return false;
         if (!cover) {
             if (existing?.source_key) await CoverService.remove(client, media.id, priority);
             return false;
@@ -127,13 +146,31 @@ export const CoverService = {
             ...NO_SOURCE_ERROR,
             update_time: Temporal.Now.instant(),
         };
-        await client.insert(MediaCover).values({ media_id: media.id, ...values }).onConflictDoUpdate({ target: MediaCover.media_id, set: values });
+        await client
+            .insert(MediaCover)
+            .values({ media_id: media.id, ...values })
+            .onConflictDoUpdate({ target: MediaCover.media_id, set: values });
         if (existing?.file_id) {
             await softDeleteFile(client, existing.file_id);
             // The old cover is gone until the new one arrives; previews fall back to the content meanwhile.
             await markChanged(client, Aspect.MEDIA_COVER, [media.id], priority);
         }
         return true;
+    },
+
+    /** The download state of each media's imported cover, for the editor (docs/failure_handling.zh-Hans.md, 9.2). */
+    async loadSources(mediaIds: readonly string[]): Promise<Map<string, CoverSource>> {
+        if (mediaIds.length === 0) return new Map();
+        const rows = await db
+            .select({
+                mediaId: MediaCover.media_id,
+                status: MediaCover.status,
+                last_error: MediaCover.last_error,
+                error_kind: MediaCover.error_kind,
+            })
+            .from(MediaCover)
+            .where(and(inArray(MediaCover.media_id, [...mediaIds]), isNotNull(MediaCover.source_key)));
+        return new Map(rows.map(({ mediaId, ...source }) => [mediaId, source]));
     },
 
     /** The completed cover of each media that has one, for responses. */

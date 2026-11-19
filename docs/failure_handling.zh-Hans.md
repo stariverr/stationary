@@ -1,6 +1,6 @@
 # 下载失败处理方案
 
-状态：提案（2026-11-19），还没有实施。实施后要回头修改 [job_queue.zh-Hans.md](./job_queue.zh-Hans.md) 和 [media_refactor.zh-Hans.md](./media_refactor.zh-Hans.md) 的相关章节（第 12 节），因为那两份文档按"现在是什么样"来写。
+状态：第 1 到 3 步已经实施（2026-11-19），第 4 步（界面）还没有做。实施时同步修改了 [job_queue.zh-Hans.md](./job_queue.zh-Hans.md) 和 [media_refactor.zh-Hans.md](./media_refactor.zh-Hans.md) 的相关章节（第 12 节），因为那两份文档按"现在是什么样"来写。
 
 范围：`download` 流水线的失败怎么分类、怎么记录、怎么显示、怎么修，以及为了让用户的修复不被下一次同步撤销，导入要遵守哪些规则。`avatar` 只定规则，代码以后再改（第 10 节）。预览图、AI 这些衍生流水线的失败模型不变。
 
@@ -207,6 +207,19 @@ kind          VIDEO | AUDIO | IMAGE | PDF，必填，和 OriginalKind 一致
 | 删除媒体 | 已有 |
 
 不支持手动填写来源 URL：签名地址很快就会过期，上传已经能解决这类问题。
+
+接口（`/api/media/:id/…`，都在一个事务里先锁帖子，最后刷新媒体和帖子的摘要状态）：
+
+| 操作 | 接口 |
+|---|---|
+| 替换原件 | `POST originals`，带 `replaces`；新原件继承旧原件声明的 `language`、`label`、`is_default` |
+| 替换字幕 | `POST captions`，带 `replaces`；没给的 `language`、`label`、`is_default` 沿用旧字幕的 |
+| 替换封面 | `POST cover` |
+| 删除 | `POST originals/:originalId/delete`、`POST captions/:captionId/delete`、`POST cover/delete` |
+| 改类型 | `POST type`，`{ type, delete_original_ids }`；新类型不能有字幕或封面时，一并删掉 |
+| 重试 | `POST originals/:originalId/retry`、`POST captions/:captionId/retry`、`POST cover/retry`；不是 `NETWORK`、`INTERNAL` 的失败返回 400 |
+
+详情 DTO 里，原件的 `kind` 在下载完成前是声明的类型；导入封面的状态在 `cover_source` 里。
 
 ### 9.2 四个视图
 

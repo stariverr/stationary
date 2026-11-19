@@ -8,7 +8,8 @@ import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
 import { Priority } from "@/infra/queue/policy";
 import { normalizeExternalId, assertUniqueExternalIds } from "@/lib/utils/media-identity";
-import { syncImportedSources } from "./media-sources";
+import { unedited } from "@/features/media/ownership";
+import { syncImportedSources, type ImportTarget } from "./media-sources";
 import type { PostItemData, MediaItemData } from "./schema";
 import { loadTagLookup, syncEntityTags } from "./tag-sync";
 
@@ -96,17 +97,23 @@ export async function saveIngestMetadata(postData: PostItemData, targetLibraryId
 
     if (existingPost) {
         postId = existingPost.id;
+        // Fields the user edited stay as they set them (docs/failure_handling.zh-Hans.md, 8.2).
         const postUpdateData: Partial<typeof Post.$inferInsert> = {
-            title: postData.title,
+            ...unedited(
+                {
+                    title: postData.title,
+                    description: postData.description,
+                    ...(postData.published_time ? { published_time: postData.published_time } : {}),
+                },
+                existingPost.user_edited_fields,
+            ),
             url: postData.url,
-            description: postData.description,
             tags: postData.tags,
             author_name: postData.author.name,
             media_count: mediaItems.length,
             library_id: targetLibraryId,
             update_time: Temporal.Now.instant(),
         };
-        if (postData.published_time) postUpdateData.published_time = postData.published_time;
 
         await tx.update(Post).set(postUpdateData).where(eq(Post.id, postId));
     } else {
@@ -178,7 +185,7 @@ export async function saveIngestMetadata(postData: PostItemData, targetLibraryId
             continue;
         }
 
-        let mediaId: string;
+        let target: ImportTarget;
 
         if (!media) {
             const insertedMedia = await tx
@@ -197,28 +204,40 @@ export async function saveIngestMetadata(postData: PostItemData, targetLibraryId
                     update_time: Temporal.Now.instant(),
                 })
                 .returning({ id: Media.id });
-            mediaId = insertedMedia[0].id;
+            target = { id: insertedMedia[0].id, type: mediaData.type, excluded_source_keys: [] };
             hasPendingTasks = true;
         } else {
-            mediaId = media.id;
+            // Fields the user edited stay as they set them, the type included, which then decides what sources the
+            // media takes (docs/failure_handling.zh-Hans.md, 8.2, 8.3).
+            const edited = media.user_edited_fields;
             const updateData: Partial<typeof Media.$inferInsert> = {
+                ...unedited(
+                    {
+                        title: mediaData.title || "",
+                        description: mediaData.description || "",
+                        type: mediaData.type,
+                        ...(incomingPublishedTime || (!media.published_time && fallbackPublishedTime)
+                            ? { published_time: incomingPublishedTime ?? fallbackPublishedTime }
+                            : {}),
+                    },
+                    edited,
+                ),
                 sort_order: index,
                 library_id: targetLibraryId,
-                title: mediaData.title || "",
-                description: mediaData.description || "",
-                type: mediaData.type,
                 update_time: Temporal.Now.instant(),
             };
-            if (incomingPublishedTime || (!media.published_time && fallbackPublishedTime)) {
-                updateData.published_time = incomingPublishedTime ?? fallbackPublishedTime;
-            }
-            await tx.update(Media).set(updateData).where(eq(Media.id, mediaId));
+            await tx.update(Media).set(updateData).where(eq(Media.id, media.id));
+            target = {
+                id: media.id,
+                type: edited.includes("type") ? media.type : mediaData.type,
+                excluded_source_keys: media.excluded_source_keys,
+            };
         }
 
-        mediaIds.push(mediaId);
-        await syncEntityTags(targetLibraryId, "media", mediaId, mediaData.tags || [], TagSource.SCRAPER, "media.tags", tagLookup, tx);
+        mediaIds.push(target.id);
+        await syncEntityTags(targetLibraryId, "media", target.id, mediaData.tags || [], TagSource.SCRAPER, "media.tags", tagLookup, tx);
 
-        if (await syncImportedSources(tx, { id: mediaId, type: mediaData.type }, mediaData)) hasPendingTasks = true;
+        if (await syncImportedSources(tx, target, mediaData)) hasPendingTasks = true;
     }
 
     if (hasPendingTasks && existingPost) {

@@ -26,6 +26,13 @@ export function refreshSource(current: { status: SyncStatus; source_url: string 
 /** Error kinds a retry may get past; the others need a new URL or a fix to the source (5). */
 const RETRYABLE_KINDS = [SourceErrorKind.NETWORK, SourceErrorKind.INTERNAL];
 
+/** Whether a retry may get an imported source past its failure: it failed, for a retryable reason. */
+export function isRetryable(row: { source_url: string | null; status: SyncStatus; error_kind: SourceErrorKind | null }): boolean {
+    return (
+        row.source_url !== null && row.status === SyncStatus.FAILED && row.error_kind !== null && RETRYABLE_KINDS.includes(row.error_kind)
+    );
+}
+
 /**
  * Puts the imported sources of `mediaIds` that failed for a retryable reason back to PENDING, for the next download.
  * Returns the media that had one.

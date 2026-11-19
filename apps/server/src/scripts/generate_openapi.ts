@@ -279,6 +279,7 @@ const PreviewImagesResponseSchema = v.object({
 
 const MediaOriginalResponseSchema = v.object({
     id: v.string(),
+    /** Probed once the original completed; until then the kind the import declared. */
     kind: v.nullable(v.picklist(["IMAGE", "PDF", "VIDEO", "AUDIO"])),
     url: v.nullable(v.string()),
     mime_type: v.nullable(v.string()),
@@ -318,6 +319,14 @@ const MediaDetailResponseSchema = v.object({
     duration: v.nullable(v.number()),
     previews: PreviewImagesResponseSchema,
     cover: v.nullable(v.object({ url: v.string() })),
+    /** The download state of an imported cover; null for an uploaded cover or none. */
+    cover_source: v.nullable(
+        v.object({
+            status: v.enum(SyncStatus),
+            last_error: v.nullable(v.string()),
+            error_kind: v.nullable(v.enum(SourceErrorKind)),
+        }),
+    ),
     playback: v.nullable(MediaPlaybackResponseSchema),
     originals: v.array(MediaOriginalResponseSchema),
     captions: v.array(MediaCaptionResponseSchema),
@@ -356,6 +365,14 @@ const AddCaptionSchema = v.object({
     language: v.optional(v.nullable(v.string())),
     label: v.optional(v.nullable(v.string())),
     is_default: v.optional(v.boolean()),
+    /** The caption the new file takes the place of; its language, label and default carry over unless given. */
+    replaces: v.optional(v.pipe(v.string(), v.uuid())),
+});
+
+const ChangeTypeSchema = v.object({
+    type: v.enum(MediaType),
+    /** Originals the new type does not take; the rest has to make up a media of the new type. */
+    delete_original_ids: v.optional(v.array(v.pipe(v.string(), v.uuid()))),
 });
 
 const TrackInfoPatchSchema = v.object({
@@ -839,7 +856,7 @@ const routes: RouteItem[] = [
     {
         path: "/api/post/update-info/:id",
         method: "post",
-        summary: "Update Post info (title, description, published time, etc.)",
+        summary: "Update Post info (title, description, published time, etc.); the fields it changes are kept by later imports",
         tags: ["Post"],
         paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         bodySchema: PostUpdateInfoSchema,
@@ -1019,11 +1036,20 @@ const routes: RouteItem[] = [
     {
         path: "/api/media/:id/cover/delete",
         method: "post",
-        summary: "Remove the cover of a Media",
+        summary: "Remove the cover of a Media; an imported cover is not brought back by later imports",
         tags: ["Media"],
         paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
+    },
+    {
+        path: "/api/media/:id/cover/retry",
+        method: "post",
+        summary: "Retry the imported cover after a network or server error (NETWORK, INTERNAL)",
+        tags: ["Media"],
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
+        requiresAuth: true,
+        responseSchema: IdResponseSchema,
     },
     {
         path: "/api/media/:id/manifest.mpd",
@@ -1073,7 +1099,7 @@ const routes: RouteItem[] = [
     {
         path: "/api/media/update-info/:id",
         method: "post",
-        summary: "Update basic info of Media",
+        summary: "Update basic info of Media; the fields it changes are kept by later imports",
         tags: ["Media"],
         paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         bodySchema: MediaUpdateInfoSchema,
@@ -1110,7 +1136,8 @@ const routes: RouteItem[] = [
     {
         path: "/api/media/:id/originals",
         method: "post",
-        summary: "Add an original uploaded as a draft file, or replace one with it",
+        summary:
+            "Add an original uploaded as a draft file, or replace one with it; a replaced imported original is not brought back by later imports",
         tags: ["Media"],
         paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         bodySchema: AddOriginalSchema,
@@ -1120,16 +1147,35 @@ const routes: RouteItem[] = [
     {
         path: "/api/media/:id/originals/:originalId/delete",
         method: "post",
-        summary: "Delete an original, unless the media would be left incomplete",
+        summary: "Delete an original, unless the media would be left incomplete; an imported one is not brought back by later imports",
         tags: ["Media"],
         paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), originalId: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,
         responseSchema: IdResponseSchema,
     },
     {
+        path: "/api/media/:id/originals/:originalId/retry",
+        method: "post",
+        summary: "Retry an imported original after a network or server error (NETWORK, INTERNAL)",
+        tags: ["Media"],
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), originalId: v.pipe(v.string(), v.uuid()) }),
+        requiresAuth: true,
+        responseSchema: IdResponseSchema,
+    },
+    {
+        path: "/api/media/:id/type",
+        method: "post",
+        summary: "Change the type of a Media, deleting the originals the new type does not take; later imports keep the type",
+        tags: ["Media"],
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
+        bodySchema: ChangeTypeSchema,
+        requiresAuth: true,
+        responseSchema: IdResponseSchema,
+    },
+    {
         path: "/api/media/:id/captions",
         method: "post",
-        summary: "Add a caption uploaded as a draft subtitle file",
+        summary: "Add a caption uploaded as a draft subtitle file, or replace one with it",
         tags: ["Media"],
         paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()) }),
         bodySchema: AddCaptionSchema,
@@ -1149,7 +1195,16 @@ const routes: RouteItem[] = [
     {
         path: "/api/media/:id/captions/:captionId/delete",
         method: "post",
-        summary: "Delete a caption",
+        summary: "Delete a caption; an imported one is not brought back by later imports",
+        tags: ["Media"],
+        paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), captionId: v.pipe(v.string(), v.uuid()) }),
+        requiresAuth: true,
+        responseSchema: IdResponseSchema,
+    },
+    {
+        path: "/api/media/:id/captions/:captionId/retry",
+        method: "post",
+        summary: "Retry an imported caption after a network or server error (NETWORK, INTERNAL)",
         tags: ["Media"],
         paramSchema: v.object({ id: v.pipe(v.string(), v.uuid()), captionId: v.pipe(v.string(), v.uuid()) }),
         requiresAuth: true,

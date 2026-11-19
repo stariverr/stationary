@@ -2,35 +2,59 @@
  * Applies the sources an import offers for one media (docs/media_refactor.zh-Hans.md, 6.3): its originals, cover and
  * captions, each matched to what the media has by `source_key` (originals also by their declared kind). A known
  * source only refreshes its URL and declarations, a new one waits for the download pipeline, and one the import no
- * longer offers is deleted. What the user uploaded (no `source_key`) is left alone.
+ * longer offers is deleted.
+ * What the user owns stays (docs/failure_handling.zh-Hans.md, 8): uploads (no `source_key`) are left alone and keep
+ * their place, sources the user deleted or replaced are not brought back, and sources are taken by the media's
+ * effective type, which is the user's when they changed it.
  */
 import { and, eq, isNotNull } from "drizzle-orm";
-import { AssetOrigin, MediaCaption, MediaOriginal, MediaType, SyncStatus } from "@/db/schema";
+import { AssetOrigin, MediaCaption, MediaOriginal, MediaType, SyncStatus, type OriginalKind } from "@/db/schema";
 import type { Transaction } from "@/global/db";
 import { deleteCaptions } from "@/features/media/captions";
 import { CoverService } from "@/features/media/cover";
-import { removeOriginal } from "@/features/media/originals";
+import { kindOfOriginal, loadOriginalStates, removeOriginal } from "@/features/media/originals";
+import { sourceKeyOf } from "@/features/media/ownership";
 import { refreshSource } from "@/features/media/source-rows";
-import { CAPTION_MEDIA_TYPES } from "@/lib/validation/media-composition";
+import { CAPTION_MEDIA_TYPES, hasRoomFor } from "@/lib/validation/media-composition";
 import type { MediaItemData } from "./schema";
 import { Priority } from "@/infra/queue/policy";
 
 type ImportSources = Pick<MediaItemData, "originals" | "cover" | "captions">;
 
-async function syncOriginals(
-    tx: Transaction,
-    media: { id: string; type: MediaType },
-    incoming: ImportSources["originals"],
-): Promise<boolean> {
-    const existing = await tx
-        .select()
-        .from(MediaOriginal)
-        .where(and(eq(MediaOriginal.media_id, media.id), isNotNull(MediaOriginal.source_key)))
-        .for("update");
+/** The media an import applies its sources to, with its effective type and the sources the user excluded. */
+export interface ImportTarget {
+    id: string;
+    type: MediaType;
+    excluded_source_keys: readonly string[];
+}
+
+/**
+ * The offered originals the media takes: not excluded, and with room for their declared kind in the effective type
+ * once the uploads have taken theirs (8.3). The first offered of a kind wins.
+ */
+function takenOriginals(media: ImportTarget, uploadKinds: OriginalKind[], incoming: ImportSources["originals"]) {
+    const kinds = [...uploadKinds];
+    return incoming.filter((original) => {
+        if (media.excluded_source_keys.includes(sourceKeyOf("original", original.source_key))) return false;
+        if (!hasRoomFor(media.type, kinds, original.kind)) return false;
+        kinds.push(original.kind);
+        return true;
+    });
+}
+
+async function syncOriginals(tx: Transaction, media: ImportTarget, offered: ImportSources["originals"]): Promise<boolean> {
+    await tx.select({ id: MediaOriginal.id }).from(MediaOriginal).where(eq(MediaOriginal.media_id, media.id)).for("update");
+    const states = (await loadOriginalStates(tx, [media.id])).get(media.id) ?? [];
+    const uploadKinds = states.flatMap((state) => {
+        const kind = state.original.source_key ? null : kindOfOriginal(state);
+        return kind ? [kind] : [];
+    });
+    const incoming = takenOriginals(media, uploadKinds, offered);
     // An original is known by its key and declared kind: its file was checked against that kind, so a key declared
     // with another kind is a new original.
-    const offered = new Map(incoming.map((original) => [original.source_key, original.kind]));
-    const kept = existing.filter((original) => offered.get(original.source_key!) === original.declared_kind);
+    const taken = new Map(incoming.map((original) => [original.source_key, original.kind]));
+    const existing = states.map((state) => state.original).filter((original) => original.source_key !== null);
+    const kept = existing.filter((original) => taken.get(original.source_key!) === original.declared_kind);
     const byKey = new Map(kept.map((original) => [original.source_key!, original]));
 
     for (const original of existing) {
@@ -68,12 +92,10 @@ async function syncOriginals(
     return pending;
 }
 
-async function syncCaptions(
-    tx: Transaction,
-    media: { id: string; type: MediaType },
-    incoming: ImportSources["captions"],
-): Promise<boolean> {
-    const offered = CAPTION_MEDIA_TYPES.has(media.type) ? incoming : [];
+async function syncCaptions(tx: Transaction, media: ImportTarget, incoming: ImportSources["captions"]): Promise<boolean> {
+    const offered = CAPTION_MEDIA_TYPES.has(media.type)
+        ? incoming.filter((caption) => !media.excluded_source_keys.includes(sourceKeyOf("caption", caption.source_key)))
+        : [];
     const existing = await tx
         .select()
         .from(MediaCaption)
@@ -123,13 +145,12 @@ async function syncCaptions(
 }
 
 /** Applies the offered sources; returns whether any of them still needs a download. */
-export async function syncImportedSources(
-    tx: Transaction,
-    media: { id: string; type: MediaType },
-    sources: ImportSources,
-): Promise<boolean> {
+export async function syncImportedSources(tx: Transaction, media: ImportTarget, sources: ImportSources): Promise<boolean> {
     const originals = await syncOriginals(tx, media, sources.originals);
-    const cover = await CoverService.syncImported(tx, media, sources.cover, Priority.CHANGE);
+    // An excluded cover is as good as not offered: an imported cover of another key the media has goes with it.
+    const offeredCover =
+        sources.cover && !media.excluded_source_keys.includes(sourceKeyOf("cover", sources.cover.source_key)) ? sources.cover : null;
+    const cover = await CoverService.syncImported(tx, media, offeredCover, Priority.CHANGE);
     const captions = await syncCaptions(tx, media, sources.captions);
     return originals || cover || captions;
 }

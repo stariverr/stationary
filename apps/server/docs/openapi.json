@@ -2403,6 +2403,41 @@
                                 ],
                                 "nullable": true
                               },
+                              "cover_source": {
+                                "type": "object",
+                                "properties": {
+                                  "status": {
+                                    "enum": [
+                                      "PENDING",
+                                      "IN_PROGRESS",
+                                      "COMPLETED",
+                                      "FAILED"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "last_error": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "error_kind": {
+                                    "enum": [
+                                      "NETWORK",
+                                      "SOURCE_UNAVAILABLE",
+                                      "UNREADABLE",
+                                      "INTERNAL",
+                                      "KIND_MISMATCH"
+                                    ],
+                                    "type": "string",
+                                    "nullable": true
+                                  }
+                                },
+                                "required": [
+                                  "status",
+                                  "last_error",
+                                  "error_kind"
+                                ],
+                                "nullable": true
+                              },
                               "playback": {
                                 "type": "object",
                                 "properties": {
@@ -2842,6 +2877,7 @@
                               "duration",
                               "previews",
                               "cover",
+                              "cover_source",
                               "playback",
                               "originals",
                               "captions"
@@ -3208,7 +3244,7 @@
     },
     "/api/post/update-info/{id}": {
       "post": {
-        "summary": "Update Post info (title, description, published time, etc.)",
+        "summary": "Update Post info (title, description, published time, etc.); the fields it changes are kept by later imports",
         "tags": [
           "Post"
         ],
@@ -4039,6 +4075,41 @@
                           ],
                           "nullable": true
                         },
+                        "cover_source": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "enum": [
+                                "PENDING",
+                                "IN_PROGRESS",
+                                "COMPLETED",
+                                "FAILED"
+                              ],
+                              "type": "string"
+                            },
+                            "last_error": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "error_kind": {
+                              "enum": [
+                                "NETWORK",
+                                "SOURCE_UNAVAILABLE",
+                                "UNREADABLE",
+                                "INTERNAL",
+                                "KIND_MISMATCH"
+                              ],
+                              "type": "string",
+                              "nullable": true
+                            }
+                          },
+                          "required": [
+                            "status",
+                            "last_error",
+                            "error_kind"
+                          ],
+                          "nullable": true
+                        },
                         "playback": {
                           "type": "object",
                           "properties": {
@@ -4478,6 +4549,7 @@
                         "duration",
                         "previews",
                         "cover",
+                        "cover_source",
                         "playback",
                         "originals",
                         "captions"
@@ -5189,7 +5261,7 @@
     },
     "/api/media/{id}/cover/delete": {
       "post": {
-        "summary": "Remove the cover of a Media",
+        "summary": "Remove the cover of a Media; an imported cover is not brought back by later imports",
         "tags": [
           "Media"
         ],
@@ -5213,6 +5285,88 @@
                     },
                     "data": {
                       "type": "object"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized / Not logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 40101
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/media/{id}/cover/retry": {
+      "post": {
+        "summary": "Retry the imported cover after a network or server error (NETWORK, INTERNAL)",
+        "tags": [
+          "Media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "Status code, 0 indicates success"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "Status description"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
                     }
                   },
                   "required": [
@@ -5595,7 +5749,7 @@
     },
     "/api/media/update-info/{id}": {
       "post": {
-        "summary": "Update basic info of Media",
+        "summary": "Update basic info of Media; the fields it changes are kept by later imports",
         "tags": [
           "Media"
         ],
@@ -5900,7 +6054,7 @@
     },
     "/api/media/{id}/originals": {
       "post": {
-        "summary": "Add an original uploaded as a draft file, or replace one with it",
+        "summary": "Add an original uploaded as a draft file, or replace one with it; a replaced imported original is not brought back by later imports",
         "tags": [
           "Media"
         ],
@@ -6005,7 +6159,7 @@
     },
     "/api/media/{id}/originals/{originalId}/delete": {
       "post": {
-        "summary": "Delete an original, unless the media would be left incomplete",
+        "summary": "Delete an original, unless the media would be left incomplete; an imported one is not brought back by later imports",
         "tags": [
           "Media"
         ],
@@ -6093,9 +6247,213 @@
         ]
       }
     },
+    "/api/media/{id}/originals/{originalId}/retry": {
+      "post": {
+        "summary": "Retry an imported original after a network or server error (NETWORK, INTERNAL)",
+        "tags": [
+          "Media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "Status code, 0 indicates success"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "Status description"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized / Not logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 40101
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "originalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/media/{id}/type": {
+      "post": {
+        "summary": "Change the type of a Media, deleting the originals the new type does not take; later imports keep the type",
+        "tags": [
+          "Media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "Status code, 0 indicates success"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "Status description"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized / Not logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 40101
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "IMAGE",
+                      "VIDEO",
+                      "LIVE_PHOTO",
+                      "AUDIO",
+                      "PDF"
+                    ],
+                    "type": "string"
+                  },
+                  "delete_original_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                },
+                "required": [
+                  "type"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/media/{id}/captions": {
       "post": {
-        "summary": "Add a caption uploaded as a draft subtitle file",
+        "summary": "Add a caption uploaded as a draft subtitle file, or replace one with it",
         "tags": [
           "Media"
         ],
@@ -6194,6 +6552,10 @@
                   },
                   "is_default": {
                     "type": "boolean"
+                  },
+                  "replaces": {
+                    "type": "string",
+                    "format": "uuid"
                   }
                 },
                 "required": [
@@ -6321,7 +6683,97 @@
     },
     "/api/media/{id}/captions/{captionId}/delete": {
       "post": {
-        "summary": "Delete a caption",
+        "summary": "Delete a caption; an imported one is not brought back by later imports",
+        "tags": [
+          "Media"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 0,
+                      "description": "Status code, 0 indicates success"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "success",
+                      "description": "Status description"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "message"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized / Not logged in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "example": 40101
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Unauthorized"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "CookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "captionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/media/{id}/captions/{captionId}/retry": {
+      "post": {
+        "summary": "Retry an imported caption after a network or server error (NETWORK, INTERNAL)",
         "tags": [
           "Media"
         ],

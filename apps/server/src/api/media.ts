@@ -3,18 +3,7 @@ import { db } from "@/global/db";
 import * as v from "valibot";
 import { success, error, respondWithResult } from "@/lib/response";
 import { Code } from "@/lib/code";
-import {
-    Media,
-    Post,
-    PostSource,
-    DeleteStatus,
-    AssetAiMetadata,
-    EntityType,
-    Tag,
-    MediaTag,
-    TagStatus,
-    MediaType,
-} from "@/db/schema";
+import { Media, Post, PostSource, DeleteStatus, AssetAiMetadata, EntityType, Tag, MediaTag, TagStatus, MediaType } from "@/db/schema";
 import { s3 } from "@/global/s3";
 import { and, eq, ilike, SQL, sql, count, asc, desc, or, isNull, inArray } from "drizzle-orm";
 
@@ -23,14 +12,26 @@ import { verifyMediaSignature } from "@/lib/utils/media-signer";
 import { MediaService } from "@/features/media/queries";
 import { v7 as uuidv7 } from "uuid";
 import { env } from "@/global/env";
-import { CoverNotAllowedError, CoverService } from "@/features/media/cover";
+import { CoverService } from "@/features/media/cover";
 import { clearPreviews, loadPreviewImages, NO_PREVIEWS } from "@/features/media/preview";
 import { COVER_MEDIA_TYPES } from "@/lib/validation/media-composition";
 import { requeue } from "@/infra/queue/changes";
 import { FormTimestampSchema, toIsoTimestamp } from "@/lib/utils/time";
 import { getFileCategories, getFileExtension, getMimeTypeByExt } from "@/lib/utils/file";
 import { validate } from "@/lib/validation/validator";
-import { addCaption, addOriginal, deleteCaption, deleteOriginal, MediaEditError, updateAudioTrack, updateCaption } from "@/features/media/edit";
+import {
+    addCaption,
+    addOriginal,
+    changeType,
+    deleteCaption,
+    deleteOriginal,
+    MediaEditError,
+    removeCover,
+    retrySource,
+    setCover,
+    updateAudioTrack,
+    updateCaption,
+} from "@/features/media/edit";
 import { loadOriginalStates } from "@/features/media/originals";
 import { mediaStoragePath } from "@/features/media/storage";
 import { buildMediaDashManifest, buildMediaHlsMaster, buildMediaHlsRendition } from "@/features/playback/manifests";
@@ -376,27 +377,33 @@ const CoverPresignSchema = v.object({
     fileName: v.pipe(v.string(), v.nonEmpty("fileName is required")),
 });
 
-router.post("/:id/cover/presign-upload", requireAuth, validate("param", MediaIdParamSchema), validate("json", CoverPresignSchema), async (c) => {
-    const { id } = c.req.valid("param");
-    const { fileName } = c.req.valid("json");
-    const access = await checkMediaAccess(c, id);
-    if (access.errorResponse) return access.errorResponse;
-    const media = access.media!;
+router.post(
+    "/:id/cover/presign-upload",
+    requireAuth,
+    validate("param", MediaIdParamSchema),
+    validate("json", CoverPresignSchema),
+    async (c) => {
+        const { id } = c.req.valid("param");
+        const { fileName } = c.req.valid("json");
+        const access = await checkMediaAccess(c, id);
+        if (access.errorResponse) return access.errorResponse;
+        const media = access.media!;
 
-    if (!COVER_MEDIA_TYPES.has(media.type)) {
-        return c.json(error(Code.INVALID_PARAMETER, `${media.type} media cannot have a cover`), 400);
-    }
-    if (!getFileCategories(fileName).includes("IMAGE")) {
-        return c.json(error(Code.INVALID_PARAMETER, `${fileName} is not an image`), 400);
-    }
+        if (!COVER_MEDIA_TYPES.has(media.type)) {
+            return c.json(error(Code.INVALID_PARAMETER, `${media.type} media cannot have a cover`), 400);
+        }
+        if (!getFileCategories(fileName).includes("IMAGE")) {
+            return c.json(error(Code.INVALID_PARAMETER, `${fileName} is not an image`), 400);
+        }
 
-    const ext = getFileExtension(fileName) || "bin";
-    const path = mediaStoragePath(media, `cover_${uuidv7()}.${ext}`);
-    const mimeType = getMimeTypeByExt(ext);
-    const url = await s3.getUploadPresignedUrl(path, { bucket: env.S3_BUCKET, contentType: mimeType, expiresInSeconds: 3600 });
+        const ext = getFileExtension(fileName) || "bin";
+        const path = mediaStoragePath(media, `cover_${uuidv7()}.${ext}`);
+        const mimeType = getMimeTypeByExt(ext);
+        const url = await s3.getUploadPresignedUrl(path, { bucket: env.S3_BUCKET, contentType: mimeType, expiresInSeconds: 3600 });
 
-    return c.json(success(Code.SUCCESS, { url, path, bucket: env.S3_BUCKET, mime_type: mimeType, extension: ext }));
-});
+        return c.json(success(Code.SUCCESS, { url, path, bucket: env.S3_BUCKET, mime_type: mimeType, extension: ext }));
+    },
+);
 
 const SetCoverSchema = v.object({
     file: v.object({
@@ -414,13 +421,11 @@ router.post("/:id/cover", requireAuth, validate("param", MediaIdParamSchema), va
     const { file } = c.req.valid("json");
     const access = await checkMediaAccess(c, id);
     if (access.errorResponse) return access.errorResponse;
-    const media = access.media!;
 
     try {
-        await db.transaction((tx) => CoverService.setUploaded(tx, media, file, Priority.CHANGE));
-    } catch (e) {
-        if (e instanceof CoverNotAllowedError) return c.json(error(Code.INVALID_PARAMETER, e.message), 400);
-        throw e;
+        await setCover(access.media!, file);
+    } catch (cause) {
+        return editErrorResponse(c, cause);
     }
     const cover = (await CoverService.loadUrls([id])).get(id) ?? null;
     return c.json(success(Code.SUCCESS, { cover }));
@@ -431,9 +436,26 @@ router.post("/:id/cover/delete", requireAuth, validate("param", MediaIdParamSche
     const access = await checkMediaAccess(c, id);
     if (access.errorResponse) return access.errorResponse;
 
-    const removed = await db.transaction((tx) => CoverService.remove(tx, id, Priority.CHANGE));
-    if (!removed) return c.json(error(Code.NOT_FOUND, "Media has no cover"), 404);
+    try {
+        await removeCover(access.media!);
+    } catch (cause) {
+        return editErrorResponse(c, cause);
+    }
     return c.json(success(Code.SUCCESS, { cover: null }));
+});
+
+/** Retries the imported cover after a network or server error. */
+router.post("/:id/cover/retry", requireAuth, validate("param", MediaIdParamSchema), async (c) => {
+    const { id } = c.req.valid("param");
+    const access = await checkMediaAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+
+    try {
+        await retrySource(access.media!, "cover");
+        return c.json(success(Code.SUCCESS, { id }));
+    } catch (cause) {
+        return editErrorResponse(c, cause);
+    }
 });
 
 const ManifestParamSchema = v.object({
@@ -679,6 +701,41 @@ router.post("/:id/originals/:originalId/delete", requireAuth, validate("param", 
     }
 });
 
+/** Retries an imported original after a network or server error. */
+router.post("/:id/originals/:originalId/retry", requireAuth, validate("param", OriginalParamSchema), async (c) => {
+    const { id, originalId } = c.req.valid("param");
+    const access = await checkMediaAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+
+    try {
+        await retrySource(access.media!, "original", originalId);
+        return c.json(success(Code.SUCCESS, { id: originalId }));
+    } catch (cause) {
+        return editErrorResponse(c, cause);
+    }
+});
+
+const ChangeTypeSchema = v.object({
+    type: v.enum(MediaType),
+    /** Originals the new type does not take; the rest has to make up a media of the new type. */
+    delete_original_ids: v.optional(v.array(v.pipe(v.string(), v.uuid())), []),
+});
+
+/** Changes the type of a media, deleting the originals the new type does not take. */
+router.post("/:id/type", requireAuth, validate("param", MediaIdParamSchema), validate("json", ChangeTypeSchema), async (c) => {
+    const { id } = c.req.valid("param");
+    const { type, delete_original_ids } = c.req.valid("json");
+    const access = await checkMediaAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+
+    try {
+        await changeType(access.media!, type, delete_original_ids);
+        return c.json(success(Code.SUCCESS, { id }));
+    } catch (cause) {
+        return editErrorResponse(c, cause);
+    }
+});
+
 const NullableTextSchema = v.optional(v.nullable(v.pipe(v.string(), v.trim(), v.maxLength(100))));
 
 const AddCaptionSchema = v.object({
@@ -686,17 +743,19 @@ const AddCaptionSchema = v.object({
     language: NullableTextSchema,
     label: NullableTextSchema,
     is_default: v.optional(v.boolean()),
+    /** The caption the new file takes the place of; its language, label and default carry over unless given. */
+    replaces: v.optional(v.pipe(v.string(), v.uuid())),
 });
 
-/** Adds a caption uploaded as a draft subtitle file. */
+/** Adds a caption uploaded as a draft subtitle file, or replaces one with it. */
 router.post("/:id/captions", requireAuth, validate("param", MediaIdParamSchema), validate("json", AddCaptionSchema), async (c) => {
     const { id } = c.req.valid("param");
-    const { draft_file_id, ...declared } = c.req.valid("json");
+    const { draft_file_id, replaces, ...declared } = c.req.valid("json");
     const access = await checkMediaAccess(c, id);
     if (access.errorResponse) return access.errorResponse;
 
     try {
-        const captionId = await addCaption(access.media!, draft_file_id, declared);
+        const captionId = await addCaption(access.media!, draft_file_id, declared, replaces);
         return c.json(success(Code.SUCCESS, { id: captionId }));
     } catch (cause) {
         return editErrorResponse(c, cause);
@@ -738,6 +797,20 @@ router.post("/:id/captions/:captionId/delete", requireAuth, validate("param", Ca
 
     try {
         await deleteCaption(access.media!, captionId);
+        return c.json(success(Code.SUCCESS, { id: captionId }));
+    } catch (cause) {
+        return editErrorResponse(c, cause);
+    }
+});
+
+/** Retries an imported caption after a network or server error. */
+router.post("/:id/captions/:captionId/retry", requireAuth, validate("param", CaptionParamSchema), async (c) => {
+    const { id, captionId } = c.req.valid("param");
+    const access = await checkMediaAccess(c, id);
+    if (access.errorResponse) return access.errorResponse;
+
+    try {
+        await retrySource(access.media!, "caption", captionId);
         return c.json(success(Code.SUCCESS, { id: captionId }));
     } catch (cause) {
         return editErrorResponse(c, cause);

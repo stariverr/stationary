@@ -3,7 +3,7 @@
  * files are probed.
  */
 import * as v from "valibot";
-import { MediaType, type OriginalKind } from "@/db/schema";
+import { MediaType, ORIGINAL_KINDS, type OriginalKind } from "@/db/schema";
 import { getFileCategories, type FileCategory } from "@/lib/utils/file";
 
 /** Media types that can have a cover: one image, uploaded or imported, that their previews are rendered from. */
@@ -20,27 +20,35 @@ const ORIGINAL_COUNTS: Record<MediaType, string> = {
     [MediaType.PDF]: "one PDF original",
 };
 
+/** How many originals of each kind a media type takes, as [min, max]; kinds it does not list it takes none of. */
+const ORIGINAL_LIMITS: Record<MediaType, Partial<Record<OriginalKind, readonly [number, number]>>> = {
+    [MediaType.VIDEO]: { VIDEO: [1, 1], AUDIO: [0, Infinity] },
+    [MediaType.AUDIO]: { AUDIO: [1, 1] },
+    [MediaType.LIVE_PHOTO]: { IMAGE: [1, 1], VIDEO: [1, 1] },
+    [MediaType.IMAGE]: { IMAGE: [1, 1] },
+    [MediaType.PDF]: { PDF: [1, 1] },
+};
+
+const countOf = (kinds: readonly OriginalKind[], kind: OriginalKind) => kinds.filter((k) => k === kind).length;
+
 /**
  * The composition rules (docs/media_refactor.zh-Hans.md, 4), over the kinds of all originals of a media: probed for
- * uploads and edits, declared for imports.
+ * uploads and completed originals, declared for imported ones not downloaded yet.
  */
-export function compositionError(type: MediaType, kinds: OriginalKind[]): string | null {
-    const count = (kind: OriginalKind) => kinds.filter((k) => k === kind).length;
-    const ok = (() => {
-        switch (type) {
-            case MediaType.VIDEO:
-                return count("VIDEO") === 1 && count("AUDIO") === kinds.length - 1;
-            case MediaType.AUDIO:
-                return kinds.length === 1 && count("AUDIO") === 1;
-            case MediaType.LIVE_PHOTO:
-                return kinds.length === 2 && count("IMAGE") === 1 && count("VIDEO") === 1;
-            case MediaType.IMAGE:
-                return kinds.length === 1 && count("IMAGE") === 1;
-            case MediaType.PDF:
-                return kinds.length === 1 && count("PDF") === 1;
-        }
-    })();
+export function compositionError(type: MediaType, kinds: readonly OriginalKind[]): string | null {
+    const limits = ORIGINAL_LIMITS[type];
+    const ok = ORIGINAL_KINDS.every((kind) => {
+        const [min, max] = limits[kind] ?? [0, 0];
+        const count = countOf(kinds, kind);
+        return count >= min && count <= max;
+    });
     return ok ? null : `${type} media takes ${ORIGINAL_COUNTS[type]}; got ${kinds.length === 0 ? "none" : kinds.join(", ")}`;
+}
+
+/** Whether a media of `type` whose originals are of `kinds` takes one more of `kind` (docs/failure_handling.zh-Hans.md, 8.3). */
+export function hasRoomFor(type: MediaType, kinds: readonly OriginalKind[], kind: OriginalKind): boolean {
+    const [, max] = ORIGINAL_LIMITS[type][kind] ?? [0, 0];
+    return countOf(kinds, kind) < max;
 }
 
 const DraftFileIdSchema = v.pipe(v.string(), v.uuid());
