@@ -5,7 +5,7 @@ import { db, type DbClient, type Transaction } from "@/global/db";
 import { env } from "@/global/env";
 import { convertToVtt, makeDefaultCaption, storeVtt } from "@/features/media/captions";
 import { lockPosts, refreshMediaSyncStatus } from "@/features/media/composition";
-import { completeOriginal } from "@/features/media/originals";
+import { completeOriginal, kindOfProbe } from "@/features/media/originals";
 import { probeOriginal } from "@/features/media/probe";
 import { NO_SOURCE_ERROR, resetRetryableSources } from "@/features/media/source-rows";
 import { mediaStoragePath } from "@/features/media/storage";
@@ -13,7 +13,7 @@ import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
 import type { ReconcileContext, ReconcileResult, SubjectPipelineHandler } from "@/infra/queue/types";
 import { DownloadStatusError, downloadStream, getBodyLength, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
-import { classifySourceError, SourceTransferError, type SourceError } from "./source-errors";
+import { classifySourceError, KindMismatchError, SourceTransferError, type SourceError } from "./source-errors";
 
 type MediaRow = typeof Media.$inferSelect;
 type OriginalRow = typeof MediaOriginal.$inferSelect;
@@ -24,7 +24,11 @@ const activeMedia = (mediaId: string) =>
     and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time));
 
 type SourceTable = typeof MediaOriginal | typeof MediaCaption | typeof MediaCover;
-type SourceRow = { id: string; source_url: string | null; source_key: string | null };
+type SourceRow = {
+    id: string;
+    source_url: string | null;
+    source_key: string | null;
+};
 
 /**
  * An imported source still waiting for its download. A FAILED one failed on its current URL and waits for a new URL
@@ -42,13 +46,27 @@ const FORBIDDEN_RETRY_DELAY_MS = 3_000;
 const keyName = (sourceKey: string) => new Bun.CryptoHasher("sha256").update(sourceKey).digest("hex").slice(0, 16);
 
 /** Inserts the file at `path`, or revives the row a previous download of the same object left there. */
-async function upsertFile(client: DbClient, values: { path: string; mime_type: string; extension: string; size: number | null }) {
+async function upsertFile(
+    client: DbClient,
+    values: {
+        path: string;
+        mime_type: string;
+        extension: string;
+        size: number | null;
+    },
+) {
     const [file] = await client
         .insert(File)
         .values({ ...values, bucket: env.S3_BUCKET })
         .onConflictDoUpdate({
             target: File.path,
-            set: { mime_type: values.mime_type, extension: values.extension, size: values.size, delete_status: DeleteStatus.ACTIVE, delete_time: null },
+            set: {
+                mime_type: values.mime_type,
+                extension: values.extension,
+                size: values.size,
+                delete_status: DeleteStatus.ACTIVE,
+                delete_time: null,
+            },
         })
         .returning();
     return file!;
@@ -57,7 +75,10 @@ async function upsertFile(client: DbClient, values: { path: string; mime_type: s
 async function softDeleteFile(client: DbClient, fileId: string) {
     await client
         .update(File)
-        .set({ delete_status: DeleteStatus.DELETED, delete_time: Temporal.Now.instant() })
+        .set({
+            delete_status: DeleteStatus.DELETED,
+            delete_time: Temporal.Now.instant(),
+        })
         .where(and(eq(File.id, fileId), eq(File.delete_status, DeleteStatus.ACTIVE)));
 }
 
@@ -125,12 +146,17 @@ async function fetchSource(ctx: ReconcileContext, media: MediaRow, source: Sourc
     return upsertFile(db, { path, mime_type: contentType, extension: ext, size });
 }
 
-/** Downloads and probes one original, then completes it unless the import replaced or removed it meanwhile. */
+/**
+ * Downloads and probes one original, then completes it unless the import replaced or removed it meanwhile. An original
+ * that is not the kind the import declared is not admitted: its file goes and nothing of its probe is kept.
+ */
 async function downloadOriginal(ctx: ReconcileContext, media: MediaRow, original: OriginalRow): Promise<void> {
     const file = await fetchSource(ctx, media, original, "original");
     let probe;
     try {
         probe = await probeOriginal(file);
+        const probed = kindOfProbe(probe);
+        if (probed !== original.declared_kind) throw new KindMismatchError(original.declared_kind!, probed);
     } catch (error) {
         await softDeleteFile(db, file.id);
         throw error;
@@ -172,7 +198,13 @@ async function downloadCaption(ctx: ReconcileContext, media: MediaRow, caption: 
         const vttFileId = await storeVtt(tx, media, keyName(caption.source_key!), vtt);
         await tx
             .update(MediaCaption)
-            .set({ source_file_id: file.id, vtt_file_id: vttFileId, status: SyncStatus.COMPLETED, ...NO_SOURCE_ERROR, update_time: Temporal.Now.instant() })
+            .set({
+                source_file_id: file.id,
+                vtt_file_id: vttFileId,
+                status: SyncStatus.COMPLETED,
+                ...NO_SOURCE_ERROR,
+                update_time: Temporal.Now.instant(),
+            })
             .where(eq(MediaCaption.id, caption.id));
         if (current.is_default) await makeDefaultCaption(tx, media.id, caption.id);
         await refreshMediaSyncStatus(tx, [media.id]);
@@ -191,7 +223,12 @@ async function downloadCover(ctx: ReconcileContext, media: MediaRow, cover: Cove
         await lockPosts(tx, { mediaIds: [media.id] });
         const completed = await tx
             .update(MediaCover)
-            .set({ file_id: file.id, status: SyncStatus.COMPLETED, ...NO_SOURCE_ERROR, update_time: Temporal.Now.instant() })
+            .set({
+                file_id: file.id,
+                status: SyncStatus.COMPLETED,
+                ...NO_SOURCE_ERROR,
+                update_time: Temporal.Now.instant(),
+            })
             .where(and(eq(MediaCover.id, cover.id), eq(MediaCover.source_key, cover.source_key!)))
             .returning({ id: MediaCover.id });
         if (completed.length === 0) return softDeleteFile(tx, file.id);
@@ -207,7 +244,10 @@ async function startSource(ctx: ReconcileContext, table: SourceTable, row: Sourc
         await lockPosts(tx, { mediaIds: [ctx.subjectId] });
         await tx
             .update(table)
-            .set({ status: SyncStatus.IN_PROGRESS, update_time: Temporal.Now.instant() })
+            .set({
+                status: SyncStatus.IN_PROGRESS,
+                update_time: Temporal.Now.instant(),
+            })
             .where(and(eq(table.id, row.id), eq(table.source_url, row.source_url!), ne(table.status, SyncStatus.COMPLETED)));
         await refreshMediaSyncStatus(tx, [ctx.subjectId]);
         await ctx.fence(tx);
@@ -288,7 +328,12 @@ export const downloadPipeline: SubjectPipelineHandler = {
                 if (ctx.signal.aborted) throw error;
                 const sourceError = classifySourceError(error);
                 await recordSourceError(ctx, table, row, sourceError);
-                if (sourceError.retryable) retry ??= { kind: "retry", error: sourceError.message, errorKind: sourceError.kind };
+                if (sourceError.retryable)
+                    retry ??= {
+                        kind: "retry",
+                        error: sourceError.message,
+                        errorKind: sourceError.kind,
+                    };
             }
         };
         for (const original of originals) await attempt(MediaOriginal, original, () => downloadOriginal(ctx, media, original));
@@ -376,21 +421,54 @@ export const downloadPipeline: SubjectPipelineHandler = {
     async countFailures(libraryIds) {
         if (libraryIds.length === 0) return new Map();
         const rows = await db
-            .select({ libraryId: Media.library_id, count: sql<number>`count(*)::int` })
+            .select({
+                libraryId: Media.library_id,
+                count: sql<number>`count(*)::int`,
+            })
             .from(Media)
             .where(failedMedia(libraryIds))
             .groupBy(Media.library_id);
         return new Map(rows.map((row) => [row.libraryId, row.count]));
     },
 
+    /** A failed media is listed with the error of its most recently failed source, where the failure is kept (4.4). */
     async listFailures(libraryId, limit) {
         const query = db
-            .select({ subjectId: Media.id, label: Media.title, error: Media.last_error, time: Media.update_time })
+            .select({
+                subjectId: Media.id,
+                label: Media.title,
+                time: Media.update_time,
+            })
             .from(Media)
             .where(failedMedia([libraryId]))
             .orderBy(desc(Media.update_time))
             .$dynamic();
-        const rows = limit === undefined ? await query : await query.limit(limit);
-        return rows.map((row) => ({ ...row, error: row.error ?? "" }));
+        const medias = limit === undefined ? await query : await query.limit(limit);
+        const ids = medias.map((media) => media.subjectId);
+        const sources =
+            ids.length === 0
+                ? []
+                : (
+                      await Promise.all(
+                          SOURCE_TABLES.map((table) =>
+                              db
+                                  .select({
+                                      mediaId: table.media_id,
+                                      error: table.last_error,
+                                      time: table.update_time,
+                                  })
+                                  .from(table)
+                                  .where(
+                                      and(inArray(table.media_id, ids), isNotNull(table.source_url), eq(table.status, SyncStatus.FAILED)),
+                                  ),
+                          ),
+                      )
+                  )
+                      .flat()
+                      .sort((a, b) => Temporal.Instant.compare(b.time, a.time));
+        return medias.map((media) => ({
+            ...media,
+            error: sources.find((source) => source.mediaId === media.subjectId)?.error ?? "",
+        }));
     },
 };

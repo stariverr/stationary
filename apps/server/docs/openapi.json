@@ -2305,10 +2305,6 @@
                               "sync_status": {
                                 "type": "string"
                               },
-                              "last_error": {
-                                "type": "string",
-                                "nullable": true
-                              },
                               "url": {
                                 "type": "string",
                                 "nullable": true
@@ -2654,7 +2650,8 @@
                                         "NETWORK",
                                         "SOURCE_UNAVAILABLE",
                                         "UNREADABLE",
-                                        "INTERNAL"
+                                        "INTERNAL",
+                                        "KIND_MISMATCH"
                                       ],
                                       "type": "string",
                                       "nullable": true
@@ -2716,7 +2713,8 @@
                                         "NETWORK",
                                         "SOURCE_UNAVAILABLE",
                                         "UNREADABLE",
-                                        "INTERNAL"
+                                        "INTERNAL",
+                                        "KIND_MISMATCH"
                                       ],
                                       "type": "string",
                                       "nullable": true
@@ -2838,7 +2836,6 @@
                               "type",
                               "sort_order",
                               "sync_status",
-                              "last_error",
                               "url",
                               "width",
                               "height",
@@ -3944,10 +3941,6 @@
                         "sync_status": {
                           "type": "string"
                         },
-                        "last_error": {
-                          "type": "string",
-                          "nullable": true
-                        },
                         "url": {
                           "type": "string",
                           "nullable": true
@@ -4293,7 +4286,8 @@
                                   "NETWORK",
                                   "SOURCE_UNAVAILABLE",
                                   "UNREADABLE",
-                                  "INTERNAL"
+                                  "INTERNAL",
+                                  "KIND_MISMATCH"
                                 ],
                                 "type": "string",
                                 "nullable": true
@@ -4355,7 +4349,8 @@
                                   "NETWORK",
                                   "SOURCE_UNAVAILABLE",
                                   "UNREADABLE",
-                                  "INTERNAL"
+                                  "INTERNAL",
+                                  "KIND_MISMATCH"
                                 ],
                                 "type": "string",
                                 "nullable": true
@@ -4477,7 +4472,6 @@
                         "type",
                         "sort_order",
                         "sync_status",
-                        "last_error",
                         "url",
                         "width",
                         "height",
@@ -6714,11 +6708,21 @@
                                     "is_default": {
                                       "type": "boolean",
                                       "default": false
+                                    },
+                                    "kind": {
+                                      "enum": [
+                                        "IMAGE",
+                                        "PDF",
+                                        "VIDEO",
+                                        "AUDIO"
+                                      ],
+                                      "type": "string"
                                     }
                                   },
                                   "required": [
                                     "url",
-                                    "source_key"
+                                    "source_key",
+                                    "kind"
                                   ]
                                 },
                                 "minItems": 1

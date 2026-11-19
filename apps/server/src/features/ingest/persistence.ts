@@ -3,7 +3,6 @@ import { Post, Media, Author, DeleteStatus, SyncStatus, TagSource } from "@/db/s
 import { and, eq, inArray } from "drizzle-orm";
 import { avatarOrigin } from "@/features/author/avatar-pipeline";
 import { refreshMediaSyncStatus, refreshPostSyncStatus } from "@/features/media/composition";
-import { originalCountError } from "@/features/media/originals";
 import { releaseMediaAssets } from "@/features/media/release";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
@@ -23,11 +22,6 @@ export async function saveIngestMetadata(postData: PostItemData, targetLibraryId
         mediaItems.map((media) => media.external_id),
         `media in post ${postExternalId}`,
     );
-    // What the originals hold is only known once they are probed; the count is checked now.
-    for (const [index, media] of mediaItems.entries()) {
-        const countError = originalCountError(media.type, media.originals.length);
-        if (countError) throw new Error(`media[${index}] ${countError}`);
-    }
 
     // 1. Author logic
     let authorId: string | null = null;
@@ -130,7 +124,6 @@ export async function saveIngestMetadata(postData: PostItemData, targetLibraryId
             update_time: Temporal.Now.instant(),
             url: postData.url,
             sync_status: SyncStatus.PENDING,
-            last_error: null,
             workflow_run_id: workflowRunId,
         };
         const results = await tx.insert(Post).values(postInsertData).returning({ id: Post.id, eid: Post.eid });

@@ -1,6 +1,6 @@
 import * as v from "valibot";
 import { toJsonSchema } from "@valibot/to-json-schema";
-import { AssetOrigin, LyricsTiming, MediaType, PostSource, SourceErrorKind, SyncStatus } from "@/db/schema";
+import { AssetOrigin, LyricsTiming, MediaType, ORIGINAL_KINDS, PostSource, SourceErrorKind, SyncStatus } from "@/db/schema";
 
 // FormTimestampSchema helper
 const FormTimestampSchema = v.optional(v.nullable(v.union([v.string(), v.number()])));
@@ -312,7 +312,6 @@ const MediaDetailResponseSchema = v.object({
     create_time: v.optional(v.string()),
     published_time: v.optional(v.string()),
     sync_status: v.string(),
-    last_error: v.nullable(v.string()),
     url: v.nullable(v.string()),
     width: v.nullable(v.number()),
     height: v.nullable(v.number()),
@@ -375,7 +374,7 @@ const AuthorSchema = v.object({
     avatar_file_url: v.optional(v.nullable(v.string())),
 });
 
-const ImportOriginalSchema = v.object({
+const ImportCaptionSchema = v.object({
     url: v.pipe(v.string(), v.minLength(1)),
     source_key: v.pipe(v.string(), v.minLength(1)),
     language: v.optional(v.nullable(v.string())),
@@ -383,7 +382,11 @@ const ImportOriginalSchema = v.object({
     is_default: v.optional(v.boolean(), false),
 });
 
-const ImportCaptionSchema = ImportOriginalSchema;
+const ImportOriginalSchema = v.object({
+    ...ImportCaptionSchema.entries,
+    /** What the file holds; the declared kinds have to make up the media, and each file is checked against its kind. */
+    kind: v.picklist(ORIGINAL_KINDS),
+});
 
 const MediaItemSchema = v.object({
     external_id: v.pipe(v.string(), v.trim(), v.minLength(1)),

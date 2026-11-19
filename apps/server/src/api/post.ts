@@ -137,7 +137,6 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
             create_time: Post.create_time,
             published_time: Post.published_time,
             sync_status: Post.sync_status,
-            last_error: Post.last_error,
             author_avatar_bucket: DbFile.bucket,
             author_avatar_path: DbFile.path,
         })
@@ -232,7 +231,6 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
             create_time: toIsoTimestamp(post.create_time),
             published_time: toIsoTimestamp(post.published_time),
             sync_status: post.sync_status,
-            last_error: post.last_error,
             media: postMedia,
         };
     });
@@ -340,7 +338,6 @@ export const PostDetailResponseBodySchema = v.object({
     type: v.optional(v.picklist(["TEXT", "MULTI_MEDIA"])),
     url: v.optional(v.nullable(v.string())),
     sync_status: v.optional(v.string()),
-    last_error: v.optional(v.nullable(v.string())),
 });
 
 router.get("/detail/:id", requireAuth, validate("param", PostDetailRequestPathParamSchema), async (c) => {
@@ -387,7 +384,6 @@ router.get("/detail/:id", requireAuth, validate("param", PostDetailRequestPathPa
         media_count: postData.media_count,
         type: (postData.media_count ?? 0) > 0 ? "MULTI_MEDIA" : "TEXT",
         sync_status: postData.sync_status,
-        last_error: postData.last_error,
         url: postData.url,
     };
 

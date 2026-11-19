@@ -1265,7 +1265,7 @@ describe("download pipeline", () => {
             type: MediaType.IMAGE,
             sort_order: 0,
         });
-        await db.insert(MediaOriginal).values({ media_id: mediaId, source_url: "https://cdn.test/a.jpg", source_key: "image", status: SyncStatus.PENDING });
+        await db.insert(MediaOriginal).values({ media_id: mediaId, source_url: "https://cdn.test/a.jpg", source_key: "image", declared_kind: "IMAGE", status: SyncStatus.PENDING });
         try {
             expect((await downloadPipeline.scanPage(libraryId, null, 100, null)).subjectIds).toEqual([mediaId]);
 

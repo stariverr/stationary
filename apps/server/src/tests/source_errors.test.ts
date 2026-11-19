@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SourceErrorKind, SyncStatus } from "@/db/schema";
-import { classifySourceError, SourceTransferError } from "@/features/ingest/source-errors";
+import { classifySourceError, KindMismatchError, SourceTransferError } from "@/features/ingest/source-errors";
 import { ProbeRejectedError } from "@/features/media/probe";
 import { NO_SOURCE_ERROR, refreshSource } from "@/features/media/source-rows";
 import { DownloadStatusError } from "@/lib/utils/media";
@@ -28,6 +28,14 @@ describe("classifySourceError", () => {
 
     test("a file the tools cannot read is final", () => {
         expect(classifySourceError(new ProbeRejectedError("not a media file"))).toMatchObject({ kind: SourceErrorKind.UNREADABLE, retryable: false });
+    });
+
+    test("a file that does not hold its declared kind is final", () => {
+        expect(classifySourceError(new KindMismatchError("VIDEO", "AUDIO"))).toEqual({
+            kind: SourceErrorKind.KIND_MISMATCH,
+            retryable: false,
+            message: "Declared as VIDEO, but the file holds AUDIO",
+        });
     });
 
     test("anything else is internal, retried", () => {

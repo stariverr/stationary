@@ -247,8 +247,7 @@ const handleQueueAi = async () => {
                             </span>
                             <span
                                 v-else-if="media.sync_status === 'FAILED'"
-                                class="inline-flex items-center gap-1 text-xs font-medium text-red-500 cursor-help"
-                                :title="media.last_error || 'Sync failed'"
+                                class="inline-flex items-center gap-1 text-xs font-medium text-red-500"
                             >
                                 <AlertCircle class="size-3 shrink-0" />
                                 <span>Sync Failed</span>

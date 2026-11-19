@@ -21,7 +21,6 @@ export const MediaListResponseBodySchema = v.object({
     mime_type: v.optional(v.nullable(v.string())),
     previews: MediaPreviewsSchema,
     sync_status: v.optional(v.nullable(v.string())),
-    last_error: v.optional(v.nullable(v.string())),
     ai_status: v.optional(v.nullable(v.string())),
     ai_error: v.optional(v.nullable(v.string())),
     matched_details: v.optional(v.nullable(v.unknown())),
@@ -69,7 +68,6 @@ export interface MappedMediaItem {
     poster: string | null;
     srcset: string | null;
     sync_status: string;
-    last_error: string | null;
     ai_status: string;
     ai_error: string | null;
     matched_details?: MatchedDetails;
@@ -249,7 +247,6 @@ export const useMediaStore = defineStore("media", () => {
             poster: previewPosterUrl(apiMedia.previews),
             srcset: previewSrcset(apiMedia.previews),
             sync_status: apiMedia.sync_status || "PENDING",
-            last_error: apiMedia.last_error || null,
             ai_status: apiMedia.ai_status || "PENDING",
             ai_error: apiMedia.ai_error || null,
             matched_details: (apiMedia.matched_details as MatchedDetails) || undefined,
@@ -276,7 +273,6 @@ export const useMediaStore = defineStore("media", () => {
         url?: string | null;
         previews: MediaPreviews;
         sync_status?: string | null;
-        last_error?: string | null;
         ai_status?: string | null;
         ai_error?: string | null;
         matched_details?: unknown;
@@ -349,7 +345,6 @@ export const useMediaStore = defineStore("media", () => {
                             poster: previewPosterUrl(item.previews),
                             srcset: previewSrcset(item.previews),
                             sync_status: item.sync_status || "PENDING",
-                            last_error: item.last_error || null,
                             ai_status: item.ai_status || "PENDING",
                             ai_error: item.ai_error || null,
                             matched_details: (item.matched_details as MatchedDetails) || undefined,

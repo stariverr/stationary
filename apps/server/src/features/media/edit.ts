@@ -10,7 +10,8 @@ import { consumeDraftFile } from "@/features/import/draft-file";
 import { getFileCategories } from "@/lib/utils/file";
 import { CAPTION_MEDIA_TYPES } from "@/lib/validation/media-composition";
 import { convertToVtt, deleteCaptions, insertUploadedCaption, makeDefaultCaption, storeVtt, type CaptionDeclaration } from "./captions";
-import { compositionError, deleteOriginals, insertUploadedOriginal, kindOfProbe, kindOfState, loadOriginalStates, removeOriginal, settleDefaultAudio } from "./originals";
+import { compositionError } from "@/lib/validation/media-composition";
+import { deleteOriginals, insertUploadedOriginal, kindOfProbe, kindOfState, loadOriginalStates, removeOriginal, settleDefaultAudio } from "./originals";
 import { probeOriginal, ProbeRejectedError } from "./probe";
 import { Priority } from "@/infra/queue/policy";
 

@@ -1,8 +1,8 @@
 /**
  * Applies the sources an import offers for one media (docs/media_refactor.zh-Hans.md, 6.3): its originals, cover and
- * captions, each matched to what the media has by `source_key`. A known key only refreshes its URL and declarations,
- * a new key waits for the download pipeline, and a key the import no longer offers is deleted. What the user uploaded
- * (no `source_key`) is left alone.
+ * captions, each matched to what the media has by `source_key` (originals also by their declared kind). A known
+ * source only refreshes its URL and declarations, a new one waits for the download pipeline, and one the import no
+ * longer offers is deleted. What the user uploaded (no `source_key`) is left alone.
  */
 import { and, eq, isNotNull } from "drizzle-orm";
 import { AssetOrigin, MediaCaption, MediaOriginal, MediaType, SyncStatus } from "@/db/schema";
@@ -17,23 +17,35 @@ import { Priority } from "@/infra/queue/policy";
 
 type ImportSources = Pick<MediaItemData, "originals" | "cover" | "captions">;
 
-async function syncOriginals(tx: Transaction, media: { id: string; type: MediaType }, incoming: ImportSources["originals"]): Promise<boolean> {
+async function syncOriginals(
+    tx: Transaction,
+    media: { id: string; type: MediaType },
+    incoming: ImportSources["originals"],
+): Promise<boolean> {
     const existing = await tx
         .select()
         .from(MediaOriginal)
         .where(and(eq(MediaOriginal.media_id, media.id), isNotNull(MediaOriginal.source_key)))
         .for("update");
-    const byKey = new Map(existing.map((original) => [original.source_key!, original]));
-    const keys = new Set(incoming.map((original) => original.source_key));
+    // An original is known by its key and declared kind: its file was checked against that kind, so a key declared
+    // with another kind is a new original.
+    const offered = new Map(incoming.map((original) => [original.source_key, original.kind]));
+    const kept = existing.filter((original) => offered.get(original.source_key!) === original.declared_kind);
+    const byKey = new Map(kept.map((original) => [original.source_key!, original]));
 
     for (const original of existing) {
-        if (!keys.has(original.source_key!)) await removeOriginal(tx, media, original.id, Priority.CHANGE);
+        if (!byKey.has(original.source_key!)) await removeOriginal(tx, media, original.id, Priority.CHANGE);
     }
 
     let pending = false;
     const now = Temporal.Now.instant();
     for (const original of incoming) {
-        const declared = { declared_language: original.language, declared_label: original.label, declared_default: original.is_default };
+        const declared = {
+            declared_kind: original.kind,
+            declared_language: original.language,
+            declared_label: original.label,
+            declared_default: original.is_default,
+        };
         const current = byKey.get(original.source_key);
         if (current) {
             const refreshed = refreshSource(current, original.url);
@@ -56,7 +68,11 @@ async function syncOriginals(tx: Transaction, media: { id: string; type: MediaTy
     return pending;
 }
 
-async function syncCaptions(tx: Transaction, media: { id: string; type: MediaType }, incoming: ImportSources["captions"]): Promise<boolean> {
+async function syncCaptions(
+    tx: Transaction,
+    media: { id: string; type: MediaType },
+    incoming: ImportSources["captions"],
+): Promise<boolean> {
     const offered = CAPTION_MEDIA_TYPES.has(media.type) ? incoming : [];
     const existing = await tx
         .select()
@@ -107,7 +123,11 @@ async function syncCaptions(tx: Transaction, media: { id: string; type: MediaTyp
 }
 
 /** Applies the offered sources; returns whether any of them still needs a download. */
-export async function syncImportedSources(tx: Transaction, media: { id: string; type: MediaType }, sources: ImportSources): Promise<boolean> {
+export async function syncImportedSources(
+    tx: Transaction,
+    media: { id: string; type: MediaType },
+    sources: ImportSources,
+): Promise<boolean> {
     const originals = await syncOriginals(tx, media, sources.originals);
     const cover = await CoverService.syncImported(tx, media, sources.cover, Priority.CHANGE);
     const captions = await syncCaptions(tx, media, sources.captions);

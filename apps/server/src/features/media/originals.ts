@@ -16,6 +16,7 @@ import {
     MediaOriginal,
     MediaType,
     SyncStatus,
+    type OriginalKind,
 } from "@/db/schema";
 import type { DbClient } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
@@ -30,8 +31,7 @@ type FileRow = typeof DbFile.$inferSelect;
 type AvFileRow = typeof AvFile.$inferSelect;
 type AvStreamRow = typeof AvStream.$inferSelect;
 
-/** What an original holds, read from its probed content (3.3: there is no kind column). */
-export type OriginalKind = "IMAGE" | "PDF" | "VIDEO" | "AUDIO";
+export type { OriginalKind };
 
 export interface OriginalState {
     original: OriginalRow;
@@ -53,40 +53,6 @@ export function kindOfState(state: OriginalState): OriginalKind | null {
     if (isPdfFile(state.file)) return "PDF";
     if (isImageFile(state.file)) return "IMAGE";
     return null;
-}
-
-const ORIGINAL_COUNTS: Record<MediaType, string> = {
-    [MediaType.VIDEO]: "one video original and any number of audio-only originals",
-    [MediaType.AUDIO]: "one audio original",
-    [MediaType.LIVE_PHOTO]: "one image original and one video original",
-    [MediaType.IMAGE]: "one image original",
-    [MediaType.PDF]: "one PDF original",
-};
-
-/** The count check that can run before probing, e.g. when an import arrives. */
-export function originalCountError(type: MediaType, count: number): string | null {
-    const ok = type === MediaType.VIDEO ? count >= 1 : type === MediaType.LIVE_PHOTO ? count === 2 : count === 1;
-    return ok ? null : `${type} media takes ${ORIGINAL_COUNTS[type]}, not ${count} originals`;
-}
-
-/** The composition rules of section 4, over the probed kinds of all originals of a media. */
-export function compositionError(type: MediaType, kinds: OriginalKind[]): string | null {
-    const count = (kind: OriginalKind) => kinds.filter((k) => k === kind).length;
-    const ok = (() => {
-        switch (type) {
-            case MediaType.VIDEO:
-                return count("VIDEO") === 1 && count("AUDIO") === kinds.length - 1;
-            case MediaType.AUDIO:
-                return kinds.length === 1 && count("AUDIO") === 1;
-            case MediaType.LIVE_PHOTO:
-                return kinds.length === 2 && count("IMAGE") === 1 && count("VIDEO") === 1;
-            case MediaType.IMAGE:
-                return kinds.length === 1 && count("IMAGE") === 1;
-            case MediaType.PDF:
-                return kinds.length === 1 && count("PDF") === 1;
-        }
-    })();
-    return ok ? null : `${type} media takes ${ORIGINAL_COUNTS[type]}; got ${kinds.length === 0 ? "none" : kinds.join(", ")}`;
 }
 
 /** Loads the originals of the given media with their files and probed streams, in creation order. */

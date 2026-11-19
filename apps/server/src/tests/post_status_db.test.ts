@@ -19,10 +19,21 @@ afterEach(async () => {
 
 /** A post with one media per status, in sort order. */
 async function postWith(statuses: SyncStatus[]) {
-    await db.insert(Library).values({ id: libraryId, name: "test", description: "", owner_id: crypto.randomUUID() });
+    await db.insert(Library).values({
+        id: libraryId,
+        name: "test",
+        description: "",
+        owner_id: crypto.randomUUID(),
+    });
     const [post] = await db
         .insert(Post)
-        .values({ eid: crypto.randomUUID(), title: "", description: "", media_count: statuses.length, library_id: libraryId })
+        .values({
+            eid: crypto.randomUUID(),
+            title: "",
+            description: "",
+            media_count: statuses.length,
+            library_id: libraryId,
+        })
         .returning({ id: Post.id });
     const media = await db
         .insert(Media)
@@ -36,7 +47,6 @@ async function postWith(statuses: SyncStatus[]) {
                 description: "",
                 type: MediaType.IMAGE,
                 sync_status,
-                last_error: sync_status === SyncStatus.FAILED ? `error ${index}` : null,
             })),
         )
         .returning({ id: Media.id });
@@ -45,8 +55,8 @@ async function postWith(statuses: SyncStatus[]) {
 }
 
 async function postStatus(postId: string) {
-    const [post] = await db.select({ status: Post.sync_status, error: Post.last_error }).from(Post).where(eq(Post.id, postId));
-    return post!;
+    const [post] = await db.select({ status: Post.sync_status }).from(Post).where(eq(Post.id, postId));
+    return post!.status;
 }
 
 describe("refreshPostSyncStatus", () => {
@@ -54,22 +64,25 @@ describe("refreshPostSyncStatus", () => {
         const { postId, mediaIds } = await postWith([SyncStatus.COMPLETED, SyncStatus.FAILED, SyncStatus.FAILED]);
 
         await db.transaction((tx) => refreshPostSyncStatus(tx, [postId]));
-        expect(await postStatus(postId)).toEqual({ status: SyncStatus.FAILED, error: `Media item ${mediaIds[1]} failed to process: error 1` });
+        expect(await postStatus(postId)).toBe(SyncStatus.FAILED);
 
-        await db.update(Media).set({ recycle_time: Temporal.Now.instant() }).where(inArray(Media.id, mediaIds.slice(1)));
+        await db
+            .update(Media)
+            .set({ recycle_time: Temporal.Now.instant() })
+            .where(inArray(Media.id, mediaIds.slice(1)));
         await db.transaction((tx) => refreshPostSyncStatus(tx, [postId]));
-        expect(await postStatus(postId)).toEqual({ status: SyncStatus.COMPLETED, error: null });
+        expect(await postStatus(postId)).toBe(SyncStatus.COMPLETED);
     });
 
     databaseTest("a media still syncing wins over a failed one", async () => {
         const { postId, mediaIds } = await postWith([SyncStatus.FAILED, SyncStatus.PENDING, SyncStatus.COMPLETED]);
 
         await db.transaction((tx) => refreshPostSyncStatus(tx, [postId]));
-        expect(await postStatus(postId)).toEqual({ status: SyncStatus.PENDING, error: null });
+        expect(await postStatus(postId)).toBe(SyncStatus.PENDING);
 
         await db.update(Media).set({ sync_status: SyncStatus.IN_PROGRESS }).where(eq(Media.id, mediaIds[1]!));
         await db.transaction((tx) => refreshPostSyncStatus(tx, [postId]));
-        expect(await postStatus(postId)).toEqual({ status: SyncStatus.IN_PROGRESS, error: null });
+        expect(await postStatus(postId)).toBe(SyncStatus.IN_PROGRESS);
     });
 
     databaseTest("leaves a post in the trash alone and refreshes it on restore", async () => {
@@ -79,12 +92,12 @@ describe("refreshPostSyncStatus", () => {
 
         // Its media went to the trash with it, so they read as none; the post keeps its status anyway.
         await db.transaction((tx) => refreshPostSyncStatus(tx, [postId]));
-        expect(await postStatus(postId)).toEqual({ status: SyncStatus.FAILED, error: `Media item ${mediaIds[0]} failed to process: error 0` });
+        expect(await postStatus(postId)).toBe(SyncStatus.FAILED);
 
         // Changed while in the trash, picked up on restore.
-        await db.update(Media).set({ sync_status: SyncStatus.COMPLETED, last_error: null }).where(eq(Media.id, mediaIds[0]!));
+        await db.update(Media).set({ sync_status: SyncStatus.COMPLETED }).where(eq(Media.id, mediaIds[0]!));
         await restorePost(postId);
-        expect(await postStatus(postId)).toEqual({ status: SyncStatus.COMPLETED, error: null });
+        expect(await postStatus(postId)).toBe(SyncStatus.COMPLETED);
     });
 
     // Each transaction completes one media and refreshes the post before the other commits. Without the post lock both
@@ -108,6 +121,6 @@ describe("refreshPostSyncStatus", () => {
             });
         await Promise.all(mediaIds.map(complete));
 
-        expect(await postStatus(postId)).toEqual({ status: SyncStatus.COMPLETED, error: null });
+        expect(await postStatus(postId)).toBe(SyncStatus.COMPLETED);
     });
 });

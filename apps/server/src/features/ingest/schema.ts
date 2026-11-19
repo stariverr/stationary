@@ -1,6 +1,7 @@
 import * as v from "valibot";
 
-import { PostSource, MediaType } from "@/db/schema";
+import { MediaType, ORIGINAL_KINDS, PostSource } from "@/db/schema";
+import { compositionError } from "@/lib/validation/media-composition";
 
 export const AuthorSchema = v.object({
     name: v.optional(v.string(), ""),
@@ -48,6 +49,8 @@ const DeclaredTextSchema = v.pipe(
 export const ImportOriginalSchema = v.object({
     url: SourceUrlSchema,
     source_key: SourceKeySchema,
+    /** What the file holds: VIDEO for a stream with video, AUDIO for a separate audio track. Checked on download. */
+    kind: v.picklist(ORIGINAL_KINDS),
     language: DeclaredTextSchema,
     label: DeclaredTextSchema,
     is_default: v.optional(v.boolean(), false),
@@ -114,6 +117,18 @@ export const PostItemSchema = v.pipe(
         media: v.array(MediaItemSchema),
         create_time: v.optional(TimestampSchema),
         published_time: v.optional(TimestampSchema),
+    }),
+    // The declared kinds have to make up each media (docs/failure_handling.zh-Hans.md, 6); the download checks each
+    // original against its kind.
+    v.rawCheck(({ dataset, addIssue }) => {
+        if (!dataset.typed) return;
+        for (const media of dataset.value.media) {
+            const error = compositionError(
+                media.type,
+                media.originals.map((original) => original.kind),
+            );
+            if (error) addIssue({ message: `Post ${dataset.value.external_id}, media ${media.external_id}: ${error}` });
+        }
     }),
     v.transform((data) => ({
         ...data,

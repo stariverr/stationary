@@ -72,12 +72,14 @@ media  （现有列）+ display_width, display_height, duration
 ### 3.3 media_original
 
 ```text
-media_original  id, media_id, file_id, source_url, source_key, status, last_error, error_kind, error_source_url
+media_original  id, media_id, file_id, source_url, source_key, declared_kind, status, last_error, error_kind, error_source_url
                 index(media_id)
                 CHECK ((status = 'COMPLETED') = (file_id IS NOT NULL))
+                CHECK ((source_key IS NULL) = (declared_kind IS NULL))
 ```
 
-- 没有 kind 或 role 列。一个原件是什么，看它的文件内容：探测出视频流，就是含视频的原件；只有音频流，就是只有音频的原件；是图片，就是图片原件。
+- 没有 role 列。一个原件是什么，看它的文件内容：探测出视频流，就是含视频的原件；只有音频流，就是只有音频的原件；是图片，就是图片原件。
+- `declared_kind` 是导入时声明的类型（第 6.3 节），只有导入的原件有。下载时探测结果必须和它一致才能完成（第 6.2 节），所以完成的导入原件，声明和内容总是一致的。
 - `source_url` 和 `source_key` 用于导入：`source_key` 是同步时用来匹配同一资源的稳定键。手动上传的原件这两列为空，插入时 `status` 就是 `COMPLETED`。
 - `status` 沿用 `SyncStatus`。它表示"下载并探测完成"，探测失败也记为 `FAILED`。
 - `last_error`、`error_kind`、`error_source_url` 是当前 URL 上最近一次的错误，原件、字幕、封面都一样，约束见 [failure_handling.zh-Hans.md](./failure_handling.zh-Hans.md) 第 4.2 节。
@@ -209,7 +211,7 @@ media_lyrics  id, media_id, origin (FILE|EMBEDDED), language, label, is_default,
 | IMAGE | 1 个 | 不能有 |
 | PDF | 1 个 | 可以有 |
 
-- 这些规则由应用层的统一写入入口校验，取代 `media-composition.ts` 里按 Track 组合的规则。
+- 这些规则由应用层的统一写入入口校验，取代 `media-composition.ts` 里按 Track 组合的规则。上传和编辑按探测出的类型校验；导入按声明的 `kind` 在入口校验，下载时再逐个原件核对（第 6.2 节），所以导入不需要在下载完成后再校验一次组合。
 - 媒体的音轨列表，就是它所有原件里所有 AUDIO 类型的 `av_stream` 合在一起。混流文件里的多条音频流，和单独的音频文件，处理方式完全相同。
 - 视频原件只有一个。如果它里面有多条视频流，只取第一条。"不同版本"和"多机位"都不支持。
 
@@ -270,6 +272,8 @@ media_lyrics  id, media_id, origin (FILE|EMBEDDED), language, label, is_default,
 
 ffprobe 解不开文件时，按"输入被拒"处理（见 [job_queue.zh-Hans.md](./job_queue.zh-Hans.md) 6.1）：原件记为 `FAILED`，写入 `last_error`。
 
+导入的原件探测完还要过准入校验：探测出的类型必须等于 `declared_kind`。不一致时软删除刚上传的文件，什么都不写，原件记为 `FAILED`、`KIND_MISMATCH`（[failure_handling.zh-Hans.md](./failure_handling.zh-Hans.md) 第 7 节）。
+
 用户手动上传的原件不经过 `download` 流水线：提交草稿或添加原件时，先在事务之外探测，再按探测结果校验组合规则（第 4 节），通过后在一个事务里写入，所以插入时 `status` 就是 `COMPLETED`。探测失败或组合不对，请求直接返回 400，什么都不写。
 
 ### 6.3 导入数据格式
@@ -279,7 +283,7 @@ ffprobe 解不开文件时，按"输入被拒"处理（见 [job_queue.zh-Hans.md
 ```text
 media item
   external_id, title, description, type, tags, create_time, published_time   （和现在一样）
-  originals[]   至少 1 个  { url, source_key, language?, label?, is_default? }
+  originals[]   至少 1 个  { url, source_key, kind, language?, label?, is_default? }
   cover         可选       { url, source_key }
   captions[]    可选       { url, source_key, language?, label?, is_default? }
 ```
@@ -287,8 +291,9 @@ media item
 - **只给地址和声明，不给流信息。** 编码、宽高、时长、sidx、`segment_base` 都由服务端探测（第 6.2 节），采集端不再推断，`duration`、`quality`、`stream_layout`、`metadata` 等字段一律删除。
 - **只给最高画质。** 平台的低画质版本不推送。
 - **`source_key`** 是这个资源在该媒体里的稳定键，比如 `video`、`audio:ja`、`caption:zh-CN`。同步时按它匹配：键相同就认为是同一个资源，即使 URL 变了（平台的签名 URL 每次都会变）也不重新下载；资源真的变了（比如平台有了更高画质），采集端要换一个键。同一个媒体里，同一类（原件、字幕）的键不能重复。
+- **`kind`** 是原件的类型：`VIDEO`（含视频流）、`AUDIO`（只有音频）、`IMAGE` 或 `PDF`。原件按键和 `kind` 一起匹配：同一个键换了 `kind`，就当作新的原件，旧的删掉，新的重新下载、重新核对。
 - **`language`、`label`、`is_default`** 是导入时的声明（第 3.7 节）：原件上的声明作用于它里面的音频流，字幕上的声明作用于这条字幕。
-- 组合规则（第 4 节）在入口校验，比如 VIDEO 恰好一个含视频的原件，这一点要等探测后才知道，所以入口只校验数量，探测后再校验内容。
+- 组合规则（第 4 节）在入口按声明的 `kind` 校验，比如 VIDEO 恰好一个 `VIDEO` 原件，加上任意个 `AUDIO` 原件。不通过的请求返回 400，错误里写明是哪个帖子、哪个媒体。
 
 ### 6.4 不在范围内的元数据
 

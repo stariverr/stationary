@@ -404,7 +404,6 @@ class Post {
   final String? publishedTime;
   final String? url;
   final String? syncStatus;
-  final String? lastError;
   final String? authorAvatarUrl;
   final String? description;
   final List<String> tags;
@@ -420,7 +419,6 @@ class Post {
     this.publishedTime,
     this.url,
     this.syncStatus,
-    this.lastError,
     this.authorAvatarUrl,
     this.description,
     required this.tags,
@@ -450,7 +448,6 @@ class Post {
       publishedTime: json['published_time'] as String?,
       url: json['url'] as String?,
       syncStatus: json['sync_status'] as String?,
-      lastError: json['last_error'] as String?,
       authorAvatarUrl: json['author_avatar_url'] as String?,
       description: json['description'] as String?,
       tags: tagsList,
@@ -599,7 +596,6 @@ class PostListItem {
   final String? publishedTime;
   final String? url;
   final String? syncStatus;
-  final String? lastError;
   final String? authorAvatarUrl;
   final String? description;
   final List<String> tags;
@@ -615,7 +611,6 @@ class PostListItem {
     this.publishedTime,
     this.url,
     this.syncStatus,
-    this.lastError,
     this.authorAvatarUrl,
     this.description,
     required this.tags,
@@ -647,7 +642,6 @@ class PostListItem {
       publishedTime: json['published_time'] as String?,
       url: json['url'] as String?,
       syncStatus: json['sync_status'] as String?,
-      lastError: json['last_error'] as String?,
       authorAvatarUrl: json['author_avatar_url'] as String?,
       description: json['description'] as String?,
       tags: tagsList,
@@ -666,7 +660,6 @@ class PostListItem {
       publishedTime: publishedTime,
       url: url,
       syncStatus: syncStatus,
-      lastError: lastError,
       authorAvatarUrl: authorAvatarUrl,
       description: description,
       tags: tags,

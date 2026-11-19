@@ -7,7 +7,8 @@ import { draftFileIds, validateDraftMediaGroups, type MediaDraft } from "@/lib/v
 import { convertToVtt, insertUploadedCaption, storeVtt } from "./captions";
 import { CoverService } from "./cover";
 import { markMediaMetaChanged } from "./meta-changes";
-import { compositionError, insertUploadedOriginal, kindOfProbe } from "./originals";
+import { compositionError } from "@/lib/validation/media-composition";
+import { insertUploadedOriginal, kindOfProbe } from "./originals";
 import { probeOriginal, ProbeRejectedError, type OriginalProbe } from "./probe";
 import { replaceMediaTagsTx } from "./tags";
 import { Priority } from "@/infra/queue/policy";

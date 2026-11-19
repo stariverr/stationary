@@ -261,7 +261,6 @@ export const usePostStore = defineStore("posts", () => {
             type: apiPost.type as "TEXT" | "MULTI_MEDIA",
             url: apiPost.url,
             sync_status: apiPost.sync_status || "PENDING",
-            last_error: apiPost.last_error || null,
             media: uiMedia,
         };
     };
@@ -387,7 +386,6 @@ export const usePostStore = defineStore("posts", () => {
                     type: detail.type as "TEXT" | "MULTI_MEDIA",
                     originalUrl: detail.url || "",
                     sync_status: detail.sync_status || "PENDING",
-                    last_error: detail.last_error || null,
                 } as Post;
             }
             return null;

@@ -1,9 +1,9 @@
 /**
- * The draft shape of a media the user uploads, and the checks that can run before its files are probed. What the
- * originals actually hold is checked against the composition rules after probing (features/media/originals.ts).
+ * The composition rules of a media, the draft shape of a media the user uploads, and the checks that can run before its
+ * files are probed.
  */
 import * as v from "valibot";
-import { MediaType } from "@/db/schema";
+import { MediaType, type OriginalKind } from "@/db/schema";
 import { getFileCategories, type FileCategory } from "@/lib/utils/file";
 
 /** Media types that can have a cover: one image, uploaded or imported, that their previews are rendered from. */
@@ -11,6 +11,37 @@ export const COVER_MEDIA_TYPES: ReadonlySet<MediaType> = new Set([MediaType.VIDE
 
 /** Media types that can have captions. */
 export const CAPTION_MEDIA_TYPES: ReadonlySet<MediaType> = new Set([MediaType.VIDEO, MediaType.AUDIO]);
+
+const ORIGINAL_COUNTS: Record<MediaType, string> = {
+    [MediaType.VIDEO]: "one video original and any number of audio-only originals",
+    [MediaType.AUDIO]: "one audio original",
+    [MediaType.LIVE_PHOTO]: "one image original and one video original",
+    [MediaType.IMAGE]: "one image original",
+    [MediaType.PDF]: "one PDF original",
+};
+
+/**
+ * The composition rules (docs/media_refactor.zh-Hans.md, 4), over the kinds of all originals of a media: probed for
+ * uploads and edits, declared for imports.
+ */
+export function compositionError(type: MediaType, kinds: OriginalKind[]): string | null {
+    const count = (kind: OriginalKind) => kinds.filter((k) => k === kind).length;
+    const ok = (() => {
+        switch (type) {
+            case MediaType.VIDEO:
+                return count("VIDEO") === 1 && count("AUDIO") === kinds.length - 1;
+            case MediaType.AUDIO:
+                return kinds.length === 1 && count("AUDIO") === 1;
+            case MediaType.LIVE_PHOTO:
+                return kinds.length === 2 && count("IMAGE") === 1 && count("VIDEO") === 1;
+            case MediaType.IMAGE:
+                return kinds.length === 1 && count("IMAGE") === 1;
+            case MediaType.PDF:
+                return kinds.length === 1 && count("PDF") === 1;
+        }
+    })();
+    return ok ? null : `${type} media takes ${ORIGINAL_COUNTS[type]}; got ${kinds.length === 0 ? "none" : kinds.join(", ")}`;
+}
 
 const DraftFileIdSchema = v.pipe(v.string(), v.uuid());
 

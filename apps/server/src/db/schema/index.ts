@@ -95,13 +95,21 @@ export enum SourceErrorKind {
     UNREADABLE = "UNREADABLE",
     /** Anything else: storage, a bug, a run past its deadline; retried. */
     INTERNAL = "INTERNAL",
+    /** The probed original is not the kind the import declared, e.g. a "video" that only holds audio. */
+    KIND_MISMATCH = "KIND_MISMATCH",
 }
 export const SourceErrorKindEnum = pgEnum("source_error_kind", [
     SourceErrorKind.NETWORK,
     SourceErrorKind.SOURCE_UNAVAILABLE,
     SourceErrorKind.UNREADABLE,
     SourceErrorKind.INTERNAL,
+    SourceErrorKind.KIND_MISMATCH,
 ]);
+
+/** What an original holds: an image, a PDF, audio with video, or audio alone (docs/media_refactor.zh-Hans.md, 4). */
+export const ORIGINAL_KINDS = ["IMAGE", "PDF", "VIDEO", "AUDIO"] as const;
+export type OriginalKind = (typeof ORIGINAL_KINDS)[number];
+export const OriginalKindEnum = pgEnum("original_kind", ORIGINAL_KINDS);
 
 /**
  * The error columns of a source row and their checks (docs/failure_handling.zh-Hans.md, 4): `last_error`,
@@ -317,7 +325,6 @@ export const Post = pgTable(
         /** Source Platform URL */
         url: text("url").default(""),
         sync_status: SyncStatusEnum("sync_status").default(SyncStatus.PENDING).notNull(),
-        last_error: text("last_error"),
         workflow_run_id: text("workflow_run_id"),
         library_id: uuid("library_id").notNull(),
         create_time: temporal("create_time")
@@ -421,7 +428,6 @@ export const Media = pgTable(
         // TODO: Change it to not null
         published_time: temporal("published_time"),
         sync_status: SyncStatusEnum("sync_status").default(SyncStatus.PENDING).notNull(),
-        last_error: text("last_error"),
         workflow_run_id: text("workflow_run_id"),
         create_time: temporal("create_time")
             .default(sql`now()`)
@@ -556,6 +562,8 @@ export const MediaOriginal = pgTable(
         declared_language: text("declared_language"),
         declared_label: text("declared_label"),
         declared_default: boolean("declared_default"),
+        /** The kind the import declares; the probe has to agree before the original completes. Null for an upload. */
+        declared_kind: OriginalKindEnum("declared_kind"),
         /** COMPLETED means downloaded and probed; a source or probe that is rejected ends FAILED. */
         status: SyncStatusEnum("status").notNull(),
         last_error: text("last_error"),
@@ -572,6 +580,7 @@ export const MediaOriginal = pgTable(
         uniqueIndex("media_original_media_source_key_unique").on(table.media_id, table.source_key).where(sql`${table.source_key} IS NOT NULL`),
         check("media_original_file_when_completed", sql`(${table.status} = 'COMPLETED') = (${table.file_id} IS NOT NULL)`),
         check("media_original_source_pair", sql`(${table.source_url} IS NULL) = (${table.source_key} IS NULL)`),
+        check("media_original_declared_kind", sql`(${table.source_key} IS NULL) = (${table.declared_kind} IS NULL)`),
         check("media_original_source_or_file", sql`${table.source_url} IS NOT NULL OR ${table.file_id} IS NOT NULL`),
         ...sourceErrorChecks("media_original", table),
     ],

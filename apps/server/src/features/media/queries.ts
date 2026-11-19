@@ -55,7 +55,6 @@ export const MediaService = {
                 create_time: toIsoTimestamp(media.create_time) ?? undefined,
                 published_time: toIsoTimestamp(media.published_time) ?? undefined,
                 sync_status: media.sync_status,
-                last_error: media.last_error,
                 url: fileUrl(mainOriginal(media.type, states)?.file ?? null),
                 width: media.display_width,
                 height: media.display_height,

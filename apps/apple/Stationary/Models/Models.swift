@@ -182,7 +182,6 @@ public struct MediaItem: Codable, Identifiable, Hashable, Sendable {
     public let title: String?
     public let description: String?
     public let sync_status: SyncStatus?
-    public let last_error: String?
     public let url: String?
     public let cover_url: String?
     public let covers: [MediaPreviewAsset]?
@@ -234,7 +233,6 @@ public struct PostListItem: Codable, Identifiable, Hashable, Sendable {
     public let create_time: String
     public let published_time: String?
     public let sync_status: SyncStatus
-    public let last_error: String?
     public let media: [MediaItem]?
     
     public var coverImageUrl: String? {
@@ -260,7 +258,6 @@ public struct PostDetailResponse: Codable, Identifiable, Sendable {
     public let type: PostType
     public let url: String?
     public let sync_status: SyncStatus
-    public let last_error: String?
     public let media: [MediaItem]?
 }
 

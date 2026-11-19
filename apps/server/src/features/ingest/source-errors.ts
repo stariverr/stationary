@@ -2,7 +2,7 @@
  * Classifies why the download of a source failed (docs/failure_handling.zh-Hans.md, 5). Only errors known to be about
  * the input are final; anything uncertain is retried.
  */
-import { SourceErrorKind } from "@/db/schema";
+import { SourceErrorKind, type OriginalKind } from "@/db/schema";
 import { ProbeRejectedError } from "@/features/media/probe";
 import { getErrorMessage } from "@/lib/utils/error";
 import { DownloadStatusError } from "@/lib/utils/media";
@@ -15,6 +15,14 @@ export class SourceTransferError extends Error {
     constructor(cause: unknown) {
         super(getErrorMessage(cause), { cause });
         this.name = "SourceTransferError";
+    }
+}
+
+/** The probed original is not the kind the import declared (docs/failure_handling.zh-Hans.md, 7). */
+export class KindMismatchError extends Error {
+    constructor(declared: OriginalKind, probed: OriginalKind) {
+        super(`Declared as ${declared}, but the file holds ${probed}`);
+        this.name = "KindMismatchError";
     }
 }
 
@@ -33,6 +41,7 @@ export function classifySourceError(error: unknown): SourceError {
             : { kind: SourceErrorKind.NETWORK, retryable: true, message };
     }
     if (error instanceof ProbeRejectedError) return { kind: SourceErrorKind.UNREADABLE, retryable: false, message };
+    if (error instanceof KindMismatchError) return { kind: SourceErrorKind.KIND_MISMATCH, retryable: false, message };
     if (error instanceof SourceTransferError) return { kind: SourceErrorKind.NETWORK, retryable: true, message };
     return { kind: SourceErrorKind.INTERNAL, retryable: true, message };
 }

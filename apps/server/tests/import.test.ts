@@ -1,7 +1,8 @@
+import * as v from "valibot";
 import { describe, expect, test } from "bun:test";
 import { DraftFileStatus, MediaType, DeleteStatus } from "../src/db/schema";
-import { draftStructureError, validateDraftMediaGroups, type MediaDraft } from "../src/lib/validation/media-composition";
-import { compositionError, originalCountError } from "../src/features/media/originals";
+import { compositionError, draftStructureError, validateDraftMediaGroups, type MediaDraft } from "../src/lib/validation/media-composition";
+import { PostItemSchema } from "../src/features/ingest/schema";
 import { consumeDraftFile, deleteDraftFile, DraftFileUnavailableError } from "../src/features/import/draft-file";
 import { getFileCategories, getMimeTypeByExt, type FileCategory } from "../src/lib/utils/file";
 
@@ -28,11 +29,45 @@ describe("media composition (section 4)", () => {
     ] as const)("rejects %s made of %p", (type, kinds) => {
         expect(compositionError(type, [...kinds])).not.toBeNull();
     });
+});
 
-    test("counts originals before they are probed", () => {
-        expect(originalCountError(MediaType.VIDEO, 3)).toBeNull();
-        expect(originalCountError(MediaType.LIVE_PHOTO, 1)).not.toBeNull();
-        expect(originalCountError(MediaType.IMAGE, 2)).not.toBeNull();
+describe("imported media declare their kinds (failure handling, 6)", () => {
+    const post = (type: MediaType, originals: { source_key: string; kind?: string }[]) => ({
+        title: "",
+        external_id: "p1",
+        author: {},
+        platform: "DOUYIN",
+        media: [
+            {
+                external_id: "m1",
+                type,
+                originals: originals.map((original) => ({
+                    url: `https://cdn.test/${original.source_key}`,
+                    ...original,
+                })),
+            },
+        ],
+    });
+
+    test("accepts originals whose declared kinds make up the media", () => {
+        const result = v.safeParse(
+            PostItemSchema,
+            post(MediaType.VIDEO, [
+                { source_key: "video", kind: "VIDEO" },
+                { source_key: "audio", kind: "AUDIO" },
+            ]),
+        );
+        expect(result.success).toBe(true);
+    });
+
+    test("rejects a media its declared kinds do not make up, naming the post and media", () => {
+        const result = v.safeParse(PostItemSchema, post(MediaType.VIDEO, [{ source_key: "audio", kind: "AUDIO" }]));
+        expect(result.success).toBe(false);
+        expect(result.issues?.[0].message).toStartWith("Post p1, media m1: ");
+    });
+
+    test("requires the kind of every original", () => {
+        expect(v.safeParse(PostItemSchema, post(MediaType.IMAGE, [{ source_key: "image" }])).success).toBe(false);
     });
 });
 
@@ -78,9 +113,16 @@ describe("media drafts", () => {
     test("rejects files that cannot be what the draft uses them as", () => {
         expect(draftStructureError(draft({ originals: [ids.caption] }), fileName)).toContain("cannot be an original");
         expect(draftStructureError(draft({ cover: ids.video }), fileName)).toBe("A cover must be an image");
-        expect(draftStructureError(draft({ type: MediaType.IMAGE, originals: [ids.cover], cover: ids.cover }), fileName)).toContain(
-            "cannot have a cover",
-        );
+        expect(
+            draftStructureError(
+                draft({
+                    type: MediaType.IMAGE,
+                    originals: [ids.cover],
+                    cover: ids.cover,
+                }),
+                fileName,
+            ),
+        ).toContain("cannot have a cover");
         expect(draftStructureError(draft({ captions: [{ draft_file_id: ids.cover, is_default: false }] }), fileName)).toContain(
             "is not a caption file",
         );
