@@ -1,20 +1,25 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { AudioLines, Download, FileStack, Loader2, Plus, RefreshCw, Star, Subtitles, Trash2 } from "@lucide/vue";
+import { AudioLines, Download, FileStack, Loader2, Plus, RefreshCw, RotateCcw, Shapes, Star, Subtitles, Trash2 } from "@lucide/vue";
 import { toast } from "vue-sonner";
 import { apiErrorMessage, useApi } from "@/composables/useApi";
 import { useImportStore } from "@/stores/import";
 import { useLibraryStore } from "@/stores/library";
 import { Input } from "@/components/ui/input";
+import MediaChangeTypeDialog from "@/components/MediaChangeTypeDialog.vue";
 import MediaCoverPanel from "@/components/MediaCoverPanel.vue";
+import SourceErrorNote from "@/components/SourceErrorNote.vue";
 import type { ApiResponse } from "@/types/api";
 import { MediaType, type MediaCaption, type MediaDetail, type MediaOriginal, type PlaybackAudioTrack } from "@/types/post";
 import { formatBytes } from "@/utils/media";
+import { canRetry } from "@/utils/source-errors";
 
 /**
- * Edits what a media is made of: its originals (add, replace, delete, download), its captions (add, rename, set the
- * default, delete), its audio tracks (rename, set the default) and its cover. New files go up as draft files first;
- * the server probes them and refuses a change that leaves the media incomplete.
+ * Edits what a media is made of: its type, its originals (add, replace, delete, download), its captions (add, replace,
+ * rename, set the default, delete), its audio tracks (rename, set the default) and its cover. New files go up as draft
+ * files first; the server probes them and refuses a change that leaves the media incomplete. An imported file that
+ * failed shows why and the fix for it (docs/failure_handling.zh-Hans.md, 9.2): a retry after a network or server
+ * error, a replacement for a file that cannot be read, a type change for a file that is not what the import declared.
  */
 const props = withDefaults(defineProps<{ mediaId: string; isDark?: boolean }>(), { isDark: false });
 
@@ -155,6 +160,9 @@ const replaceOriginal = (original: MediaOriginal) =>
         ),
     );
 
+const retryOriginal = (original: MediaOriginal) =>
+    runEdit(`original:${original.id}`, () => post(`/originals/${original.id}/retry`), "media.editor.source_retried");
+
 const deleteOriginal = (original: MediaOriginal) => {
     if (!confirm(t("media.editor.original_delete_confirm"))) return;
     void runEdit(`original:${original.id}`, () => post(`/originals/${original.id}/delete`), "media.editor.original_deleted");
@@ -209,6 +217,18 @@ const addCaption = () =>
         runEdit("caption:new", () => withDraftFile(file, (id) => post("/captions", { draft_file_id: id })), "media.editor.caption_added"),
     );
 
+const replaceCaption = (caption: MediaCaption) =>
+    pickFile(".srt,.vtt,.ass", (file) =>
+        runEdit(
+            `caption:${caption.id}`,
+            () => withDraftFile(file, (id) => post("/captions", { draft_file_id: id, replaces: caption.id })),
+            "media.editor.caption_replaced",
+        ),
+    );
+
+const retryCaption = (caption: MediaCaption) =>
+    runEdit(`caption:${caption.id}`, () => post(`/captions/${caption.id}/retry`), "media.editor.source_retried");
+
 const saveCaption = (caption: MediaCaption) =>
     runEdit(`caption:${caption.id}`, () => post(`/captions/${caption.id}/update`, infoPatch(caption.id)), "media.editor.saved");
 
@@ -230,6 +250,22 @@ const saveAudioTrack = (track: PlaybackAudioTrack) =>
 const makeDefaultAudioTrack = (track: PlaybackAudioTrack) =>
     runEdit(`audio:${track.id}`, () => post(`/audio-tracks/${track.id}/update`, { is_default: true }), "media.editor.saved");
 
+// --- Type ---
+
+const isChangingType = ref(false);
+/** The original whose kind did not match, ticked for deletion when the dialog opens from its row. */
+const typeChangeOriginalIds = ref<string[]>([]);
+
+const openChangeType = (original?: MediaOriginal) => {
+    typeChangeOriginalIds.value = original ? [original.id] : [];
+    isChangingType.value = true;
+};
+
+const handleTypeChanged = async () => {
+    await fetchDetail();
+    emit("changed");
+};
+
 const statusClass = (status: string) =>
     status === "FAILED" ? "text-red-500" : status === "COMPLETED" ? (props.isDark ? "text-zinc-500" : "text-zinc-400") : "text-amber-500";
 
@@ -239,6 +275,11 @@ const buttonClass = computed(() =>
     props.isDark
         ? "border-zinc-800 bg-zinc-900 text-zinc-200 hover:bg-zinc-800"
         : "border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50",
+);
+const emphasisButtonClass = computed(() =>
+    props.isDark
+        ? "border-blue-800 bg-blue-950/40 text-blue-300 hover:bg-blue-950/60"
+        : "border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100",
 );
 const dangerButtonClass = computed(() =>
     props.isDark ? "border-red-900/40 text-red-400 hover:bg-red-950/30" : "border-red-200 text-red-600 hover:bg-red-50",
@@ -254,6 +295,30 @@ const dangerButtonClass = computed(() =>
         </div>
 
         <template v-if="detail">
+            <!-- Type -->
+            <section class="flex items-center justify-between gap-2 p-3 rounded-lg border" :class="rowClass">
+                <div class="flex items-center gap-1.5 text-xs">
+                    <Shapes class="w-3.5 h-3.5" :class="headingClass" />
+                    <span class="font-bold uppercase tracking-wider" :class="headingClass">{{ $t("media.editor.type") }}</span>
+                    <span class="font-semibold">{{ getMediaTypeLabel(detail.type, t) }}</span>
+                </div>
+                <button
+                    type="button"
+                    :disabled="!!busyKey"
+                    class="px-2.5 py-1 rounded-lg border text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    :class="buttonClass"
+                    @click="openChangeType()"
+                >
+                    {{ $t("media.editor.change_type") }}
+                </button>
+            </section>
+            <MediaChangeTypeDialog
+                v-model:open="isChangingType"
+                :media="detail"
+                :preselected-original-ids="typeChangeOriginalIds"
+                @changed="handleTypeChanged"
+            />
+
             <!-- Originals -->
             <section class="space-y-2.5">
                 <div class="flex items-center justify-between gap-2 px-1">
@@ -296,11 +361,29 @@ const dangerButtonClass = computed(() =>
                             <div class="mt-0.5 text-xs truncate" :class="headingClass">
                                 <span v-if="original.mime_type">{{ original.mime_type }}</span>
                                 <span v-if="original.size !== null"> · {{ formatBytes(original.size) }}</span>
-                                <span v-if="original.status !== 'COMPLETED'" :class="statusClass(original.status)">
+                                <span v-if="original.status !== 'COMPLETED' && !original.error_kind" :class="statusClass(original.status)">
                                     · {{ $t(`media.editor.status.${original.status.toLowerCase()}`) }}
                                 </span>
                             </div>
-                            <p v-if="original.last_error" class="mt-1 text-xs text-red-500 break-words">{{ original.last_error }}</p>
+                            <SourceErrorNote
+                                v-if="original.error_kind"
+                                class="mt-1"
+                                :status="original.status"
+                                :kind="original.error_kind"
+                                :declared-kind="original.kind"
+                            />
+                            <button
+                                v-if="original.error_kind === 'KIND_MISMATCH' && original.status === 'FAILED'"
+                                type="button"
+                                :disabled="!!busyKey"
+                                class="mt-1 pl-4 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50 cursor-pointer"
+                                @click="openChangeType(original)"
+                            >
+                                {{ $t("media.editor.change_type") }}
+                            </button>
+                            <p v-if="original.last_error" class="mt-1 text-[11px] break-words" :class="headingClass">
+                                {{ original.last_error }}
+                            </p>
                         </div>
                         <div class="flex items-center gap-1.5">
                             <Loader2 v-if="busyKey === `original:${original.id}`" class="w-3.5 h-3.5 animate-spin" :class="headingClass" />
@@ -317,10 +400,23 @@ const dangerButtonClass = computed(() =>
                                 <Download class="w-3.5 h-3.5" />
                             </button>
                             <button
+                                v-if="canRetry(original.status, original.error_kind)"
+                                type="button"
+                                :disabled="!!busyKey"
+                                class="inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+                                :class="buttonClass"
+                                @click="retryOriginal(original)"
+                            >
+                                <RotateCcw class="w-3.5 h-3.5" />
+                                {{ $t("sync.retry") }}
+                            </button>
+                            <button
                                 type="button"
                                 :disabled="!!busyKey"
                                 class="p-1.5 rounded-lg border transition-colors disabled:opacity-50 cursor-pointer"
-                                :class="buttonClass"
+                                :class="
+                                    original.error_kind === 'UNREADABLE' && original.status === 'FAILED' ? emphasisButtonClass : buttonClass
+                                "
                                 :title="$t('media.editor.replace')"
                                 :aria-label="$t('media.editor.replace')"
                                 @click="replaceOriginal(original)"
@@ -441,7 +537,11 @@ const dangerButtonClass = computed(() =>
                         <span v-if="caption.origin === 'EMBEDDED'" class="text-xs" :class="headingClass">
                             {{ $t("media.editor.embedded") }}
                         </span>
-                        <span v-if="caption.status !== 'COMPLETED'" class="text-xs" :class="statusClass(caption.status)">
+                        <span
+                            v-if="caption.status !== 'COMPLETED' && !caption.error_kind"
+                            class="text-xs"
+                            :class="statusClass(caption.status)"
+                        >
                             {{ $t(`media.editor.status.${caption.status.toLowerCase()}`) }}
                         </span>
                         <button
@@ -467,6 +567,29 @@ const dangerButtonClass = computed(() =>
                             {{ caption.is_default ? $t("media.editor.default") : $t("media.editor.make_default") }}
                         </button>
                         <button
+                            v-if="canRetry(caption.status, caption.error_kind)"
+                            type="button"
+                            :disabled="!!busyKey"
+                            class="inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
+                            :class="buttonClass"
+                            @click="retryCaption(caption)"
+                        >
+                            <RotateCcw class="w-3.5 h-3.5" />
+                            {{ $t("sync.retry") }}
+                        </button>
+                        <button
+                            v-if="caption.origin === 'FILE'"
+                            type="button"
+                            :disabled="!!busyKey"
+                            class="p-1.5 rounded-lg border transition-colors disabled:opacity-50 cursor-pointer"
+                            :class="caption.error_kind === 'UNREADABLE' && caption.status === 'FAILED' ? emphasisButtonClass : buttonClass"
+                            :title="$t('media.editor.replace')"
+                            :aria-label="$t('media.editor.replace')"
+                            @click="replaceCaption(caption)"
+                        >
+                            <RefreshCw class="w-3.5 h-3.5" />
+                        </button>
+                        <button
                             type="button"
                             :disabled="!!busyKey"
                             class="p-1.5 rounded-lg border transition-colors disabled:opacity-50 cursor-pointer"
@@ -477,7 +600,10 @@ const dangerButtonClass = computed(() =>
                         >
                             <Trash2 class="w-3.5 h-3.5" />
                         </button>
-                        <p v-if="caption.last_error" class="basis-full text-xs text-red-500 break-words">{{ caption.last_error }}</p>
+                        <SourceErrorNote v-if="caption.error_kind" class="basis-full" :status="caption.status" :kind="caption.error_kind" />
+                        <p v-if="caption.last_error" class="basis-full text-[11px] break-words" :class="headingClass">
+                            {{ caption.last_error }}
+                        </p>
                     </li>
                 </ul>
             </section>

@@ -264,10 +264,53 @@
                 "in_progress": "処理中",
                 "completed": "完了",
                 "failed": "失敗"
-            }
+            },
+            "type": "種類",
+            "change_type": "種類を変更",
+            "change_type_desc": "新しい種類と、残さないファイルを選んでください。残りのファイルで新しい種類のメディアが成り立つ必要があります。",
+            "new_type": "新しい種類",
+            "delete_originals": "これらのファイルを削除",
+            "drops_captions": "新しい種類には字幕がないため、現在の字幕も削除されます。",
+            "drops_cover": "新しい種類にはカバーがないため、現在のカバーも削除されます。",
+            "type_changed": "種類を変更しました",
+            "cancel": "キャンセル",
+            "confirm": "種類を変更",
+            "caption_replaced": "字幕を置き換えました",
+            "source_retried": "再試行に追加しました"
         }
     },
     "draft_box": {
         "merge_dialog_desc": "選択したファイルを 1 つのメディア（オリジナルファイル、カバー、字幕）にまとめます。"
+    },
+    "sync": {
+        "status": {
+            "pending": "同期待ち",
+            "syncing": "同期中",
+            "retrying": "再試行中",
+            "failed": "同期に失敗"
+        },
+        "reason": {
+            "NETWORK": "ネットワークの問題でダウンロードが完了しませんでした",
+            "INTERNAL": "サーバーエラー",
+            "SOURCE_UNAVAILABLE": "プラットフォームのリンクが無効になりました",
+            "UNREADABLE": "ファイルを読み取れないか、形式に対応していません",
+            "KIND_MISMATCH": "ファイルが宣言された種類と一致しません"
+        },
+        "action": {
+            "retry": "再試行できます",
+            "retrying": "自動で再試行しています",
+            "reshare": "収集アプリからこの投稿をもう一度共有してください",
+            "replace": "エディターでファイルをアップロードして置き換えてください",
+            "change_kind": "種類を変更するか、ファイルを置き換えてください"
+        },
+        "declared_kind": "宣言: {kind}",
+        "retry": "再試行",
+        "edit": "編集",
+        "open_platform": "プラットフォームで開く",
+        "retry_queued": "{count} 件を再試行に追加しました",
+        "nothing_to_retry": "再試行できる失敗はありません",
+        "retry_failed": "再試行できませんでした",
+        "problems": "同期の問題",
+        "retry_all": "すべて再試行"
     }
 }

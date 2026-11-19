@@ -1,7 +1,7 @@
 import type { Ref } from "vue";
 import { useQuery, useQueryClient } from "@tanstack/vue-query";
 import type { ApiResponse } from "@/types/api";
-import type { LibraryPipelines, PipelineFailure, PipelineName } from "@/types/pipeline";
+import type { LibraryPipelines, PipelineFailureGroup, PipelineName } from "@/types/pipeline";
 
 const STATUS_POLL_MS = 5000;
 
@@ -29,7 +29,7 @@ export function useLibraryPipelines(libraryId: Ref<string | null>) {
         await refresh();
     };
 
-    /** Queues every current failure of a pipeline again; resolves to how many were queued. */
+    /** Queues every current failure of a pipeline a retry can get past again; resolves to how many were queued. */
     const retryFailed = async (pipeline: PipelineName) => {
         const res = await useApi<ApiResponse<{ retried: number }>>(`/jobs/pipelines/${libraryId.value}/${pipeline}/retry-failed`, {
             method: "POST",
@@ -41,7 +41,7 @@ export function useLibraryPipelines(libraryId: Ref<string | null>) {
     return { query, setPaused, retryFailed };
 }
 
-/** Recent failures of one pipeline; refetched whenever the failure count it was loaded for changes. */
+/** Recent failures of one pipeline grouped by kind; refetched whenever the failure count it was loaded for changes. */
 export function usePipelineFailures(libraryId: Ref<string | null>, pipeline: Ref<PipelineName | null>, failedCount: Ref<number>) {
     return useQuery({
         queryKey: computed(() => ["pipeline-failures", libraryId.value, pipeline.value, failedCount.value]),
@@ -49,11 +49,11 @@ export function usePipelineFailures(libraryId: Ref<string | null>, pipeline: Ref
         // Keeps the list in place while a changed count reloads it, but not across pipelines.
         placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[2] === pipeline.value ? previous : undefined),
         queryFn: async () => {
-            const res = await useApi<ApiResponse<{ items: PipelineFailure[] }>>(
+            const res = await useApi<ApiResponse<{ groups: PipelineFailureGroup[] }>>(
                 `/jobs/pipelines/${libraryId.value}/${pipeline.value}/failures`,
                 { query: { limit: 50 } },
             );
-            return res?.data?.items ?? [];
+            return res?.data?.groups ?? [];
         },
     });
 }

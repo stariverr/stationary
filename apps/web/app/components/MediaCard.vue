@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from "vue";
 import type { MediaListItem, MappedMediaItem } from "@/stores/media";
-import { Play, Layers, Loader2, FileImage, Trash, Clock, CheckCircle2, AlertCircle, Sparkles, RefreshCw } from "@lucide/vue";
+import { Play, Layers, Loader2, FileImage, Trash, Clock, AlertCircle, Sparkles, RefreshCw } from "@lucide/vue";
+import SourceErrorNote from "@/components/SourceErrorNote.vue";
+import { canRetry } from "@/utils/source-errors";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 
@@ -22,6 +24,8 @@ const { media, isSelected, isChecked, canMove, showCheckbox } = defineProps<{
 const emit = defineEmits<{
     toggleChecked: [checked: boolean];
     click: [event: MouseEvent];
+    /** Open the media in the editor, where its failed sources can be fixed. */
+    edit: [];
 }>();
 
 const videoRef = ref<HTMLVideoElement | null>(null);
@@ -101,13 +105,12 @@ const handleRetrySync = async () => {
     isRetryingSync.value = true;
     try {
         const res = await mediaStore.retrySync([media.id]);
-        if (res && res.success) {
-            toast.success(t("toasts.sync_retry_queued", "Sync retry queued."));
-        } else {
-            throw new Error();
-        }
+        if (!res?.success) throw new Error();
+        const count = res.data?.retriedCount ?? 0;
+        if (count > 0) toast.success(t("sync.retry_queued", { count }));
+        else toast.info(t("sync.nothing_to_retry"));
     } catch {
-        toast.error(t("toasts.sync_retry_failed", "Unable to queue sync retry. Try again."));
+        toast.error(t("sync.retry_failed"));
     } finally {
         isRetryingSync.value = false;
     }
@@ -229,30 +232,17 @@ const handleQueueAi = async () => {
                         <span>{{ media.date }}</span>
                     </div>
                     <div class="flex items-center gap-2 mt-1">
-                        <!-- Media Sync Status (Low Presence) -->
-                        <template v-if="media.sync_status && media.sync_status !== 'COMPLETED'">
-                            <span
-                                v-if="media.sync_status === 'PENDING'"
-                                class="inline-flex items-center gap-1 text-xs font-medium text-zinc-500"
-                            >
-                                <Clock class="size-3 shrink-0" />
-                                <span>Pending Sync</span>
-                            </span>
-                            <span
-                                v-else-if="media.sync_status === 'IN_PROGRESS'"
-                                class="inline-flex items-center gap-1 text-xs font-medium text-blue-500 animate-pulse"
-                            >
-                                <Loader2 class="size-3 animate-spin shrink-0" />
-                                <span>Syncing...</span>
-                            </span>
-                            <span
-                                v-else-if="media.sync_status === 'FAILED'"
-                                class="inline-flex items-center gap-1 text-xs font-medium text-red-500"
-                            >
-                                <AlertCircle class="size-3 shrink-0" />
-                                <span>Sync Failed</span>
-                            </span>
-                        </template>
+                        <!-- Media Sync Status (Low Presence): a failure opens the editor, where it is fixed -->
+                        <button
+                            v-if="media.error_kind"
+                            type="button"
+                            class="min-w-0 text-left hover:underline"
+                            :title="$t('sync.edit')"
+                            @click.stop="emit('edit')"
+                        >
+                            <SourceErrorNote :status="media.sync_status" :kind="media.error_kind" compact />
+                        </button>
+                        <SourceErrorNote v-else :status="media.sync_status" :kind="null" compact />
 
                         <!-- Media AI Status Badge (Low Presence) -->
                         <template v-if="media.ai_status">
@@ -313,14 +303,14 @@ const handleQueueAi = async () => {
                 <span>{{ $t("media.actions.regenerate_previews") }}</span>
             </ContextMenuItem>
             <ContextMenuItem
-                v-if="media.sync_status === 'FAILED'"
+                v-if="canRetry(media.sync_status, media.error_kind)"
                 :disabled="isRetryingSync"
                 class="flex items-center gap-2"
                 @click.stop="handleRetrySync"
             >
                 <Loader2 v-if="isRetryingSync" class="w-4 h-4 animate-spin" />
                 <RefreshCw class="w-4 h-4" />
-                <span>{{ $t("media.actions.retry_sync", "Retry Sync") }}</span>
+                <span>{{ $t("sync.retry") }}</span>
             </ContextMenuItem>
             <ContextMenuItem :disabled="isQueueingAi" class="flex items-center gap-2" @click.stop="handleQueueAi">
                 <Loader2 v-if="isQueueingAi" class="w-4 h-4 animate-spin" />

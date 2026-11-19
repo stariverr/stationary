@@ -8,6 +8,7 @@ import { useLibraryStore } from "@/stores/library";
 import { CheckSquare, Loader2, MoveRight, X, FileImage, RefreshCw, Sparkles, Link } from "@lucide/vue";
 import { useMediaStore, type MappedMediaItem } from "@/stores/media";
 import { usePostStore } from "@/stores/posts";
+import { canRetry } from "@/utils/source-errors";
 import type { Post, PostMedia } from "@/types/post";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
@@ -97,35 +98,25 @@ async function handleLinkToPost() {
     }
 }
 
-const hasSelectedFailedSync = computed(() => {
-    const directFailedMedia = mediaStore.medias.some(
-        (m: MappedMediaItem) => props.mediaIds.includes(String(m.id)) && m.sync_status === "FAILED",
-    );
-    const directFailedPost = postStore.posts.some(
-        (p: Post) =>
-            props.postIds.includes(String(p.id)) && (p.sync_status === "FAILED" || p.media?.some((m) => m.sync_status === "FAILED")),
-    );
-    return directFailedMedia || directFailedPost;
-});
+/** Whether a selected item has a failure a retry can get past; the others need the post shared again or the editor. */
+const hasSelectedRetryableFailure = computed(
+    () =>
+        mediaStore.medias.some((m: MappedMediaItem) => props.mediaIds.includes(String(m.id)) && canRetry(m.sync_status, m.error_kind)) ||
+        postStore.posts.some((p: Post) => props.postIds.includes(String(p.id)) && canRetry(p.sync_status, p.error_kind)),
+);
 
 const handleBatchRetrySync = async () => {
     if (props.postIds.length === 0 && props.mediaIds.length === 0) return;
     isRetryingSync.value = true;
     try {
-        let response;
-        if (props.postIds.length > 0) {
-            response = await postStore.retrySync(props.postIds);
-        } else if (props.mediaIds.length > 0) {
-            response = await mediaStore.retrySync(props.mediaIds);
-        }
-        if (response && response.success) {
-            toast.success("Batch sync retry queued.");
-            emit("cancel");
-        } else {
-            throw new Error();
-        }
+        const response = props.postIds.length > 0 ? await postStore.retrySync(props.postIds) : await mediaStore.retrySync(props.mediaIds);
+        if (!response?.success) throw new Error();
+        const count = response.data?.retriedCount ?? 0;
+        if (count > 0) toast.success(t("sync.retry_queued", { count }));
+        else toast.info(t("sync.nothing_to_retry"));
+        emit("cancel");
     } catch {
-        toast.error("Failed to queue batch sync retry.");
+        toast.error(t("sync.retry_failed"));
     } finally {
         isRetryingSync.value = false;
     }
@@ -379,7 +370,7 @@ const handleMove = async () => {
                     {{ $t("media.actions.regenerate_previews") }}
                 </Button>
                 <Button
-                    v-if="hasSelectedFailedSync"
+                    v-if="hasSelectedRetryableFailure"
                     type="button"
                     variant="outline"
                     size="sm"
@@ -388,7 +379,7 @@ const handleMove = async () => {
                 >
                     <Loader2 v-if="isRetryingSync" class="animate-spin" />
                     <RefreshCw v-else />
-                    {{ $t("media.actions.retry_sync", "Retry Sync") }}
+                    {{ $t("sync.retry") }}
                 </Button>
                 <Button
                     type="button"

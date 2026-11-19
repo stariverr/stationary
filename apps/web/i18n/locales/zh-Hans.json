@@ -547,7 +547,19 @@
                 "in_progress": "处理中",
                 "completed": "就绪",
                 "failed": "失败"
-            }
+            },
+            "type": "类型",
+            "change_type": "改类型",
+            "change_type_desc": "选择新的类型，以及不再保留的文件。剩下的文件要能组成新类型的媒体。",
+            "new_type": "新类型",
+            "delete_originals": "删除这些文件",
+            "drops_captions": "新类型不能有字幕，现有字幕会一并删除。",
+            "drops_cover": "新类型不能有封面，现有封面会一并删除。",
+            "type_changed": "类型已更改",
+            "cancel": "取消",
+            "confirm": "改类型",
+            "caption_replaced": "字幕已替换",
+            "source_retried": "已加入重试"
         }
     },
     "search": {
@@ -1075,7 +1087,9 @@
             "failures": "失败记录",
             "retry_all": "全部重试",
             "no_failures": "没有失败",
-            "failures_error": "无法加载失败记录。"
+            "failures_error": "无法加载失败记录。",
+            "unclassified": "其他失败",
+            "open_post": "查看帖子"
         },
         "pipelines": {
             "scanning": "扫描中",
@@ -1194,5 +1208,36 @@
             "thumb_alt": "缩略图",
             "media_alt": "媒体素材"
         }
+    },
+    "sync": {
+        "status": {
+            "pending": "等待同步",
+            "syncing": "同步中",
+            "retrying": "重试中",
+            "failed": "同步失败"
+        },
+        "reason": {
+            "NETWORK": "网络问题，下载没有完成",
+            "INTERNAL": "服务器出错",
+            "SOURCE_UNAVAILABLE": "平台的链接已经失效，需要重新分享这个帖子",
+            "UNREADABLE": "文件无法读取，或者格式不支持",
+            "KIND_MISMATCH": "文件和声明的类型不符"
+        },
+        "action": {
+            "retry": "可以重试",
+            "retrying": "正在自动重试",
+            "reshare": "在采集端重新分享这个帖子",
+            "replace": "在编辑器里上传文件替换",
+            "change_kind": "改类型，或者替换文件"
+        },
+        "declared_kind": "声明为 {kind}",
+        "retry": "重试",
+        "edit": "编辑",
+        "open_platform": "打开平台链接",
+        "retry_queued": "已将 {count} 项加入重试",
+        "nothing_to_retry": "没有可以重试的失败",
+        "retry_failed": "无法重试",
+        "problems": "同步问题",
+        "retry_all": "全部重试"
     }
 }

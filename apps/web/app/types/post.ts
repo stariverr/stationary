@@ -164,6 +164,8 @@ export const MediaDetailSchema = v.object({
     create_time: v.optional(v.string()),
     published_time: v.optional(v.nullable(v.string())),
     sync_status: v.optional(v.nullable(v.string())),
+    /** The kind that sums up the errors on its imported sources, failed or being retried. */
+    error_kind: v.nullable(SourceErrorKindSchema),
     /** The main original: the image of an IMAGE or LIVE_PHOTO, the video, audio or PDF of the others. */
     url: v.nullable(v.string()),
     /** Displayed size, rotation applied. */
@@ -217,6 +219,8 @@ export const PostListItemSchema = v.object({
     media: v.array(ApiPostListItemMediaSchema),
     type: v.picklist(["TEXT", "MULTI_MEDIA"]),
     sync_status: v.optional(v.nullable(v.string())),
+    /** The kind that sums up the errors of its media. */
+    error_kind: v.nullable(SourceErrorKindSchema),
 });
 export type ApiPostListItem = v.InferOutput<typeof PostListItemSchema>;
 
@@ -237,6 +241,7 @@ export const PostDetailResponseBodySchema = v.object({
     url: v.optional(v.nullable(v.string())),
     type: v.picklist(["TEXT", "MULTI_MEDIA"]),
     sync_status: v.optional(v.nullable(v.string())),
+    error_kind: v.nullable(SourceErrorKindSchema),
 });
 export type ApiPostDetail = v.InferOutput<typeof PostDetailResponseBodySchema>;
 
@@ -248,8 +253,6 @@ export const PostMediaSchema = v.object({
     sort_order: v.number(),
     previews: MediaPreviewsSchema,
     title: v.nullish(v.string()),
-    // Read by post cards, but `/post/list` items do not carry them.
-    sync_status: v.optional(v.nullable(v.string())),
     ai_status: v.optional(v.nullable(v.string())),
     ai_error: v.optional(v.nullable(v.string())),
     width: v.optional(v.number()),
@@ -280,6 +283,8 @@ export const PostSchema = v.object({
     url: v.optional(v.nullable(v.string())),
     media: v.optional(v.array(PostMediaSchema)),
     sync_status: v.optional(v.nullable(v.string())),
+    /** The kind that sums up the errors of its media. */
+    error_kind: v.optional(v.nullable(SourceErrorKindSchema)),
 
     // Mapped fields for UI / Legacy compatibility
     platform: v.enum(Platform),

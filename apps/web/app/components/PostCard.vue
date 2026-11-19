@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from "vue";
 import type { Post } from "@/types/post";
-import { Play, Loader2, FileImage, Link as LinkIcon, Trash, Clock, CheckCircle2, AlertCircle, Sparkles, RefreshCw } from "@lucide/vue";
+import { Play, Loader2, FileImage, Link as LinkIcon, Trash, Clock, AlertCircle, Sparkles, RefreshCw } from "@lucide/vue";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { toast } from "vue-sonner";
 import { useApi } from "@/composables/useApi";
 import { usePostStore } from "@/stores/posts";
 import { useAppLayout } from "@/composables/useAppLayout";
+import SourceErrorNote from "@/components/SourceErrorNote.vue";
+import { canRetry } from "@/utils/source-errors";
 
 const { post, isSelected, isChecked, showCheckbox } = defineProps<{
     post: Post;
@@ -107,21 +109,16 @@ const handleDelete = async () => {
 const isRetryingSync = ref(false);
 const isQueueingAi = ref(false);
 
-const hasFailedMedia = computed(() => {
-    return post.media?.some((m) => m.sync_status === "FAILED");
-});
-
 const handleRetrySync = async () => {
     isRetryingSync.value = true;
     try {
         const res = await postStore.retrySync([post.id]);
-        if (res && res.success) {
-            toast.success(t("toasts.sync_retry_queued", "Sync retry queued."));
-        } else {
-            throw new Error();
-        }
+        if (!res?.success) throw new Error();
+        const count = res.data?.retriedCount ?? 0;
+        if (count > 0) toast.success(t("sync.retry_queued", { count }));
+        else toast.info(t("sync.nothing_to_retry"));
     } catch {
-        toast.error(t("toasts.sync_retry_failed", "Unable to queue sync retry. Try again."));
+        toast.error(t("sync.retry_failed"));
     } finally {
         isRetryingSync.value = false;
     }
@@ -320,30 +317,8 @@ const getPlatformBadgeClass = (platform: string) => {
                         <span v-if="post.type !== 'TEXT' && post.size">{{ post.size }}</span>
                     </div>
                     <div class="flex items-center gap-2 mt-1">
-                        <!-- Post Sync Status (Low Presence) -->
-                        <template v-if="post.sync_status && post.sync_status !== 'COMPLETED'">
-                            <span
-                                v-if="post.sync_status === 'PENDING'"
-                                class="inline-flex items-center gap-1 text-xs font-medium text-zinc-500"
-                            >
-                                <Clock class="size-3 shrink-0" />
-                                <span>Pending Sync</span>
-                            </span>
-                            <span
-                                v-else-if="post.sync_status === 'IN_PROGRESS'"
-                                class="inline-flex items-center gap-1 text-xs font-medium text-blue-500 animate-pulse"
-                            >
-                                <Loader2 class="size-3 animate-spin shrink-0" />
-                                <span>Syncing...</span>
-                            </span>
-                            <span
-                                v-else-if="post.sync_status === 'FAILED'"
-                                class="inline-flex items-center gap-1 text-xs font-medium text-red-500"
-                            >
-                                <AlertCircle class="size-3 shrink-0" />
-                                <span>Sync Failed</span>
-                            </span>
-                        </template>
+                        <!-- Post Sync Status (Low Presence); the post detail lists what failed and how to fix it -->
+                        <SourceErrorNote :status="post.sync_status" :kind="post.error_kind" compact />
 
                         <!-- AI Status Badge (Low Presence) -->
                         <template v-if="post.media?.[0]?.ai_status">
@@ -395,14 +370,14 @@ const getPlatformBadgeClass = (platform: string) => {
                 <span>{{ $t("media.actions.regenerate_previews") }}</span>
             </ContextMenuItem>
             <ContextMenuItem
-                v-if="post.sync_status === 'FAILED' || hasFailedMedia"
+                v-if="canRetry(post.sync_status, post.error_kind)"
                 :disabled="isRetryingSync"
                 class="flex items-center gap-2"
                 @click.stop="handleRetrySync"
             >
                 <Loader2 v-if="isRetryingSync" class="w-4 h-4 animate-spin" />
                 <RefreshCw v-else class="w-4 h-4" />
-                <span>{{ $t("post.actions.retry_sync", "Retry Sync") }}</span>
+                <span>{{ $t("sync.retry") }}</span>
             </ContextMenuItem>
             <ContextMenuItem :disabled="isQueueingAi" class="flex items-center gap-2" @click.stop="handleQueueAi">
                 <Loader2 v-if="isQueueingAi" class="w-4 h-4 animate-spin" />

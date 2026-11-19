@@ -4,7 +4,7 @@ import { useLibraryStore } from "@/stores/library";
 import { previewPosterUrl, previewSrcset, previewThumbnailUrl } from "@/utils/media";
 
 import * as v from "valibot";
-import { MediaPreviewsSchema, type MediaPreviews } from "@/types/post";
+import { MediaPreviewsSchema, SourceErrorKindSchema, type MediaPreviews, type SourceErrorKind } from "@/types/post";
 
 export const MediaListResponseBodySchema = v.object({
     id: v.string(),
@@ -21,6 +21,8 @@ export const MediaListResponseBodySchema = v.object({
     mime_type: v.optional(v.nullable(v.string())),
     previews: MediaPreviewsSchema,
     sync_status: v.optional(v.nullable(v.string())),
+    /** The kind that sums up the errors on its imported sources; only `/media/list` items carry it. */
+    error_kind: v.optional(v.nullable(SourceErrorKindSchema)),
     ai_status: v.optional(v.nullable(v.string())),
     ai_error: v.optional(v.nullable(v.string())),
     matched_details: v.optional(v.nullable(v.unknown())),
@@ -68,6 +70,7 @@ export interface MappedMediaItem {
     poster: string | null;
     srcset: string | null;
     sync_status: string;
+    error_kind: SourceErrorKind | null;
     ai_status: string;
     ai_error: string | null;
     matched_details?: MatchedDetails;
@@ -247,6 +250,7 @@ export const useMediaStore = defineStore("media", () => {
             poster: previewPosterUrl(apiMedia.previews),
             srcset: previewSrcset(apiMedia.previews),
             sync_status: apiMedia.sync_status || "PENDING",
+            error_kind: apiMedia.error_kind ?? null,
             ai_status: apiMedia.ai_status || "PENDING",
             ai_error: apiMedia.ai_error || null,
             matched_details: (apiMedia.matched_details as MatchedDetails) || undefined,
@@ -345,6 +349,7 @@ export const useMediaStore = defineStore("media", () => {
                             poster: previewPosterUrl(item.previews),
                             srcset: previewSrcset(item.previews),
                             sync_status: item.sync_status || "PENDING",
+                            error_kind: null,
                             ai_status: item.ai_status || "PENDING",
                             ai_error: item.ai_error || null,
                             matched_details: (item.matched_details as MatchedDetails) || undefined,
@@ -426,8 +431,9 @@ export const useMediaStore = defineStore("media", () => {
         data?: T;
     }
 
-    const retrySync = async (mediaIds: string[]): Promise<ApiResponse> => {
-        const response = await useApi<ApiResponse>("/task/retry-sync", {
+    /** Retries the sources of the media that failed for a network or server error; `retriedCount` is how many had one. */
+    const retrySync = async (mediaIds: string[]): Promise<ApiResponse<{ retriedCount: number }>> => {
+        const response = await useApi<ApiResponse<{ retriedCount: number }>>("/task/retry-sync", {
             method: "POST",
             body: { media_ids: mediaIds },
         });

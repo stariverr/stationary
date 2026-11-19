@@ -264,10 +264,53 @@
                 "in_progress": "In Bearbeitung",
                 "completed": "Bereit",
                 "failed": "Fehlgeschlagen"
-            }
+            },
+            "type": "Typ",
+            "change_type": "Typ ändern",
+            "change_type_desc": "Wähle den neuen Typ und die Dateien, die er nicht behält. Die übrigen müssen ein Medium des neuen Typs ergeben.",
+            "new_type": "Neuer Typ",
+            "delete_originals": "Diese Dateien löschen",
+            "drops_captions": "Der neue Typ hat keine Untertitel; die vorhandenen werden gelöscht.",
+            "drops_cover": "Der neue Typ hat kein Cover; das vorhandene wird gelöscht.",
+            "type_changed": "Typ geändert",
+            "cancel": "Abbrechen",
+            "confirm": "Typ ändern",
+            "caption_replaced": "Untertitel ersetzt",
+            "source_retried": "Erneut eingereiht"
         }
     },
     "draft_box": {
         "merge_dialog_desc": "Füge die ausgewählten Dateien zu einem Medium zusammen: Originaldateien, Cover und Untertitel."
+    },
+    "sync": {
+        "status": {
+            "pending": "Wartet auf Synchronisierung",
+            "syncing": "Wird synchronisiert",
+            "retrying": "Neuer Versuch läuft",
+            "failed": "Synchronisierung fehlgeschlagen"
+        },
+        "reason": {
+            "NETWORK": "Netzwerkproblem, der Download wurde nicht abgeschlossen",
+            "INTERNAL": "Serverfehler",
+            "SOURCE_UNAVAILABLE": "Der Plattform-Link ist abgelaufen",
+            "UNREADABLE": "Die Datei ist nicht lesbar oder ihr Format wird nicht unterstützt",
+            "KIND_MISMATCH": "Die Datei passt nicht zum angegebenen Typ"
+        },
+        "action": {
+            "retry": "Kann erneut versucht werden",
+            "retrying": "Wird automatisch erneut versucht",
+            "reshare": "Teile diesen Beitrag im Scraper erneut",
+            "replace": "Lade im Editor eine Datei als Ersatz hoch",
+            "change_kind": "Ändere den Typ oder ersetze die Datei"
+        },
+        "declared_kind": "angegeben als {kind}",
+        "retry": "Erneut versuchen",
+        "edit": "Bearbeiten",
+        "open_platform": "Auf der Plattform öffnen",
+        "retry_queued": "{count} erneut eingereiht",
+        "nothing_to_retry": "Hier lässt sich nichts erneut versuchen",
+        "retry_failed": "Erneuter Versuch nicht möglich",
+        "problems": "Synchronisierungsprobleme",
+        "retry_all": "Alle erneut versuchen"
     }
 }

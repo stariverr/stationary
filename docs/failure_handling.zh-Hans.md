@@ -1,6 +1,6 @@
 # 下载失败处理方案
 
-状态：第 1 到 3 步已经实施（2026-11-19），第 4 步（界面）还没有做。实施时同步修改了 [job_queue.zh-Hans.md](./job_queue.zh-Hans.md) 和 [media_refactor.zh-Hans.md](./media_refactor.zh-Hans.md) 的相关章节（第 12 节），因为那两份文档按"现在是什么样"来写。
+状态：第 1 到 4 步已经实施（2026-11-19）。第 4 步只改了 web；Flutter 和 Apple 是只读浏览端，没有编辑器，暂不显示失败原因。实施时同步修改了 [job_queue.zh-Hans.md](./job_queue.zh-Hans.md) 和 [media_refactor.zh-Hans.md](./media_refactor.zh-Hans.md) 的相关章节（第 12 节），因为那两份文档按"现在是什么样"来写。
 
 范围：`download` 流水线的失败怎么分类、怎么记录、怎么显示、怎么修，以及为了让用户的修复不被下一次同步撤销，导入要遵守哪些规则。`avatar` 只定规则，代码以后再改（第 10 节）。预览图、AI 这些衍生流水线的失败模型不变。
 
@@ -242,8 +242,25 @@ kind          VIDEO | AUDIO | IMAGE | PDF，必填，和 OriginalKind 一致
 | `UNREADABLE` | 文件无法读取，或者格式不支持 |
 | `INTERNAL` | 服务器出错 |
 
-- **重试只做一件事：** 把可以重试的失败改回 `PENDING` 再入队。`retry-sync.ts` 和 `retryFailures` 都只处理 `NETWORK`、`INTERNAL`。
-- **"同步中"和"重试中"：** 来源是 `PENDING` 并且带着错误时，显示"重试中"和原因，不放操作按钮。
+每种原因对应一个建议操作：`NETWORK`、`INTERNAL` 是"重试"，`SOURCE_UNAVAILABLE` 是"在采集端重新分享这个帖子"，`UNREADABLE` 是"上传文件替换"，`KIND_MISMATCH` 是"改类型，或者替换文件"。界面只按 `error_kind` 出文案，不解析 `last_error`；`last_error` 只在编辑器和任务页里作为技术细节显示。
+
+- **重试只做一件事：** 把可以重试的失败改回 `PENDING` 再入队。`retry-sync.ts` 和 `retryFailures` 都只处理 `NETWORK`、`INTERNAL`。`retry-sync` 返回的 `retriedCount` 是实际重置了来源的媒体数，为 0 时界面提示"没有可以重试的失败"。
+- **"同步中"和"重试中"：** 来源是 `PENDING` 或 `IN_PROGRESS` 并且带着错误时，显示"重试中"和原因，不放操作按钮。只有 `FAILED` 并且是可以重试的 kind，才显示"重试"。
+
+**主要的 `error_kind`。** 媒体和帖子各带一个 `error_kind`，概括它的来源上的错误，读的时候现算，不落库（`source-rows.ts` 的 `mainErrorKind`、`loadMainErrorKinds`、`loadPostErrorKinds`）：
+
+- 只看带 `source_url` 并且 `error_kind` 不为空的来源行，也就是失败了或者正在重试的导入来源。帖子只看它未删除、不在回收站的媒体。
+- 按优先级取一个：`SOURCE_UNAVAILABLE` > `KIND_MISMATCH` > `UNREADABLE` > `INTERNAL` > `NETWORK`。重试修不了的排在前面，重新分享能刷新整个帖子的 URL，所以排第一。这样主要的 kind 可以重试，就等于它下面所有失败都可以重试，"重试"按钮不会误导人。
+- 出现在 `GET /media/list` 和 `GET /post/list` 的列表项、`GET /post/:id` 的帖子详情，以及 `MediaDetail`（`/media/detail/:id` 和 `/post/:id/media`）上。
+
+**任务页的分组。** `GET /jobs/pipelines/:library_id/:pipeline/failures` 返回 `{ groups: [{ kind, count, items }] }`，按数量从大到小排，`limit` 是每组的条数。每条失败带 `post: { id, url }`，指向主体所在的帖子。download 流水线的 `kind` 是这个媒体主要的 `error_kind`，`error` 是这个 kind 下最近一个来源的 `last_error`；其他流水线不分类，`kind` 为 null，只有一组。
+
+**web 上的位置。**
+
+- 卡片的状态行显示"状态 · 原因"，点它打开编辑器。
+- 帖子详情的信息页顶部有"同步问题"区块（`PostSyncProblems.vue`）。
+- 编辑器顶部是类型和"改类型"（`MediaChangeTypeDialog.vue`，默认勾上类型不符和新类型放不下的原件）。每个来源行显示原因和 `last_error`，可以重试时在"替换"前面放"重试"；`UNREADABLE` 的"替换"加强调色，`KIND_MISMATCH` 的原件旁边有"改类型"，打开时预先勾上它。
+- 任务页按组列出：可以重试的组用页头的"全部重试"；`SOURCE_UNAVAILABLE` 的每条链接到帖子和平台；`UNREADABLE`、`KIND_MISMATCH` 的每条可以在任务页打开编辑器。
 
 ## 10. avatar
 

@@ -4,6 +4,7 @@ import { type Post, type Platform, type ApiPostListItem, type ApiPostDetail } fr
 import { previewLargestUrl, previewPosterUrl, previewSrcset, previewThumbnailUrl } from "@/utils/media";
 
 import { useLibraryStore } from "@/stores/library";
+import type { ApiResponse } from "@/types/api";
 
 export const usePostStore = defineStore("posts", () => {
     const route = useRoute();
@@ -386,6 +387,7 @@ export const usePostStore = defineStore("posts", () => {
                     type: detail.type as "TEXT" | "MULTI_MEDIA",
                     originalUrl: detail.url || "",
                     sync_status: detail.sync_status || "PENDING",
+                    error_kind: detail.error_kind,
                 } as Post;
             }
             return null;
@@ -418,8 +420,9 @@ export const usePostStore = defineStore("posts", () => {
         return router.push({ path: "/posts", query: route.query });
     };
 
+    /** Retries the sources of the posts' media that failed for a network or server error; `retriedCount` is how many media had one. */
     const retrySync = async (postIds: string[]) => {
-        const response = await useApi<any>("/task/retry-sync", {
+        const response = await useApi<ApiResponse<{ retriedCount: number }>>("/task/retry-sync", {
             method: "POST",
             body: { post_ids: postIds },
         });

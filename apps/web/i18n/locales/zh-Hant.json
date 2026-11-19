@@ -515,7 +515,19 @@
                 "in_progress": "處理中",
                 "completed": "就緒",
                 "failed": "失敗"
-            }
+            },
+            "type": "類型",
+            "change_type": "改類型",
+            "change_type_desc": "選擇新的類型，以及不再保留的檔案。剩下的檔案要能組成新類型的媒體。",
+            "new_type": "新類型",
+            "delete_originals": "刪除這些檔案",
+            "drops_captions": "新類型不能有字幕，現有字幕會一併刪除。",
+            "drops_cover": "新類型不能有封面，現有封面會一併刪除。",
+            "type_changed": "類型已變更",
+            "cancel": "取消",
+            "confirm": "改類型",
+            "caption_replaced": "字幕已替換",
+            "source_retried": "已加入重試"
         }
     },
     "search": {
@@ -1024,7 +1036,9 @@
             "failures": "失敗記錄",
             "retry_all": "全部重試",
             "no_failures": "沒有失敗",
-            "failures_error": "無法載入失敗記錄。"
+            "failures_error": "無法載入失敗記錄。",
+            "unclassified": "其他失敗",
+            "open_post": "查看貼文"
         },
         "pipelines": {
             "scanning": "掃描中",
@@ -1062,5 +1076,36 @@
             "view": "查看任務",
             "dismiss": "關閉提醒"
         }
+    },
+    "sync": {
+        "status": {
+            "pending": "等待同步",
+            "syncing": "同步中",
+            "retrying": "重試中",
+            "failed": "同步失敗"
+        },
+        "reason": {
+            "NETWORK": "網路問題，下載沒有完成",
+            "INTERNAL": "伺服器出錯",
+            "SOURCE_UNAVAILABLE": "平台的連結已經失效，需要重新分享這則貼文",
+            "UNREADABLE": "檔案無法讀取，或者格式不支援",
+            "KIND_MISMATCH": "檔案和宣告的類型不符"
+        },
+        "action": {
+            "retry": "可以重試",
+            "retrying": "正在自動重試",
+            "reshare": "在採集端重新分享這則貼文",
+            "replace": "在編輯器裡上傳檔案替換",
+            "change_kind": "改類型，或者替換檔案"
+        },
+        "declared_kind": "宣告為 {kind}",
+        "retry": "重試",
+        "edit": "編輯",
+        "open_platform": "開啟平台連結",
+        "retry_queued": "已將 {count} 項加入重試",
+        "nothing_to_retry": "沒有可以重試的失敗",
+        "retry_failed": "無法重試",
+        "problems": "同步問題",
+        "retry_all": "全部重試"
     }
 }

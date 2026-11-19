@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { NumberField, NumberFieldInput } from "@/components/ui/number-field";
 import { useVisualViewportBottomOffset } from "@/composables/useVisualViewportBottomOffset";
 import { useMediaStore, type MappedMediaItem } from "@/stores/media";
+import MediaEditorDialog from "@/components/MediaEditorDialog.vue";
 import { useLibraryStore } from "@/stores/library";
 import { storeToRefs } from "pinia";
 
@@ -43,6 +44,9 @@ const {
     aiCoverage,
 } = storeToRefs(store);
 const { refetchMedia, selectMedia, clearAiCoverage } = store;
+
+/** The media whose sync failure is being fixed in the editor, opened from its card. */
+const editingMediaId = ref<string | null>(null);
 const { t } = useI18n();
 const { toggleSidebar, isSidebarCollapsed, isCreateMediaOpen } = useAppLayout();
 const libraryStore = useLibraryStore();
@@ -613,6 +617,7 @@ onMounted(() => {
                         :show-checkbox="isSelectionMode || isMediaChecked(media.id)"
                         @toggle-checked="setMediaChecked(media, $event)"
                         @click="handleMediaClick(media, $event)"
+                        @edit="editingMediaId = media.id"
                     />
                 </div>
             </div>
@@ -757,5 +762,12 @@ onMounted(() => {
         />
 
         <CreateMediaDialog v-model:open="showCreateDialog" />
+        <MediaEditorDialog
+            :open="editingMediaId !== null"
+            :media-list="editingMediaId ? [{ id: editingMediaId }] : []"
+            :initial-media-id="editingMediaId"
+            @update:open="!$event && (editingMediaId = null)"
+            @changed="refetchMedia()"
+        />
     </div>
 </template>

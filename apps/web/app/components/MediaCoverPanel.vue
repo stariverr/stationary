@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
-import { ImageOff, Loader2, Trash2, Upload, FileImage } from "@lucide/vue";
+import { ImageOff, Loader2, RotateCcw, Trash2, Upload, FileImage } from "@lucide/vue";
 import { toast } from "vue-sonner";
-import { useApi } from "@/composables/useApi";
+import SourceErrorNote from "@/components/SourceErrorNote.vue";
+import { apiErrorMessage, useApi } from "@/composables/useApi";
 import type { ApiResponse } from "@/types/api";
-import type { MediaCover, MediaPreviews, MediaType } from "@/types/post";
+import type { MediaCover, MediaCoverSource, MediaPreviews, MediaType } from "@/types/post";
 import { canHaveCover } from "@/utils/media";
+import { canRetry } from "@/utils/source-errors";
 
 /**
  * The original cover of a media item, which the user can upload, replace or delete, and the previews the system
- * generates from it, shown read-only.
+ * generates from it, shown read-only. An imported cover that failed to download shows why, with a retry after a
+ * network or server error (docs/failure_handling.zh-Hans.md, 9.2).
  */
 const props = withDefaults(defineProps<{ mediaId: string; isDark?: boolean }>(), { isDark: false });
 
@@ -21,6 +24,7 @@ const emit = defineEmits<{
 interface MediaCoverDetail {
     type: MediaType;
     cover: MediaCover | null;
+    cover_source: MediaCoverSource | null;
     previews: MediaPreviews;
 }
 
@@ -29,10 +33,12 @@ const { t } = useI18n();
 const detail = ref<MediaCoverDetail | null>(null);
 const isUploading = ref(false);
 const isDeleting = ref(false);
+const isRetrying = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 
 const coverable = computed(() => canHaveCover(detail.value?.type));
-const isBusy = computed(() => isUploading.value || isDeleting.value);
+const isBusy = computed(() => isUploading.value || isDeleting.value || isRetrying.value);
+const coverSource = computed(() => detail.value?.cover_source ?? null);
 
 const previewSizes = computed(() => {
     const previews = detail.value?.previews;
@@ -100,6 +106,20 @@ const handleFileSelected = async (event: Event) => {
     }
 };
 
+const handleRetry = async () => {
+    isRetrying.value = true;
+    try {
+        await useApi<ApiResponse<unknown>>(`/media/${props.mediaId}/cover/retry`, { method: "POST" });
+        toast.success(t("media.editor.source_retried"));
+        await fetchDetail();
+        emit("changed");
+    } catch (err) {
+        toast.error(t("media.editor.edit_failed"), { description: apiErrorMessage(err) });
+    } finally {
+        isRetrying.value = false;
+    }
+};
+
 const handleDelete = async () => {
     if (!confirm(t("media.cover.delete_confirm"))) return;
     isDeleting.value = true;
@@ -146,10 +166,28 @@ const handleDelete = async () => {
                 </div>
 
                 <div class="flex-1 min-w-0 flex flex-col gap-2">
-                    <span v-if="!detail.cover" class="text-xs" :class="isDark ? 'text-zinc-500' : 'text-zinc-500'">
+                    <span v-if="!detail.cover && !coverSource?.error_kind" class="text-xs text-zinc-500">
                         {{ $t("media.cover.empty") }}
                     </span>
+                    <SourceErrorNote v-if="coverSource?.error_kind" :status="coverSource.status" :kind="coverSource.error_kind" />
+                    <p v-if="coverSource?.last_error" class="text-[11px] break-words text-zinc-500">{{ coverSource.last_error }}</p>
                     <div class="flex flex-wrap items-center gap-2">
+                        <button
+                            v-if="coverSource && canRetry(coverSource.status, coverSource.error_kind)"
+                            type="button"
+                            :disabled="isBusy"
+                            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                            :class="
+                                isDark
+                                    ? 'border-zinc-800 bg-zinc-900 text-zinc-200 hover:bg-zinc-800'
+                                    : 'border-zinc-200 bg-white text-zinc-800 hover:bg-zinc-50'
+                            "
+                            @click="handleRetry"
+                        >
+                            <Loader2 v-if="isRetrying" class="w-3.5 h-3.5 animate-spin" />
+                            <RotateCcw v-else class="w-3.5 h-3.5" />
+                            {{ $t("sync.retry") }}
+                        </button>
                         <button
                             type="button"
                             :disabled="isBusy"

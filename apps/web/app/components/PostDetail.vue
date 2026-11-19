@@ -39,6 +39,7 @@ import {
 } from "@/types/post";
 import OrphanMediaPickerDialog from "./OrphanMediaPickerDialog.vue";
 import MediaEditorDialog from "./MediaEditorDialog.vue";
+import PostSyncProblems from "./PostSyncProblems.vue";
 
 const { selectedPost, selectedPostId, closePost } = usePosts();
 const { t } = useI18n();
@@ -962,6 +963,14 @@ const confirmTrashMedia = async () => {
                 v-show="activeTab === 'details'"
                 class="min-h-0 flex-1 overflow-y-auto px-5 py-6 scrollbar-thin md:px-6 space-y-6 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100"
             >
+                <PostSyncProblems
+                    v-if="selectedPost"
+                    :post="selectedPost"
+                    :media="postMediaList"
+                    @edit="openMediaEditor"
+                    @retried="refreshPostData(selectedPost.id)"
+                />
+
                 <!-- Playlist Swiper (Linear / Apple style inspector row) -->
                 <section v-if="postMediaList.length" class="space-y-3" aria-labelledby="post-media-heading">
                     <div class="flex items-center justify-between gap-3">

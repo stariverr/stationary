@@ -264,10 +264,53 @@
                 "in_progress": "En cours",
                 "completed": "Prêt",
                 "failed": "Échec"
-            }
+            },
+            "type": "Type",
+            "change_type": "Changer le type",
+            "change_type_desc": "Choisissez le nouveau type et les fichiers qu’il ne garde pas. Les autres doivent former un média du nouveau type.",
+            "new_type": "Nouveau type",
+            "delete_originals": "Supprimer ces fichiers",
+            "drops_captions": "Le nouveau type n’a pas de sous-titres ; ceux existants seront supprimés.",
+            "drops_cover": "Le nouveau type n’a pas de couverture ; celle existante sera supprimée.",
+            "type_changed": "Type modifié",
+            "cancel": "Annuler",
+            "confirm": "Changer le type",
+            "caption_replaced": "Sous-titres remplacés",
+            "source_retried": "Remis en file"
         }
     },
     "draft_box": {
         "merge_dialog_desc": "Combinez les fichiers sélectionnés en un seul média : fichiers originaux, couverture et sous-titres."
+    },
+    "sync": {
+        "status": {
+            "pending": "En attente de synchronisation",
+            "syncing": "Synchronisation",
+            "retrying": "Nouvel essai en cours",
+            "failed": "Échec de la synchronisation"
+        },
+        "reason": {
+            "NETWORK": "Problème réseau, le téléchargement n’a pas abouti",
+            "INTERNAL": "Erreur du serveur",
+            "SOURCE_UNAVAILABLE": "Le lien de la plateforme a expiré",
+            "UNREADABLE": "Le fichier est illisible ou son format n’est pas pris en charge",
+            "KIND_MISMATCH": "Le fichier ne correspond pas au type déclaré"
+        },
+        "action": {
+            "retry": "Peut être réessayé",
+            "retrying": "Nouvel essai automatique",
+            "reshare": "Partagez à nouveau cette publication depuis le collecteur",
+            "replace": "Importez un fichier de remplacement dans l’éditeur",
+            "change_kind": "Changez le type ou remplacez le fichier"
+        },
+        "declared_kind": "déclaré comme {kind}",
+        "retry": "Réessayer",
+        "edit": "Modifier",
+        "open_platform": "Ouvrir sur la plateforme",
+        "retry_queued": "{count} élément(s) remis en file",
+        "nothing_to_retry": "Rien ici ne peut être réessayé",
+        "retry_failed": "Impossible de réessayer",
+        "problems": "Problèmes de synchronisation",
+        "retry_all": "Tout réessayer"
     }
 }

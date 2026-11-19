@@ -264,10 +264,53 @@
                 "in_progress": "Bezig",
                 "completed": "Gereed",
                 "failed": "Mislukt"
-            }
+            },
+            "type": "Type",
+            "change_type": "Type wijzigen",
+            "change_type_desc": "Kies het nieuwe type en de bestanden die het niet houdt. De rest moet samen een medium van het nieuwe type vormen.",
+            "new_type": "Nieuw type",
+            "delete_originals": "Deze bestanden verwijderen",
+            "drops_captions": "Het nieuwe type heeft geen ondertitels; de huidige worden verwijderd.",
+            "drops_cover": "Het nieuwe type heeft geen omslag; de huidige wordt verwijderd.",
+            "type_changed": "Type gewijzigd",
+            "cancel": "Annuleren",
+            "confirm": "Type wijzigen",
+            "caption_replaced": "Ondertitels vervangen",
+            "source_retried": "Opnieuw in de wachtrij gezet"
         }
     },
     "draft_box": {
         "merge_dialog_desc": "Combineer de geselecteerde bestanden tot één medium: originele bestanden, omslag en ondertitels."
+    },
+    "sync": {
+        "status": {
+            "pending": "Wacht op synchronisatie",
+            "syncing": "Bezig met synchroniseren",
+            "retrying": "Nieuwe poging bezig",
+            "failed": "Synchronisatie mislukt"
+        },
+        "reason": {
+            "NETWORK": "Netwerkprobleem, de download is niet voltooid",
+            "INTERNAL": "Serverfout",
+            "SOURCE_UNAVAILABLE": "De platformlink is verlopen",
+            "UNREADABLE": "Het bestand kan niet worden gelezen of het formaat wordt niet ondersteund",
+            "KIND_MISMATCH": "Het bestand past niet bij het opgegeven type"
+        },
+        "action": {
+            "retry": "Kan opnieuw worden geprobeerd",
+            "retrying": "Wordt automatisch opnieuw geprobeerd",
+            "reshare": "Deel dit bericht opnieuw vanuit de scraper",
+            "replace": "Upload in de editor een bestand ter vervanging",
+            "change_kind": "Wijzig het type of vervang het bestand"
+        },
+        "declared_kind": "opgegeven als {kind}",
+        "retry": "Opnieuw proberen",
+        "edit": "Bewerken",
+        "open_platform": "Openen op platform",
+        "retry_queued": "{count} opnieuw in de wachtrij gezet",
+        "nothing_to_retry": "Hier kan niets opnieuw worden geprobeerd",
+        "retry_failed": "Opnieuw proberen is mislukt",
+        "problems": "Synchronisatieproblemen",
+        "retry_all": "Alles opnieuw proberen"
     }
 }

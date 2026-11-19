@@ -95,6 +95,15 @@ const originalCategories: Record<MediaType, readonly FileCategory[]> = {
 const coverMediaTypes: ReadonlySet<MediaType> = new Set([MediaType.VIDEO, MediaType.AUDIO, MediaType.PDF]);
 const captionMediaTypes: ReadonlySet<MediaType> = new Set([MediaType.VIDEO, MediaType.AUDIO]);
 
+/** Whether a media of this type takes an original of this kind (the category of the file it holds). */
+export function takesOriginalKind(mediaType: MediaType, kind: string | null): boolean {
+    return kind != null && (originalCategories[mediaType] as readonly string[]).includes(kind);
+}
+
+export function canHaveCaptions(mediaType: MediaType): boolean {
+    return captionMediaTypes.has(mediaType);
+}
+
 /**
  * The role a file takes in a media of this type, or null when it fits none. Captions are subtitle files, a cover is the
  * image of a VIDEO, AUDIO or PDF; everything else of a fitting category is an original.

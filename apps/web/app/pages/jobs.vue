@@ -3,10 +3,12 @@ import { Pause, Play, Sidebar } from "@lucide/vue";
 import { onKeyStroke } from "@vueuse/core";
 import { toast } from "vue-sonner";
 import { Button } from "@/components/ui/button";
+import MediaEditorDialog from "@/components/MediaEditorDialog.vue";
 import PipelineInspector from "@/components/jobs/PipelineInspector.vue";
 import PipelineTable from "@/components/jobs/PipelineTable.vue";
 import { useAppLayout } from "@/composables/useAppLayout";
 import { useLibraryPipelines } from "@/composables/useLibraryPipelines";
+import { useQueryClient } from "@tanstack/vue-query";
 import { useLibraryStore } from "@/stores/library";
 import type { PipelineName } from "@/types/pipeline";
 import { hasWork } from "@/utils/pipelines";
@@ -62,6 +64,11 @@ async function togglePaused() {
     }
 }
 
+/** The failed media open in the editor; a fix shows up as the pipeline's failure count changing. */
+const editingMediaId = ref<string | null>(null);
+const queryClient = useQueryClient();
+const refreshFailures = () => queryClient.invalidateQueries({ queryKey: ["pipeline-failures"] });
+
 const retrying = ref(false);
 async function retrySelected() {
     if (!selected.value) return;
@@ -97,7 +104,11 @@ async function retrySelected() {
             </div>
 
             <div v-if="libraryId" class="flex items-center gap-1.5 shrink-0">
-                <p v-if="summary" role="status" class="hidden sm:flex items-center gap-1.5 mr-1.5 text-xs font-medium text-zinc-500 tabular-nums">
+                <p
+                    v-if="summary"
+                    role="status"
+                    class="hidden sm:flex items-center gap-1.5 mr-1.5 text-xs font-medium text-zinc-500 tabular-nums"
+                >
                     <span class="size-1.5 rounded-full" :class="summary.dot" aria-hidden="true" />
                     {{ summary.text }}
                 </p>
@@ -114,7 +125,11 @@ async function retrySelected() {
             </div>
         </header>
 
-        <div v-if="paused" role="status" class="shrink-0 px-4 md:px-6 py-2 border-b border-amber-100 bg-amber-50/60 text-xs font-medium text-amber-800">
+        <div
+            v-if="paused"
+            role="status"
+            class="shrink-0 px-4 md:px-6 py-2 border-b border-amber-100 bg-amber-50/60 text-xs font-medium text-amber-800"
+        >
             {{ $t("jobs.paused_notice") }}
         </div>
 
@@ -137,10 +152,19 @@ async function retrySelected() {
                         :retrying="retrying"
                         @close="selected = null"
                         @retry="retrySelected"
+                        @edit="editingMediaId = $event"
                     />
                 </aside>
             </Transition>
         </div>
+
+        <MediaEditorDialog
+            :open="editingMediaId !== null"
+            :media-list="editingMediaId ? [{ id: editingMediaId }] : []"
+            :initial-media-id="editingMediaId"
+            @update:open="!$event && (editingMediaId = null)"
+            @changed="refreshFailures"
+        />
     </div>
 </template>
 

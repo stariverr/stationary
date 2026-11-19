@@ -264,10 +264,53 @@
                 "in_progress": "A processar",
                 "completed": "Pronto",
                 "failed": "Falhou"
-            }
+            },
+            "type": "Tipo",
+            "change_type": "Alterar tipo",
+            "change_type_desc": "Escolha o novo tipo e os ficheiros que não mantém. Os restantes têm de formar um conteúdo do novo tipo.",
+            "new_type": "Novo tipo",
+            "delete_originals": "Eliminar estes ficheiros",
+            "drops_captions": "O novo tipo não tem legendas; as atuais serão eliminadas.",
+            "drops_cover": "O novo tipo não tem capa; a atual será eliminada.",
+            "type_changed": "Tipo alterado",
+            "cancel": "Cancelar",
+            "confirm": "Alterar tipo",
+            "caption_replaced": "Legendas substituídas",
+            "source_retried": "Em fila para nova tentativa"
         }
     },
     "draft_box": {
         "merge_dialog_desc": "Combine os ficheiros selecionados numa multimédia: ficheiros originais, capa e legendas."
+    },
+    "sync": {
+        "status": {
+            "pending": "A aguardar sincronização",
+            "syncing": "A sincronizar",
+            "retrying": "A tentar novamente",
+            "failed": "Falha na sincronização"
+        },
+        "reason": {
+            "NETWORK": "Problema de rede, a transferência não terminou",
+            "INTERNAL": "Erro do servidor",
+            "SOURCE_UNAVAILABLE": "A ligação da plataforma expirou",
+            "UNREADABLE": "O ficheiro não pode ser lido ou o formato não é suportado",
+            "KIND_MISMATCH": "O ficheiro não corresponde ao tipo declarado"
+        },
+        "action": {
+            "retry": "Pode tentar novamente",
+            "retrying": "A tentar novamente automaticamente",
+            "reshare": "Partilhe novamente esta publicação a partir do recolhedor",
+            "replace": "Carregue um ficheiro para o substituir no editor",
+            "change_kind": "Altere o tipo ou substitua o ficheiro"
+        },
+        "declared_kind": "declarado como {kind}",
+        "retry": "Tentar novamente",
+        "edit": "Editar",
+        "open_platform": "Abrir na plataforma",
+        "retry_queued": "{count} em fila para nova tentativa",
+        "nothing_to_retry": "Nada aqui pode ser tentado novamente",
+        "retry_failed": "Não foi possível tentar novamente",
+        "problems": "Problemas de sincronização",
+        "retry_all": "Tentar tudo novamente"
     }
 }

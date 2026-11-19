@@ -30,4 +30,15 @@ export interface PipelineFailure {
     label: string | null;
     error: string;
     time: string | null;
+    /** The post of a media subject. */
+    post: { id: string; url: string | null } | null;
+}
+
+/** Failures of one kind, as GET /jobs/pipelines/:library_id/:pipeline/failures groups them, the largest first. */
+export interface PipelineFailureGroup {
+    /** A SourceErrorKind for `download`; null for a pipeline that does not classify its failures. */
+    kind: string | null;
+    count: number;
+    /** The most recent ones. */
+    items: PipelineFailure[];
 }

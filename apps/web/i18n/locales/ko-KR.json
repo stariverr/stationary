@@ -264,10 +264,53 @@
                 "in_progress": "처리 중",
                 "completed": "준비됨",
                 "failed": "실패"
-            }
+            },
+            "type": "유형",
+            "change_type": "유형 변경",
+            "change_type_desc": "새 유형과 남기지 않을 파일을 고르세요. 나머지 파일로 새 유형의 미디어를 구성할 수 있어야 합니다.",
+            "new_type": "새 유형",
+            "delete_originals": "이 파일 삭제",
+            "drops_captions": "새 유형에는 자막이 없어 현재 자막도 삭제됩니다.",
+            "drops_cover": "새 유형에는 커버가 없어 현재 커버도 삭제됩니다.",
+            "type_changed": "유형을 변경했습니다",
+            "cancel": "취소",
+            "confirm": "유형 변경",
+            "caption_replaced": "자막을 교체했습니다",
+            "source_retried": "다시 시도하도록 추가했습니다"
         }
     },
     "draft_box": {
         "merge_dialog_desc": "선택한 파일을 하나의 미디어(원본 파일, 커버, 자막)로 합칩니다."
+    },
+    "sync": {
+        "status": {
+            "pending": "동기화 대기",
+            "syncing": "동기화 중",
+            "retrying": "재시도 중",
+            "failed": "동기화 실패"
+        },
+        "reason": {
+            "NETWORK": "네트워크 문제로 다운로드가 완료되지 않았습니다",
+            "INTERNAL": "서버 오류",
+            "SOURCE_UNAVAILABLE": "플랫폼 링크가 만료되었습니다",
+            "UNREADABLE": "파일을 읽을 수 없거나 지원하지 않는 형식입니다",
+            "KIND_MISMATCH": "파일이 선언된 유형과 맞지 않습니다"
+        },
+        "action": {
+            "retry": "다시 시도할 수 있습니다",
+            "retrying": "자동으로 다시 시도하는 중",
+            "reshare": "수집 앱에서 이 게시물을 다시 공유하세요",
+            "replace": "편집기에서 파일을 업로드해 교체하세요",
+            "change_kind": "유형을 바꾸거나 파일을 교체하세요"
+        },
+        "declared_kind": "선언된 유형: {kind}",
+        "retry": "다시 시도",
+        "edit": "편집",
+        "open_platform": "플랫폼에서 열기",
+        "retry_queued": "{count}개를 다시 시도하도록 추가했습니다",
+        "nothing_to_retry": "다시 시도할 수 있는 실패가 없습니다",
+        "retry_failed": "다시 시도하지 못했습니다",
+        "problems": "동기화 문제",
+        "retry_all": "모두 다시 시도"
     }
 }

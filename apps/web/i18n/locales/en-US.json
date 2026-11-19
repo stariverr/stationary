@@ -547,7 +547,19 @@
                 "in_progress": "Processing",
                 "completed": "Ready",
                 "failed": "Failed"
-            }
+            },
+            "type": "Type",
+            "change_type": "Change type",
+            "change_type_desc": "Pick the new type and the files it does not keep. The rest must make up a media of the new type.",
+            "new_type": "New type",
+            "delete_originals": "Delete these files",
+            "drops_captions": "The new type has no captions; the current ones will be deleted.",
+            "drops_cover": "The new type has no cover; the current one will be deleted.",
+            "type_changed": "Type changed",
+            "cancel": "Cancel",
+            "confirm": "Change type",
+            "caption_replaced": "Caption replaced",
+            "source_retried": "Queued for retry"
         }
     },
     "search": {
@@ -1075,7 +1087,9 @@
             "failures": "Failures",
             "retry_all": "Retry all",
             "no_failures": "No failures",
-            "failures_error": "Couldn't load failures."
+            "failures_error": "Couldn't load failures.",
+            "unclassified": "Other failures",
+            "open_post": "Open post"
         },
         "pipelines": {
             "scanning": "scanning",
@@ -1194,5 +1208,36 @@
             "thumb_alt": "Thumbnail",
             "media_alt": "Media asset"
         }
+    },
+    "sync": {
+        "status": {
+            "pending": "Waiting to sync",
+            "syncing": "Syncing",
+            "retrying": "Retrying",
+            "failed": "Sync failed"
+        },
+        "reason": {
+            "NETWORK": "Network problem, the download did not finish",
+            "INTERNAL": "Server error",
+            "SOURCE_UNAVAILABLE": "The platform link has expired",
+            "UNREADABLE": "The file cannot be read or its format is not supported",
+            "KIND_MISMATCH": "The file does not match its declared type"
+        },
+        "action": {
+            "retry": "Retry it",
+            "retrying": "Retrying automatically",
+            "reshare": "Share this post again from the scraper",
+            "replace": "Upload a file to replace it in the editor",
+            "change_kind": "Change the type, or replace the file"
+        },
+        "declared_kind": "declared as {kind}",
+        "retry": "Retry",
+        "edit": "Edit",
+        "open_platform": "Open on platform",
+        "retry_queued": "Queued {count} for retry",
+        "nothing_to_retry": "Nothing here can be retried",
+        "retry_failed": "Could not retry",
+        "problems": "Sync problems",
+        "retry_all": "Retry all"
     }
 }
