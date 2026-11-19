@@ -61,6 +61,17 @@ describe("refreshPostSyncStatus", () => {
         expect(await postStatus(postId)).toEqual({ status: SyncStatus.COMPLETED, error: null });
     });
 
+    databaseTest("a media still syncing wins over a failed one", async () => {
+        const { postId, mediaIds } = await postWith([SyncStatus.FAILED, SyncStatus.PENDING, SyncStatus.COMPLETED]);
+
+        await db.transaction((tx) => refreshPostSyncStatus(tx, [postId]));
+        expect(await postStatus(postId)).toEqual({ status: SyncStatus.PENDING, error: null });
+
+        await db.update(Media).set({ sync_status: SyncStatus.IN_PROGRESS }).where(eq(Media.id, mediaIds[1]!));
+        await db.transaction((tx) => refreshPostSyncStatus(tx, [postId]));
+        expect(await postStatus(postId)).toEqual({ status: SyncStatus.IN_PROGRESS, error: null });
+    });
+
     databaseTest("leaves a post in the trash alone and refreshes it on restore", async () => {
         const { postId, mediaIds } = await postWith([SyncStatus.FAILED]);
         await db.transaction((tx) => refreshPostSyncStatus(tx, [postId]));

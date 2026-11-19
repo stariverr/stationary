@@ -2,7 +2,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { eq, inArray, sql } from "drizzle-orm";
 import { Library, Media, MediaCover, MediaOriginal, MediaType, SourceErrorKind, SyncStatus } from "@/db/schema";
 import { downloadPipeline } from "@/features/ingest/download-pipeline";
+import { refreshMediaSyncStatus } from "@/features/media/composition";
 import { db } from "@/global/db";
+import { Priority } from "@/infra/queue/policy";
 import type { ReconcileContext } from "@/infra/queue/types";
 
 /**
@@ -51,7 +53,7 @@ async function imageMedia(originalUrl: string, extra: { cover?: string } = {}) {
 }
 
 function reconcile(mediaId: string) {
-    const ctx: ReconcileContext = { subjectId: mediaId, libraryId, space: null, signal: new AbortController().signal, fence: async () => {} };
+    const ctx: ReconcileContext = { subjectId: mediaId, libraryId, space: null, priority: Priority.CHANGE, signal: new AbortController().signal, fence: async () => {} };
     return downloadPipeline.reconcile(ctx);
 }
 
@@ -111,6 +113,7 @@ describe("download failures", () => {
             error_kind: SourceErrorKind.NETWORK,
             error_source_url: broken,
         });
+        expect((await mediaOf(mediaId)).sync_status).toBe(SyncStatus.PENDING);
         expect((await downloadPipeline.scanPage(libraryId, null, 100, null)).subjectIds).toEqual([mediaId]);
     }, 15_000);
 
@@ -126,6 +129,27 @@ describe("download failures", () => {
         expect((await mediaOf(mediaId)).sync_status).toBe(SyncStatus.FAILED);
     });
 
+    databaseTest("a media sums up its imported sources, and one still syncing wins over a failed one", async () => {
+        const mediaId = await imageMedia(url(500), { cover: url(404) });
+        const status = async () => {
+            await db.transaction((tx) => refreshMediaSyncStatus(tx, [mediaId]));
+            const media = await mediaOf(mediaId);
+            return { status: media.sync_status, error: media.last_error };
+        };
+        const fail = (table: typeof MediaOriginal | typeof MediaCover, error: string) =>
+            db
+                .update(table)
+                .set({ status: SyncStatus.FAILED, last_error: error, error_kind: SourceErrorKind.SOURCE_UNAVAILABLE, error_source_url: sql`source_url` })
+                .where(eq(table.media_id, mediaId));
+
+        await fail(MediaCover, "404");
+        expect(await status()).toEqual({ status: SyncStatus.PENDING, error: null });
+        await db.update(MediaOriginal).set({ status: SyncStatus.IN_PROGRESS }).where(eq(MediaOriginal.media_id, mediaId));
+        expect(await status()).toEqual({ status: SyncStatus.IN_PROGRESS, error: null });
+        await fail(MediaOriginal, "410");
+        expect((await status()).status).toBe(SyncStatus.FAILED);
+    });
+
     databaseTest("used-up attempts fail the sources, which keep their own error", async () => {
         const mediaId = await imageMedia(url(500), { cover: url(200) });
         await db
@@ -133,7 +157,7 @@ describe("download failures", () => {
             .set({ last_error: "503 from the CDN", error_kind: SourceErrorKind.NETWORK, error_source_url: sql`source_url` })
             .where(eq(MediaOriginal.media_id, mediaId));
 
-        await db.transaction((tx) => downloadPipeline.recordFailure(tx, { subjectId: mediaId, space: null, error: "The run timed out", errorKind: null }));
+        await db.transaction((tx) => downloadPipeline.recordFailure(tx, { subjectId: mediaId, space: null, priority: Priority.CHANGE, error: "The run timed out", errorKind: null }));
 
         expect(await originalOf(mediaId)).toMatchObject({ status: SyncStatus.FAILED, last_error: "503 from the CDN", error_kind: SourceErrorKind.NETWORK });
         expect(await coverOf(mediaId)).toMatchObject({ status: SyncStatus.FAILED, last_error: "The run timed out", error_kind: SourceErrorKind.INTERNAL });
@@ -143,7 +167,7 @@ describe("download failures", () => {
     databaseTest("retrying failures only runs media a retry can get past", async () => {
         const retryable = await imageMedia(url(500));
         const gone = await imageMedia(url(404));
-        await db.transaction((tx) => downloadPipeline.recordFailure(tx, { subjectId: retryable, space: null, error: "503", errorKind: SourceErrorKind.NETWORK }));
+        await db.transaction((tx) => downloadPipeline.recordFailure(tx, { subjectId: retryable, space: null, priority: Priority.CHANGE, error: "503", errorKind: SourceErrorKind.NETWORK }));
         await reconcile(gone);
 
         const retried = await db.transaction((tx) => downloadPipeline.resetFailures!(tx, [retryable, gone]));

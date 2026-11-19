@@ -2,7 +2,7 @@ import { type Transaction } from "@/global/db";
 import { Post, Media, Author, DeleteStatus, SyncStatus, TagSource } from "@/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { avatarOrigin } from "@/features/author/avatar-pipeline";
-import { refreshPostSyncStatus } from "@/features/media/composition";
+import { refreshMediaSyncStatus, refreshPostSyncStatus } from "@/features/media/composition";
 import { originalCountError } from "@/features/media/originals";
 import { releaseMediaAssets } from "@/features/media/release";
 import { markChanged } from "@/infra/queue/changes";
@@ -225,17 +225,14 @@ export async function saveIngestMetadata(postData: PostItemData, targetLibraryId
         mediaIds.push(mediaId);
         await syncEntityTags(targetLibraryId, "media", mediaId, mediaData.tags || [], TagSource.SCRAPER, "media.tags", tagLookup, tx);
 
-        // A media waiting for sources, or one whose last sync failed, goes back to the download pipeline.
-        const needsDownload = await syncImportedSources(tx, { id: mediaId, type: mediaData.type }, mediaData);
-        if (media && (needsDownload || media.sync_status !== SyncStatus.COMPLETED)) {
-            await tx.update(Media).set({ sync_status: SyncStatus.PENDING, last_error: null }).where(eq(Media.id, mediaId));
-            hasPendingTasks = true;
-        }
+        if (await syncImportedSources(tx, { id: mediaId, type: mediaData.type }, mediaData)) hasPendingTasks = true;
     }
 
     if (hasPendingTasks && existingPost) {
         await tx.update(Post).set({ workflow_run_id: workflowRunId }).where(eq(Post.id, postId));
     }
+    // The media's sources changed with the import; their status and the post's follow.
+    await refreshMediaSyncStatus(tx, mediaIds);
     await refreshPostSyncStatus(tx, [postId]);
 
     return {

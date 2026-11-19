@@ -1,6 +1,6 @@
 import { and, eq, inArray, or } from "drizzle-orm";
-import { DeleteStatus, Media, Post, SyncStatus } from "@/db/schema";
-import { lockPosts, refreshPostSyncStatus } from "@/features/media/composition";
+import { DeleteStatus, Media, Post } from "@/db/schema";
+import { lockPosts, refreshMediaSyncStatus } from "@/features/media/composition";
 import { resetRetryableSources } from "@/features/media/source-rows";
 import { canReachItems, type LibraryAuth } from "@/features/library/access";
 import { db } from "@/global/db";
@@ -32,17 +32,17 @@ export async function retrySync(input: RetrySyncInput, auth: LibraryAuth) {
         if (mediaFilters.length === 0) return { retriedCount };
 
         const media = await tx
-            .update(Media)
-            .set({ sync_status: SyncStatus.PENDING, last_error: null })
-            .where(and(or(...mediaFilters), eq(Media.delete_status, DeleteStatus.ACTIVE)))
-            .returning({ id: Media.id });
+            .select({ id: Media.id })
+            .from(Media)
+            .where(and(or(...mediaFilters), eq(Media.delete_status, DeleteStatus.ACTIVE)));
         if (input.media_ids?.length) retriedCount += media.filter((row) => input.media_ids!.includes(row.id)).length;
-        await refreshPostSyncStatus(tx, postIds);
 
-        const mediaIds = media.map((row) => row.id);
-        if (mediaIds.length === 0) return { retriedCount };
-        await resetRetryableSources(tx, mediaIds);
-        await markChanged(tx, Aspect.MEDIA_SOURCE, mediaIds, Priority.CHANGE);
+        const retried = await resetRetryableSources(
+            tx,
+            media.map((row) => row.id),
+        );
+        await refreshMediaSyncStatus(tx, retried);
+        await markChanged(tx, Aspect.MEDIA_SOURCE, retried, Priority.CHANGE);
         return { retriedCount };
     });
 }

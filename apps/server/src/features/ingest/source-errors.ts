@@ -10,7 +10,7 @@ import { DownloadStatusError } from "@/lib/utils/media";
 /** Statuses that say the URL itself is refused: malformed, gone, or (most often) past its signature's expiry. */
 const UNAVAILABLE_STATUSES = new Set([400, 403, 404, 410]);
 
-/** The transfer of a source broke off: the connection, a timeout, or the stream into storage. */
+/** The source could not be reached or broke off mid-transfer: the connection or a timeout. Storage errors are not. */
 export class SourceTransferError extends Error {
     constructor(cause: unknown) {
         super(getErrorMessage(cause), { cause });
