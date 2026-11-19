@@ -33,6 +33,7 @@ import {
     updateCaption,
 } from "@/features/media/edit";
 import { loadOriginalStates } from "@/features/media/originals";
+import { loadMainErrorKinds } from "@/features/media/source-rows";
 import { mediaStoragePath } from "@/features/media/storage";
 import { buildMediaDashManifest, buildMediaHlsMaster, buildMediaHlsRendition } from "@/features/playback/manifests";
 import { readPackagedPart } from "@/features/playback/packaging";
@@ -162,7 +163,11 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
         .offset(offset);
 
     const mediaIds = rawMedia.map((m) => m.id);
-    const [previewsByMediaId, mainUrls] = await Promise.all([loadPreviewImages(mediaIds), MediaService.getMainUrls(rawMedia)]);
+    const [previewsByMediaId, mainUrls, errorKinds] = await Promise.all([
+        loadPreviewImages(mediaIds),
+        MediaService.getMainUrls(rawMedia),
+        loadMainErrorKinds(db, mediaIds),
+    ]);
 
     const aiRows =
         mediaIds.length > 0
@@ -191,6 +196,7 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
             create_time: toIsoTimestamp(m.create_time) ?? undefined,
             published_time: toIsoTimestamp(m.published_time) ?? undefined,
             sync_status: m.sync_status,
+            error_kind: errorKinds.get(m.id) ?? null,
             ai_status: aiStatus.status,
             ai_error: aiStatus.error,
             url: mainUrls.get(m.id) ?? null,

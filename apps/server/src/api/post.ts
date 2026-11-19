@@ -4,7 +4,19 @@ import * as v from "valibot";
 import { error, success } from "@/lib/response";
 import { Code } from "@/lib/code";
 import { AuthEnv, ownedLibrary, requireAuth } from "@/lib/auth/middleware";
-import { Media, Post, File as DbFile, DeleteStatus, PostSource, Author, MediaType, PostTag, Tag, TagStatus } from "@/db/schema";
+import {
+    Media,
+    Post,
+    File as DbFile,
+    DeleteStatus,
+    PostSource,
+    Author,
+    MediaType,
+    PostTag,
+    Tag,
+    TagStatus,
+    SourceErrorKind,
+} from "@/db/schema";
 import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lte, exists, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { PostService } from "@/features/post/post-service";
@@ -17,6 +29,7 @@ import { MediaService } from "@/features/media/queries";
 import { loadPreviewImages, NO_PREVIEWS, type PreviewImages } from "@/features/media/preview";
 import { CreatePostSchema } from "@/features/post/schema";
 import { CreatePostError, createPost } from "@/features/post/create-post";
+import { loadPostErrorKinds } from "@/features/media/source-rows";
 
 const router = new Hono<AuthEnv>();
 const activePostFilter = and(eq(Post.delete_status, DeleteStatus.ACTIVE), isNull(Post.recycle_time));
@@ -149,6 +162,7 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
         .offset(offset);
 
     const postIds = rawPosts.map((p) => p.id);
+    const errorKinds = await loadPostErrorKinds(db, postIds);
 
     type MediaItem = Pick<typeof Media.$inferSelect, "id" | "post_id" | "type" | "sort_order"> & {
         previews: PreviewImages;
@@ -231,6 +245,7 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
             create_time: toIsoTimestamp(post.create_time),
             published_time: toIsoTimestamp(post.published_time),
             sync_status: post.sync_status,
+            error_kind: errorKinds.get(post.id) ?? null,
             media: postMedia,
         };
     });
@@ -338,6 +353,8 @@ export const PostDetailResponseBodySchema = v.object({
     type: v.optional(v.picklist(["TEXT", "MULTI_MEDIA"])),
     url: v.optional(v.nullable(v.string())),
     sync_status: v.optional(v.string()),
+    /** The kind that sums up the errors of its media (docs/failure_handling.zh-Hans.md, 9.2). */
+    error_kind: v.nullable(v.enum(SourceErrorKind)),
 });
 
 router.get("/detail/:id", requireAuth, validate("param", PostDetailRequestPathParamSchema), async (c) => {
@@ -367,6 +384,7 @@ router.get("/detail/:id", requireAuth, validate("param", PostDetailRequestPathPa
         .where(and(eq(PostTag.post_id, id), eq(Tag.status, TagStatus.ACTIVE)))
         .orderBy(asc(PostTag.id));
     const postTags = postTagsList.map((pt) => pt.name);
+    const errorKind = (await loadPostErrorKinds(db, [id])).get(id) ?? null;
 
     const result: v.InferOutput<typeof PostDetailResponseBodySchema> = {
         id: postData.id,
@@ -384,6 +402,7 @@ router.get("/detail/:id", requireAuth, validate("param", PostDetailRequestPathPa
         media_count: postData.media_count,
         type: (postData.media_count ?? 0) > 0 ? "MULTI_MEDIA" : "TEXT",
         sync_status: postData.sync_status,
+        error_kind: errorKind,
         url: postData.url,
     };
 

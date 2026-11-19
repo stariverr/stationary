@@ -63,6 +63,10 @@ export interface PipelineFailure {
     readonly label: string | null;
     readonly error: string;
     readonly time: Temporal.Instant | null;
+    /** Why it failed, for pipelines that classify their failures; the failures page groups by it. */
+    readonly kind?: string | null;
+    /** The post the subject belongs to, for pipelines whose subject is a media. */
+    readonly post?: { readonly id: string; readonly url: string | null } | null;
 }
 
 interface PipelineHandlerBase {

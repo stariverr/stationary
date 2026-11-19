@@ -1,5 +1,5 @@
 import { and, eq, inArray, or } from "drizzle-orm";
-import { DeleteStatus, Media, Post } from "@/db/schema";
+import { DeleteStatus, Media } from "@/db/schema";
 import { lockPosts, refreshMediaSyncStatus } from "@/features/media/composition";
 import { resetRetryableSources } from "@/features/media/source-rows";
 import { canReachItems, type LibraryAuth } from "@/features/library/access";
@@ -15,27 +15,19 @@ export async function retrySync(input: RetrySyncInput, auth: LibraryAuth) {
         throw new RetrySyncError("One or more items were not found");
     }
 
-    // Retrying a post retries all of its media; their downloads are queued again, with the sources that failed for a
-    // retryable reason. A source the platform refused or that cannot be read fails the media again until it changes.
+    // Retrying a post retries all of its media: their sources that failed for a retryable reason go back to PENDING and
+    // download again. A source the platform refused or that cannot be read stays failed until it changes, so the count
+    // is of the media that actually had something to retry.
     return db.transaction(async (tx) => {
-        const postIds = await lockPosts(tx, { postIds: input.post_ids, mediaIds: input.media_ids });
-        let retriedCount = 0;
-        if (input.post_ids?.length) {
-            const posts = await tx.select({ id: Post.id }).from(Post).where(inArray(Post.id, input.post_ids));
-            retriedCount += posts.length;
-        }
-
+        await lockPosts(tx, { postIds: input.post_ids, mediaIds: input.media_ids });
         const mediaFilters = [
             ...(input.post_ids?.length ? [inArray(Media.post_id, input.post_ids)] : []),
             ...(input.media_ids?.length ? [inArray(Media.id, input.media_ids)] : []),
         ];
-        if (mediaFilters.length === 0) return { retriedCount };
-
         const media = await tx
             .select({ id: Media.id })
             .from(Media)
             .where(and(or(...mediaFilters), eq(Media.delete_status, DeleteStatus.ACTIVE)));
-        if (input.media_ids?.length) retriedCount += media.filter((row) => input.media_ids!.includes(row.id)).length;
 
         const retried = await resetRetryableSources(
             tx,
@@ -43,6 +35,6 @@ export async function retrySync(input: RetrySyncInput, auth: LibraryAuth) {
         );
         await refreshMediaSyncStatus(tx, retried);
         await markChanged(tx, Aspect.MEDIA_SOURCE, retried, Priority.CHANGE);
-        return { retriedCount };
+        return { retriedCount: retried.length };
     });
 }

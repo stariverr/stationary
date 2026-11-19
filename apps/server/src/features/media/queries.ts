@@ -7,6 +7,7 @@ import { assemblePlayback } from "@/features/playback/assembly";
 import { CoverService } from "./cover";
 import { kindOfOriginal, kindOfState, loadOriginalStates, type OriginalKind, type OriginalState } from "./originals";
 import { loadPreviewImages, NO_PREVIEWS } from "./preview";
+import { loadMainErrorKinds } from "./source-rows";
 
 /** The original a media is shown by: its image (IMAGE, LIVE_PHOTO), video, audio or PDF. */
 const MAIN_KIND: Record<MediaType, OriginalKind> = {
@@ -28,7 +29,7 @@ export const MediaService = {
     async getDetails(mediaList: Array<typeof Media.$inferSelect>, startPosition = 0) {
         if (!mediaList.length) return [];
         const mediaIds = mediaList.map((m) => m.id);
-        const [previewsByMedia, coversByMedia, coverSources, statesByMedia, playbackByMedia, captionRows] = await Promise.all([
+        const [previewsByMedia, coversByMedia, coverSources, statesByMedia, playbackByMedia, captionRows, errorKinds] = await Promise.all([
             loadPreviewImages(mediaIds),
             CoverService.loadUrls(mediaIds),
             CoverService.loadSources(mediaIds),
@@ -40,6 +41,7 @@ export const MediaService = {
                 .leftJoin(DbFile, and(eq(DbFile.id, MediaCaption.vtt_file_id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
                 .where(inArray(MediaCaption.media_id, mediaIds))
                 .orderBy(asc(MediaCaption.create_time)),
+            loadMainErrorKinds(db, mediaIds),
         ]);
 
         return mediaList.map((media, index) => {
@@ -56,6 +58,7 @@ export const MediaService = {
                 create_time: toIsoTimestamp(media.create_time) ?? undefined,
                 published_time: toIsoTimestamp(media.published_time) ?? undefined,
                 sync_status: media.sync_status,
+                error_kind: errorKinds.get(media.id) ?? null,
                 url: fileUrl(mainOriginal(media.type, states)?.file ?? null),
                 width: media.display_width,
                 height: media.display_height,

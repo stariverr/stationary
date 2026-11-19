@@ -1,13 +1,13 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { and, asc, desc, eq, exists, gt, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
-import { DeleteStatus, File, Media, MediaCaption, MediaCover, MediaOriginal, SourceErrorKind, SyncStatus } from "@/db/schema";
+import { DeleteStatus, File, Media, MediaCaption, MediaCover, MediaOriginal, Post, SourceErrorKind, SyncStatus } from "@/db/schema";
 import { db, type DbClient, type Transaction } from "@/global/db";
 import { env } from "@/global/env";
 import { convertToVtt, makeDefaultCaption, storeVtt } from "@/features/media/captions";
 import { lockPosts, refreshMediaSyncStatus } from "@/features/media/composition";
 import { completeOriginal, kindOfProbe } from "@/features/media/originals";
 import { probeOriginal } from "@/features/media/probe";
-import { NO_SOURCE_ERROR, resetRetryableSources } from "@/features/media/source-rows";
+import { mainErrorKind, NO_SOURCE_ERROR, resetRetryableSources } from "@/features/media/source-rows";
 import { mediaStoragePath } from "@/features/media/storage";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
@@ -431,15 +431,21 @@ export const downloadPipeline: SubjectPipelineHandler = {
         return new Map(rows.map((row) => [row.libraryId, row.count]));
     },
 
-    /** A failed media is listed with the error of its most recently failed source, where the failure is kept (4.4). */
+    /**
+     * A failed media is listed with its main error kind (9.2) and the error of its most recently failed source of that
+     * kind, where the failure is kept (4.4).
+     */
     async listFailures(libraryId, limit) {
         const query = db
             .select({
                 subjectId: Media.id,
                 label: Media.title,
                 time: Media.update_time,
+                postId: Post.id,
+                postUrl: Post.url,
             })
             .from(Media)
+            .leftJoin(Post, eq(Post.id, Media.post_id))
             .where(failedMedia([libraryId]))
             .orderBy(desc(Media.update_time))
             .$dynamic();
@@ -455,6 +461,7 @@ export const downloadPipeline: SubjectPipelineHandler = {
                                   .select({
                                       mediaId: table.media_id,
                                       error: table.last_error,
+                                      kind: table.error_kind,
                                       time: table.update_time,
                                   })
                                   .from(table)
@@ -466,9 +473,15 @@ export const downloadPipeline: SubjectPipelineHandler = {
                   )
                       .flat()
                       .sort((a, b) => Temporal.Instant.compare(b.time, a.time));
-        return medias.map((media) => ({
-            ...media,
-            error: sources.find((source) => source.mediaId === media.subjectId)?.error ?? "",
-        }));
+        return medias.map(({ postId, postUrl, ...media }) => {
+            const own = sources.filter((source) => source.mediaId === media.subjectId);
+            const kind = mainErrorKind(own.map((source) => source.kind!));
+            return {
+                ...media,
+                kind,
+                error: own.find((source) => source.kind === kind)?.error ?? "",
+                post: postId ? { id: postId, url: postUrl || null } : null,
+            };
+        });
     },
 };

@@ -3,6 +3,7 @@ import { requeue } from "@/infra/queue/changes";
 import { pipelineHandlers } from "@/infra/queue/handlers";
 import { PIPELINE_NAMES, parseQueueName, type PipelineName } from "@/infra/queue/pipelines";
 import { countQueue } from "@/infra/queue/store";
+import type { PipelineFailure } from "@/infra/queue/types";
 
 export interface PipelineStatus {
     readonly pipeline: PipelineName;
@@ -71,8 +72,27 @@ export async function pipelineStatus(libraryIds: readonly string[]): Promise<Map
     return result;
 }
 
-export function listFailures(libraryId: string, pipeline: PipelineName, limit: number) {
-    return pipelineHandlers[pipeline].listFailures(libraryId, limit);
+export interface FailureGroup {
+    /** The kind its failures share; null for a pipeline that does not classify its failures. */
+    readonly kind: string | null;
+    readonly count: number;
+    /** The most recent failures of the group, at most the limit asked for. */
+    readonly failures: readonly PipelineFailure[];
+}
+
+/**
+ * The current failures of a pipeline in a library, grouped by kind, the largest group first, so the page can tell what
+ * most failures are and act on each kind (docs/failure_handling.zh-Hans.md, 9.2).
+ */
+export async function listFailureGroups(libraryId: string, pipeline: PipelineName, limit: number): Promise<FailureGroup[]> {
+    const groups = new Map<string | null, PipelineFailure[]>();
+    for (const failure of await pipelineHandlers[pipeline].listFailures(libraryId)) {
+        const kind = failure.kind ?? null;
+        groups.set(kind, [...(groups.get(kind) ?? []), failure]);
+    }
+    return [...groups]
+        .map(([kind, failures]) => ({ kind, count: failures.length, failures: failures.slice(0, limit) }))
+        .sort((a, b) => b.count - a.count);
 }
 
 /** Queues every current failure of a pipeline in a library that a run may get past again; returns how many. */

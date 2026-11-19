@@ -329,7 +329,8 @@ handler 返回 `done`，或者下面三类之一（抛异常等同于 `retry`）
 
 - `GET /api/jobs/pipelines?library_id=`：各流水线的状态、是否暂停、等待和封锁时长。
 - `PUT /api/jobs/pipelines/:library_id/paused`，body `{ paused }`。
-- `GET /api/jobs/pipelines/:library_id/:pipeline/failures`、`POST /api/jobs/pipelines/:library_id/:pipeline/retry-failed`。
+- `GET /api/jobs/pipelines/:library_id/:pipeline/failures`：当前的失败按 `kind` 分组，`{ groups: [{ kind, count, items }] }`，数量大的组在前，`limit` 是每组的条数。
+- `POST /api/jobs/pipelines/:library_id/:pipeline/retry-failed`：只重新排队重试能解决的失败（有 `resetFailures` 的流水线由它决定）。
 - `POST /api/ai/media/process`：重试已记录的失败，并给四条 AI 流水线各请求一次 scan。
 - 以上接口都校验库归属和 API 令牌的库范围。
 
@@ -340,7 +341,7 @@ handler 返回 `done`，或者下面三类之一（抛异常等同于 `retry`）
    - `reconcile`：读当前状态，只做差异；写结果的事务里先写，再 `ctx.fence(tx)`，再 `markChanged` 产出的方面（只在真的变了时，优先级传 `ctx.priority`）。
    - `recordFailure`：把失败连同输入写到结果行。结果行上没有地方记失败的话，先加字段。
    - `scanPage`：按对象 id 翻页，只返回需要处理、且失败不适用于当前输入的对象。
-   - `countFailures`、`listFailures`：任务页用。
+   - `countFailures`、`listFailures`：任务页用。`listFailures` 可以给每条失败填 `kind`（任务页按它分组）和 `post`（主体所在的帖子）；不分类的流水线不填。
    - 可选：`maxAttempts`、`timeoutMs`、`blockedMs`、`patrol`、`settled`。
 3. 在 `handlers.ts` 注册。
 4. 让所有改动输入的写入方，在自己的事务里调用 `markChanged`。

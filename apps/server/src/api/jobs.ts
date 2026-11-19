@@ -5,7 +5,7 @@ import { Code } from "@/lib/code";
 import * as v from "valibot";
 import { validate } from "@/lib/validation/validator";
 import { PIPELINE_NAMES, type PipelineName } from "@/infra/queue/pipelines";
-import { listFailures, pipelineStatus, retryFailures } from "@/infra/queue/status";
+import { listFailureGroups, pipelineStatus, retryFailures } from "@/infra/queue/status";
 import { setLibraryPaused } from "@/infra/queue/store";
 
 export const jobsApp = new Hono<AuthEnv>();
@@ -36,6 +36,7 @@ const PausedBodySchema = v.strictObject({
 });
 
 const FailuresQuerySchema = v.object({
+    /** At most this many failures per group. */
     limit: v.optional(v.pipe(v.string(), v.toNumber(), v.integer(), v.minValue(1), v.maxValue(200)), "50"),
 });
 
@@ -75,7 +76,7 @@ jobsApp.put(
     },
 );
 
-// GET /api/jobs/pipelines/:library_id/:pipeline/failures - Subjects whose failure still applies
+// GET /api/jobs/pipelines/:library_id/:pipeline/failures - Subjects whose failure still applies, grouped by kind
 jobsApp.get(
     "/pipelines/:library_id/:pipeline/failures",
     requireAuth,
@@ -89,14 +90,19 @@ jobsApp.get(
         const target = await resolvePipelineParams(c, user.id, params.library_id, params.pipeline);
         if (!target) return c.json(error(Code.NOT_FOUND, "Library or pipeline not found"), 404);
 
-        const failures = await listFailures(target.library.id, target.pipeline, Number(c.req.valid("query").limit));
+        const groups = await listFailureGroups(target.library.id, target.pipeline, Number(c.req.valid("query").limit));
         return c.json(
             success(Code.SUCCESS, {
-                items: failures.map((failure) => ({
-                    subject_id: failure.subjectId,
-                    label: failure.label,
-                    error: failure.error,
-                    time: failure.time?.toString() ?? null,
+                groups: groups.map((group) => ({
+                    kind: group.kind,
+                    count: group.count,
+                    items: group.failures.map((failure) => ({
+                        subject_id: failure.subjectId,
+                        label: failure.label,
+                        error: failure.error,
+                        time: failure.time?.toString() ?? null,
+                        post: failure.post ?? null,
+                    })),
                 })),
             }),
         );

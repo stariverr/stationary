@@ -313,6 +313,8 @@ const MediaDetailResponseSchema = v.object({
     create_time: v.optional(v.string()),
     published_time: v.optional(v.string()),
     sync_status: v.string(),
+    /** The kind that sums up the errors on its imported sources, failed or being retried (docs/failure_handling.zh-Hans.md, 9.2). */
+    error_kind: v.nullable(v.enum(SourceErrorKind)),
     url: v.nullable(v.string()),
     width: v.nullable(v.number()),
     height: v.nullable(v.number()),
@@ -1233,11 +1235,11 @@ const routes: RouteItem[] = [
     {
         path: "/api/task/retry-sync",
         method: "post",
-        summary: "Retry tasks that failed to synchronize",
+        summary: "Retry the sources of posts and media that failed for a network or server error",
         tags: ["Task"],
         bodySchema: RetrySyncSchema,
         requiresAuth: true,
-        responseSchema: makeUnifiedSuccessResponse({ type: "object" }),
+        responseSchema: makeUnifiedSuccessResponse({ type: "object", properties: { retriedCount: { type: "integer" } } }),
     },
     {
         path: "/api/ai/media/process",
@@ -1298,13 +1300,41 @@ const routes: RouteItem[] = [
     {
         path: "/api/jobs/pipelines/:library_id/:pipeline/failures",
         method: "get",
-        summary: "List the current failures of a pipeline",
+        summary: "List the current failures of a pipeline, grouped by kind, the largest group first",
         tags: ["Jobs"],
         paramSchema: v.object({ library_id: v.pipe(v.string(), v.uuid()), pipeline: v.string() }),
         requiresAuth: true,
         responseSchema: makeUnifiedSuccessResponse({
             type: "object",
-            properties: { items: { type: "array", items: { type: "object" } } },
+            properties: {
+                groups: {
+                    type: "array",
+                    items: {
+                        type: "object",
+                        properties: {
+                            kind: { type: "string", nullable: true },
+                            count: { type: "integer" },
+                            items: {
+                                type: "array",
+                                items: {
+                                    type: "object",
+                                    properties: {
+                                        subject_id: { type: "string" },
+                                        label: { type: "string", nullable: true },
+                                        error: { type: "string" },
+                                        time: { type: "string", nullable: true },
+                                        post: {
+                                            type: "object",
+                                            nullable: true,
+                                            properties: { id: { type: "string" }, url: { type: "string", nullable: true } },
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
         }),
     },
     {

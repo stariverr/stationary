@@ -1,11 +1,14 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { eq, inArray, sql } from "drizzle-orm";
-import { Library, Media, MediaCover, MediaOriginal, MediaType, SourceErrorKind, SyncStatus } from "@/db/schema";
+import { Library, Media, MediaCover, MediaOriginal, MediaType, Post, SourceErrorKind, SyncStatus } from "@/db/schema";
 import { downloadPipeline } from "@/features/ingest/download-pipeline";
 import { syncImportedSources } from "@/features/ingest/media-sources";
 import { refreshMediaSyncStatus } from "@/features/media/composition";
+import { loadMainErrorKinds, loadPostErrorKinds, mainErrorKind } from "@/features/media/source-rows";
+import { retrySync } from "@/features/sync/retry-sync";
 import { db } from "@/global/db";
 import { Priority } from "@/infra/queue/policy";
+import { listFailureGroups } from "@/infra/queue/status";
 import type { ReconcileContext } from "@/infra/queue/types";
 
 /**
@@ -38,6 +41,7 @@ afterEach(async () => {
     const media = db.select({ id: Media.id }).from(Media).where(eq(Media.library_id, libraryId));
     for (const table of [MediaOriginal, MediaCover]) await db.delete(table).where(inArray(table.media_id, media));
     await db.delete(Media).where(eq(Media.library_id, libraryId));
+    await db.delete(Post).where(eq(Post.library_id, libraryId));
     await db.delete(Library).where(eq(Library.id, libraryId));
     libraryId = crypto.randomUUID();
 });
@@ -96,6 +100,36 @@ function reconcile(mediaId: string) {
 const originalOf = async (mediaId: string) => (await db.select().from(MediaOriginal).where(eq(MediaOriginal.media_id, mediaId)))[0]!;
 const coverOf = async (mediaId: string) => (await db.select().from(MediaCover).where(eq(MediaCover.media_id, mediaId)))[0]!;
 const mediaOf = async (mediaId: string) => (await db.select().from(Media).where(eq(Media.id, mediaId)))[0]!;
+
+/** Puts the media into a new post of the library and returns the post. */
+async function postOf(mediaIds: string[]) {
+    const postId = crypto.randomUUID();
+    await db.insert(Post).values({
+        id: postId,
+        eid: `download-${postId}`,
+        title: "",
+        description: "",
+        media_count: mediaIds.length,
+        library_id: libraryId,
+        url: "https://platform.example/post",
+    });
+    for (const [index, mediaId] of mediaIds.entries()) {
+        await db.update(Media).set({ post_id: postId, sort_order: index }).where(eq(Media.id, mediaId));
+    }
+    return postId;
+}
+
+/** Fails the original of a media for `kind` (already PENDING with the error while `retrying`). */
+const failOriginal = (mediaId: string, kind: SourceErrorKind, retrying = false) =>
+    db
+        .update(MediaOriginal)
+        .set({
+            status: retrying ? SyncStatus.PENDING : SyncStatus.FAILED,
+            last_error: `${kind} error`,
+            error_kind: kind,
+            error_source_url: sql`source_url`,
+        })
+        .where(eq(MediaOriginal.media_id, mediaId));
 
 describe("download failures", () => {
     databaseTest("source rows refuse an error that does not belong to their current URL", async () => {
@@ -262,7 +296,9 @@ describe("download failures", () => {
                 subjectId: mediaId,
                 label: "",
                 time: expect.anything(),
+                kind: SourceErrorKind.SOURCE_UNAVAILABLE,
                 error: expect.stringContaining(": 404"),
+                post: null,
             },
         ]);
     });
@@ -346,4 +382,73 @@ describe("download failures", () => {
         });
         expect((await mediaOf(gone)).sync_status).toBe(SyncStatus.FAILED);
     });
+
+    databaseTest("the main error kind of a media and a post puts what needs the user first", async () => {
+        const network = await imageMedia(url(500), { cover: url(404) });
+        const retrying = await imageMedia(url(500));
+        const clean = await imageMedia(url(200));
+        await failOriginal(network, SourceErrorKind.NETWORK);
+        await db
+            .update(MediaCover)
+            .set({
+                status: SyncStatus.FAILED,
+                last_error: "404",
+                error_kind: SourceErrorKind.SOURCE_UNAVAILABLE,
+                error_source_url: sql`source_url`,
+            })
+            .where(eq(MediaCover.media_id, network));
+        await failOriginal(retrying, SourceErrorKind.INTERNAL, true);
+        const postId = await postOf([retrying, clean]);
+
+        expect(await loadMainErrorKinds(db, [network, retrying, clean])).toEqual(
+            new Map([
+                [network, SourceErrorKind.SOURCE_UNAVAILABLE],
+                [retrying, SourceErrorKind.INTERNAL],
+            ]),
+        );
+        expect(await loadPostErrorKinds(db, [postId])).toEqual(new Map([[postId, SourceErrorKind.INTERNAL]]));
+    });
+
+    databaseTest("failures are grouped by their main kind, the largest group first", async () => {
+        const mismatch = await imageMedia(url(200));
+        const gone = await imageMedia(url(404));
+        const goneToo = await imageMedia(url(404));
+        await failOriginal(mismatch, SourceErrorKind.KIND_MISMATCH);
+        await failOriginal(gone, SourceErrorKind.SOURCE_UNAVAILABLE);
+        await failOriginal(goneToo, SourceErrorKind.SOURCE_UNAVAILABLE);
+        const postId = await postOf([gone]);
+        await db.transaction((tx) => refreshMediaSyncStatus(tx, [mismatch, gone, goneToo]));
+
+        const groups = await listFailureGroups(libraryId, "download", 1);
+
+        expect(groups.map(({ kind, count }) => ({ kind, count }))).toEqual([
+            { kind: SourceErrorKind.SOURCE_UNAVAILABLE, count: 2 },
+            { kind: SourceErrorKind.KIND_MISMATCH, count: 1 },
+        ]);
+        expect(groups[0]!.failures).toHaveLength(1);
+        const [listedGone] = (await listFailureGroups(libraryId, "download", 2))[0]!.failures.filter(
+            (failure) => failure.subjectId === gone,
+        );
+        expect(listedGone).toMatchObject({ error: "SOURCE_UNAVAILABLE error", post: { id: postId, url: "https://platform.example/post" } });
+    });
+
+    databaseTest("retrying sync counts only the media that had a retryable failure", async () => {
+        const retryable = await imageMedia(url(500));
+        const gone = await imageMedia(url(404));
+        await failOriginal(retryable, SourceErrorKind.NETWORK);
+        await failOriginal(gone, SourceErrorKind.SOURCE_UNAVAILABLE);
+        const [library] = await db.select({ ownerId: Library.owner_id }).from(Library).where(eq(Library.id, libraryId));
+
+        expect(await retrySync({ media_ids: [retryable, gone] }, { ownerId: library!.ownerId })).toEqual({ retriedCount: 1 });
+        expect((await originalOf(retryable)).status).toBe(SyncStatus.PENDING);
+        expect((await originalOf(gone)).status).toBe(SyncStatus.FAILED);
+    });
+});
+
+test("mainErrorKind puts final kinds before retryable ones", () => {
+    expect(mainErrorKind([])).toBeNull();
+    expect(mainErrorKind([SourceErrorKind.NETWORK, SourceErrorKind.INTERNAL])).toBe(SourceErrorKind.INTERNAL);
+    expect(mainErrorKind([SourceErrorKind.NETWORK, SourceErrorKind.UNREADABLE])).toBe(SourceErrorKind.UNREADABLE);
+    expect(mainErrorKind([SourceErrorKind.UNREADABLE, SourceErrorKind.KIND_MISMATCH])).toBe(SourceErrorKind.KIND_MISMATCH);
+    expect(mainErrorKind([SourceErrorKind.KIND_MISMATCH, SourceErrorKind.SOURCE_UNAVAILABLE])).toBe(SourceErrorKind.SOURCE_UNAVAILABLE);
 });
