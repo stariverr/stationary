@@ -12,6 +12,7 @@ import { CoverService } from "@/features/media/cover";
 import { removeOriginal } from "@/features/media/originals";
 import { CAPTION_MEDIA_TYPES } from "@/lib/validation/media-composition";
 import type { MediaItemData } from "./schema";
+import { Priority } from "@/infra/queue/policy";
 
 type ImportSources = Pick<MediaItemData, "originals" | "cover" | "captions">;
 
@@ -25,7 +26,7 @@ async function syncOriginals(tx: Transaction, media: { id: string; type: MediaTy
     const keys = new Set(incoming.map((original) => original.source_key));
 
     for (const original of existing) {
-        if (!keys.has(original.source_key!)) await removeOriginal(tx, media, original.id);
+        if (!keys.has(original.source_key!)) await removeOriginal(tx, media, original.id, Priority.CHANGE);
     }
 
     let pending = false;
@@ -102,7 +103,7 @@ async function syncCaptions(tx: Transaction, media: { id: string; type: MediaTyp
 /** Applies the offered sources; returns whether any of them still needs a download. */
 export async function syncImportedSources(tx: Transaction, media: { id: string; type: MediaType }, sources: ImportSources): Promise<boolean> {
     const originals = await syncOriginals(tx, media, sources.originals);
-    const cover = await CoverService.syncImported(tx, media, sources.cover);
+    const cover = await CoverService.syncImported(tx, media, sources.cover, Priority.CHANGE);
     const captions = await syncCaptions(tx, media, sources.captions);
     return originals || cover || captions;
 }

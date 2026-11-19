@@ -42,6 +42,7 @@ import { AiService } from "@/features/ai/service";
 import { assertMediaAccess, MediaAccessError } from "@/features/media/access";
 import { replaceMediaTags } from "@/features/media/tags";
 import { updateMediaInfo } from "@/features/media/update-info";
+import { Priority } from "@/infra/queue/policy";
 
 const router = new Hono<AuthEnv>();
 
@@ -418,7 +419,7 @@ router.post("/:id/cover", requireAuth, validate("param", MediaIdParamSchema), va
     const media = access.media!;
 
     try {
-        await db.transaction((tx) => CoverService.setUploaded(tx, media, file));
+        await db.transaction((tx) => CoverService.setUploaded(tx, media, file, Priority.CHANGE));
     } catch (e) {
         if (e instanceof CoverNotAllowedError) return c.json(error(Code.INVALID_PARAMETER, e.message), 400);
         throw e;
@@ -432,7 +433,7 @@ router.post("/:id/cover/delete", requireAuth, validate("param", MediaIdParamSche
     const access = await checkMediaAccess(c, id);
     if (access.errorResponse) return access.errorResponse;
 
-    const removed = await db.transaction((tx) => CoverService.remove(tx, id));
+    const removed = await db.transaction((tx) => CoverService.remove(tx, id, Priority.CHANGE));
     if (!removed) return c.json(error(Code.NOT_FOUND, "Media has no cover"), 404);
     return c.json(success(Code.SUCCESS, { cover: null }));
 });

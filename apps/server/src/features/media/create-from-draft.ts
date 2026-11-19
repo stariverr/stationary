@@ -10,6 +10,7 @@ import { markMediaMetaChanged } from "./meta-changes";
 import { compositionError, insertUploadedOriginal, kindOfProbe } from "./originals";
 import { probeOriginal, ProbeRejectedError, type OriginalProbe } from "./probe";
 import { replaceMediaTagsTx } from "./tags";
+import { Priority } from "@/infra/queue/policy";
 
 /** A draft that cannot become a media: a bad structure, a file that cannot be probed, or a wrong composition. */
 export class DraftContentError extends Error {
@@ -113,9 +114,9 @@ export async function createMediaFromDraft({ tx, libraryId, prepared, sortOrder,
     });
 
     for (const original of prepared.originals) {
-        await insertUploadedOriginal(tx, media, await consumeDraftFile(tx, original.draftFileId, libraryId), original.probe);
+        await insertUploadedOriginal(tx, media, await consumeDraftFile(tx, original.draftFileId, libraryId), original.probe, Priority.CHANGE);
     }
-    if (draft.cover) await CoverService.setFile(tx, media, await consumeDraftFile(tx, draft.cover, libraryId));
+    if (draft.cover) await CoverService.setFile(tx, media, await consumeDraftFile(tx, draft.cover, libraryId), Priority.CHANGE);
     for (const caption of prepared.captions) {
         const sourceFileId = await consumeDraftFile(tx, caption.draftFileId, libraryId);
         const vttFileId = await storeVtt(tx, media, caption.draftFileId, caption.vtt);

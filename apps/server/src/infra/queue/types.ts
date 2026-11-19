@@ -6,6 +6,8 @@ export interface ReconcileContext {
     readonly libraryId: string;
     /** Space row id of a per-space pipeline; null otherwise. */
     readonly space: string | null;
+    /** Priority of this run's queue row. Pass it to markChanged for what the run reports, so downstream work keeps it. */
+    readonly priority: number;
     /**
      * Aborted when the lease is lost, the run is past its deadline or the worker shuts down. A run that does not return
      * soon after keeps running with nothing waiting for it, so everything it awaits has to take this signal.
@@ -40,6 +42,8 @@ export type ReconcileResult =
 export interface FailureRecord {
     readonly subjectId: string;
     readonly space: string | null;
+    /** As ReconcileContext.priority: a failure that reports a change queues it at this priority. */
+    readonly priority: number;
     readonly error: string;
     /** Classified kind of the error, when the pipeline classifies its errors. */
     readonly errorKind: string | null;

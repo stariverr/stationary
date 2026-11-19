@@ -3,6 +3,7 @@ import { AiModel, Library, LibraryEmbeddingSpace, LibraryEmbeddingSpaceStatus } 
 import { db, type Transaction } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
+import { Priority } from "@/infra/queue/policy";
 import { requestRedescribe } from "./describe-pipeline";
 import { alignEmbeddingSpace, dropSpacesOfModels } from "./embedding-spaces";
 import { IMAGE_METADATA_PROMPT_VERSION } from "./image-metadata";
@@ -116,7 +117,7 @@ export async function saveLibraryBindings(library: { id: string; owner_id: strin
                 });
             }
         } else if (describeModelId !== current.ai_bindings?.describe?.modelId || nextLanguage !== current.ai_language) {
-            await markChanged(tx, Aspect.LIBRARY_AI_CONFIG, [library.id]);
+            await markChanged(tx, Aspect.LIBRARY_AI_CONFIG, [library.id], Priority.CHANGE);
         }
     });
 }

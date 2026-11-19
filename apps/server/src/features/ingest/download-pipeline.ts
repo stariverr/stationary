@@ -93,7 +93,7 @@ async function downloadOriginal(ctx: ReconcileContext, media: MediaRow, original
             .where(and(eq(MediaOriginal.id, original.id), eq(MediaOriginal.source_key, original.source_key!)))
             .for("update");
         if (!current) return softDeleteFile(tx, file.id);
-        await completeOriginal(tx, media, original.id, file.id, probe);
+        await completeOriginal(tx, media, original.id, file.id, probe, ctx.priority);
         await ctx.fence(tx);
     });
 }
@@ -123,7 +123,7 @@ async function downloadCaption(ctx: ReconcileContext, media: MediaRow, caption: 
             .where(eq(MediaCaption.id, caption.id));
         if (current.is_default) await makeDefaultCaption(tx, media.id, caption.id);
         await ctx.fence(tx);
-        await markChanged(tx, Aspect.MEDIA_CONTENT, [media.id]);
+        await markChanged(tx, Aspect.MEDIA_CONTENT, [media.id], ctx.priority);
     });
 }
 
@@ -141,7 +141,7 @@ async function downloadCover(ctx: ReconcileContext, media: MediaRow, cover: Cove
             .returning({ id: MediaCover.id });
         if (completed.length === 0) return softDeleteFile(tx, file.id);
         await ctx.fence(tx);
-        await markChanged(tx, Aspect.MEDIA_COVER, [media.id]);
+        await markChanged(tx, Aspect.MEDIA_COVER, [media.id], ctx.priority);
     });
 }
 
@@ -185,6 +185,8 @@ const SOURCE_TABLES = [MediaOriginal, MediaCaption, MediaCover] as const;
  * is complete. Content and cover changes are reported as they land, which queues the previews.
  */
 export const downloadPipeline: SubjectPipelineHandler = {
+    // A run may take up to two hours; without a limit, slow downloads could fill every slot of the worker.
+    concurrency: 4,
     // A large source takes a long time on a slow link; one that stalls fails the idle read timeout long before this.
     timeoutMs: 2 * 60 * 60_000,
 

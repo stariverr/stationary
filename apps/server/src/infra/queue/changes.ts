@@ -55,8 +55,12 @@ async function spacesIn(
 /**
  * Reports that `aspect` changed for `ids` (subject ids, or library ids for `library.*` aspects). Call it inside the
  * transaction that made the change, so the follow-up work is queued exactly when the change commits.
+ *
+ * `priority` is what the subject rows are queued at: `Priority.CHANGE` for a change the user made, and the run's own
+ * priority (`ctx.priority`) for a change a run reports, so a backfill stays a backfill down the chain. Library aspects
+ * queue scans, which always go at `Priority.CHANGE`; the subjects a scan finds are backfill.
  */
-export async function markChanged(client: DbClient, aspect: Aspect, ids: readonly string[]): Promise<void> {
+export async function markChanged(client: DbClient, aspect: Aspect, ids: readonly string[], priority: number): Promise<void> {
     const uniqueIds = [...new Set(ids)];
     const pipelines = pipelinesReading(aspect);
     if (uniqueIds.length === 0 || pipelines.length === 0) return;
@@ -66,14 +70,23 @@ export async function markChanged(client: DbClient, aspect: Aspect, ids: readonl
         return;
     }
 
-    await requeue(client, pipelines, uniqueIds);
+    await enqueueSubjects(client, pipelines, uniqueIds, priority);
 }
 
 /**
  * Queues subjects for specific pipelines without reporting a change, for when the user asks to redo or retry a
- * pipeline's own results (regenerate previews, retry failures).
+ * pipeline's own results (regenerate previews, retry failures). A user action, so it goes at `Priority.CHANGE`.
  */
-export async function requeue(client: DbClient, pipelines: readonly PipelineName[], subjectIds: readonly string[]): Promise<void> {
+export function requeue(client: DbClient, pipelines: readonly PipelineName[], subjectIds: readonly string[]): Promise<void> {
+    return enqueueSubjects(client, pipelines, subjectIds, Priority.CHANGE);
+}
+
+async function enqueueSubjects(
+    client: DbClient,
+    pipelines: readonly PipelineName[],
+    subjectIds: readonly string[],
+    priority: number,
+): Promise<void> {
     if (subjectIds.length === 0) return;
     const rows: EnqueueRow[] = [];
     const libraries = new Map<SubjectKind, Map<string, string>>();
@@ -89,7 +102,7 @@ export async function requeue(client: DbClient, pipelines: readonly PipelineName
             const libraryId = byId.get(subjectId);
             if (!libraryId) continue;
             for (const space of spaces.get(libraryId) ?? []) {
-                rows.push({ pipeline: queueName(pipeline, space), subjectId, libraryId, priority: Priority.CHANGE });
+                rows.push({ pipeline: queueName(pipeline, space), subjectId, libraryId, priority });
             }
         }
     }

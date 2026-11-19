@@ -12,6 +12,7 @@ import { CAPTION_MEDIA_TYPES } from "@/lib/validation/media-composition";
 import { convertToVtt, deleteCaptions, insertUploadedCaption, makeDefaultCaption, storeVtt, type CaptionDeclaration } from "./captions";
 import { compositionError, deleteOriginals, insertUploadedOriginal, kindOfProbe, kindOfState, loadOriginalStates, removeOriginal, settleDefaultAudio } from "./originals";
 import { probeOriginal, ProbeRejectedError } from "./probe";
+import { Priority } from "@/infra/queue/policy";
 
 type MediaRow = typeof Media.$inferSelect;
 
@@ -56,7 +57,7 @@ export async function addOriginal(media: MediaRow, draftFileId: string, replaces
     return db.transaction(async (tx) => {
         if (replaces) await deleteOriginals(tx, { ids: [replaces] });
         const fileId = await consumeDraftFile(tx, draftFileId, media.library_id);
-        return insertUploadedOriginal(tx, media, fileId, probe);
+        return insertUploadedOriginal(tx, media, fileId, probe, Priority.CHANGE);
     });
 }
 
@@ -67,7 +68,7 @@ export async function deleteOriginal(media: MediaRow, originalId: string): Promi
     const kinds = states.filter((state) => state.original.id !== originalId).map(kindOfState);
     const composition = kinds.includes(null) ? null : compositionError(media.type, kinds as NonNullable<(typeof kinds)[number]>[]);
     if (composition) throw new MediaEditError(400, `Deleting it would leave the media incomplete: ${composition}`);
-    await db.transaction((tx) => removeOriginal(tx, media, originalId));
+    await db.transaction((tx) => removeOriginal(tx, media, originalId, Priority.CHANGE));
 }
 
 /** Adds a caption from a draft subtitle file, converted to WebVTT. */

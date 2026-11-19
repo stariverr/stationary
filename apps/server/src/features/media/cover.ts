@@ -58,33 +58,33 @@ export async function deleteMediaImages(client: DbClient, mediaIds: readonly str
 
 /**
  * The original cover of a media (docs/media_refactor.zh-Hans.md, 3.4). Every write reports `media.cover` once the cover
- * it leaves behind is usable, so previews follow it.
+ * it leaves behind is usable, so previews follow it, at the `priority` its caller gives.
  */
 export const CoverService = {
     /** Sets the cover to a stored file, replacing any cover the media had. */
-    async setFile(client: DbClient, media: { id: string; type: MediaType }, fileId: string): Promise<void> {
+    async setFile(client: DbClient, media: { id: string; type: MediaType }, fileId: string, priority: number): Promise<void> {
         if (!COVER_MEDIA_TYPES.has(media.type)) throw new CoverNotAllowedError(media.type);
         const existing = await lockCover(client, media.id);
         const values = { file_id: fileId, source_url: null, source_key: null, status: SyncStatus.COMPLETED, last_error: null, update_time: Temporal.Now.instant() };
         await client.insert(MediaCover).values({ media_id: media.id, ...values }).onConflictDoUpdate({ target: MediaCover.media_id, set: values });
         if (existing?.file_id !== fileId) await softDeleteFile(client, existing?.file_id ?? null);
-        await markChanged(client, Aspect.MEDIA_COVER, [media.id]);
+        await markChanged(client, Aspect.MEDIA_COVER, [media.id], priority);
     },
 
     /** Sets the cover to a file the user uploaded through a presigned URL. */
-    async setUploaded(client: DbClient, media: { id: string; type: MediaType }, upload: UploadedCoverFile): Promise<void> {
+    async setUploaded(client: DbClient, media: { id: string; type: MediaType }, upload: UploadedCoverFile, priority: number): Promise<void> {
         if (!COVER_MEDIA_TYPES.has(media.type)) throw new CoverNotAllowedError(media.type);
         const [file] = await client
             .insert(DbFile)
             .values({ path: upload.path, bucket: upload.bucket, mime_type: upload.mime_type, extension: upload.extension, size: upload.size })
             .returning({ id: DbFile.id });
-        await CoverService.setFile(client, media, file!.id);
+        await CoverService.setFile(client, media, file!.id, priority);
     },
 
     /** Removes the cover; previews fall back to the content. Returns whether the media had one. */
-    async remove(client: DbClient, mediaId: string): Promise<boolean> {
+    async remove(client: DbClient, mediaId: string, priority: number): Promise<boolean> {
         const removed = await deleteCover(client, mediaId);
-        if (removed) await markChanged(client, Aspect.MEDIA_COVER, [mediaId]);
+        if (removed) await markChanged(client, Aspect.MEDIA_COVER, [mediaId], priority);
         return removed;
     },
 
@@ -98,11 +98,12 @@ export const CoverService = {
         client: DbClient,
         media: { id: string; type: MediaType },
         cover: { url: string; source_key: string } | null,
+        priority: number,
     ): Promise<boolean> {
         if (!COVER_MEDIA_TYPES.has(media.type)) return false;
         const existing = await lockCover(client, media.id);
         if (!cover) {
-            if (existing?.source_key) await CoverService.remove(client, media.id);
+            if (existing?.source_key) await CoverService.remove(client, media.id, priority);
             return false;
         }
         if (existing?.source_key === cover.source_key) {
@@ -124,7 +125,7 @@ export const CoverService = {
         if (existing?.file_id) {
             await softDeleteFile(client, existing.file_id);
             // The old cover is gone until the new one arrives; previews fall back to the content meanwhile.
-            await markChanged(client, Aspect.MEDIA_COVER, [media.id]);
+            await markChanged(client, Aspect.MEDIA_COVER, [media.id], priority);
         }
         return true;
     },

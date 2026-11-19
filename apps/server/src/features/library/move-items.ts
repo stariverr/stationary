@@ -3,6 +3,7 @@ import { Author, DeleteStatus, Library, Media, MediaTag, Post, PostTag, Tag } fr
 import { db } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
+import { Priority } from "@/infra/queue/policy";
 import { relocate } from "@/infra/queue/store";
 import { LibraryMoveError } from "./errors";
 import type { LibraryMoveItemsInput } from "./schema";
@@ -125,7 +126,7 @@ export async function moveLibraryItems(input: LibraryMoveItemsInput, auth: Libra
                 authorMap.set(sourceAuthor.id, newAuthorId);
                 newAuthorIds.push(newAuthorId);
             }
-            await markChanged(tx, Aspect.AUTHOR_AVATAR_SOURCE, newAuthorIds);
+            await markChanged(tx, Aspect.AUTHOR_AVATAR_SOURCE, newAuthorIds, Priority.CHANGE);
         }
 
         const postTags =
@@ -283,7 +284,7 @@ export async function moveLibraryItems(input: LibraryMoveItemsInput, auth: Libra
 
         // Queued work follows its subjects into the target library.
         await relocate(tx, movedMediaIds, input.target_library_id);
-        await markChanged(tx, Aspect.MEDIA_LIBRARY, movedMediaIds);
+        await markChanged(tx, Aspect.MEDIA_LIBRARY, movedMediaIds, Priority.CHANGE);
 
         return { posts, media, post_media: postMedia };
     });

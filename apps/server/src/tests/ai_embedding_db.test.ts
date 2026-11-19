@@ -36,6 +36,7 @@ import { previewPipeline } from "@/features/media/preview-pipeline";
 import { markChanged, requestScan, requeue } from "@/infra/queue/changes";
 import { pipelineHandlers } from "@/infra/queue/handlers";
 import { Aspect, queueName } from "@/infra/queue/pipelines";
+import { Priority } from "@/infra/queue/policy";
 import { pipelineStatus } from "@/infra/queue/status";
 import type { SubjectPipelineHandler } from "@/infra/queue/types";
 import { QueueWorker } from "@/infra/queue/worker";
@@ -274,7 +275,7 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
                     .set({ title: `${animal}${suffix}` })
                     .where(eq(Media.id, id));
             }
-            await markChanged(tx, Aspect.MEDIA_META, Object.values(mediaIds));
+            await markChanged(tx, Aspect.MEDIA_META, Object.values(mediaIds), Priority.CHANGE);
         });
 
     databaseTest("finds the input a provider rejects in a batch and embeds the others", async () => {
@@ -375,6 +376,7 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
                 previewPipeline.recordFailure(tx, {
                     subjectId: mediaIds.cat,
                     space: null,
+                    priority: Priority.CHANGE,
                     error: "cannot render",
                     errorKind: null,
                 }),
@@ -420,7 +422,7 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
         rejectedText = " v2";
         await db.transaction(async (tx) => {
             await tx.update(Media).set({ title: "dog v2" }).where(eq(Media.id, mediaIds.dog));
-            await markChanged(tx, Aspect.MEDIA_META, [mediaIds.dog]);
+            await markChanged(tx, Aspect.MEDIA_META, [mediaIds.dog], Priority.CHANGE);
         });
         await drain(libraryId);
         const failed = await vectorOf(mediaIds.dog);
@@ -455,6 +457,7 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
             pipelineHandlers["ai.text"].recordFailure(tx, {
                 subjectId: mediaIds.dog,
                 space: spaceRow.id,
+                priority: Priority.CHANGE,
                 error: "provider is down",
                 errorKind: "TRANSIENT",
             }),
@@ -471,7 +474,7 @@ describe("AI embedding pipelines (PostgreSQL + Redis)", () => {
         await createRedisRateLimitStore(kv).coolDown(otherProviderId, 5_000);
         await db.transaction(async (tx) => {
             await tx.update(Media).set({ title: "dog v3" }).where(eq(Media.id, mediaIds.dog));
-            await markChanged(tx, Aspect.MEDIA_META, [mediaIds.dog]);
+            await markChanged(tx, Aspect.MEDIA_META, [mediaIds.dog], Priority.CHANGE);
         });
         const worker = new QueueWorker(pipelineHandlers, { pollIntervalMs: 50, patrolIntervalMs: 0 });
         worker.start();
@@ -880,6 +883,7 @@ describe("AI description (PostgreSQL + Redis)", () => {
             pipelineHandlers["ai.describe"].recordFailure(tx, {
                 subjectId: mediaId,
                 space: null,
+                priority: Priority.CHANGE,
                 error: "provider is down",
                 errorKind: "TRANSIENT",
             }),

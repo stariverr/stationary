@@ -16,6 +16,8 @@ export interface ClaimedRow {
     readonly pipeline: string;
     readonly subjectId: string;
     readonly libraryId: string;
+    /** Priority the row was claimed at; what this run reports as changed is queued at it too. */
+    readonly priority: number;
     readonly leaseToken: string;
     /** This run's attempt, starting at 1. Counted at claim, so a run that dies without settling counts too. */
     readonly attempts: number;
@@ -108,6 +110,7 @@ type ClaimedRecord = {
     pipeline: string;
     subject_id: string;
     library_id: string;
+    priority: number;
     lease_token: string;
     attempts: number;
     cursor: string | null;
@@ -140,12 +143,13 @@ async function claimWhere(filter: SQL, limit: number): Promise<ClaimedRow[]> {
             interruptions = q.interruptions + picked.interrupted::int
         FROM picked
         WHERE q.pipeline = picked.pipeline AND q.subject_id = picked.subject_id
-        RETURNING q.pipeline, q.subject_id, q.library_id, q.lease_token, q.attempts, q.cursor, q.interruptions
+        RETURNING q.pipeline, q.subject_id, q.library_id, q.priority, q.lease_token, q.attempts, q.cursor, q.interruptions
     `);
     return result.rows.map((row) => ({
         pipeline: row.pipeline,
         subjectId: row.subject_id,
         libraryId: row.library_id,
+        priority: row.priority,
         leaseToken: row.lease_token,
         attempts: row.attempts,
         cursor: row.cursor,

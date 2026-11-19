@@ -3,6 +3,7 @@ import { AssetAiMetadata, DeleteStatus, EntityType, Media } from "@/db/schema";
 import { db, type DbClient, type Transaction } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
+import { Priority } from "@/infra/queue/policy";
 import type { ReconcileContext, SubjectPipelineHandler } from "@/infra/queue/types";
 import { aiErrorResult } from "./pipeline-result";
 import { loadAiImageSources, readAiSourceImage, resolveAiImageSource } from "./image-source";
@@ -44,14 +45,14 @@ async function dropForeignDescription(
     tx: Transaction,
     mediaId: string,
     libraryId: string,
-    fence: ReconcileContext["fence"],
+    ctx: ReconcileContext,
 ): Promise<void> {
     const deleted = await tx
         .delete(AssetAiMetadata)
         .where(and(metadataOf([mediaId]), sql`${AssetAiMetadata.library_id} <> ${libraryId}`))
         .returning({ id: AssetAiMetadata.id });
-    await fence(tx);
-    if (deleted.length > 0) await markChanged(tx, Aspect.MEDIA_DESCRIPTION, [mediaId]);
+    await ctx.fence(tx);
+    if (deleted.length > 0) await markChanged(tx, Aspect.MEDIA_DESCRIPTION, [mediaId], ctx.priority);
 }
 
 const failedDescriptions = (libraryIds: readonly string[]) =>
@@ -83,7 +84,7 @@ export const describePipeline: SubjectPipelineHandler = {
                 .limit(1)
         )[0];
         if (stored && stored.library_id !== media.libraryId) {
-            await db.transaction((tx) => dropForeignDescription(tx, media.id, media.libraryId, ctx.fence));
+            await db.transaction((tx) => dropForeignDescription(tx, media.id, media.libraryId, ctx));
             stored = undefined;
         }
 
@@ -131,7 +132,7 @@ export const describePipeline: SubjectPipelineHandler = {
                     set: { ...result, library_id: media.libraryId, update_time: sql`now()` },
                 });
             await ctx.fence(tx);
-            await markChanged(tx, Aspect.MEDIA_DESCRIPTION, [media.id]);
+            await markChanged(tx, Aspect.MEDIA_DESCRIPTION, [media.id], ctx.priority);
         });
         return { kind: "done" };
     },
@@ -254,5 +255,5 @@ export async function requestRedescribe(client: DbClient, libraryId: string, tar
                 sql`(${AssetAiMetadata.model} <> ${target.model} OR ${AssetAiMetadata.prompt_version} <> ${target.promptVersion})`,
             ),
         );
-    await markChanged(client, Aspect.LIBRARY_AI_CONFIG, [libraryId]);
+    await markChanged(client, Aspect.LIBRARY_AI_CONFIG, [libraryId], Priority.CHANGE);
 }

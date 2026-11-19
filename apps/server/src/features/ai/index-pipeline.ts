@@ -63,7 +63,7 @@ export const indexPipeline: SubjectPipelineHandler = {
                     });
             }
             await ctx.fence(tx);
-            if (stale) await markChanged(tx, Aspect.MEDIA_SEARCH_DOC, [ctx.subjectId]);
+            if (stale) await markChanged(tx, Aspect.MEDIA_SEARCH_DOC, [ctx.subjectId], ctx.priority);
         });
         return { kind: "done" };
     },

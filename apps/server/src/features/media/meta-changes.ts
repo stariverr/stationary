@@ -3,13 +3,15 @@ import { Media, MediaTag, PostTag, Tag } from "@/db/schema";
 import type { DbClient } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
+import { Priority } from "@/infra/queue/policy";
 
 /**
  * Reports a change of what media are described by (their own or their post's title, description and tags) for the
- * search documents built from it. Call these in the transaction that makes the change.
+ * search documents built from it. Call these in the transaction that makes the change. Only users edit these, so the
+ * change goes at `Priority.CHANGE`.
  */
 export async function markMediaMetaChanged(client: DbClient, mediaIds: readonly string[]): Promise<void> {
-    await markChanged(client, Aspect.MEDIA_META, mediaIds);
+    await markChanged(client, Aspect.MEDIA_META, mediaIds, Priority.CHANGE);
 }
 
 /** A post's title, description or tags changed: its media are affected. */

@@ -5,6 +5,7 @@ import { canReachItems, type LibraryAuth } from "@/features/library/access";
 import { db } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
+import { Priority } from "@/infra/queue/policy";
 import { RetrySyncError } from "./errors";
 import type { RetrySyncInput } from "./schema";
 
@@ -52,7 +53,7 @@ export async function retrySync(input: RetrySyncInput, auth: LibraryAuth) {
             .update(MediaCover)
             .set(retry)
             .where(and(inArray(MediaCover.media_id, mediaIds), eq(MediaCover.status, SyncStatus.FAILED), isNotNull(MediaCover.source_url)));
-        await markChanged(tx, Aspect.MEDIA_SOURCE, mediaIds);
+        await markChanged(tx, Aspect.MEDIA_SOURCE, mediaIds, Priority.CHANGE);
         return { retriedCount };
     });
 }

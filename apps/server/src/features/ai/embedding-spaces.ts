@@ -11,6 +11,7 @@ import {
 import { db, type DbClient, type Transaction } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect, PIPELINE_NAMES, queueName, scanQueueName, spaceRoleOf, type PipelineName } from "@/infra/queue/pipelines";
+import { Priority } from "@/infra/queue/policy";
 import { countRows, deleteQueues } from "@/infra/queue/store";
 import { parseModelCapabilities, type EmbeddingModelCapabilities } from "./model-schema";
 import type { AiErrorView, EmbeddingBindingRole } from "./types";
@@ -159,7 +160,7 @@ export async function alignEmbeddingSpace(
     } else {
         await tx.insert(LibraryEmbeddingSpace).values({ library_id: library.id, role, model_id: modelId, space_id: spaceId, status });
     }
-    await markChanged(tx, Aspect.LIBRARY_SPACES, [library.id]);
+    await markChanged(tx, Aspect.LIBRARY_SPACES, [library.id], Priority.CHANGE);
 }
 
 /** Drops every library space served by one of `modelIds`; used when models or providers are deleted. */

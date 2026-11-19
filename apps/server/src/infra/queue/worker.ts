@@ -295,6 +295,7 @@ export class QueueWorker {
                 subjectId: row.subjectId,
                 libraryId: row.libraryId,
                 space: name.space,
+                priority: row.priority,
                 signal: abort.signal,
                 fence: (tx) => fence(tx, row),
             });
@@ -406,7 +407,7 @@ export class QueueWorker {
                 if (!changed) await finish(row);
                 else
                     await db.transaction(async (tx) => {
-                        if (await finish(row, tx)) await markChanged(tx, changed, [row.subjectId]);
+                        if (await finish(row, tx)) await markChanged(tx, changed, [row.subjectId], row.priority);
                     });
                 return;
             }
@@ -427,6 +428,7 @@ export class QueueWorker {
             handler.recordFailure(tx, {
                 subjectId: row.subjectId,
                 space: name.space,
+                priority: row.priority,
                 error: result.error,
                 errorKind: result.errorKind ?? null,
             }),

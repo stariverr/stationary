@@ -1,7 +1,8 @@
 /**
  * Originals of a media and the facts probed from them (docs/media_refactor.zh-Hans.md, 3.2, 3.3, 3.6, 3.7, 4, 10).
  * Every write of an original goes through here, so the composition rules, the summary columns on `media` and the
- * single default audio track hold for uploads, imports and edits alike.
+ * single default audio track hold for uploads, imports and edits alike. Writes that report a change take the priority to
+ * queue it at from their caller: `Priority.CHANGE` for a user's edit, the run's own for the download pipeline.
  */
 import { and, asc, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import {
@@ -224,6 +225,7 @@ export async function completeOriginal(
     originalId: string,
     fileId: string,
     probe: OriginalProbe,
+    priority: number,
 ): Promise<void> {
     const [original] = await client
         .update(MediaOriginal)
@@ -238,7 +240,7 @@ export async function completeOriginal(
     });
     // A declared default takes over from whatever audio track was the default before.
     const declaredDefault = original.declared_default ? streams.find((stream) => stream.type === AvStreamType.AUDIO)?.id : undefined;
-    await settleAfterOriginalChange(client, media, declaredDefault);
+    await settleAfterOriginalChange(client, media, priority, declaredDefault);
 }
 
 /** Inserts an original the user uploaded: it is probed already, so it is complete from the start. */
@@ -247,20 +249,21 @@ export async function insertUploadedOriginal(
     media: { id: string; type: MediaType },
     fileId: string,
     probe: OriginalProbe,
+    priority: number,
 ): Promise<string> {
     const [original] = await client
         .insert(MediaOriginal)
         .values({ media_id: media.id, file_id: fileId, status: SyncStatus.COMPLETED })
         .returning({ id: MediaOriginal.id });
     await storeProbe(client, media, { id: original!.id, file_id: fileId }, probe, {});
-    await settleAfterOriginalChange(client, media);
+    await settleAfterOriginalChange(client, media, priority);
     return original!.id;
 }
 
-async function settleAfterOriginalChange(client: DbClient, media: { id: string; type: MediaType }, preferredAudio?: string) {
+async function settleAfterOriginalChange(client: DbClient, media: { id: string; type: MediaType }, priority: number, preferredAudio?: string) {
     await refreshAvSummary(client, media);
     await settleDefaultAudio(client, media.id, preferredAudio);
-    await markChanged(client, Aspect.MEDIA_CONTENT, [media.id]);
+    await markChanged(client, Aspect.MEDIA_CONTENT, [media.id], priority);
 }
 
 async function softDeleteFiles(client: DbClient, fileIds: (string | null)[]) {
@@ -320,7 +323,12 @@ export async function deleteOriginals(client: DbClient, where: { ids?: readonly 
 }
 
 /** Deletes one original of a media the user edits, then settles the summary and default audio around the rest. */
-export async function removeOriginal(client: DbClient, media: { id: string; type: MediaType }, originalId: string): Promise<boolean> {
+export async function removeOriginal(
+    client: DbClient,
+    media: { id: string; type: MediaType },
+    originalId: string,
+    priority: number,
+): Promise<boolean> {
     const state = ((await loadOriginalStates(client, [media.id])).get(media.id) ?? []).find((s) => s.original.id === originalId);
     if (!state) return false;
     await deleteOriginals(client, { ids: [originalId] });
@@ -328,6 +336,6 @@ export async function removeOriginal(client: DbClient, media: { id: string; type
     if (kindOfState(state) === "IMAGE") {
         await client.update(Media).set({ display_width: null, display_height: null }).where(eq(Media.id, media.id));
     }
-    await settleAfterOriginalChange(client, media);
+    await settleAfterOriginalChange(client, media, priority);
     return true;
 }

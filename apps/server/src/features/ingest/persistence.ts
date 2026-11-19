@@ -7,6 +7,7 @@ import { originalCountError } from "@/features/media/originals";
 import { releaseMediaAssets } from "@/features/media/release";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
+import { Priority } from "@/infra/queue/policy";
 import { normalizeExternalId, assertUniqueExternalIds } from "@/lib/utils/media-identity";
 import { syncImportedSources } from "./media-sources";
 import type { PostItemData, MediaItemData } from "./schema";
@@ -62,7 +63,7 @@ export async function saveIngestMetadata(postData: PostItemData, targetLibraryId
                 authorId = author.id;
                 const origin = avatarOrigin(author);
                 if (origin && origin !== author.avatar_origin && origin !== author.avatar_error_origin) {
-                    await markChanged(tx, Aspect.AUTHOR_AVATAR_SOURCE, [author.id]);
+                    await markChanged(tx, Aspect.AUTHOR_AVATAR_SOURCE, [author.id], Priority.CHANGE);
                 }
             }
         } catch (e) {

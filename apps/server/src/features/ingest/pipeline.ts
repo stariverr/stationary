@@ -1,6 +1,7 @@
 import { db } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
+import { Priority } from "@/infra/queue/policy";
 import type { PostItemData } from "./schema";
 import { saveIngestMetadata } from "./persistence";
 
@@ -29,9 +30,9 @@ export const IngestPipeline = {
             const saved = await saveIngestMetadata(postData, targetLibraryId, workflowRunId, tx);
             if (saved.skipUpdate) return saved;
             if (saved.mediaIds.length > 0) {
-                await markChanged(tx, Aspect.MEDIA_SOURCE, saved.mediaIds);
+                await markChanged(tx, Aspect.MEDIA_SOURCE, saved.mediaIds, Priority.CHANGE);
                 // The post's metadata describes its media in search.
-                await markChanged(tx, Aspect.MEDIA_META, saved.mediaIds);
+                await markChanged(tx, Aspect.MEDIA_META, saved.mediaIds, Priority.CHANGE);
             }
             return saved;
         });

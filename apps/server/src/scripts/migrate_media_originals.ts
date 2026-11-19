@@ -49,6 +49,7 @@ import { requestScan } from "@/infra/queue/changes";
 import { deleteQueues } from "@/infra/queue/store";
 import { getErrorMessage } from "@/lib/utils/error";
 import { CAPTION_MEDIA_TYPES, COVER_MEDIA_TYPES } from "@/lib/validation/media-composition";
+import { Priority } from "@/infra/queue/policy";
 
 const command = process.argv[2];
 const apply = process.argv.includes("--apply");
@@ -268,7 +269,7 @@ async function writeMedia(tx: Transaction, plan: MediaPlan): Promise<void> {
             })
             .returning({ id: MediaOriginal.id });
         if (file && probe) {
-            await completeOriginal(tx, media, original!.id, file.id, probe);
+            await completeOriginal(tx, media, original!.id, file.id, probe, Priority.BACKFILL);
             counts.originals++;
         } else counts.pendingOriginals++;
     }

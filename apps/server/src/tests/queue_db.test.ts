@@ -8,7 +8,7 @@ import { ApiTokenService } from "@/features/auth/api-token";
 import { db } from "@/global/db";
 import { markChanged, requeue } from "@/infra/queue/changes";
 import { Aspect, PIPELINE_NAMES, scanQueueName } from "@/infra/queue/pipelines";
-import { DEFAULT_MAX_ATTEMPTS } from "@/infra/queue/policy";
+import { DEFAULT_MAX_ATTEMPTS, Priority } from "@/infra/queue/policy";
 import {
     LeaseLostError,
     advance,
@@ -48,6 +48,7 @@ let libraryId = crypto.randomUUID();
 afterEach(async () => {
     if (process.env.RUN_QUEUE_DB_TESTS !== "1") return;
     await db.delete(JobQueue).where(eq(JobQueue.library_id, libraryId));
+    await db.delete(Media).where(eq(Media.library_id, libraryId));
     await db.delete(Library).where(eq(Library.id, libraryId));
     libraryId = crypto.randomUUID();
 });
@@ -58,6 +59,22 @@ const subject = () => `test-${crypto.randomUUID()}`;
 async function pausedLibrary() {
     await db.insert(Library).values({ id: libraryId, name: "test", description: "", owner_id: crypto.randomUUID() });
     await setLibraryPaused(libraryId, true);
+}
+
+/** A media row in the test library, for changes reported on it: markChanged looks up each subject's library. */
+async function testMedia(): Promise<string> {
+    const mediaId = crypto.randomUUID();
+    await db.insert(Library).values({ id: libraryId, name: "test", description: "", owner_id: crypto.randomUUID() }).onConflictDoNothing();
+    await db.insert(Media).values({
+        id: mediaId,
+        library_id: libraryId,
+        eid: `queue-${mediaId}`,
+        title: "",
+        description: "",
+        type: MediaType.IMAGE,
+        sort_order: 0,
+    });
+    return mediaId;
 }
 
 async function queue(pipeline: string, subjectIds: readonly string[], mode: "change" | "scan" | "absent" = "change") {
@@ -441,14 +458,41 @@ describe("job_queue store", () => {
         const rollback = new Error("ROLLBACK_QUEUE_TEST");
         await expect(
             db.transaction(async (tx) => {
-                await markChanged(tx, Aspect.LIBRARY_AI_CONFIG, [libraryId]);
+                await markChanged(tx, Aspect.LIBRARY_AI_CONFIG, [libraryId], Priority.CHANGE);
                 throw rollback;
             }),
         ).rejects.toBe(rollback);
         expect(await rowOf(scanQueueName("ai.describe"), libraryId)).toBeUndefined();
 
-        await db.transaction((tx) => markChanged(tx, Aspect.LIBRARY_AI_CONFIG, [libraryId]));
+        await db.transaction((tx) => markChanged(tx, Aspect.LIBRARY_AI_CONFIG, [libraryId], Priority.CHANGE));
         expect(await rowOf(scanQueueName("ai.describe"), libraryId)).toBeDefined();
+    });
+});
+
+describe("priority", () => {
+    databaseTest("claims hand each row's priority to its run", async () => {
+        await queue("avatar", [subject()]);
+        const [row] = await claimOurs(1);
+        expect(row?.priority).toBe(TEST_PRIORITY);
+    });
+
+    databaseTest("a subject a backfill queued moves up to CHANGE when the user changes it, and stays there", async () => {
+        const mediaId = await testMedia();
+        const report = (priority: number) => db.transaction((tx) => markChanged(tx, Aspect.MEDIA_CONTENT, [mediaId], priority));
+
+        await report(Priority.BACKFILL);
+        expect((await rowOf("preview", mediaId))?.priority).toBe(Priority.BACKFILL);
+        await report(Priority.CHANGE);
+        expect((await rowOf("preview", mediaId))?.priority).toBe(Priority.CHANGE);
+        await report(Priority.BACKFILL);
+        expect((await rowOf("preview", mediaId))?.priority).toBe(Priority.CHANGE);
+    });
+
+    databaseTest("retrying failures is a user action", async () => {
+        const mediaId = await testMedia();
+        await db.transaction((tx) => markChanged(tx, Aspect.MEDIA_CONTENT, [mediaId], Priority.BACKFILL));
+        await requeue(db, ["preview"], [mediaId]);
+        expect((await rowOf("preview", mediaId))?.priority).toBe(Priority.CHANGE);
     });
 });
 
@@ -631,12 +675,124 @@ describe("QueueWorker", () => {
         expect(leased).toHaveLength(1);
 
         for (let left = previews.length; left > 0; left--) {
+            // Release the next preview only once it runs: it waits on the promise current when it started.
+            await until(() => running === 1);
             const current = releasePreview;
             releasePreview = Promise.withResolvers<void>();
             current.resolve();
             await until(() => previews.filter((id) => done.includes(id)).length === previews.length - left + 1);
         }
         expect(mostAtOnce).toBe(1);
+    });
+
+    databaseTest("what a run reports goes down the chain at the run's own priority", async () => {
+        // A backfill in miniature. BACKFILL itself would queue behind whatever else waits in the shared queue, so the
+        // chain runs at a priority that is not CHANGE but still goes first.
+        const priority = TEST_PRIORITY - 1;
+        expect(priority).not.toBe(Priority.CHANGE);
+        const mediaId = await testMedia();
+        const seen: Partial<Record<string, number>> = {};
+        let failedAt: number | undefined;
+        const { promise: reachedEnd, resolve: reached } = Promise.withResolvers<void>();
+        const { promise: released, resolve: release } = Promise.withResolvers<void>();
+        // No concurrency limits: a limited pipeline is claimed on its own and could pick up another library's row.
+        const handlers: PipelineHandlers = {
+            ...everyPipeline(idleHandler),
+            // Reports from inside the run, as the download pipeline does.
+            download: {
+                ...idleHandler,
+                async reconcile(ctx) {
+                    seen.download = ctx.priority;
+                    await db.transaction(async (tx) => {
+                        await ctx.fence(tx);
+                        await markChanged(tx, Aspect.MEDIA_CONTENT, [ctx.subjectId], ctx.priority);
+                    });
+                    return { kind: "done" };
+                },
+            },
+            // Reports through its result, which the worker queues.
+            preview: {
+                ...idleHandler,
+                async reconcile(ctx) {
+                    seen.preview = ctx.priority;
+                    return { kind: "done", changed: Aspect.MEDIA_PREVIEW };
+                },
+            },
+            // Holds the only slot until the worker drains, so it claims nothing outside this test.
+            "ai.describe": {
+                ...idleHandler,
+                async reconcile(ctx) {
+                    seen["ai.describe"] = ctx.priority;
+                    reached();
+                    await released;
+                    return { kind: "rejected", error: "unreadable" };
+                },
+                async recordFailure(_tx, failure) {
+                    failedAt = failure.priority;
+                },
+            },
+        };
+        await enqueue(db, [{ pipeline: "download", subjectId: mediaId, libraryId, priority }]);
+        const running = worker(handlers, 1);
+        running.start();
+        await reachedEnd;
+        const draining = running.drain(5_000);
+        release();
+        await draining;
+
+        expect(seen).toEqual({ download: priority, preview: priority, "ai.describe": priority });
+        expect(failedAt).toBe(priority);
+    });
+
+    databaseTest("downloads take at most four slots, and the rest go to other pipelines", async () => {
+        const limit = downloadPipeline.concurrency!;
+        expect(limit).toBe(4);
+        const downloads = Array.from({ length: limit + 2 }, () => subject());
+        const others = [subject()];
+        const { promise: released, resolve: release } = Promise.withResolvers<void>();
+        let downloading = 0;
+        let mostAtOnce = 0;
+        let otherStarted = false;
+        const handlers: PipelineHandlers = {
+            ...everyPipeline(idleHandler),
+            download: {
+                ...idleHandler,
+                concurrency: limit,
+                async reconcile() {
+                    downloading += 1;
+                    mostAtOnce = Math.max(mostAtOnce, downloading);
+                    await released;
+                    downloading -= 1;
+                    return { kind: "done" };
+                },
+            },
+            // Holds the last slot, so the worker claims nothing outside this test.
+            avatar: {
+                ...idleHandler,
+                async reconcile() {
+                    otherStarted = true;
+                    await released;
+                    return { kind: "done" };
+                },
+            },
+        };
+        await queue("download", downloads);
+        await queue("avatar", others);
+        const running = worker(handlers, limit + 1);
+        running.start();
+        await until(() => downloading === limit && otherStarted);
+        // A few more polls: the downloads still queued must stay queued.
+        await Bun.sleep(300);
+        const leased = await db
+            .select({ subject: JobQueue.subject_id })
+            .from(JobQueue)
+            .where(and(eq(JobQueue.library_id, libraryId), eq(JobQueue.pipeline, "download"), sql`${JobQueue.lease_token} IS NOT NULL`));
+        expect(leased).toHaveLength(limit);
+        expect(mostAtOnce).toBe(limit);
+
+        const draining = running.drain(5_000);
+        release();
+        await draining;
     });
 
     databaseTest("runs queued subjects to completion and records a rejected input at once", async () => {
@@ -648,7 +804,7 @@ describe("QueueWorker", () => {
         );
 
         expect(reconciled.sort()).toEqual([...ok, bad].sort());
-        expect(failures).toEqual([{ subjectId: bad, space: null, error: "unrenderable", errorKind: null }]);
+        expect(failures).toEqual([{ subjectId: bad, space: null, priority: TEST_PRIORITY, error: "unrenderable", errorKind: null }]);
     });
 
     databaseTest("records a failure without blaming the input once its attempts run out", async () => {
@@ -656,7 +812,7 @@ describe("QueueWorker", () => {
         const { reconciled, failures } = await runWorker(() => ({ kind: "retry", error: "bad gateway", errorKind: "TRANSIENT" }), [id], 1);
 
         expect(reconciled).toEqual([id]);
-        expect(failures).toEqual([{ subjectId: id, space: null, error: "bad gateway", errorKind: "TRANSIENT" }]);
+        expect(failures).toEqual([{ subjectId: id, space: null, priority: TEST_PRIORITY, error: "bad gateway", errorKind: "TRANSIENT" }]);
     });
 
     databaseTest("gives up on a subject interrupted too many times in a row, and never runs it again", async () => {
@@ -674,6 +830,7 @@ describe("QueueWorker", () => {
             {
                 subjectId: id,
                 space: null,
+                priority: TEST_PRIORITY,
                 error: `The run was interrupted ${DEFAULT_MAX_ATTEMPTS} times in a row`,
                 errorKind: null,
             },
@@ -714,7 +871,7 @@ describe("QueueWorker", () => {
         const { reconciled, failures } = await runWorker(() => ({ kind: "retry", error: "bad gateway" }), []);
 
         expect(reconciled).toEqual([id]);
-        expect(failures).toEqual([{ subjectId: id, space: null, error: "bad gateway", errorKind: null }]);
+        expect(failures).toEqual([{ subjectId: id, space: null, priority: TEST_PRIORITY, error: "bad gateway", errorKind: null }]);
     });
 
     databaseTest("patrols when it starts, as the timer starts over with the process", async () => {
@@ -1113,7 +1270,7 @@ describe("download pipeline", () => {
             expect((await downloadPipeline.scanPage(libraryId, null, 100, null)).subjectIds).toEqual([mediaId]);
 
             await db.transaction((tx) =>
-                downloadPipeline.recordFailure(tx, { subjectId: mediaId, space: null, error: "503 from the CDN", errorKind: null }),
+                downloadPipeline.recordFailure(tx, { subjectId: mediaId, space: null, priority: Priority.CHANGE, error: "503 from the CDN", errorKind: null }),
             );
 
             expect((await downloadPipeline.scanPage(libraryId, null, 100, null)).subjectIds).toEqual([]);

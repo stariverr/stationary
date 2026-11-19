@@ -76,8 +76,8 @@ export const previewPipeline: SubjectPipelineHandler = {
     },
 
     /** Records the failure on every size still missing, for the source it failed on. AI work goes on without previews. */
-    async recordFailure(tx, { subjectId: mediaId, error }) {
-        await markChanged(tx, Aspect.MEDIA_PREVIEW, [mediaId]);
+    async recordFailure(tx, { subjectId: mediaId, priority, error }) {
+        await markChanged(tx, Aspect.MEDIA_PREVIEW, [mediaId], priority);
         const [state] = await loadPreviewStates(tx, [mediaId]);
         if (state) await storePreviewFailure(tx, state, error);
     },

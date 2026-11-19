@@ -1,6 +1,6 @@
 # 后台任务队列
 
-下载、头像、封面、AI 描述、搜索文档和向量，都跑在 PostgreSQL 里的一个 reconcile 队列（`job_queue`）上，由 API 进程内的 `QueueWorker` 执行。本文是这套机制的设计说明，按"现在是什么样"来写；做了哪些取舍、哪些暂时不做，写在第 10 节和第 11 节。上线步骤见 [job_queue_rollout.zh-Hans.md](./job_queue_rollout.zh-Hans.md)。
+下载、头像、预览图、AI 描述、搜索文档和向量，都跑在 PostgreSQL 里的一个 reconcile 队列（`job_queue`）上，由 API 进程内的 `QueueWorker` 执行。本文是这套机制的设计说明，按"现在是什么样"来写；做了哪些取舍、哪些暂时不做，写在第 10 节和第 11 节。上线步骤见 [job_queue_rollout.zh-Hans.md](./job_queue_rollout.zh-Hans.md)。
 
 怎么读：
 
@@ -15,7 +15,7 @@
 
 | 类型 | 例子 | 机制 |
 |---|---|---|
-| 衍生数据：由源数据和配置算出来，应当一直保持最新 | 下载、头像、封面、AI 描述、搜索文档、文本和图片向量 | reconcile 队列（本文） |
+| 衍生数据：由源数据和配置算出来，应当一直保持最新 | 下载、头像、预览图、AI 描述、搜索文档、文本和图片向量 | reconcile 队列（本文） |
 | 操作：由用户发起，有开始和结束，要能列出、看进度、取消 | 导出 ZIP、存储迁移、外部 Batch API | operation 层，还没有建（11 节） |
 
 衍生数据不按"命令"排队，而是按 Kubernetes controller 的思路做 reconcile：
@@ -110,7 +110,7 @@ flowchart TD
 | `infra/queue/handlers.ts` | 流水线名到 handler 的注册表 |
 | `features/ingest/download-pipeline.ts` | `download` |
 | `features/author/avatar-pipeline.ts` | `avatar` |
-| `features/media/cover-pipeline.ts` | `cover` |
+| `features/media/preview-pipeline.ts` | `preview` |
 | `features/ai/describe-pipeline.ts`、`index-pipeline.ts`、`embed-pipeline.ts` | `ai.describe`、`ai.index`、`ai.text` / `ai.image`（共用一个文件） |
 | `features/ai/rate-limit.ts` | Redis 限流器和熔断 |
 | `features/ai/embedding-spaces.ts` | 向量空间的提升和删除 |
@@ -135,9 +135,9 @@ job_queue(
 
 `pipeline` 列存的是队列名，不只是流水线名：
 
-- 普通流水线就是流水线名，比如 `cover`。
+- 普通流水线就是流水线名，比如 `preview`。
 - 按向量空间拆分的流水线带空间行 id，比如 `ai.text:<空间行 id>`，每个空间单独填充、单独计数。
-- 库扫描的队列名加 `scan:` 前缀，对象是 library_id，比如 `scan:cover`、`scan:ai.text:<空间行 id>`。
+- 库扫描的队列名加 `scan:` 前缀，对象是 library_id，比如 `scan:preview`、`scan:ai.text:<空间行 id>`。
 
 ### 4.2 操作
 
@@ -152,7 +152,14 @@ job_queue(
 
 worker 每秒轮询一次到期的行，最多同时跑 8 个 run（所有流水线共用）。没有用 `LISTEN/NOTIFY`：新工作最多晚 1 秒开始，换来的是不需要单独的监听连接，经过连接池也不受影响。
 
-很占内存的流水线可以声明 `concurrency`，限制自己在一个 worker 里同时跑几个 run（目前只有 `preview` 声明了，是 2，原因见 [media_refactor.zh-Hans.md](./media_refactor.zh-Hans.md) 第 5 节）。这类流水线单独认领，最多认领到上限，通用认领跳过它们的对象行；所以排着队的预览图不占 worker 的空位，其他流水线照常跑。限制是按进程算的，因为要防的是一个容器的内存，多开副本时各自独立。scan 行不受限制。
+流水线可以声明 `concurrency`，限制自己在一个 worker 里同时跑几个 run。它只是上限，不额外给槽位，这些 run 仍然占 8 个里的位置：
+
+| 流水线 | 上限 | 原因 |
+|---|---|---|
+| `download` | 4 | 单次最长 2 小时。不限的话，一批慢下载能占满 8 个槽位，`preview` 和 AI 流水线只能等 |
+| `preview` | 2 | 一次渲染可能要约 800 MiB，要防的是一个容器的内存（[media_refactor.zh-Hans.md](./media_refactor.zh-Hans.md) 第 5 节） |
+
+这类流水线单独认领，最多认领到上限；通用认领跳过它们的对象行，所以排着队的下载和预览图不占空位，其他流水线照常跑。8 个槽位里 AI 流水线至少还有 2 个。上限按进程算，多开副本时各自独立。scan 行不受限制。
 
 ### 4.3 租约和 fencing
 
@@ -171,29 +178,30 @@ worker 每秒轮询一次到期的行，最多同时跑 8 个 run（所有流水
 
 | 流水线 | 对象 | 读的方面 | 产出 | 失败记在哪 |
 |---|---|---|---|---|
-| `download` | media | `media.source` | `media.content`（内容 track 的文件） | track / media 的 `sync_status`、`last_error` |
+| `download` | media | `media.source` | `media.content`（原件和字幕的文件）、`media.cover`（导入的封面） | 原件、字幕、封面行的 `status`、`last_error`；media 的 `sync_status`、`last_error` |
 | `avatar` | author | `author.avatar_source` | `author.avatar_file_id` | `author.avatar_error`、`avatar_error_origin` |
-| `cover` | media | `media.content`、`media.library`、`library.cover_config` | `media.cover`（cover track） | cover track 的 `last_error`、`metadata.error_source_file_id` |
-| `ai.describe` | media | `media.content`、`media.cover`、`media.library`、`library.ai_config` | `media.description`（`asset_ai_metadata`） | `asset_ai_metadata.last_error`、`error_input_hash` |
+| `preview` | media | `media.content`、`media.cover` | `media.preview`（`media_preview`，三种尺寸） | `media_preview.last_error`，连同失败时的 `source_file_id`、`recipe_version` |
+| `ai.describe` | media | `media.preview`、`media.library`、`library.ai_config` | `media.description`（`asset_ai_metadata`） | `asset_ai_metadata.last_error`、`error_input_hash` |
 | `ai.index` | media | `media.description`、`media.meta`、`media.library` | `media.search_doc`（`asset_search_document`） | 不调用 provider，只打日志 |
 | `ai.text:<空间>` | media | `media.search_doc`、`media.library`、`library.spaces` | `asset_embedding` | `asset_embedding.last_error`、`error_input_hash` |
-| `ai.image:<空间>` | media | `media.content`、`media.cover`、`media.library`、`library.spaces` | `asset_embedding` | `asset_embedding.last_error`、`error_input_hash` |
+| `ai.image:<空间>` | media | `media.preview`、`media.library`、`library.spaces` | `asset_embedding` | `asset_embedding.last_error`、`error_input_hash` |
 
-- `ai.describe` 和 `ai.image` 也读 `media.content`：没有生成封面的图片直接用内容图。
-- 失败旁边都记着失败时的输入（`error_input_hash`、`error_source_file_id`、`avatar_error_origin` 等）。输入一变，scan 就会重新拉起它。描述的哈希由图片、模型、prompt 版本、语言算出；向量的哈希是搜索文档或图片的哈希。
+- `ai.describe` 和 `ai.image` 只看大尺寸预览图，不直接读内容或封面。
+- 失败旁边都记着失败时的输入（`error_input_hash`、预览图的 `source_file_id` 和 `recipe_version`、`avatar_error_origin` 等）。输入一变，scan 就会重新拉起它。描述的哈希由图片、模型、prompt 版本、语言算出；向量的哈希是搜索文档或图片的哈希。
 - `ai.index` 的 scan 比较内容哈希，所以巡检会重试它的失败，也能发现漏报的变化。代价是每 200 个媒体多一组查询。哈希取决于标签名，标签名先排序。
-- `media.library` 表示媒体换了库。AI 结果行带自己的 `library_id`，reconcile 发现和媒体当前的库不一致，就删掉再按新库的配置重建。cover track 不分库：新库配置里有的质量，只要源文件没变就直接复用；配置里没有的质量照旧保留，不删。
+- `media.library` 表示媒体换了库。AI 结果行带自己的 `library_id`，reconcile 发现和媒体当前的库不一致，就删掉再按新库的配置重建。预览图不分库，换库后照旧使用。
 
 ### 5.2 markChanged
 
 ```ts
-markChanged(tx, aspect, ids)
+markChanged(tx, aspect, ids, priority)
 ```
 
-- 媒体级的方面：直接给读它的流水线入队，优先级为 `Priority.CHANGE`。`ai.text` / `ai.image` 展开成该库正在写入的每个空间各一条。
-- 库级的方面（`library.*`）：给读它的每条流水线入队一行 scan，对象是 library_id。
-- 只有产出**真的变了**才调用 `markChanged`；reconcile 发现已是最新，就不往下传。例外是封面：它是别的流水线等待的前置条件，所以最终失败时（`recordFailure`）和无事可做时（返回 `{ kind: "done", changed }`，在删队列行的事务里报告）也报告 `media.cover`，否则等它的 `ai.describe`、`ai.image` 再也不会被唤醒。
-- 每个 reconcile 开头先检查前置条件，比如封面没好时 `ai.describe` 直接结束，不记失败。封面写好后报告的 `media.cover` 会再把它入队。
+- 对象级的方面（`media.*`、`author.*`）：ids 就是读它的流水线的对象，直接入队。`ai.text` / `ai.image` 展开成该库正在写入的每个空间各一条。
+- 优先级由调用方给出，是必填参数：API、导入、设置等用户操作报告的变化用 `Priority.CHANGE`；run 里报告的变化用这次 run 自己那一行的优先级（`ctx.priority`），规则见 8 节。
+- 库级的方面（`library.*`）：给读它的每条流水线入队一行 scan，对象是 library_id。scan 行一律是 CHANGE，不看传入的优先级；scan 找到的对象是 BACKFILL。
+- 只有产出**真的变了**才调用 `markChanged`；reconcile 发现已是最新，就不往下传。例外是预览图：它是 AI 流水线等待的前置条件，所以最终失败时（`recordFailure`）和无事可做时（返回 `{ kind: "done", changed }`，在删队列行的事务里报告）也报告 `media.preview`，否则等它的 `ai.describe`、`ai.image` 再也不会被唤醒。
+- 每个 reconcile 开头先检查前置条件，比如媒体还在 `preview` 队列里时 `ai.describe` 直接结束，不记失败。预览图写好后报告的 `media.preview` 会再把它入队。
 
 ### 5.3 scan 和巡检
 
@@ -281,7 +289,13 @@ handler 返回 `done`，或者下面三类之一（抛异常等同于 `retry`）
 
 - **限流**：provider 打满时，Redis 限流器（`rate-limit.ts`）给出可重试的时间，行按这个时间 `postpone`，不计失败。限流在多个进程之间共享。
 - **熔断**：也在 Redis 限流器里，和限流共用冷却键，另加一个连续失败计数。指向 provider 的失败（鉴权、不可用、模型、未知）连续 5 次后封锁 30 秒，之后每次探测失败时长翻倍，最长 1 小时；任何一次成功都会清零。封锁期间调用方看到的和限流一样，行走 `deferred`，不计次数，也不请求 provider。输入错误和 429 不计入。provider 的 Key、地址或模板更新时清除封锁。熔断开始时打 `[AI LIMIT]` 日志。
-- **优先级**：两档。写入方报告的变化是 `Priority.CHANGE`，scan 找到的是 `Priority.BACKFILL`，所以新内容不会被整库回填饿死。认领用 `ORDER BY priority DESC NULLS LAST, available_at`，正好用上 `job_queue_claim_idx`。
+- **优先级**：两档，用户操作是 `Priority.CHANGE`，scan 找到的是 `Priority.BACKFILL`。认领用 `ORDER BY priority DESC NULLS LAST, available_at`，正好用上 `job_queue_claim_idx`。
+  - **下游继承上游的优先级。** run 里报告的变化，用这次 run 那一行的优先级入队，不一律提成 CHANGE。写结果时、`recordFailure` 里、返回 `{ kind: "done", changed }` 时报告的都算（后两种见 5.2 节预览图的例外），所以认领到的行要带上 `priority`，交给 `ReconcileContext` 和 `FailureRecord`。一次回填沿着整条链（下载 → 预览图 → AI）都是 BACKFILL，新内容在每条流水线上都排在它前面；用户的修改沿链都是 CHANGE。
+  - 同一行被两种优先级入队时取较高的（4.2 节），所以回填中的对象被用户改了，会升到 CHANGE，它的下游也跟着是 CHANGE。
+  - "重试失败"（`requeue`）是用户操作，用 CHANGE。
+  - API 和 run 共用的 helper（`CoverService`、`originals.ts` 里写原件的函数）不自己定优先级，由调用方传入。
+  - 攒批的流水线（`ai.text`、`ai.image`）没有下游，不需要按行区分优先级。以后有攒批的流水线要报告变化，每个对象用自己那一行的优先级。
+  - 起因：2026-11-14 上线迁移时，迁移脚本请求的 `download` scan 是 BACKFILL，但下载完成时报告的 `media.content`、`media.cover` 一律按 CHANGE 入队，1.8 万个媒体的预览图全成了 CHANGE。新导入的媒体和它们同一档，只能按时间排在后面，要等好几天。
 - **暂停**：`library.jobs_paused`，用户在任务页按库开关，存在数据库里，重启后仍然有效，作用于该库所有流水线。
   - 只有认领读这个字段：运行中的 run 继续跑完；入队、scan 和巡检照常，行留在队列里，恢复后按原来的优先级和时间处理。
   - 恢复后 worker 在下一次轮询（1 秒内）认领。暂停和恢复只写 `library`，不碰队列行，所以不会打乱加锁顺序。
@@ -307,7 +321,7 @@ handler 返回 `done`，或者下面三类之一（抛异常等同于 `retry`）
 
 ### 9.2 界面
 
-- 任务页（`jobs.vue`）按"库 × 流水线"显示排队、处理中、失败及原因，每 5 秒轮询；有"重试失败"和暂停开关。设置页的封面和 AI 进度每 2 秒轮询，暂停时显示"已暂停"。
+- 任务页（`jobs.vue`）按"库 × 流水线"显示排队、处理中、失败及原因，每 5 秒轮询；有"重试失败"和暂停开关。设置页的预览图和 AI 进度每 2 秒轮询，暂停时显示"已暂停"。
 - 顶部提醒（`GlobalProviderNotice.vue`）：当前库的 provider 封锁至少 2 分钟时出现，连续失败的 provider 第三次封锁就到这个时长。每 60 秒读一次 `blocked_seconds`，标签页隐藏时和在任务页上不轮询。用户关掉后，这次封锁结束前不再出现。
 
 ### 9.3 接口
@@ -322,7 +336,7 @@ handler 返回 `done`，或者下面三类之一（抛异常等同于 `retry`）
 
 1. 在 `pipelines.ts` 的 `PIPELINES` 里声明对象、读的方面和产出，按依赖顺序放（读它产出的流水线排在它后面）。需要新方面时加到 `Aspect`。
 2. 实现 handler（`types.ts`）：
-   - `reconcile`：读当前状态，只做差异；写结果的事务里先写，再 `ctx.fence(tx)`，再 `markChanged` 产出的方面（只在真的变了时）。
+   - `reconcile`：读当前状态，只做差异；写结果的事务里先写，再 `ctx.fence(tx)`，再 `markChanged` 产出的方面（只在真的变了时，优先级传 `ctx.priority`）。
    - `recordFailure`：把失败连同输入写到结果行。结果行上没有地方记失败的话，先加字段。
    - `scanPage`：按对象 id 翻页，只返回需要处理、且失败不适用于当前输入的对象。
    - `countFailures`、`listFailures`：任务页用。
@@ -348,12 +362,14 @@ handler 返回 `done`，或者下面三类之一（抛异常等同于 `retry`）
 
 **调度**
 
-- **所有流水线共用 8 个槽位。** 一批慢任务（FFmpeg、AI）能占满全部槽位。
+- **所有流水线共用 8 个槽位。** `download` 最多占 4 个、`preview` 最多 2 个（4.2 节），AI 流水线至少还有 2 个。这两个上限是按单次 run 的耗时和内存估的，没有按实际负载测过。
+- **总并发没有加大。** 每个 pod 的数据库连接池默认 10 个，而生产的 Supabase session 池所有客户端合计只有 15 个，2026-11-15 满过一次，当时认领全部失败，队列看起来像卡住了。要加大，得先改用 transaction 池（6543 端口，`prepare: false`），并确认没有代码依赖会话级的状态。
+- **通用认领要跳过达到上限的流水线的行。** `job_queue_claim_idx` 里没有 `pipeline` 列，排在前面的积压（比如 1.8 万行预览图）每次通用认领都要扫过再丢掉。8 节"暂停"一条测过同样形状的查询：跳过 20 万行约 17.6 毫秒，每秒一次可以接受。真成了慢查询，再加带 `pipeline` 的索引。
 - **没有按库轮转。** 一个大库能占满全部槽位，多用户部署时再加。
 - **"重试失败"和新内容同优先级。** 它走 `requeue`，优先级和编辑触发的变化一样。
 - **限流时不单独暂停队列。** provider 打满时，积压的每一行（攒批的是每一批）在每个等待窗口里会被认领一次、查一次 Redis 后放回，不调用 provider，也不计次数。以前在 worker 内存里按"队列 × 库"记一个到期时间来省掉这些认领，2026-11-04 删掉了：只省空转，不值得多一份状态。
 - **新工作最多晚 1 秒开始。** 用轮询代替 `LISTEN/NOTIFY`，2026-11-04 改的，换来不需要监听连接、不受连接池模式限制。
-- **暂停只能整库停。** 不能只停某一条流水线，所以暂停期间新上传的媒体也不会生成封面。
+- **暂停只能整库停。** 不能只停某一条流水线，所以暂停期间新上传的媒体也不会生成预览图。
 
 **运行时**
 
@@ -385,7 +401,7 @@ handler 返回 `done`，或者下面三类之一（抛异常等同于 `retry`）
   - 取消操作时同时取消 provider 端的作业。
   - 协议差异放在 provider 适配器（`submit / poll / cancel`）：OpenAI 和百炼兼容模式用 Files + Batches，Gemini 的 Batch Mode 是另一种格式。
 - **复制 post 或媒体到别的库。** 在目标库新建 post、media、track 行，再对新媒体 `markChanged("media.source")`。删除如果是按引用的（删一条记录不会删掉别人还在用的文件），新行直接引用同一批文件，复制就是一次同步请求；否则要真的拷贝文件，量大时做成 operation。
-- **按库轮转、按 provider 或流水线划分槽位、通知系统、指标和告警**：见 10 节，有需要时再做。
+- **按库轮转、按 provider 划分槽位、通知系统、指标和告警**：见 10 节，有需要时再做。
 - **推送进度。** 前端目前轮询；需要时从 `finish` 发 `NOTIFY` 转 SSE。
 
 ## 12. 待验证
@@ -395,7 +411,6 @@ handler 返回 `done`，或者下面三类之一（抛异常等同于 `retry`）
 - 提醒被关闭后，封锁结束再次触发时能重新出现。
 - 繁体中文的新文案，还没在页面上看过。
 - 控制台里 `LibrarySwitcher` 和任务页的 hydration 警告，没有和改动前对比过。
-- `cover-all-formats` 测试，需要 S3。
 - 生产环境的 Postgres 版本。
 - 开发库的 worker 恢复情况。57 行 `ai.text` 的 `attempts` 最高到 112，现在被认领后会再跑一次，再失败就只记错误、由巡检重新入队。还没在开发库上看过。
 
@@ -407,4 +422,8 @@ handler 返回 `done`，或者下面三类之一（抛异常等同于 `retry`）
   2. 迁移四条 AI 流水线，含攒批和限流；删除旧引擎、两张任务表和 embedding 队列（2026-10-30）。
   3. 熔断提醒、优先级、库级暂停（2026-10-30）。
 - 2026-11-04 加固并简化：中断单独计数、drain 和容器入口、超时；删掉被中断行的单独运行、限流时的内存暂停表和 `LISTEN/NOTIFY`。
+- 2026-11-18 定下：
+  - run 里报告的变化继承这次 run 的优先级，`markChanged` 的优先级改为必填（8 节）。当时排着的回填行已经跑完，生产队列为空，不需要降级已有的行。
+  - `download` 加并发上限 4（4.2 节）。
+  - 考虑过把帖子状态做成一条流水线，没有采用：库暂停时帖子状态会跟着冻住，新帖子会先闪一下 PENDING，还要为它加对象类型和专用槽位。帖子状态不进队列，由 `refreshPostSyncStatus` 先锁帖子行再计算，规则写在它的注释里。
 - 旧的问题清单和逐层记录在 git 历史的 `docs/async_task_improvements.zh-Hans.md` 里。
