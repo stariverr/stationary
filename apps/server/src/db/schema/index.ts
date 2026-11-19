@@ -17,6 +17,7 @@ import {
     real,
     smallint,
     primaryKey,
+    type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { v7 as createUuidV7 } from "uuid";
 
@@ -83,6 +84,48 @@ export enum SyncStatus {
     FAILED = "FAILED",
 }
 export const SyncStatusEnum = pgEnum("sync_status", [SyncStatus.PENDING, SyncStatus.IN_PROGRESS, SyncStatus.COMPLETED, SyncStatus.FAILED]);
+
+/** Why a source of a media (an original, caption or cover) failed (docs/failure_handling.zh-Hans.md, 5). */
+export enum SourceErrorKind {
+    /** Timeouts, dropped connections, 5xx and other answers that may pass later; retried. */
+    NETWORK = "NETWORK",
+    /** The platform refuses the URL (400, 403, 404, 410), most often an expired signature. */
+    SOURCE_UNAVAILABLE = "SOURCE_UNAVAILABLE",
+    /** The file cannot be read: the probe or the caption conversion rejects it. */
+    UNREADABLE = "UNREADABLE",
+    /** Anything else: storage, a bug, a run past its deadline; retried. */
+    INTERNAL = "INTERNAL",
+}
+export const SourceErrorKindEnum = pgEnum("source_error_kind", [
+    SourceErrorKind.NETWORK,
+    SourceErrorKind.SOURCE_UNAVAILABLE,
+    SourceErrorKind.UNREADABLE,
+    SourceErrorKind.INTERNAL,
+]);
+
+/**
+ * The error columns of a source row and their checks (docs/failure_handling.zh-Hans.md, 4): `last_error`,
+ * `error_kind` and `error_source_url` are the latest error on the row's current source, all set or all null. An error
+ * of an imported source names the URL it happened on, which must be the current one, so a new URL cannot keep a stale
+ * error; an error of a source without a URL (an embedded caption) names none. FAILED rows have an error, COMPLETED
+ * rows none; PENDING and IN_PROGRESS rows may carry the error of their last attempt while it is retried.
+ */
+const sourceErrorColumns = () => ({
+    error_kind: SourceErrorKindEnum("error_kind"),
+    error_source_url: text("error_source_url"),
+});
+
+function sourceErrorChecks(name: string, table: { status: AnyPgColumn; last_error: AnyPgColumn; error_kind: AnyPgColumn; error_source_url: AnyPgColumn; source_url: AnyPgColumn }) {
+    return [
+        check(`${name}_error_kind_pair`, sql`(${table.last_error} IS NULL) = (${table.error_kind} IS NULL)`),
+        check(
+            `${name}_error_on_current_source`,
+            sql`${table.error_source_url} IS NOT DISTINCT FROM (CASE WHEN ${table.last_error} IS NULL THEN NULL ELSE ${table.source_url} END)`,
+        ),
+        check(`${name}_error_when_failed`, sql`${table.status} <> 'FAILED' OR ${table.last_error} IS NOT NULL`),
+        check(`${name}_no_error_when_completed`, sql`${table.status} <> 'COMPLETED' OR ${table.last_error} IS NULL`),
+    ];
+}
 
 export enum AccessRole {
     VIEWER = "VIEWER",
@@ -427,6 +470,7 @@ export const MediaCover = pgTable(
         source_key: text("source_key"),
         status: SyncStatusEnum("status").notNull(),
         last_error: text("last_error"),
+        ...sourceErrorColumns(),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),
@@ -436,6 +480,7 @@ export const MediaCover = pgTable(
     },
     (table) => [
         uniqueIndex("media_cover_media_unique").on(table.media_id),
+        ...sourceErrorChecks("media_cover", table),
         check("media_cover_file_when_completed", sql`(${table.status} = 'COMPLETED') = (${table.file_id} IS NOT NULL)`),
         check("media_cover_source_or_file", sql`${table.source_url} IS NOT NULL OR ${table.file_id} IS NOT NULL`),
         check("media_cover_source_pair", sql`(${table.source_url} IS NULL) = (${table.source_key} IS NULL)`),
@@ -514,6 +559,7 @@ export const MediaOriginal = pgTable(
         /** COMPLETED means downloaded and probed; a source or probe that is rejected ends FAILED. */
         status: SyncStatusEnum("status").notNull(),
         last_error: text("last_error"),
+        ...sourceErrorColumns(),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),
@@ -527,6 +573,7 @@ export const MediaOriginal = pgTable(
         check("media_original_file_when_completed", sql`(${table.status} = 'COMPLETED') = (${table.file_id} IS NOT NULL)`),
         check("media_original_source_pair", sql`(${table.source_url} IS NULL) = (${table.source_key} IS NULL)`),
         check("media_original_source_or_file", sql`${table.source_url} IS NOT NULL OR ${table.file_id} IS NOT NULL`),
+        ...sourceErrorChecks("media_original", table),
     ],
 );
 
@@ -651,6 +698,7 @@ export const MediaCaption = pgTable(
         source_key: text("source_key"),
         status: SyncStatusEnum("status").notNull(),
         last_error: text("last_error"),
+        ...sourceErrorColumns(),
         create_time: temporal("create_time")
             .default(sql`now()`)
             .notNull(),
@@ -670,6 +718,7 @@ export const MediaCaption = pgTable(
             sql`${table.origin} = 'EMBEDDED' OR ${table.status} <> 'COMPLETED' OR ${table.source_file_id} IS NOT NULL`,
         ),
         check("media_caption_source_pair", sql`(${table.source_url} IS NULL) = (${table.source_key} IS NULL)`),
+        ...sourceErrorChecks("media_caption", table),
     ],
 );
 

@@ -1,6 +1,6 @@
 import * as v from "valibot";
 import { toJsonSchema } from "@valibot/to-json-schema";
-import { AssetOrigin, LyricsTiming, MediaType, PostSource, SyncStatus } from "@/db/schema";
+import { AssetOrigin, LyricsTiming, MediaType, PostSource, SourceErrorKind, SyncStatus } from "@/db/schema";
 
 // FormTimestampSchema helper
 const FormTimestampSchema = v.optional(v.nullable(v.union([v.string(), v.number()])));
@@ -285,6 +285,7 @@ const MediaOriginalResponseSchema = v.object({
     size: v.nullable(v.number()),
     status: v.enum(SyncStatus),
     last_error: v.nullable(v.string()),
+    error_kind: v.nullable(v.enum(SourceErrorKind)),
 });
 
 const MediaCaptionResponseSchema = v.object({
@@ -295,6 +296,7 @@ const MediaCaptionResponseSchema = v.object({
     is_default: v.boolean(),
     status: v.enum(SyncStatus),
     last_error: v.nullable(v.string()),
+    error_kind: v.nullable(v.enum(SourceErrorKind)),
     vtt_url: v.nullable(v.string()),
 });
 

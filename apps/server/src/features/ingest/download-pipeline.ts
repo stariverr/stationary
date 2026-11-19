@@ -1,17 +1,19 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { and, asc, desc, eq, exists, gt, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
-import { DeleteStatus, File, Media, MediaCaption, MediaCover, MediaOriginal, SyncStatus } from "@/db/schema";
+import { DeleteStatus, File, Media, MediaCaption, MediaCover, MediaOriginal, SourceErrorKind, SyncStatus } from "@/db/schema";
 import { db, type DbClient, type Transaction } from "@/global/db";
 import { env } from "@/global/env";
 import { convertToVtt, makeDefaultCaption, storeVtt } from "@/features/media/captions";
 import { getMediaCompletionError, lockPosts, refreshPostSyncStatus } from "@/features/media/composition";
 import { completeOriginal } from "@/features/media/originals";
-import { probeOriginal, ProbeRejectedError } from "@/features/media/probe";
+import { probeOriginal } from "@/features/media/probe";
+import { NO_SOURCE_ERROR, resetRetryableSources } from "@/features/media/source-rows";
 import { mediaStoragePath } from "@/features/media/storage";
 import { markChanged } from "@/infra/queue/changes";
 import { Aspect } from "@/infra/queue/pipelines";
 import type { ReconcileContext, ReconcileResult, SubjectPipelineHandler } from "@/infra/queue/types";
-import { getErrorMessage } from "@/lib/utils/error";
 import { DownloadStatusError, downloadStream, getBodyLength, getExtensionFromContentType, uploadToS3 } from "@/lib/utils/media";
+import { classifySourceError, SourceTransferError, type SourceError } from "./source-errors";
 
 type MediaRow = typeof Media.$inferSelect;
 type OriginalRow = typeof MediaOriginal.$inferSelect;
@@ -21,16 +23,20 @@ type CoverRow = typeof MediaCover.$inferSelect;
 const activeMedia = (mediaId: string) =>
     and(eq(Media.id, mediaId), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time));
 
+type SourceTable = typeof MediaOriginal | typeof MediaCaption | typeof MediaCover;
+type SourceRow = { id: string; source_url: string | null; source_key: string | null };
+
 /**
- * An imported source still waiting for its download: FAILED ones failed on it and run only when the media is
- * requeued. Originals, captions and covers share the shape.
+ * An imported source still waiting for its download. A FAILED one failed on its current URL and waits for a new URL
+ * or a retry, which make it PENDING again (docs/failure_handling.zh-Hans.md, 4.3). Originals, captions and covers
+ * share the shape.
  */
-function pendingSource(table: typeof MediaOriginal | typeof MediaCaption | typeof MediaCover, failedToo: boolean): SQL {
-    return and(
-        isNotNull(table.source_url),
-        failedToo ? ne(table.status, SyncStatus.COMPLETED) : inArray(table.status, [SyncStatus.PENDING, SyncStatus.IN_PROGRESS]),
-    )!;
+function pendingSource(table: SourceTable): SQL {
+    return and(isNotNull(table.source_url), inArray(table.status, [SyncStatus.PENDING, SyncStatus.IN_PROGRESS]))!;
 }
+
+/** How long to wait before trying a source that answered 403 once more: CDNs also refuse for a moment. */
+const FORBIDDEN_RETRY_DELAY_MS = 3_000;
 
 /** Objects are named after the source key, so a new source never overwrites a file a CDN may still serve. */
 const keyName = (sourceKey: string) => new Bun.CryptoHasher("sha256").update(sourceKey).digest("hex").slice(0, 16);
@@ -55,28 +61,45 @@ async function softDeleteFile(client: DbClient, fileId: string) {
         .where(and(eq(File.id, fileId), eq(File.delete_status, DeleteStatus.ACTIVE)));
 }
 
-/** Downloads a source into storage under `media`, as `<prefix>_<key>.<ext>`, and records its file. */
-async function fetchSource(ctx: ReconcileContext, media: MediaRow, source: { source_url: string | null; source_key: string | null }, prefix: string) {
-    const sourceUrl = source.source_url!;
-    const response = await downloadStream(sourceUrl, { signal: ctx.signal });
-    if (!response?.body) throw new Error(`Download of ${sourceUrl} returned no body`);
-    ctx.signal.throwIfAborted();
+/** Opens a source; a 403 is tried once more after a short pause, as a CDN may refuse for a moment. */
+async function openSource(url: string, signal: AbortSignal): Promise<Response | null> {
+    try {
+        return await downloadStream(url, { signal });
+    } catch (error) {
+        if (!(error instanceof DownloadStatusError && error.status === 403)) throw error;
+        await delay(FORBIDDEN_RETRY_DELAY_MS, undefined, { signal });
+        return downloadStream(url, { signal });
+    }
+}
 
-    const contentType = response.headers.get("Content-Type") || "application/octet-stream";
-    const size = getBodyLength(response) ?? null;
-    const ext = getExtensionFromContentType(contentType, sourceUrl);
-    const path = mediaStoragePath(media, `${prefix}_${keyName(source.source_key!)}.${ext}`);
-    await uploadToS3(path, response.body, contentType, env.S3_BUCKET, size ?? undefined, ctx.signal);
-    ctx.signal.throwIfAborted();
-    return upsertFile(db, { path, mime_type: contentType, extension: ext, size });
+/**
+ * Downloads a source into storage under `media`, as `<prefix>_<key>.<ext>`, and records its file. A refusal keeps its
+ * status; anything else that breaks the transfer is a SourceTransferError.
+ */
+async function fetchSource(ctx: ReconcileContext, media: MediaRow, source: SourceRow, prefix: string) {
+    const sourceUrl = source.source_url!;
+    let stored: { path: string; mime_type: string; extension: string; size: number | null };
+    try {
+        const response = await openSource(sourceUrl, ctx.signal);
+        if (!response?.body) throw new Error(`Download of ${sourceUrl} returned no body`);
+        ctx.signal.throwIfAborted();
+
+        const contentType = response.headers.get("Content-Type") || "application/octet-stream";
+        const size = getBodyLength(response) ?? null;
+        const ext = getExtensionFromContentType(contentType, sourceUrl);
+        const path = mediaStoragePath(media, `${prefix}_${keyName(source.source_key!)}.${ext}`);
+        await uploadToS3(path, response.body, contentType, env.S3_BUCKET, size ?? undefined, ctx.signal);
+        ctx.signal.throwIfAborted();
+        stored = { path, mime_type: contentType, extension: ext, size };
+    } catch (error) {
+        if (ctx.signal.aborted || error instanceof DownloadStatusError) throw error;
+        throw new SourceTransferError(error);
+    }
+    return upsertFile(db, stored);
 }
 
 /** Downloads and probes one original, then completes it unless the import replaced or removed it meanwhile. */
 async function downloadOriginal(ctx: ReconcileContext, media: MediaRow, original: OriginalRow): Promise<void> {
-    await db.transaction(async (tx) => {
-        await tx.update(MediaOriginal).set({ status: SyncStatus.IN_PROGRESS, update_time: Temporal.Now.instant() }).where(eq(MediaOriginal.id, original.id));
-        await ctx.fence(tx);
-    });
     const file = await fetchSource(ctx, media, original, "original");
     let probe;
     try {
@@ -119,7 +142,7 @@ async function downloadCaption(ctx: ReconcileContext, media: MediaRow, caption: 
         const vttFileId = await storeVtt(tx, media, keyName(caption.source_key!), vtt);
         await tx
             .update(MediaCaption)
-            .set({ source_file_id: file.id, vtt_file_id: vttFileId, status: SyncStatus.COMPLETED, last_error: null, update_time: Temporal.Now.instant() })
+            .set({ source_file_id: file.id, vtt_file_id: vttFileId, status: SyncStatus.COMPLETED, ...NO_SOURCE_ERROR, update_time: Temporal.Now.instant() })
             .where(eq(MediaCaption.id, caption.id));
         if (current.is_default) await makeDefaultCaption(tx, media.id, caption.id);
         await ctx.fence(tx);
@@ -136,7 +159,7 @@ async function downloadCover(ctx: ReconcileContext, media: MediaRow, cover: Cove
     await db.transaction(async (tx) => {
         const completed = await tx
             .update(MediaCover)
-            .set({ file_id: file.id, status: SyncStatus.COMPLETED, last_error: null, update_time: Temporal.Now.instant() })
+            .set({ file_id: file.id, status: SyncStatus.COMPLETED, ...NO_SOURCE_ERROR, update_time: Temporal.Now.instant() })
             .where(and(eq(MediaCover.id, cover.id), eq(MediaCover.source_key, cover.source_key!)))
             .returning({ id: MediaCover.id });
         if (completed.length === 0) return softDeleteFile(tx, file.id);
@@ -145,19 +168,33 @@ async function downloadCover(ctx: ReconcileContext, media: MediaRow, cover: Cove
     });
 }
 
-/** Records a failed download on its row, unless the import replaced the source meanwhile. */
-async function recordSourceError(
-    ctx: ReconcileContext,
-    table: typeof MediaOriginal | typeof MediaCaption | typeof MediaCover,
-    row: { id: string; source_key: string | null },
-    status: SyncStatus,
-    error: string,
-) {
+/** Marks a source as downloading, unless the import gave it another URL or it completed meanwhile. */
+async function startSource(ctx: ReconcileContext, table: SourceTable, row: SourceRow) {
     await db.transaction(async (tx) => {
         await tx
             .update(table)
-            .set({ status, last_error: error, update_time: Temporal.Now.instant() })
-            .where(and(eq(table.id, row.id), eq(table.source_key, row.source_key!), ne(table.status, SyncStatus.COMPLETED)));
+            .set({ status: SyncStatus.IN_PROGRESS, update_time: Temporal.Now.instant() })
+            .where(and(eq(table.id, row.id), eq(table.source_url, row.source_url!), ne(table.status, SyncStatus.COMPLETED)));
+        await ctx.fence(tx);
+    });
+}
+
+/**
+ * Records the error of a download on its row, bound to the URL it happened on: PENDING while it is retried, FAILED
+ * when it is final. An import that gave the source another URL meanwhile voids it.
+ */
+async function recordSourceError(ctx: ReconcileContext, table: SourceTable, row: SourceRow, error: SourceError) {
+    await db.transaction(async (tx) => {
+        await tx
+            .update(table)
+            .set({
+                status: error.retryable ? SyncStatus.PENDING : SyncStatus.FAILED,
+                last_error: error.message,
+                error_kind: error.kind,
+                error_source_url: row.source_url,
+                update_time: Temporal.Now.instant(),
+            })
+            .where(and(eq(table.id, row.id), eq(table.source_url, row.source_url!), ne(table.status, SyncStatus.COMPLETED)));
         await ctx.fence(tx);
     });
 }
@@ -179,6 +216,19 @@ const failedMedia = (libraryIds: readonly string[]) =>
 
 const SOURCE_TABLES = [MediaOriginal, MediaCaption, MediaCover] as const;
 
+/** The error of an imported source of the media that failed for good, if one did; such a source fails the media. */
+async function failedSourceError(client: DbClient, mediaId: string): Promise<string | null> {
+    for (const table of SOURCE_TABLES) {
+        const [failed] = await client
+            .select({ error: table.last_error })
+            .from(table)
+            .where(and(eq(table.media_id, mediaId), isNotNull(table.source_url), eq(table.status, SyncStatus.FAILED)))
+            .limit(1);
+        if (failed) return failed.error!;
+    }
+    return null;
+}
+
 /**
  * `download`: fetches the imported sources of a media into storage: its originals, which are probed, its captions,
  * which are converted to WebVTT, and its cover. Once every original is complete and they make up the media, the media
@@ -198,17 +248,17 @@ export const downloadPipeline: SubjectPipelineHandler = {
             db
                 .select()
                 .from(MediaOriginal)
-                .where(and(eq(MediaOriginal.media_id, media.id), pendingSource(MediaOriginal, true)))
+                .where(and(eq(MediaOriginal.media_id, media.id), pendingSource(MediaOriginal)))
                 .orderBy(asc(MediaOriginal.create_time)),
             db
                 .select()
                 .from(MediaCaption)
-                .where(and(eq(MediaCaption.media_id, media.id), pendingSource(MediaCaption, true)))
+                .where(and(eq(MediaCaption.media_id, media.id), pendingSource(MediaCaption)))
                 .orderBy(asc(MediaCaption.create_time)),
             db
                 .select()
                 .from(MediaCover)
-                .where(and(eq(MediaCover.media_id, media.id), pendingSource(MediaCover, true))),
+                .where(and(eq(MediaCover.media_id, media.id), pendingSource(MediaCover))),
         ]);
 
         if (originals.length + captions.length + covers.length > 0) {
@@ -221,32 +271,27 @@ export const downloadPipeline: SubjectPipelineHandler = {
             });
         }
 
-        let failure: ReconcileResult | undefined;
-        const attempt = async (
-            table: (typeof SOURCE_TABLES)[number],
-            row: { id: string; source_key: string | null },
-            download: () => Promise<void>,
-        ) => {
+        // A final error ends its source FAILED at once and the others still run; one that may pass later retries the media.
+        let retry: ReconcileResult | undefined;
+        const attempt = async (table: SourceTable, row: SourceRow, download: () => Promise<void>) => {
+            await startSource(ctx, table, row);
             try {
                 await download();
             } catch (error) {
                 if (ctx.signal.aborted) throw error;
-                // A source the platform refuses, or a file the tools cannot read, will not work on a retry.
-                const rejected = (error instanceof DownloadStatusError && error.rejected) || error instanceof ProbeRejectedError;
-                const message = getErrorMessage(error);
-                await recordSourceError(ctx, table, row, rejected ? SyncStatus.FAILED : SyncStatus.PENDING, message);
-                // Any source that may still work keeps the media retrying.
-                if (!failure || !rejected) failure = { kind: rejected ? "rejected" : "retry", error: message };
+                const sourceError = classifySourceError(error);
+                await recordSourceError(ctx, table, row, sourceError);
+                if (sourceError.retryable) retry ??= { kind: "retry", error: sourceError.message, errorKind: sourceError.kind };
             }
         };
         for (const original of originals) await attempt(MediaOriginal, original, () => downloadOriginal(ctx, media, original));
         for (const caption of captions) await attempt(MediaCaption, caption, () => downloadCaption(ctx, media, caption));
         for (const cover of covers) await attempt(MediaCover, cover, () => downloadCover(ctx, media, cover));
-        if (failure) return failure;
+        if (retry) return retry;
 
         await db.transaction(async (tx) => {
             const postIds = await lockPosts(tx, { mediaIds: [media.id] });
-            const completionError = await getMediaCompletionError(tx, media);
+            const completionError = (await failedSourceError(tx, media.id)) ?? (await getMediaCompletionError(tx, media));
             if (completionError) {
                 await setMediaFailed(tx, media.id, postIds, completionError);
                 await ctx.fence(tx);
@@ -263,18 +308,41 @@ export const downloadPipeline: SubjectPipelineHandler = {
         return { kind: "done" };
     },
 
-    /** Marks the media failed, and its sources still waiting for a download too, so scans leave them until a requeue. */
-    async recordFailure(tx, { subjectId: mediaId, error }) {
+    /**
+     * Marks the media failed, and its sources still waiting for a download too, so scans leave them until a retry or a
+     * new URL. A source keeps the error its own last attempt recorded; one without takes the run's.
+     */
+    async recordFailure(tx, { subjectId: mediaId, error, errorKind }) {
         const postIds = await lockPosts(tx, { mediaIds: [mediaId] });
         const [media] = await tx.select({ id: Media.id }).from(Media).where(activeMedia(mediaId)).limit(1);
         if (!media) return;
         for (const table of SOURCE_TABLES) {
             await tx
                 .update(table)
-                .set({ status: SyncStatus.FAILED, update_time: Temporal.Now.instant() })
-                .where(and(eq(table.media_id, mediaId), pendingSource(table, false)));
+                .set({
+                    status: SyncStatus.FAILED,
+                    last_error: sql`coalesce(${table.last_error}, ${error})`,
+                    error_kind: sql`coalesce(${table.error_kind}, ${errorKind ?? SourceErrorKind.INTERNAL}::source_error_kind)`,
+                    error_source_url: sql`${table.source_url}`,
+                    update_time: Temporal.Now.instant(),
+                })
+                .where(and(eq(table.media_id, mediaId), pendingSource(table)));
         }
         await setMediaFailed(tx, mediaId, postIds, error);
+    },
+
+    /** A media is retried when one of its sources failed for a retryable reason; the others fail it again anyway. */
+    async resetFailures(tx, mediaIds) {
+        const postIds = await lockPosts(tx, { mediaIds });
+        const retried = await resetRetryableSources(tx, mediaIds);
+        if (retried.length === 0) return [];
+        const now = Temporal.Now.instant();
+        await tx
+            .update(Media)
+            .set({ sync_status: SyncStatus.PENDING, last_error: null, update_time: now })
+            .where(and(inArray(Media.id, retried), eq(Media.sync_status, SyncStatus.FAILED)));
+        await refreshPostSyncStatus(tx, postIds, now);
+        return retried;
     },
 
     async scanPage(libraryId, cursor, limit) {
@@ -303,7 +371,7 @@ export const downloadPipeline: SubjectPipelineHandler = {
                                 db
                                     .select({ id: table.id })
                                     .from(table)
-                                    .where(and(eq(table.media_id, Media.id), pendingSource(table, false))),
+                                    .where(and(eq(table.media_id, Media.id), pendingSource(table))),
                             ),
                         ),
                     ),

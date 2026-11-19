@@ -2648,6 +2648,16 @@
                                     "last_error": {
                                       "type": "string",
                                       "nullable": true
+                                    },
+                                    "error_kind": {
+                                      "enum": [
+                                        "NETWORK",
+                                        "SOURCE_UNAVAILABLE",
+                                        "UNREADABLE",
+                                        "INTERNAL"
+                                      ],
+                                      "type": "string",
+                                      "nullable": true
                                     }
                                   },
                                   "required": [
@@ -2657,7 +2667,8 @@
                                     "mime_type",
                                     "size",
                                     "status",
-                                    "last_error"
+                                    "last_error",
+                                    "error_kind"
                                   ]
                                 }
                               },
@@ -2700,6 +2711,16 @@
                                       "type": "string",
                                       "nullable": true
                                     },
+                                    "error_kind": {
+                                      "enum": [
+                                        "NETWORK",
+                                        "SOURCE_UNAVAILABLE",
+                                        "UNREADABLE",
+                                        "INTERNAL"
+                                      ],
+                                      "type": "string",
+                                      "nullable": true
+                                    },
                                     "vtt_url": {
                                       "type": "string",
                                       "nullable": true
@@ -2713,6 +2734,7 @@
                                     "is_default",
                                     "status",
                                     "last_error",
+                                    "error_kind",
                                     "vtt_url"
                                   ]
                                 }
@@ -4265,6 +4287,16 @@
                               "last_error": {
                                 "type": "string",
                                 "nullable": true
+                              },
+                              "error_kind": {
+                                "enum": [
+                                  "NETWORK",
+                                  "SOURCE_UNAVAILABLE",
+                                  "UNREADABLE",
+                                  "INTERNAL"
+                                ],
+                                "type": "string",
+                                "nullable": true
                               }
                             },
                             "required": [
@@ -4274,7 +4306,8 @@
                               "mime_type",
                               "size",
                               "status",
-                              "last_error"
+                              "last_error",
+                              "error_kind"
                             ]
                           }
                         },
@@ -4317,6 +4350,16 @@
                                 "type": "string",
                                 "nullable": true
                               },
+                              "error_kind": {
+                                "enum": [
+                                  "NETWORK",
+                                  "SOURCE_UNAVAILABLE",
+                                  "UNREADABLE",
+                                  "INTERNAL"
+                                ],
+                                "type": "string",
+                                "nullable": true
+                              },
                               "vtt_url": {
                                 "type": "string",
                                 "nullable": true
@@ -4330,6 +4373,7 @@
                               "is_default",
                               "status",
                               "last_error",
+                              "error_kind",
                               "vtt_url"
                             ]
                           }

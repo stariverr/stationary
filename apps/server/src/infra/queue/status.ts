@@ -75,14 +75,15 @@ export function listFailures(libraryId: string, pipeline: PipelineName, limit: n
     return pipelineHandlers[pipeline].listFailures(libraryId, limit);
 }
 
-/** Queues every current failure of a pipeline in a library again; a run on unchanged input retries it. */
+/** Queues every current failure of a pipeline in a library that a run may get past again; returns how many. */
 export async function retryFailures(libraryId: string, pipeline: PipelineName): Promise<number> {
-    const failures = await pipelineHandlers[pipeline].listFailures(libraryId);
+    const handler = pipelineHandlers[pipeline];
+    const failures = await handler.listFailures(libraryId);
     if (failures.length === 0) return 0;
-    await requeue(
-        db,
-        [pipeline],
-        failures.map((failure) => failure.subjectId),
-    );
-    return failures.length;
+    const subjectIds = failures.map((failure) => failure.subjectId);
+    return db.transaction(async (tx) => {
+        const retried = handler.resetFailures ? await handler.resetFailures(tx, subjectIds) : subjectIds;
+        await requeue(tx, [pipeline], retried);
+        return retried.length;
+    });
 }

@@ -71,6 +71,7 @@ export const MediaService = {
                     size: state.file?.size ?? null,
                     status: state.original.status,
                     last_error: state.original.last_error,
+                    error_kind: state.original.error_kind,
                 })),
                 captions: captionRows
                     .filter(({ caption }) => caption.media_id === media.id)
@@ -82,6 +83,7 @@ export const MediaService = {
                         is_default: caption.is_default,
                         status: caption.status,
                         last_error: caption.last_error,
+                        error_kind: caption.error_kind,
                         vtt_url: fileUrl(file),
                     })),
                 position: startPosition + index,

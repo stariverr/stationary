@@ -15,7 +15,7 @@
 
 | 类型 | 例子 | 机制 |
 |---|---|---|
-| 衍生数据：由源数据和配置算出来，应当一直保持最新 | 下载、头像、预览图、AI 描述、搜索文档、文本和图片向量 | reconcile 队列（本文） |
+| 衍生数据：让状态收敛到期望，分两种（[failure_handling.zh-Hans.md](./failure_handling.zh-Hans.md) 第 3 节）。持续衍生：由源数据和配置算出来，应当一直保持最新；一次性落地：把导入给的来源取到存储里，取到就不再变 | 持续衍生：预览图、AI 描述、搜索文档、文本和图片向量；一次性落地：下载、头像 | reconcile 队列（本文） |
 | 操作：由用户发起，有开始和结束，要能列出、看进度、取消 | 导出 ZIP、存储迁移、外部 Batch API | operation 层，还没有建（11 节） |
 
 衍生数据不按"命令"排队，而是按 Kubernetes controller 的思路做 reconcile：
@@ -178,7 +178,7 @@ worker 每秒轮询一次到期的行，最多同时跑 8 个 run（所有流水
 
 | 流水线 | 对象 | 读的方面 | 产出 | 失败记在哪 |
 |---|---|---|---|---|
-| `download` | media | `media.source` | `media.content`（原件和字幕的文件）、`media.cover`（导入的封面） | 原件、字幕、封面行的 `status`、`last_error`；media 的 `sync_status`、`last_error` |
+| `download` | media | `media.source` | `media.content`、`media.cover`（原件、字幕和封面的文件） | 来源行（`media_original`、`media_caption`、`media_cover`）的 `status`、`last_error`、`error_kind`、`error_source_url`，汇总到 media 和 post 的 `sync_status`（[failure_handling.zh-Hans.md](./failure_handling.zh-Hans.md) 第 4 节） |
 | `avatar` | author | `author.avatar_source` | `author.avatar_file_id` | `author.avatar_error`、`avatar_error_origin` |
 | `preview` | media | `media.content`、`media.cover` | `media.preview`（`media_preview`，三种尺寸） | `media_preview.last_error`，连同失败时的 `source_file_id`、`recipe_version` |
 | `ai.describe` | media | `media.preview`、`media.library`、`library.ai_config` | `media.description`（`asset_ai_metadata`） | `asset_ai_metadata.last_error`、`error_input_hash` |
@@ -187,7 +187,7 @@ worker 每秒轮询一次到期的行，最多同时跑 8 个 run（所有流水
 | `ai.image:<空间>` | media | `media.preview`、`media.library`、`library.spaces` | `asset_embedding` | `asset_embedding.last_error`、`error_input_hash` |
 
 - `ai.describe` 和 `ai.image` 只看大尺寸预览图，不直接读内容或封面。
-- 失败旁边都记着失败时的输入（`error_input_hash`、预览图的 `source_file_id` 和 `recipe_version`、`avatar_error_origin` 等）。输入一变，scan 就会重新拉起它。描述的哈希由图片、模型、prompt 版本、语言算出；向量的哈希是搜索文档或图片的哈希。
+- 失败旁边都记着失败时的输入（`error_input_hash`、预览图的 `source_file_id` 和 `recipe_version`、来源行的 `error_source_url`、`avatar_error_origin` 等）。输入一变，scan 就会重新拉起它。描述的哈希由图片、模型、prompt 版本、语言算出；向量的哈希是搜索文档或图片的哈希。
 - `ai.index` 的 scan 比较内容哈希，所以巡检会重试它的失败，也能发现漏报的变化。代价是每 200 个媒体多一组查询。哈希取决于标签名，标签名先排序。
 - `media.library` 表示媒体换了库。AI 结果行带自己的 `library_id`，reconcile 发现和媒体当前的库不一致，就删掉再按新库的配置重建。预览图不分库，换库后照旧使用。
 
@@ -222,11 +222,12 @@ handler 返回 `done`，或者下面三类之一（抛异常等同于 `retry`）
 
 | 类别 | 例子 | 处理 |
 |---|---|---|
-| 输入被拒（`rejected`） | 图片超过大小上限或格式不支持、provider 返回 413、下载返回 400 / 404 / 410、FFmpeg 解不开文件、连续中断 | 不重试，失败连同输入写到结果行。scan 跳过它，直到输入变化或用户点"重试失败" |
+| 输入被拒（`rejected`） | 图片超过大小上限或格式不支持、provider 返回 413、FFmpeg 解不开文件、连续中断 | 不重试，失败连同输入写到结果行。scan 跳过它，直到输入变化或用户点"重试失败" |
 | 其他失败（`retry`），未知错误也算这类 | provider 返回 400 / 422、其他 4xx、5xx、超时、网络错误、鉴权失败、存储不可用 | 退避重试（5 秒 × 4ⁿ，加抖动，最长 300 秒），默认最多 5 次，用完后和被拒一样写到结果行 |
 | 限流（`deferred`） | provider 打满、熔断中 | `postpone` 到限流器给出的时间，不计次数 |
 
-- 判断不准的错误一律当作可重试，只有确定是输入的问题才拒绝。provider 对配置错误也会返回 400 / 422，CDN 也会临时返回 403，所以这些都按其他失败处理。
+- 判断不准的错误一律当作可重试，只有确定是输入的问题才拒绝。provider 对配置错误也会返回 400 / 422，所以这些都按其他失败处理。
+- `download` 按来源分类错误（[failure_handling.zh-Hans.md](./failure_handling.zh-Hans.md) 第 5 节）：400 / 403 / 404 / 410 和读不出的文件让那个来源立刻 `FAILED`，其他来源照常下载，媒体在这次运行结束时失败；有来源可以重试时整个媒体返回 `retry`。CDN 偶尔临时返回 403，所以 403 先在这次运行里等几秒再试一次。"重试失败"只重置网络和内部错误的来源。
 - 次数用完的失败也记下输入，巡检不再拉起它。否则持续失败的对象每小时要再试 5 次，一直消耗 provider 配额。代价见 10 节。
 - 结果行上还留着失败时，不算"已是最新"：输入改回原来的样子再做一次，就能清掉那条失败。
 - "重试失败"清掉失败记录后重新入队（`requeue`），优先级和编辑触发的一样。

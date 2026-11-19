@@ -72,7 +72,7 @@ media  （现有列）+ display_width, display_height, duration
 ### 3.3 media_original
 
 ```text
-media_original  id, media_id, file_id, source_url, source_key, status, last_error
+media_original  id, media_id, file_id, source_url, source_key, status, last_error, error_kind, error_source_url
                 index(media_id)
                 CHECK ((status = 'COMPLETED') = (file_id IS NOT NULL))
 ```
@@ -80,12 +80,13 @@ media_original  id, media_id, file_id, source_url, source_key, status, last_erro
 - 没有 kind 或 role 列。一个原件是什么，看它的文件内容：探测出视频流，就是含视频的原件；只有音频流，就是只有音频的原件；是图片，就是图片原件。
 - `source_url` 和 `source_key` 用于导入：`source_key` 是同步时用来匹配同一资源的稳定键。手动上传的原件这两列为空，插入时 `status` 就是 `COMPLETED`。
 - `status` 沿用 `SyncStatus`。它表示"下载并探测完成"，探测失败也记为 `FAILED`。
+- `last_error`、`error_kind`、`error_source_url` 是当前 URL 上最近一次的错误，原件、字幕、封面都一样，约束见 [failure_handling.zh-Hans.md](./failure_handling.zh-Hans.md) 第 4.2 节。
 
 ### 3.4 media_cover
 
 ```text
 media_cover  id, media_id (unique), origin (FILE|EMBEDDED), file_id, original_id → media_original,
-             source_url, source_key, status, last_error
+             source_url, source_key, status, last_error, error_kind, error_source_url
              CHECK ((origin = 'EMBEDDED') = (original_id IS NOT NULL))
              CHECK ((status = 'COMPLETED') = (file_id IS NOT NULL))
 ```
@@ -164,7 +165,7 @@ CHECK 约束：
 ```text
 media_caption  id, media_id, origin (FILE|EMBEDDED), language, label, is_default,
                vtt_file_id, source_file_id, source_stream_id → av_stream,
-               source_url, source_key, status, last_error
+               source_url, source_key, status, last_error, error_kind, error_source_url
                index(media_id)；部分唯一索引 (media_id) WHERE is_default
 ```
 
@@ -174,6 +175,7 @@ CHECK 约束：
 - `origin = 'FILE' OR source_file_id IS NULL`
 - `(status = 'COMPLETED') = (vtt_file_id IS NOT NULL)`
 - `origin = 'EMBEDDED' OR status <> 'COMPLETED' OR source_file_id IS NOT NULL`
+- 错误列的四条约束和原件相同。内嵌字幕没有 `source_url`，提取失败时 `error_kind` 是 `UNREADABLE`，`error_source_url` 为空。
 
 说明：
 

@@ -6,6 +6,7 @@ import { Aspect } from "@/infra/queue/pipelines";
 import { buildCdnUrl } from "@/lib/utils/cdn";
 import { COVER_MEDIA_TYPES } from "@/lib/validation/media-composition";
 import { clearPreviews } from "./preview";
+import { NO_SOURCE_ERROR, refreshSource } from "./source-rows";
 
 type CoverRow = typeof MediaCover.$inferSelect;
 
@@ -65,7 +66,7 @@ export const CoverService = {
     async setFile(client: DbClient, media: { id: string; type: MediaType }, fileId: string, priority: number): Promise<void> {
         if (!COVER_MEDIA_TYPES.has(media.type)) throw new CoverNotAllowedError(media.type);
         const existing = await lockCover(client, media.id);
-        const values = { file_id: fileId, source_url: null, source_key: null, status: SyncStatus.COMPLETED, last_error: null, update_time: Temporal.Now.instant() };
+        const values = { file_id: fileId, source_url: null, source_key: null, status: SyncStatus.COMPLETED, ...NO_SOURCE_ERROR, update_time: Temporal.Now.instant() };
         await client.insert(MediaCover).values({ media_id: media.id, ...values }).onConflictDoUpdate({ target: MediaCover.media_id, set: values });
         if (existing?.file_id !== fileId) await softDeleteFile(client, existing?.file_id ?? null);
         await markChanged(client, Aspect.MEDIA_COVER, [media.id], priority);
@@ -90,7 +91,8 @@ export const CoverService = {
 
     /**
      * Applies the cover a platform import offers, matched by its `source_key`. A new key leaves the cover pending for the
-     * download pipeline (the old file is released now); the same key only refreshes the URL, which platforms re-sign.
+     * download pipeline (the old file is released now); the same key only refreshes the URL, which platforms re-sign
+     * (see refreshSource).
      * Without one, a previously imported cover goes, while a cover the user uploaded stays. Media types that cannot
      * have a cover ignore it. Returns whether a download is needed.
      */
@@ -107,10 +109,14 @@ export const CoverService = {
             return false;
         }
         if (existing?.source_key === cover.source_key) {
+            const refreshed = refreshSource(existing, cover.url);
             if (existing.source_url !== cover.url) {
-                await client.update(MediaCover).set({ source_url: cover.url, update_time: Temporal.Now.instant() }).where(eq(MediaCover.id, existing.id));
+                await client
+                    .update(MediaCover)
+                    .set({ ...refreshed.values, update_time: Temporal.Now.instant() })
+                    .where(eq(MediaCover.id, existing.id));
             }
-            return existing.status !== SyncStatus.COMPLETED;
+            return refreshed.pending;
         }
 
         const values = {
@@ -118,7 +124,7 @@ export const CoverService = {
             source_url: cover.url,
             source_key: cover.source_key,
             status: SyncStatus.PENDING,
-            last_error: null,
+            ...NO_SOURCE_ERROR,
             update_time: Temporal.Now.instant(),
         };
         await client.insert(MediaCover).values({ media_id: media.id, ...values }).onConflictDoUpdate({ target: MediaCover.media_id, set: values });

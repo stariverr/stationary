@@ -19,6 +19,7 @@ import {
 } from "@/db/schema";
 import type { DbClient } from "@/global/db";
 import { markChanged } from "@/infra/queue/changes";
+import { NO_SOURCE_ERROR } from "./source-rows";
 import { Aspect } from "@/infra/queue/pipelines";
 import { insertEmbeddedCaptions } from "./captions";
 import { deleteEmbeddedLyrics, insertEmbeddedLyrics } from "./lyrics";
@@ -229,7 +230,7 @@ export async function completeOriginal(
 ): Promise<void> {
     const [original] = await client
         .update(MediaOriginal)
-        .set({ file_id: fileId, status: SyncStatus.COMPLETED, last_error: null, update_time: Temporal.Now.instant() })
+        .set({ file_id: fileId, status: SyncStatus.COMPLETED, ...NO_SOURCE_ERROR, update_time: Temporal.Now.instant() })
         .where(eq(MediaOriginal.id, originalId))
         .returning();
     if (!original) return;

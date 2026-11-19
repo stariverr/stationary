@@ -3,7 +3,7 @@
  * imported file and its WebVTT conversion; clients only ever get the WebVTT.
  */
 import { and, eq, inArray, ne, type SQL } from "drizzle-orm";
-import { AssetOrigin, DeleteStatus, File as DbFile, MediaCaption, SyncStatus } from "@/db/schema";
+import { AssetOrigin, DeleteStatus, File as DbFile, MediaCaption, SourceErrorKind, SyncStatus } from "@/db/schema";
 import type { DbClient } from "@/global/db";
 import { env } from "@/global/env";
 import { s3 } from "@/global/s3";
@@ -110,6 +110,7 @@ export async function insertEmbeddedCaptions(
                 vtt_file_id: vttFileId,
                 status: completed ? SyncStatus.COMPLETED : SyncStatus.FAILED,
                 last_error: completed ? null : extracted.error,
+                error_kind: completed ? null : SourceErrorKind.UNREADABLE,
             })
             .returning({ id: MediaCaption.id });
         if (completed && stream.is_default) {

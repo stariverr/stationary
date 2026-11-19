@@ -10,6 +10,7 @@ import type { Transaction } from "@/global/db";
 import { deleteCaptions } from "@/features/media/captions";
 import { CoverService } from "@/features/media/cover";
 import { removeOriginal } from "@/features/media/originals";
+import { refreshSource } from "@/features/media/source-rows";
 import { CAPTION_MEDIA_TYPES } from "@/lib/validation/media-composition";
 import type { MediaItemData } from "./schema";
 import { Priority } from "@/infra/queue/policy";
@@ -35,11 +36,12 @@ async function syncOriginals(tx: Transaction, media: { id: string; type: MediaTy
         const declared = { declared_language: original.language, declared_label: original.label, declared_default: original.is_default };
         const current = byKey.get(original.source_key);
         if (current) {
+            const refreshed = refreshSource(current, original.url);
             await tx
                 .update(MediaOriginal)
-                .set({ source_url: original.url, ...declared, update_time: now })
+                .set({ ...refreshed.values, ...declared, update_time: now })
                 .where(eq(MediaOriginal.id, current.id));
-            if (current.status !== SyncStatus.COMPLETED) pending = true;
+            if (refreshed.pending) pending = true;
             continue;
         }
         await tx.insert(MediaOriginal).values({
@@ -75,8 +77,12 @@ async function syncCaptions(tx: Transaction, media: { id: string; type: MediaTyp
         const current = byKey.get(caption.source_key);
         if (current) {
             // Language, label and default are the caption's own fields, which the user may have edited since.
-            await tx.update(MediaCaption).set({ source_url: caption.url, update_time: now }).where(eq(MediaCaption.id, current.id));
-            if (current.status !== SyncStatus.COMPLETED) pending = true;
+            const refreshed = refreshSource(current, caption.url);
+            await tx
+                .update(MediaCaption)
+                .set({ ...refreshed.values, update_time: now })
+                .where(eq(MediaCaption.id, current.id));
+            if (refreshed.pending) pending = true;
             continue;
         }
         if (caption.is_default) {

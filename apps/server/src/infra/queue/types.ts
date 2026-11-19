@@ -79,6 +79,11 @@ interface PipelineHandlerBase {
     countFailures(libraryIds: readonly string[]): Promise<Map<string, number>>;
     /** Current failures of one library, most recent first; all of them when `limit` is omitted. */
     listFailures(libraryId: string, limit?: number): Promise<PipelineFailure[]>;
+    /**
+     * Clears the failures of `subjectIds` that a run may get past, and returns those subjects to run again. Without it,
+     * every failure is retried by running its subject on unchanged input.
+     */
+    resetFailures?(tx: Transaction, subjectIds: readonly string[]): Promise<readonly string[]>;
     /** How long the provider this pipeline calls in a library stays out of reach, in milliseconds; 0 when it can be called. */
     blockedMs?(libraryId: string): Promise<number>;
     /** Called after a run or a finished scan of a per-space pipeline, to act on the space once its queue drains. */
