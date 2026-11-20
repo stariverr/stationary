@@ -27,7 +27,8 @@ type EmbeddingInput =
     | { kind: "wait" }
     /** Nothing to embed (empty document, no image): the media has no vector in the space. */
     | { kind: "none" }
-    | { kind: "text"; hash: string; text: string; title: string }
+    /** The search document; its text is read only when it is embedded (embedTexts). */
+    | { kind: "text"; hash: string }
     | { kind: "image"; hash: string; source: AiImageSource };
 
 const done: ReconcileResult = { kind: "done" };
@@ -42,6 +43,9 @@ const ofSpaceMedia = (space: SpaceRow, mediaIds: readonly string[]) =>
         eq(AssetEmbedding.embedding_space_id, space.space_id),
         eq(AssetEmbedding.embedding_role, EMBEDDING_ROLE_FOR[space.role]),
     );
+
+const searchDocumentsOf = (mediaIds: readonly string[]) =>
+    and(eq(AssetSearchDocument.entity_type, EntityType.MEDIA), inArray(AssetSearchDocument.entity_id, [...mediaIds]));
 
 async function loadSpace(client: DbClient, spaceRowId: string): Promise<SpaceRow | undefined> {
     const [space] = await client.select().from(LibraryEmbeddingSpace).where(eq(LibraryEmbeddingSpace.id, spaceRowId)).limit(1);
@@ -66,19 +70,18 @@ async function loadInputs(space: SpaceRow, mediaIds: readonly string[], forScan:
             .select({
                 id: AssetSearchDocument.entity_id,
                 libraryId: AssetSearchDocument.library_id,
-                title: AssetSearchDocument.title,
-                content: AssetSearchDocument.content,
                 hash: AssetSearchDocument.content_hash,
+                empty: sql<boolean>`${AssetSearchDocument.content} = ''`,
             })
             .from(AssetSearchDocument)
-            .where(and(eq(AssetSearchDocument.entity_type, EntityType.MEDIA), inArray(AssetSearchDocument.entity_id, ids)));
+            .where(searchDocumentsOf(ids));
         const byId = new Map(documents.map((document) => [document.id, document]));
         for (const id of ids) {
             const document = byId.get(id);
             // ai.index writes the document; its change queues the media again.
             if (!document || document.libraryId !== space.library_id) inputs.set(id, { kind: "wait" });
-            else if (!document.content) inputs.set(id, { kind: "none" });
-            else inputs.set(id, { kind: "text", hash: document.hash, text: document.content, title: document.title });
+            else if (document.empty) inputs.set(id, { kind: "none" });
+            else inputs.set(id, { kind: "text", hash: document.hash });
         }
         return inputs;
     }
@@ -193,6 +196,41 @@ async function embedImages(
     return { vectors: embedded.vectors, failures: new Map([...failures, ...embedded.failures]) };
 }
 
+/**
+ * Embeds the search documents of `items`. A document that changed after its hash was read is left out: its change
+ * queued the media again, and the vector must be stored with the hash of the text it was made from.
+ */
+async function embedTexts(
+    service: AiService,
+    provider: TextEmbeddingProvider,
+    items: Array<{ id: string; input: Extract<EmbeddingInput, { kind: "text" }> }>,
+    signal: AbortSignal,
+): Promise<Embedded> {
+    const documents = await db
+        .select({
+            id: AssetSearchDocument.entity_id,
+            hash: AssetSearchDocument.content_hash,
+            title: AssetSearchDocument.title,
+            content: AssetSearchDocument.content,
+        })
+        .from(AssetSearchDocument)
+        .where(searchDocumentsOf(items.map((item) => item.id)));
+    const byId = new Map(documents.map((document) => [document.id, document]));
+    const ready = items.flatMap(({ id, input }) => {
+        const document = byId.get(id);
+        return document?.hash === input.hash ? [{ id, title: document.title, content: document.content }] : [];
+    });
+    if (ready.length === 0) return { vectors: new Map(), failures: new Map() };
+
+    return embedSplittingOnInputError(ready, (batch) =>
+        service.embedDocuments(
+            provider,
+            batch.map((item) => ({ text: item.content, title: item.title || undefined, purpose: "DOCUMENT" as const })),
+            signal,
+        ),
+    );
+}
+
 /** Deletes the vectors of the given media in a space, inside a fenced transaction per media. */
 async function dropVectors(space: SpaceRow, mediaIds: readonly string[], fence: (tx: Transaction, id: string) => Promise<void>) {
     for (const id of mediaIds) {
@@ -268,14 +306,11 @@ function embeddingPipeline(role: EmbeddingBindingRole): BatchPipelineHandler {
                           pending.map((item) => ({ id: item.id, input: item.input as Extract<EmbeddingInput, { kind: "image" }> })),
                           ctx.signal,
                       )
-                    : await embedSplittingOnInputError(
-                          pending.map((item) => ({ id: item.id, ...(item.input as Extract<EmbeddingInput, { kind: "text" }>) })),
-                          (texts) =>
-                              service.embedDocuments(
-                                  provider,
-                                  texts.map((text) => ({ text: text.text, title: text.title || undefined, purpose: "DOCUMENT" as const })),
-                                  ctx.signal,
-                              ),
+                    : await embedTexts(
+                          service,
+                          provider as TextEmbeddingProvider,
+                          pending.map((item) => ({ id: item.id, input: item.input as Extract<EmbeddingInput, { kind: "text" }> })),
+                          ctx.signal,
                       );
             for (const [id, result] of failures) results.set(id, result);
 

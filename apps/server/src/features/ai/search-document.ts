@@ -35,7 +35,15 @@ export interface BuiltSearchDocument {
  */
 export async function buildSearchDocuments(mediaIds: readonly string[]): Promise<Map<string, BuiltSearchDocument>> {
     const media = await db
-        .select()
+        .select({
+            id: Media.id,
+            post_id: Media.post_id,
+            library_id: Media.library_id,
+            source: Media.source,
+            type: Media.type,
+            title: Media.title,
+            description: Media.description,
+        })
         .from(Media)
         .where(and(inArray(Media.id, [...mediaIds]), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)));
     const ids = media.map((row) => row.id);

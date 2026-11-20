@@ -31,9 +31,9 @@ export interface PreviewSource {
 }
 
 export interface PreviewState {
-    media: MediaRow;
+    media: Pick<MediaRow, "id" | "type" | "post_id">;
     source: PreviewSource | null;
-    previews: PreviewRow[];
+    previews: Pick<PreviewRow, "media_id" | "size" | "source_file_id" | "recipe_version" | "file_id">[];
     /** Files of `previews` that are still active. */
     activePreviewFileIds: Set<string>;
 }
@@ -78,7 +78,7 @@ export function previewSourceOf(type: MediaType, cover: FileRow | null, contents
 export async function loadPreviewStates(client: DbClient, mediaIds: readonly string[]): Promise<PreviewState[]> {
     if (mediaIds.length === 0) return [];
     const mediaRows = await client
-        .select()
+        .select({ id: Media.id, type: Media.type, post_id: Media.post_id })
         .from(Media)
         .where(and(inArray(Media.id, [...mediaIds]), eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time)));
     if (mediaRows.length === 0) return [];
@@ -91,7 +91,16 @@ export async function loadPreviewStates(client: DbClient, mediaIds: readonly str
             .innerJoin(DbFile, and(eq(DbFile.id, MediaCover.file_id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
             .where(and(inArray(MediaCover.media_id, ids), eq(MediaCover.status, SyncStatus.COMPLETED))),
         loadOriginalStates(client, ids),
-        client.select().from(MediaPreview).where(inArray(MediaPreview.media_id, ids)),
+        client
+            .select({
+                media_id: MediaPreview.media_id,
+                size: MediaPreview.size,
+                source_file_id: MediaPreview.source_file_id,
+                recipe_version: MediaPreview.recipe_version,
+                file_id: MediaPreview.file_id,
+            })
+            .from(MediaPreview)
+            .where(inArray(MediaPreview.media_id, ids)),
     ]);
 
     const previewFileIds = previews.flatMap((row) => (row.file_id ? [row.file_id] : []));
@@ -178,7 +187,7 @@ export async function clearLibraryPreviews(client: DbClient, libraryId: string):
     );
 }
 
-function previewKey(media: MediaRow, size: PreviewSize, sourceFileId: string): string {
+function previewKey(media: PreviewState["media"], size: PreviewSize, sourceFileId: string): string {
     const name = `preview/${size.toLowerCase()}/v${RECIPE_VERSION}-${sourceFileId}.avif`;
     return media.post_id
         ? `v2/p/${media.post_id.slice(-2)}/${media.post_id}/media_${media.id}/${name}`

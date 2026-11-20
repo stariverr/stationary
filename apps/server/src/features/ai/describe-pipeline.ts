@@ -11,10 +11,25 @@ import { AiService, providerBlockedMs } from "./service";
 import type { DescribeTarget } from "./types";
 import { computeSha256 } from "./utils";
 
-type StoredAiMetadata = typeof AssetAiMetadata.$inferSelect;
-
 const metadataOf = (mediaIds: readonly string[]) =>
     and(eq(AssetAiMetadata.entity_type, EntityType.MEDIA), inArray(AssetAiMetadata.entity_id, [...mediaIds]));
+
+/** What decides whether the media are described again, without the descriptions themselves. */
+function loadStored(mediaIds: readonly string[]) {
+    return db
+        .select({
+            entity_id: AssetAiMetadata.entity_id,
+            library_id: AssetAiMetadata.library_id,
+            input_hash: AssetAiMetadata.input_hash,
+            language: AssetAiMetadata.language,
+            is_stale: AssetAiMetadata.is_stale,
+            last_error: AssetAiMetadata.last_error,
+            error_input_hash: AssetAiMetadata.error_input_hash,
+        })
+        .from(AssetAiMetadata)
+        .where(metadataOf(mediaIds));
+}
+type StoredAiMetadata = Awaited<ReturnType<typeof loadStored>>[number];
 
 const activeMedia = and(eq(Media.delete_status, DeleteStatus.ACTIVE), isNull(Media.recycle_time));
 
@@ -76,13 +91,7 @@ export const describePipeline: SubjectPipelineHandler = {
             .limit(1);
         if (!media) return { kind: "done" };
 
-        let stored: StoredAiMetadata | undefined = (
-            await db
-                .select()
-                .from(AssetAiMetadata)
-                .where(metadataOf([media.id]))
-                .limit(1)
-        )[0];
+        let stored: StoredAiMetadata | undefined = (await loadStored([media.id]))[0];
         if (stored && stored.library_id !== media.libraryId) {
             await db.transaction((tx) => dropForeignDescription(tx, media.id, media.libraryId, ctx));
             stored = undefined;
@@ -184,7 +193,7 @@ export const describePipeline: SubjectPipelineHandler = {
         const ids = page.map((media) => media.id);
         const [sources, storedRows] = await Promise.all([
             loadAiImageSources(ids),
-            db.select().from(AssetAiMetadata).where(metadataOf(ids)),
+            loadStored(ids),
         ]);
         const storedById = new Map(storedRows.map((row) => [row.entity_id, row]));
 

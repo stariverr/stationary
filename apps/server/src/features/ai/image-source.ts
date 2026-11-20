@@ -21,7 +21,7 @@ const PREVIEW_PREFERENCE: readonly PreviewSize[] = [PreviewSize.LARGE, PreviewSi
  * preview itself, so rendering previews again with a new recipe does not describe or embed the media again.
  */
 export interface AiImageSource {
-    file: typeof DbFile.$inferSelect;
+    file: Pick<typeof DbFile.$inferSelect, "id" | "path" | "bucket" | "mime_type" | "size">;
     width: number;
     height: number;
     sourceFileId: string;
@@ -43,7 +43,11 @@ export function selectAiPreview<T extends { preview: Pick<typeof MediaPreview.$i
 export async function loadAiImageSources(mediaIds: readonly string[]): Promise<Map<string, AiImageSource>> {
     if (mediaIds.length === 0) return new Map();
     const rows = await db
-        .select({ preview: MediaPreview, file: DbFile, source: { id: sourceFile.id, hash: sourceFile.hash } })
+        .select({
+            preview: { media_id: MediaPreview.media_id, size: MediaPreview.size, width: MediaPreview.width, height: MediaPreview.height },
+            file: { id: DbFile.id, path: DbFile.path, bucket: DbFile.bucket, mime_type: DbFile.mime_type, size: DbFile.size },
+            source: { id: sourceFile.id, hash: sourceFile.hash },
+        })
         .from(MediaPreview)
         .innerJoin(DbFile, and(eq(DbFile.id, MediaPreview.file_id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
         .innerJoin(sourceFile, eq(sourceFile.id, MediaPreview.source_file_id))
