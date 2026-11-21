@@ -286,6 +286,7 @@
         "status": {
             "pending": "A aguardar sincronização",
             "syncing": "A sincronizar",
+            "completed": "Sincronizado",
             "retrying": "A tentar novamente",
             "failed": "Falha na sincronização"
         },
@@ -311,6 +312,10 @@
         "nothing_to_retry": "Nada aqui pode ser tentado novamente",
         "retry_failed": "Não foi possível tentar novamente",
         "problems": "Problemas de sincronização",
-        "retry_all": "Tentar tudo novamente"
+        "retry_all": "Tentar tudo novamente",
+        "filter": {
+            "label": "Estado da sincronização",
+            "all": "Todos"
+        }
     }
 }

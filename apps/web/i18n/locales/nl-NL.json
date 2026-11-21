@@ -286,6 +286,7 @@
         "status": {
             "pending": "Wacht op synchronisatie",
             "syncing": "Bezig met synchroniseren",
+            "completed": "Gesynchroniseerd",
             "retrying": "Nieuwe poging bezig",
             "failed": "Synchronisatie mislukt"
         },
@@ -311,6 +312,10 @@
         "nothing_to_retry": "Hier kan niets opnieuw worden geprobeerd",
         "retry_failed": "Opnieuw proberen is mislukt",
         "problems": "Synchronisatieproblemen",
-        "retry_all": "Alles opnieuw proberen"
+        "retry_all": "Alles opnieuw proberen",
+        "filter": {
+            "label": "Synchronisatiestatus",
+            "all": "Alle"
+        }
     }
 }

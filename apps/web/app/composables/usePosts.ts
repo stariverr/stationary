@@ -46,6 +46,10 @@ export const usePosts = () => {
             get: () => store.mediaType,
             set: (val) => (store.mediaType = val),
         }),
+        syncStatus: computed({
+            get: () => store.syncStatus,
+            set: (val) => (store.syncStatus = val),
+        }),
         authors: computed(() => store.authors),
         selectPost: store.selectPost,
         closePost: store.closePost,

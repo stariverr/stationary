@@ -41,6 +41,7 @@ const {
     sortBy,
     sortOrder,
     mediaType,
+    syncStatus,
     aiCoverage,
 } = storeToRefs(store);
 const { refetchMedia, selectMedia, clearAiCoverage } = store;
@@ -117,6 +118,7 @@ const hasActiveFilters = computed(() => {
     return Boolean(
         source.value ||
         mediaType.value ||
+        syncStatus.value ||
         (sortBy.value && sortBy.value !== "create_time") ||
         (sortOrder.value && sortOrder.value !== "desc"),
     );
@@ -126,12 +128,22 @@ const resetFilters = () => {
     keyword.value = "";
     source.value = undefined;
     mediaType.value = undefined;
+    syncStatus.value = undefined;
     sortBy.value = "create_time";
     sortOrder.value = "desc";
 };
 
 watch(
-    () => [keyword.value, source.value, displayMode.value, libraryStore.activeLibraryId, sortBy.value, sortOrder.value, mediaType.value],
+    () => [
+        keyword.value,
+        source.value,
+        displayMode.value,
+        libraryStore.activeLibraryId,
+        sortBy.value,
+        sortOrder.value,
+        mediaType.value,
+        syncStatus.value,
+    ],
     () => {
         exitSelectionMode();
     },
@@ -485,6 +497,30 @@ onMounted(() => {
                                     <option :value="undefined">{{ $t("common.all_media_types", "All Types") }}</option>
                                     <option value="VIDEO">{{ $t("common.media_type_video", "Video Only") }}</option>
                                     <option value="IMAGE">{{ $t("common.media_type_image", "Image Only") }}</option>
+                                </select>
+                                <ChevronDown
+                                    class="w-3.5 h-3.5 text-zinc-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
+                                />
+                            </div>
+                        </div>
+
+                        <!-- Sync Status Dropdown -->
+                        <div class="flex items-center gap-2">
+                            <label for="media-sync-status-select" class="text-zinc-600 font-semibold select-none cursor-pointer"
+                                >{{ $t("sync.filter.label") }}:</label
+                            >
+                            <div class="relative">
+                                <select
+                                    id="media-sync-status-select"
+                                    v-model="syncStatus"
+                                    :aria-label="$t('sync.filter.label')"
+                                    class="appearance-none bg-white border border-zinc-200 hover:border-zinc-300 text-zinc-800 rounded-lg py-1.5 pl-3 pr-8 text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500/10 cursor-pointer transition-all"
+                                >
+                                    <option :value="undefined">{{ $t("sync.filter.all") }}</option>
+                                    <option value="PENDING">{{ $t("sync.status.pending") }}</option>
+                                    <option value="IN_PROGRESS">{{ $t("sync.status.syncing") }}</option>
+                                    <option value="COMPLETED">{{ $t("sync.status.completed") }}</option>
+                                    <option value="FAILED">{{ $t("sync.status.failed") }}</option>
                                 </select>
                                 <ChevronDown
                                     class="w-3.5 h-3.5 text-zinc-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"

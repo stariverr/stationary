@@ -305,6 +305,47 @@ describe.skipIf(process.env.RUN_CONTENT_DB_TESTS !== "1")("Content access contro
         expect(await listedIds(aliceToken, [mediaRouter, `/list?library_id=${aliceLibrary}`])).toEqual({ ids: [aliceMedia], total: 1 });
     });
 
+    test("lists filter by sync status; a stack matches on its post", async () => {
+        const [failedPost] = await db
+            .insert(Post)
+            .values({
+                eid: crypto.randomUUID(),
+                title: "failed post",
+                description: "",
+                media_count: 2,
+                library_id: aliceOtherLibrary,
+                sync_status: SyncStatus.FAILED,
+            })
+            .returning();
+        const [firstMedia, failedMedia, failedIndependent] = await db
+            .insert(Media)
+            .values(
+                [
+                    { post_id: failedPost.id, sort_order: 0, sync_status: SyncStatus.COMPLETED },
+                    { post_id: failedPost.id, sort_order: 1, sync_status: SyncStatus.FAILED },
+                    { post_id: null, sort_order: 0, sync_status: SyncStatus.FAILED },
+                ].map((media) => ({
+                    ...media,
+                    eid: crypto.randomUUID(),
+                    title: "",
+                    description: "",
+                    type: MediaType.IMAGE,
+                    library_id: aliceOtherLibrary,
+                })),
+            )
+            .returning();
+        const sorted = ({ ids, total }: { ids: string[]; total: number }) => ({ ids: ids.toSorted(), total });
+        const list = `?library_id=${aliceOtherLibrary}&sync_status=${SyncStatus.FAILED}`;
+
+        expect(await listedIds(aliceToken, [postRouter, `/list${list}`])).toEqual({ ids: [failedPost.id], total: 1 });
+        expect(sorted(await listedIds(aliceToken, [mediaRouter, `/list${list}`]))).toEqual(
+            sorted({ ids: [failedMedia.id, failedIndependent.id], total: 2 }),
+        );
+        expect(sorted(await listedIds(aliceToken, [mediaRouter, `/list${list}&display_mode=stacked`]))).toEqual(
+            sorted({ ids: [firstMedia.id, failedIndependent.id], total: 2 }),
+        );
+    });
+
     test("a library-scoped token still works on its own library", async () => {
         const routes: Route[] = [
             [postRouter, `/authors?library_id=${aliceLibrary}`],

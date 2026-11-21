@@ -34,6 +34,7 @@ export const usePostStore = defineStore("posts", () => {
               : [],
     );
     const mediaType = ref<string | undefined>((route.query.media_type as string) || undefined);
+    const syncStatus = ref<string | undefined>((route.query.sync_status as string) || undefined);
     const tagIds = ref<string[]>((route.query.tag_ids as string) ? (route.query.tag_ids as string).split(",").filter(Boolean) : []);
     const authorSearchKeyword = ref("");
     const authorCache = ref<Record<string, { id: string; nickname: string; platform: Platform; avatar_url: string | null }>>({});
@@ -55,7 +56,7 @@ export const usePostStore = defineStore("posts", () => {
 
     // Reset page to 1 when search filters change
     watch(
-        () => [source.value, sortBy.value, sortOrder.value, [...authorIds.value], [...tagIds.value], mediaType.value],
+        () => [source.value, sortBy.value, sortOrder.value, [...authorIds.value], [...tagIds.value], mediaType.value, syncStatus.value],
         () => {
             page.value = 1;
         },
@@ -121,6 +122,7 @@ export const usePostStore = defineStore("posts", () => {
             author_ids: authorIds.value.length ? authorIds.value.join(",") : undefined,
             tag_ids: tagIds.value.length ? tagIds.value.join(",") : undefined,
             media_type: mediaType.value,
+            sync_status: syncStatus.value,
         }),
         ({
             keyword: newKeyword,
@@ -132,6 +134,7 @@ export const usePostStore = defineStore("posts", () => {
             author_ids: newAuthorIds,
             tag_ids: newTagIds,
             media_type: newMediaType,
+            sync_status: newSyncStatus,
         }) => {
             const query = { ...route.query };
             let changed = false;
@@ -164,6 +167,7 @@ export const usePostStore = defineStore("posts", () => {
             updateParam("author_ids", newAuthorIds);
             updateParam("tag_ids", newTagIds);
             updateParam("media_type", newMediaType);
+            updateParam("sync_status", newSyncStatus);
 
             if (query.author_id !== undefined) {
                 delete query.author_id;
@@ -218,6 +222,10 @@ export const usePostStore = defineStore("posts", () => {
             const queryMediaType = (newQuery.media_type as string) || undefined;
             if (queryMediaType !== mediaType.value) {
                 mediaType.value = queryMediaType;
+            }
+            const querySyncStatus = (newQuery.sync_status as string) || undefined;
+            if (querySyncStatus !== syncStatus.value) {
+                syncStatus.value = querySyncStatus;
             }
             const queryTagIds = (newQuery.tag_ids as string) || "";
             const parsedTagIds = queryTagIds ? queryTagIds.split(",").filter(Boolean) : [];
@@ -287,6 +295,7 @@ export const usePostStore = defineStore("posts", () => {
                 author_ids: authorIds.value.join(","),
                 tag_ids: tagIds.value.join(","),
                 media_type: mediaType.value,
+                sync_status: syncStatus.value,
             },
         ]),
         enabled: isListEnabled,
@@ -307,6 +316,7 @@ export const usePostStore = defineStore("posts", () => {
                     author_ids: authorIds.value.join(","),
                     tag_ids: tagIds.value.join(","),
                     media_type: mediaType.value,
+                    sync_status: syncStatus.value,
                 },
             });
             if (response && response.success && response.data) {
@@ -483,6 +493,7 @@ export const usePostStore = defineStore("posts", () => {
         authorIds,
         tagIds,
         mediaType,
+        syncStatus,
         authorSearchKeyword,
         authorCache,
         // Computed

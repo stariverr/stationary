@@ -3,7 +3,19 @@ import { db } from "@/global/db";
 import * as v from "valibot";
 import { success, error, respondWithResult } from "@/lib/response";
 import { Code } from "@/lib/code";
-import { Media, Post, PostSource, DeleteStatus, AssetAiMetadata, EntityType, Tag, MediaTag, TagStatus, MediaType } from "@/db/schema";
+import {
+    Media,
+    Post,
+    PostSource,
+    DeleteStatus,
+    AssetAiMetadata,
+    EntityType,
+    Tag,
+    MediaTag,
+    TagStatus,
+    MediaType,
+    SyncStatus,
+} from "@/db/schema";
 import { s3 } from "@/global/s3";
 import { and, eq, ilike, SQL, sql, count, asc, desc, or, isNull, inArray } from "drizzle-orm";
 
@@ -80,6 +92,7 @@ export const MediaListRequestBodySchema = v.object({
     has_no_post: v.optional(v.string()),
     /** Only items AI search does not cover yet, or cannot cover (see features/ai/coverage.ts). */
     ai_coverage: v.optional(v.picklist(["incomplete", "unprocessable"])),
+    sync_status: v.optional(v.enum(SyncStatus)),
 });
 
 // Media List - Cover-only media hydration (zero content track queries)
@@ -96,7 +109,7 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
         pageSize = 100;
     }
     const offset = (page - 1) * pageSize;
-    const { keyword, source, sort_by, sort_order, type, display_mode, library_id, has_no_post, ai_coverage } = query;
+    const { keyword, source, sort_by, sort_order, type, display_mode, library_id, has_no_post, ai_coverage, sync_status } = query;
 
     if (!(await ownedLibrary(c, user.id, library_id))) {
         return c.json(error(Code.NOT_FOUND, "Library not found"), 404);
@@ -115,6 +128,14 @@ router.get("/list", requireAuth, validate("query", MediaListRequestBodySchema), 
     }
     if (type) {
         where.push(eq(Media.type, type));
+    }
+    if (sync_status) {
+        // A stack stands for its post, so it matches on the post's status, which sums up all its media.
+        where.push(
+            display_mode === "stacked"
+                ? or(and(isNull(Media.post_id), eq(Media.sync_status, sync_status)), eq(Post.sync_status, sync_status))!
+                : eq(Media.sync_status, sync_status),
+        );
     }
     if (ai_coverage) {
         const targets = getCoverageTargets(await AiService.forLibrary(library_id));

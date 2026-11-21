@@ -16,6 +16,7 @@ import {
     Tag,
     TagStatus,
     SourceErrorKind,
+    SyncStatus,
 } from "@/db/schema";
 import { and, eq, ilike, SQL, count, asc, desc, sql, isNull, inArray, lte, exists, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -65,6 +66,7 @@ export const PostListRequestBodySchema = v.object({
     author_ids: v.optional(v.string()),
     media_type: v.optional(v.enum(MediaType)),
     tag_ids: v.optional(v.string()),
+    sync_status: v.optional(v.enum(SyncStatus)),
 });
 
 // Post List - Cover-only media hydration (no primary content track queries)
@@ -82,7 +84,17 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
     }
     const offset = (page - 1) * pageSize;
 
-    const { keyword, source, sort_by, sort_order, author_ids: authorIdsStr, media_type: mediaType, tag_ids: tagIdsStr, library_id } = query;
+    const {
+        keyword,
+        source,
+        sort_by,
+        sort_order,
+        author_ids: authorIdsStr,
+        media_type: mediaType,
+        tag_ids: tagIdsStr,
+        library_id,
+        sync_status,
+    } = query;
     const sortBy = sort_by ?? "published_time";
     const sortOrder = sort_order ?? "desc";
 
@@ -97,6 +109,9 @@ router.get("/list", requireAuth, validate("query", PostListRequestBodySchema), a
     }
     if (source) {
         where.push(eq(Post.source, source));
+    }
+    if (sync_status) {
+        where.push(eq(Post.sync_status, sync_status));
     }
     if (authorIdsStr) {
         const authorIds = authorIdsStr.split(",").filter((id) => id.trim().length > 0);

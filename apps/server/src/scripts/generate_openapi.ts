@@ -176,6 +176,7 @@ const PostListRequestBodySchema = v.object({
     author_ids: v.optional(v.string()),
     media_type: v.optional(v.enum(MediaType)),
     tag_ids: v.optional(v.string()),
+    sync_status: v.optional(v.enum(SyncStatus)),
 });
 
 const PostUpdateInfoSchema = v.object({
@@ -204,6 +205,7 @@ const MediaListRequestBodySchema = v.object({
     source: v.optional(v.enum(PostSource)),
     display_mode: v.optional(v.picklist(["flat", "stacked"]), "flat"),
     library_id: v.pipe(v.string(), v.uuid()),
+    sync_status: v.optional(v.enum(SyncStatus)),
 });
 
 const MediaUpdateInfoSchema = v.object({

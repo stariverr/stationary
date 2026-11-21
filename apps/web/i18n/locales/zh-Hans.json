@@ -1213,6 +1213,7 @@
         "status": {
             "pending": "等待同步",
             "syncing": "同步中",
+            "completed": "已同步",
             "retrying": "重试中",
             "failed": "同步失败"
         },
@@ -1238,6 +1239,10 @@
         "nothing_to_retry": "没有可以重试的失败",
         "retry_failed": "无法重试",
         "problems": "同步问题",
-        "retry_all": "全部重试"
+        "retry_all": "全部重试",
+        "filter": {
+            "label": "同步状态",
+            "all": "全部"
+        }
     }
 }

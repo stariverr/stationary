@@ -286,6 +286,7 @@
         "status": {
             "pending": "동기화 대기",
             "syncing": "동기화 중",
+            "completed": "동기화됨",
             "retrying": "재시도 중",
             "failed": "동기화 실패"
         },
@@ -311,6 +312,10 @@
         "nothing_to_retry": "다시 시도할 수 있는 실패가 없습니다",
         "retry_failed": "다시 시도하지 못했습니다",
         "problems": "동기화 문제",
-        "retry_all": "모두 다시 시도"
+        "retry_all": "모두 다시 시도",
+        "filter": {
+            "label": "동기화 상태",
+            "all": "전체"
+        }
     }
 }

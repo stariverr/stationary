@@ -93,6 +93,7 @@ export const useMediaStore = defineStore("media", () => {
     const sortBy = ref<"create_time" | "published_time">((route.query.sort_by as "create_time" | "published_time") || "create_time");
     const sortOrder = ref<"asc" | "desc">((route.query.sort_order as "asc" | "desc") || "desc");
     const mediaType = ref<string | undefined>((route.query.type as string) || undefined);
+    const syncStatus = ref<string | undefined>((route.query.sync_status as string) || undefined);
     const displayMode = ref<"flat" | "stacked">((route.query.display_mode as "flat" | "stacked") || "flat");
     const page = ref(parseInt(route.query.page as string) || 1);
     const count = ref(parseInt(route.query.count as string) || 20);
@@ -125,7 +126,7 @@ export const useMediaStore = defineStore("media", () => {
     });
 
     // Reset page to 1 when search filters change
-    watch([source, displayMode, useAiSearch, sortBy, sortOrder, mediaType, aiCoverage], () => {
+    watch([source, displayMode, useAiSearch, sortBy, sortOrder, mediaType, syncStatus, aiCoverage], () => {
         page.value = 1;
     });
 
@@ -145,6 +146,7 @@ export const useMediaStore = defineStore("media", () => {
             sortBy: sortBy.value,
             sortOrder: sortOrder.value,
             mediaType: mediaType.value,
+            syncStatus: syncStatus.value,
             page: page.value,
             display_mode: displayMode.value,
             count: count.value,
@@ -155,6 +157,7 @@ export const useMediaStore = defineStore("media", () => {
             sortBy: newSortBy,
             sortOrder: newSortOrder,
             mediaType: newMediaType,
+            syncStatus: newSyncStatus,
             page: newPage,
             display_mode: newDisplayMode,
             count: newCount,
@@ -186,6 +189,7 @@ export const useMediaStore = defineStore("media", () => {
             updateParam("sort_by", newSortBy !== "create_time" ? newSortBy : undefined);
             updateParam("sort_order", newSortOrder !== "desc" ? newSortOrder : undefined);
             updateParam("type", newMediaType);
+            updateParam("sync_status", newSyncStatus);
             updateParam("page", newPage && newPage > 1 ? newPage.toString() : undefined);
             updateParam("display_mode", newDisplayMode && newDisplayMode !== "flat" ? newDisplayMode : undefined);
             updateParam("count", newCount && newCount !== 20 ? newCount.toString() : undefined);
@@ -224,6 +228,10 @@ export const useMediaStore = defineStore("media", () => {
             const queryType = (newQuery.type as string) || undefined;
             if (queryType !== mediaType.value) {
                 mediaType.value = queryType;
+            }
+            const querySyncStatus = (newQuery.sync_status as string) || undefined;
+            if (querySyncStatus !== syncStatus.value) {
+                syncStatus.value = querySyncStatus;
             }
             const queryDisplayMode = (newQuery.display_mode as "flat" | "stacked") || "flat";
             if (queryDisplayMode !== displayMode.value) {
@@ -300,6 +308,7 @@ export const useMediaStore = defineStore("media", () => {
                 sortBy: sortBy.value,
                 sortOrder: sortOrder.value,
                 mediaType: mediaType.value,
+                syncStatus: syncStatus.value,
                 display_mode: displayMode.value,
                 library_id: libraryStore.activeLibraryId,
                 ai: useAiSearch.value,
@@ -312,7 +321,8 @@ export const useMediaStore = defineStore("media", () => {
             const hasKeyword = !!searchKeyword.value?.trim();
             const isAi = useAiSearch.value;
             console.log("[DEBUG STORE] queryFn called. hasKeyword:", hasKeyword, "isAi:", isAi, "useAiSearch:", useAiSearch.value);
-            if (hasKeyword && isAi && !aiCoverage.value) {
+            // `/search` takes neither filter, so a keyword with one of them falls back to the list's title match.
+            if (hasKeyword && isAi && !aiCoverage.value && !syncStatus.value) {
                 console.log("[DEBUG STORE] Fetching from /search");
                 const response = await useApi<{
                     success: boolean;
@@ -389,6 +399,7 @@ export const useMediaStore = defineStore("media", () => {
                         sort_by: sortBy.value,
                         sort_order: sortOrder.value,
                         type: mediaType.value,
+                        sync_status: syncStatus.value,
                         display_mode: displayMode.value,
                         library_id: libraryStore.activeLibraryId,
                         ai_coverage: aiCoverage.value,
@@ -485,6 +496,7 @@ export const useMediaStore = defineStore("media", () => {
         sortBy,
         sortOrder,
         mediaType,
+        syncStatus,
         displayMode,
         page,
         count,

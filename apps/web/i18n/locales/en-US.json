@@ -1213,6 +1213,7 @@
         "status": {
             "pending": "Waiting to sync",
             "syncing": "Syncing",
+            "completed": "Synced",
             "retrying": "Retrying",
             "failed": "Sync failed"
         },
@@ -1238,6 +1239,10 @@
         "nothing_to_retry": "Nothing here can be retried",
         "retry_failed": "Could not retry",
         "problems": "Sync problems",
-        "retry_all": "Retry all"
+        "retry_all": "Retry all",
+        "filter": {
+            "label": "Sync status",
+            "all": "All"
+        }
     }
 }

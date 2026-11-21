@@ -286,6 +286,7 @@
         "status": {
             "pending": "En attente de synchronisation",
             "syncing": "Synchronisation",
+            "completed": "Synchronisé",
             "retrying": "Nouvel essai en cours",
             "failed": "Échec de la synchronisation"
         },
@@ -311,6 +312,10 @@
         "nothing_to_retry": "Rien ici ne peut être réessayé",
         "retry_failed": "Impossible de réessayer",
         "problems": "Problèmes de synchronisation",
-        "retry_all": "Tout réessayer"
+        "retry_all": "Tout réessayer",
+        "filter": {
+            "label": "État de synchronisation",
+            "all": "Tous"
+        }
     }
 }

@@ -286,6 +286,7 @@
         "status": {
             "pending": "同期待ち",
             "syncing": "同期中",
+            "completed": "同期済み",
             "retrying": "再試行中",
             "failed": "同期に失敗"
         },
@@ -311,6 +312,10 @@
         "nothing_to_retry": "再試行できる失敗はありません",
         "retry_failed": "再試行できませんでした",
         "problems": "同期の問題",
-        "retry_all": "すべて再試行"
+        "retry_all": "すべて再試行",
+        "filter": {
+            "label": "同期状態",
+            "all": "すべて"
+        }
     }
 }

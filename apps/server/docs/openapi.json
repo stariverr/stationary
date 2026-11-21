@@ -2026,6 +2026,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "sync_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "PENDING",
+                "IN_PROGRESS",
+                "COMPLETED",
+                "FAILED"
+              ],
+              "type": "string"
+            }
           }
         ]
       }
@@ -3905,6 +3919,20 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "sync_status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "PENDING",
+                "IN_PROGRESS",
+                "COMPLETED",
+                "FAILED"
+              ],
+              "type": "string"
             }
           }
         ]

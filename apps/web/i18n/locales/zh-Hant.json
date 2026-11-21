@@ -1081,6 +1081,7 @@
         "status": {
             "pending": "等待同步",
             "syncing": "同步中",
+            "completed": "已同步",
             "retrying": "重試中",
             "failed": "同步失敗"
         },
@@ -1106,6 +1107,10 @@
         "nothing_to_retry": "沒有可以重試的失敗",
         "retry_failed": "無法重試",
         "problems": "同步問題",
-        "retry_all": "全部重試"
+        "retry_all": "全部重試",
+        "filter": {
+            "label": "同步狀態",
+            "all": "全部"
+        }
     }
 }
