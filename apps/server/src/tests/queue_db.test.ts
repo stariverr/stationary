@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { jobsApp } from "@/api/jobs";
-import { ExternalApiToken, JobQueue, Library, Media, MediaOriginal, MediaType, SyncStatus, User } from "@/db/schema";
+import { ExternalApiToken, JobQueue, Library, Media, MediaOriginal, MediaType, QueuePatrol, SyncStatus, User } from "@/db/schema";
 import { downloadPipeline } from "@/features/ingest/download-pipeline";
 import { deleteLibrary } from "@/features/library/delete-library";
 import { ApiTokenService } from "@/features/auth/api-token";
@@ -882,6 +882,18 @@ describe("QueueWorker", () => {
         expect(patrol).toHaveBeenCalledTimes(1);
     });
 
+    /** Runs `body` with no patrol recorded, then puts back the one the database had, so its own server is not disturbed. */
+    async function withoutRecordedPatrol(body: () => Promise<void>): Promise<void> {
+        const recorded = await db.select().from(QueuePatrol);
+        await db.delete(QueuePatrol);
+        try {
+            await body();
+        } finally {
+            await db.delete(QueuePatrol);
+            if (recorded.length > 0) await db.insert(QueuePatrol).values(recorded);
+        }
+    }
+
     databaseTest("a failing upkeep does not stop the others or the scans", async () => {
         await db.insert(Library).values({ id: libraryId, name: "Queue test", description: "", owner_id: crypto.randomUUID() });
         const ran: string[] = [];
@@ -899,9 +911,36 @@ describe("QueueWorker", () => {
             {},
         );
         try {
-            await patrolling.patrol();
-            expect(ran).toEqual(["preview"]);
-            expect(await rowOf(scanQueueName("download"), libraryId)).toBeDefined();
+            await withoutRecordedPatrol(async () => {
+                await patrolling.patrol();
+                expect(ran).toEqual(["preview"]);
+                expect(await rowOf(scanQueueName("download"), libraryId)).toBeDefined();
+            });
+        } finally {
+            await db.delete(Library).where(eq(Library.id, libraryId));
+            await db.delete(JobQueue).where(sql`${JobQueue.pipeline} LIKE 'scan:%'`);
+        }
+    });
+
+    databaseTest("libraries are rescanned once per interval, however many patrols run", async () => {
+        await db.insert(Library).values({ id: libraryId, name: "Queue test", description: "", owner_id: crypto.randomUUID() });
+        const ran: string[] = [];
+        const upkeep = { ...idleHandler, patrol: async () => void ran.push("upkeep") };
+        const first = new QueueWorker({ ...everyPipeline(idleHandler), avatar: upkeep }, {});
+        const second = new QueueWorker({ ...everyPipeline(idleHandler), avatar: upkeep }, {});
+        try {
+            await withoutRecordedPatrol(async () => {
+                await first.patrol();
+                await db.delete(JobQueue).where(sql`${JobQueue.pipeline} LIKE 'scan:%'`);
+                await second.patrol();
+                await first.patrol();
+                expect(ran).toEqual(["upkeep", "upkeep", "upkeep"]);
+                expect(await rowOf(scanQueueName("download"), libraryId)).toBeUndefined();
+
+                await db.update(QueuePatrol).set({ patrolled_at: sql`now() - interval '25 hours'` });
+                await second.patrol();
+                expect(await rowOf(scanQueueName("download"), libraryId)).toBeDefined();
+            });
         } finally {
             await db.delete(Library).where(eq(Library.id, libraryId));
             await db.delete(JobQueue).where(sql`${JobQueue.pipeline} LIKE 'scan:%'`);

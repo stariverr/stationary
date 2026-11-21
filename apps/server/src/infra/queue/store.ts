@@ -1,6 +1,6 @@
 import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
-import { JobQueue, Library } from "@/db/schema";
+import { JobQueue, Library, QueuePatrol } from "@/db/schema";
 import { db, type DbClient, type Transaction } from "@/global/db";
 import { KNOWN_QUEUE_PATTERNS, queueLockOrder, subjectQueuePattern, type PipelineName } from "@/infra/queue/pipelines";
 import { LEASE_SECONDS } from "@/infra/queue/policy";
@@ -372,4 +372,21 @@ export async function isQueued(pipeline: string, subjectId: string): Promise<boo
         .where(and(eq(JobQueue.pipeline, pipeline), eq(JobQueue.subject_id, subjectId)))
         .limit(1);
     return rows.length > 0;
+}
+
+/**
+ * Records a rescan of every library as started now if the last one is at least `intervalMs` old, or there was none.
+ * True when it was due: the caller runs it in the same transaction, so a failed rescan leaves it due.
+ */
+export async function claimPatrol(tx: Transaction, intervalMs: number): Promise<boolean> {
+    const claimed = await tx
+        .insert(QueuePatrol)
+        .values({ patrolled_at: sql`now()` })
+        .onConflictDoUpdate({
+            target: QueuePatrol.id,
+            set: { patrolled_at: sql`now()` },
+            setWhere: sql`${QueuePatrol.patrolled_at} <= now() - make_interval(secs => ${intervalMs / 1000})`,
+        })
+        .returning({ id: QueuePatrol.id });
+    return claimed.length > 0;
 }

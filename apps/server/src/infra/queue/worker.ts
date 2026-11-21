@@ -9,6 +9,7 @@ import {
     DEFAULT_RUN_TIMEOUT_MS,
     HEARTBEAT_INTERVAL_MS,
     MAX_STUCK_RUNS,
+    PATROL_CHECK_INTERVAL_MS,
     PATROL_INTERVAL_MS,
     Priority,
     SCAN_PAGE_SIZE,
@@ -18,6 +19,7 @@ import {
 import {
     LeaseLostError,
     advance,
+    claimPatrol,
     claim,
     claimBatch,
     claimSubjects,
@@ -36,7 +38,7 @@ export interface QueueWorkerOptions {
     readonly concurrency?: number;
     /** How often to look for due rows; new work waits at most this long. */
     readonly pollIntervalMs?: number;
-    /** Set to 0 to disable periodic library scans. */
+    /** How often all processes together rescan every library; 0 disables the patrol. */
     readonly patrolIntervalMs?: number;
     readonly stuckAfterMs?: number;
     readonly maxStuckRuns?: number;
@@ -141,8 +143,8 @@ export class QueueWorker {
             const patrol = () => {
                 this.patrol().catch((error: unknown) => console.error(`[Queue] Patrol failed: ${getErrorMessage(error)}`));
             };
-            this.timers.push(setInterval(patrol, this.patrolIntervalMs));
-            // The timer starts over with the process, so a server restarted more often than the interval needs this one.
+            this.timers.push(setInterval(patrol, PATROL_CHECK_INTERVAL_MS));
+            // The timer starts over with the process, so a server restarted more often than the check needs this one.
             patrol();
         }
         for (const timer of this.timers) timer.unref?.();
@@ -155,16 +157,22 @@ export class QueueWorker {
         if (!this.pumping) void this.pump();
     }
 
-    /** Runs the pipelines' upkeep and queues a scan of every library for every pipeline, catching changes no writer reported. */
+    /**
+     * Runs the pipelines' upkeep and, once every `patrolIntervalMs` across all processes, queues a scan of every library
+     * for every pipeline, catching changes no writer reported.
+     */
     async patrol(): Promise<void> {
         for (const pipeline of PIPELINE_NAMES) {
             await this.handlers[pipeline].patrol?.().catch((error: unknown) => {
                 console.error(`[Queue] Upkeep of ${pipeline} failed: ${getErrorMessage(error)}`);
             });
         }
-        const libraries = await db.select({ id: Library.id }).from(Library).where(eq(Library.delete_status, DeleteStatus.ACTIVE));
-        const ids = libraries.map((library) => library.id);
-        for (const pipeline of PIPELINE_NAMES) await requestScan(db, pipeline, ids, "absent");
+        await db.transaction(async (tx) => {
+            if (!(await claimPatrol(tx, this.patrolIntervalMs))) return;
+            const libraries = await tx.select({ id: Library.id }).from(Library).where(eq(Library.delete_status, DeleteStatus.ACTIVE));
+            const ids = libraries.map((library) => library.id);
+            for (const pipeline of PIPELINE_NAMES) await requestScan(tx, pipeline, ids, "absent");
+        });
     }
 
     private async pump(): Promise<void> {

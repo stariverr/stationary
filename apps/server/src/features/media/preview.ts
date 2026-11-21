@@ -8,7 +8,7 @@ import { uploadToS3 } from "@/lib/utils/media";
 import { renderPreview, type PreparedPreviewSource } from "@/lib/utils/preview_renderer";
 import { RECIPE_VERSION } from "@/lib/utils/preview_profiles";
 import { COVER_MEDIA_TYPES } from "@/lib/validation/media-composition";
-import { kindOfState, loadOriginalStates, type OriginalState } from "./originals";
+import { loadOriginalFiles, type OriginalFile } from "./originals";
 
 export const PREVIEW_SIZES = [PreviewSize.SMALL, PreviewSize.MEDIUM, PreviewSize.LARGE] as const;
 
@@ -20,6 +20,7 @@ const UNRENDERABLE_EXTENSIONS = new Set(["jxl"]);
 
 type MediaRow = typeof Media.$inferSelect;
 type FileRow = typeof DbFile.$inferSelect;
+type StoredFile = Pick<FileRow, "id" | "path" | "bucket">;
 export type PreviewRow = typeof MediaPreview.$inferSelect;
 
 /** The file a media's previews are rendered from, and whether it is decoded as an image or as a video frame. */
@@ -41,15 +42,12 @@ export interface PreviewState {
 /** A content file the renderer can decode: an image or video original, completed and in a known format. */
 interface ContentFile {
     kind: "IMAGE" | "VIDEO";
-    file: FileRow;
+    file: OriginalFile["file"];
 }
 
 /** The originals a preview can be rendered from. */
-export function contentFiles(states: readonly OriginalState[]): ContentFile[] {
-    return states.flatMap((state) => {
-        const kind = kindOfState(state);
-        return state.file && (kind === "IMAGE" || kind === "VIDEO") ? [{ kind, file: state.file }] : [];
-    });
+function contentFiles(originals: readonly OriginalFile[]): ContentFile[] {
+    return originals.flatMap(({ kind, file }) => (kind === "IMAGE" || kind === "VIDEO" ? [{ kind, file }] : []));
 }
 
 /** The content a preview is rendered from: renderable formats first, then an image before a video (a live photo's still). */
@@ -67,7 +65,7 @@ export function pickContentSource(contents: readonly ContentFile[]): PreviewSour
 }
 
 /** What a media's previews are rendered from: its completed cover, else (for visual media) its content. */
-export function previewSourceOf(type: MediaType, cover: FileRow | null, contents: readonly ContentFile[]): PreviewSource | null {
+export function previewSourceOf(type: MediaType, cover: StoredFile | null, contents: readonly ContentFile[]): PreviewSource | null {
     if (cover && COVER_MEDIA_TYPES.has(type)) {
         return { fileId: cover.id, path: cover.path, bucket: cover.bucket, renderAs: MediaType.IMAGE };
     }
@@ -84,13 +82,13 @@ export async function loadPreviewStates(client: DbClient, mediaIds: readonly str
     if (mediaRows.length === 0) return [];
     const ids = mediaRows.map((media) => media.id);
 
-    const [covers, statesByMedia, previews] = await Promise.all([
+    const [covers, originalsByMedia, previews] = await Promise.all([
         client
-            .select({ mediaId: MediaCover.media_id, file: DbFile })
+            .select({ mediaId: MediaCover.media_id, file: { id: DbFile.id, path: DbFile.path, bucket: DbFile.bucket } })
             .from(MediaCover)
             .innerJoin(DbFile, and(eq(DbFile.id, MediaCover.file_id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
             .where(and(inArray(MediaCover.media_id, ids), eq(MediaCover.status, SyncStatus.COMPLETED))),
-        loadOriginalStates(client, ids),
+        loadOriginalFiles(client, ids),
         client
             .select({
                 media_id: MediaPreview.media_id,
@@ -115,7 +113,7 @@ export async function loadPreviewStates(client: DbClient, mediaIds: readonly str
 
     return mediaRows.map((media) => {
         const cover = covers.find((row) => row.mediaId === media.id)?.file ?? null;
-        const source = previewSourceOf(media.type, cover, contentFiles(statesByMedia.get(media.id) ?? []));
+        const source = previewSourceOf(media.type, cover, contentFiles(originalsByMedia.get(media.id) ?? []));
         const own = previews.filter((row) => row.media_id === media.id);
         return {
             media,

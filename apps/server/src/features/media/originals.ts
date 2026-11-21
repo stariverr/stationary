@@ -4,7 +4,7 @@
  * single default audio track hold for uploads, imports and edits alike. Writes that report a change take the priority to
  * queue it at from their caller: `Priority.CHANGE` for a user's edit, the run's own for the download pipeline.
  */
-import { and, asc, eq, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, asc, eq, exists, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import {
     AvFile,
     AvStream,
@@ -46,13 +46,19 @@ export function kindOfProbe(probe: OriginalProbe): OriginalKind {
     return probe.av.streams.some((stream) => stream.type === AvStreamType.VIDEO) ? "VIDEO" : "AUDIO";
 }
 
+/** The kind of a probed file: `av` is what its streams make it when it has any, else its format decides. */
+function kindOfFile(file: Pick<FileRow, "mime_type" | "extension">, av: "VIDEO" | "AUDIO" | null): OriginalKind | null {
+    if (av) return av;
+    if (isPdfFile(file)) return "PDF";
+    if (isImageFile(file)) return "IMAGE";
+    return null;
+}
+
 /** The kind of a completed original, or null while it is not probed. */
 export function kindOfState(state: OriginalState): OriginalKind | null {
     if (!state.file) return null;
-    if (state.avFile) return state.streams.some((stream) => stream.type === AvStreamType.VIDEO) ? "VIDEO" : "AUDIO";
-    if (isPdfFile(state.file)) return "PDF";
-    if (isImageFile(state.file)) return "IMAGE";
-    return null;
+    const av = state.avFile ? (state.streams.some((stream) => stream.type === AvStreamType.VIDEO) ? "VIDEO" : "AUDIO") : null;
+    return kindOfFile(state.file, av);
 }
 
 /**
@@ -88,6 +94,39 @@ export async function loadOriginalStates(client: DbClient, mediaIds: readonly st
             streams: row.avFile ? streams.filter((stream) => stream.av_file_id === row.avFile!.id) : [],
         });
         result.set(row.original.media_id, list);
+    }
+    return result;
+}
+
+/** A completed original's active file and the kind probed from it. */
+export interface OriginalFile {
+    kind: OriginalKind | null;
+    file: Pick<FileRow, "id" | "path" | "bucket" | "mime_type" | "extension">;
+}
+
+/** Loads the active files of the given media's completed originals with their kinds, in creation order. */
+export async function loadOriginalFiles(client: DbClient, mediaIds: readonly string[]): Promise<Map<string, OriginalFile[]>> {
+    const result = new Map<string, OriginalFile[]>();
+    if (mediaIds.length === 0) return result;
+    const videoStreams = client
+        .select({ id: AvStream.id })
+        .from(AvStream)
+        .where(and(eq(AvStream.av_file_id, AvFile.id), eq(AvStream.type, AvStreamType.VIDEO)));
+    const rows = await client
+        .select({
+            mediaId: MediaOriginal.media_id,
+            file: { id: DbFile.id, path: DbFile.path, bucket: DbFile.bucket, mime_type: DbFile.mime_type, extension: DbFile.extension },
+            av: sql<"VIDEO" | "AUDIO" | null>`case when ${AvFile.id} is null then null when ${exists(videoStreams)} then 'VIDEO' else 'AUDIO' end`,
+        })
+        .from(MediaOriginal)
+        .innerJoin(DbFile, and(eq(DbFile.id, MediaOriginal.file_id), eq(DbFile.delete_status, DeleteStatus.ACTIVE)))
+        .leftJoin(AvFile, eq(AvFile.file_id, MediaOriginal.file_id))
+        .where(inArray(MediaOriginal.media_id, [...mediaIds]))
+        .orderBy(asc(MediaOriginal.create_time), asc(MediaOriginal.id));
+    for (const { mediaId, file, av } of rows) {
+        const list = result.get(mediaId) ?? [];
+        list.push({ kind: kindOfFile(file, av), file });
+        result.set(mediaId, list);
     }
     return result;
 }

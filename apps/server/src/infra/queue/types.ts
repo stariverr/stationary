@@ -92,7 +92,7 @@ interface PipelineHandlerBase {
     blockedMs?(libraryId: string): Promise<number>;
     /** Called after a run or a finished scan of a per-space pipeline, to act on the space once its queue drains. */
     settled?(libraryId: string, space: string): Promise<void>;
-    /** Periodic upkeep, run with the patrol. */
+    /** Periodic upkeep, run by every process each time it checks whether the patrol is due. */
     patrol?(): Promise<void>;
 }
 

@@ -1302,3 +1302,16 @@ export const JobQueue = pgTable(
         index("job_queue_library_pipeline_idx").on(table.library_id, table.pipeline),
     ],
 );
+
+/**
+ * When the queue last rescanned every library (docs/job_queue.zh-Hans.md, 5.3). A single row: the process whose update
+ * finds it due runs the rescan, so restarts and other processes do not repeat it.
+ */
+export const QueuePatrol = pgTable(
+    "queue_patrol",
+    {
+        id: boolean("id").primaryKey().default(true),
+        patrolled_at: temporal("patrolled_at").notNull(),
+    },
+    (table) => [check("queue_patrol_single_row", sql`${table.id}`)],
+);

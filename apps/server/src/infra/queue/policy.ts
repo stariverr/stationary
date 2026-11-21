@@ -10,8 +10,10 @@ export const STUCK_AFTER_MS = 30_000;
 export const MAX_STUCK_RUNS = 8;
 /** Subjects per library scan step. */
 export const SCAN_PAGE_SIZE = 200;
-/** How often every library is rescanned to catch changes no writer reported. */
-export const PATROL_INTERVAL_MS = 60 * 60_000;
+/** How often every library is rescanned to catch changes no writer reported, once for all processes together. */
+export const PATROL_INTERVAL_MS = 24 * 60 * 60_000;
+/** How often a process runs the pipelines' upkeep and checks whether the rescan is due. */
+export const PATROL_CHECK_INTERVAL_MS = 60 * 60_000;
 
 /** Writers reporting a change go before work found by library scans, so new content is not starved by backfills. */
 export const Priority = {
