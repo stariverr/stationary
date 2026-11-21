@@ -12,7 +12,7 @@
         "test:post-status:db": "RUN_POST_STATUS_DB_TESTS=1 bun test src/tests/post_status_db.test.ts",
         "build": "bun build src/index.ts src/worker.ts src/db/migrate.ts --outdir ./dist --target bun --external @napi-rs/image",
         "start:worker": "bun run src/worker.ts",
-        "test:unit": "bun test src/tests/health.test.ts src/tests/queue_pipelines.test.ts src/tests/source_errors.test.ts src/tests/delete_service.test.ts",
+        "test:unit": "bun test --preload ./src/tests/unit-env.ts src/tests/health.test.ts src/tests/queue_pipelines.test.ts src/tests/source_errors.test.ts src/tests/delete_service.test.ts",
         "deploy": "bunx wrangler deploy",
         "worker:dev": "bunx wrangler dev",
         "db:migrate": "bunx drizzle-kit generate && bun run src/db/migrate.ts",
