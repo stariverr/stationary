@@ -496,6 +496,9 @@ export const Media = pgTable(
         check("media_duration_by_type", sql`${table.type} NOT IN ('IMAGE', 'PDF') OR ${table.duration} IS NULL`),
         index("media_library_delete_time_idx").on(table.library_id, table.delete_time),
         index("media_post_delete_time_idx").on(table.post_id, table.delete_time),
+        index("media_library_failed_idx")
+            .on(table.library_id)
+            .where(sql`${table.sync_status} = 'FAILED'`),
     ],
 );
 
@@ -574,6 +577,9 @@ export const MediaPreview = pgTable(
     },
     (table) => [
         uniqueIndex("media_preview_media_size_unique").on(table.media_id, table.size),
+        index("media_preview_failed_idx")
+            .on(table.media_id)
+            .where(sql`${table.last_error} IS NOT NULL`),
         check("media_preview_result_or_failure", sql`(${table.file_id} IS NOT NULL) <> (${table.last_error} IS NOT NULL)`),
         check(
             "media_preview_size_with_file",

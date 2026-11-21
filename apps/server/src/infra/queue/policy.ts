@@ -14,6 +14,8 @@ export const SCAN_PAGE_SIZE = 200;
 export const PATROL_INTERVAL_MS = 24 * 60 * 60_000;
 /** How often a process runs the pipelines' upkeep and checks whether the rescan is due. */
 export const PATROL_CHECK_INTERVAL_MS = 60 * 60_000;
+/** How many times its poll interval an idle worker may wait between looks; an empty look still costs a round trip of egress. */
+export const IDLE_POLL_SLOWDOWN = 10;
 
 /** Writers reporting a change go before work found by library scans, so new content is not starved by backfills. */
 export const Priority = {

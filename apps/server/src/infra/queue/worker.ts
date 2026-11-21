@@ -8,6 +8,7 @@ import {
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_RUN_TIMEOUT_MS,
     HEARTBEAT_INTERVAL_MS,
+    IDLE_POLL_SLOWDOWN,
     MAX_STUCK_RUNS,
     PATROL_CHECK_INTERVAL_MS,
     PATROL_INTERVAL_MS,
@@ -36,7 +37,10 @@ import type { BatchPipelineHandler, PipelineHandler, PipelineHandlers, Reconcile
 
 export interface QueueWorkerOptions {
     readonly concurrency?: number;
-    /** How often to look for due rows; new work waits at most this long. */
+    /**
+     * How often to look for due rows while there is work. Each look that finds none doubles the wait, up to
+     * `IDLE_POLL_SLOWDOWN` times this, so new work in an idle queue waits at most that long.
+     */
     readonly pollIntervalMs?: number;
     /** How often all processes together rescan every library; 0 disables the patrol. */
     readonly patrolIntervalMs?: number;
@@ -115,6 +119,8 @@ export class QueueWorker {
     private aborting = false;
     private pumping = false;
     private wakeRequested = false;
+    private pollDelayMs: number;
+    private pollTimer: ReturnType<typeof setTimeout> | undefined;
     private timers: ReturnType<typeof setInterval>[] = [];
 
     constructor(
@@ -123,6 +129,7 @@ export class QueueWorker {
     ) {
         this.concurrency = options.concurrency ?? 8;
         this.pollIntervalMs = options.pollIntervalMs ?? 1_000;
+        this.pollDelayMs = this.pollIntervalMs;
         this.patrolIntervalMs = options.patrolIntervalMs ?? PATROL_INTERVAL_MS;
         this.stuckAfterMs = options.stuckAfterMs ?? STUCK_AFTER_MS;
         this.maxStuckRuns = options.maxStuckRuns ?? MAX_STUCK_RUNS;
@@ -138,7 +145,7 @@ export class QueueWorker {
     start(): void {
         if (this.running) return;
         this.running = true;
-        this.timers.push(setInterval(() => this.wake(), this.pollIntervalMs));
+        this.schedulePoll();
         if (this.patrolIntervalMs > 0) {
             const patrol = () => {
                 this.patrol().catch((error: unknown) => console.error(`[Queue] Patrol failed: ${getErrorMessage(error)}`));
@@ -149,6 +156,15 @@ export class QueueWorker {
         }
         for (const timer of this.timers) timer.unref?.();
         this.wake();
+    }
+
+    private schedulePoll(): void {
+        if (!this.running) return;
+        this.pollTimer = setTimeout(() => {
+            this.wake();
+            this.schedulePoll();
+        }, this.pollDelayMs);
+        this.pollTimer.unref?.();
     }
 
     wake(): void {
@@ -190,6 +206,8 @@ export class QueueWorker {
                     if (room > 0) rows.push(...(await claimSubjects(limited.pipeline, room)));
                 }
                 rows.push(...(await claim(free - rows.length, this.limitedPipelines)));
+                this.pollDelayMs =
+                    rows.length > 0 ? this.pollIntervalMs : Math.min(this.pollDelayMs * 2, this.pollIntervalMs * IDLE_POLL_SLOWDOWN);
                 for (const row of rows) {
                     const limited = this.limitedOf(row);
                     if (limited) limited.active += 1;
@@ -450,6 +468,7 @@ export class QueueWorker {
      */
     async drain(graceMs = 10_000, abortMs = 5_000): Promise<void> {
         this.running = false;
+        clearTimeout(this.pollTimer);
         for (const timer of this.timers) clearInterval(timer);
         this.timers = [];
 
