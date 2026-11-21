@@ -140,34 +140,14 @@ Access endpoint:
 
 ---
 
-## ☸️ Kubernetes & GitOps (k3s + ArgoCD + GitHub Actions)
+## ☸️ Kubernetes & GitOps (k3s + ArgoCD + Helm OCI)
 
-Stationary includes a complete GitOps deployment setup for Kubernetes / k3s:
+Stationary uses a two-repository GitOps workflow for Kubernetes / k3s:
 
-- **CI/CD**: GitHub Actions (`.github/workflows/deploy.yaml`) builds and pushes the single unified image to GHCR (`ghcr.io/stariverr/stationary`) and updates the Kustomize image tag.
-- **GitOps**: ArgoCD monitors `deploy/k8s/overlays/production` and automatically reconciles changes to the cluster.
-- **Ingress**: Uses Traefik (default in k3s) to route all incoming traffic directly to port 4000 on the unified `stationary` service.
+- **App CI/CD (`.github/workflows/release.yaml`)**: Triggered on `v*` tags. Runs typechecks, linting, and unit tests, then builds split `web-release` (`ghcr.io/stariverr/stationary-web`) and `server-release` (`ghcr.io/stariverr/stationary-server`) images, pushes the OCI Helm chart (`charts/stationary` → `oci://ghcr.io/stariverr/charts/stationary`), and dispatches a release event to the cluster GitOps repository.
+- **Cluster GitOps (`stariverr/stationary-gitops`)**: ArgoCD reconciles the OCI Helm chart alongside environment `values.yaml`, Sealed Secrets, and Traefik Gateway API (`HTTPRoute` routing `/api` to `server:9400` and `/` to `web:3000`), running `PreSync` Drizzle SQL migrations before rolling out `web`, `server`, and `worker`.
 
-Apply the ArgoCD application to your cluster:
-```bash
-# 1. Create stationary secrets in k3s
-kubectl create secret generic stationary-secrets -n stationary \
-  --from-literal=DB_URL="postgresql://..." \
-  --from-literal=REDIS_URL="redis://..." \
-  --from-literal=AUTH_SECRET="..." \
-  --from-literal=SECRETS_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
-  --from-literal=CRON_SECRET="$(openssl rand -hex 32)" \
-  --from-literal=RESEND_API_KEY="..." \
-  --from-literal=RESEND_EMAIL_SENDER="..." \
-  --from-literal=S3_ENDPOINT="..." \
-  --from-literal=S3_ACCESS_KEY_ID="..." \
-  --from-literal=S3_SECRET_ACCESS_KEY="..." \
-  --from-literal=S3_BUCKET="..." \
-  --from-literal=CDN_BASE_URL="..."
-
-# 2. Register ArgoCD Application
-kubectl apply -f deploy/argocd/application.yaml
-```
+For architecture details, see [docs/k8s_gitops_redesign.zh-Hans.md](./docs/k8s_gitops_redesign.zh-Hans.md).
 
 
 ## 📚 Documentation

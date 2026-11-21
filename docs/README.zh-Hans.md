@@ -138,34 +138,14 @@ bun run docker:logs # 或: docker compose logs -f
 
 ---
 
-## ☸️ Kubernetes & GitOps 编排 (k3s + ArgoCD + GitHub Actions)
+## ☸️ Kubernetes & GitOps 编排 (k3s + ArgoCD + Helm OCI)
 
-Stationary 提供基于 k3s 与 ArgoCD 的现代化 GitOps 持续交付配置：
+Stationary 采用“源码仓 + 集群仓”分离的现代化 GitOps 持续交付架构：
 
-- **CI/CD**：GitHub Actions (`.github/workflows/deploy.yaml`) 负责自动构建单一整合镜像并推送至 GHCR (`ghcr.io/stariverr/stationary`)，自动更新 Kustomize 镜像版本。
-- **GitOps**：ArgoCD 监听 `deploy/k8s/overlays/production` 目录，自动化同步状态至 k3s 集群并保障状态自愈。
-- **网关路由**：适配 k3s 内置 Traefik Ingress Controller，将外部流量直通 `stationary:4000` 服务。
+- **发布流水线（`.github/workflows/release.yaml`）**：在推送 `v*` Tag 时触发，通过 `typecheck`、`oxlint` 与单元测试后，分别构建推送 `stationary-web` 与 `stationary-server`（供 API / Worker / Migrate 共用）镜像，打包并推送 Helm Chart 至 `oci://ghcr.io/stariverr/charts/stationary`，再通过 `repository_dispatch` 通知集群仓。
+- **集群编排（`stariverr/stationary-gitops`）**：ArgoCD 通过多源 Application 组合 OCI Helm Chart 与环境 `values.yaml`、Sealed Secrets 及 Gateway API `HTTPRoute`（将 `/api` 分发至 `server:9400`，`/` 分发至 `web:3000`），并在每次同步前通过 `PreSync` Hook 自动执行 Drizzle SQL 迁移。
 
-在 k3s 集群中注册并启用 ArgoCD Application：
-```bash
-# 1. 在 stationary 命名空间下创建 Secret（连接外部数据库/Redis及各项密钥）
-kubectl create namespace stationary
-kubectl create secret generic stationary-secrets -n stationary \
-  --from-literal=DB_URL="postgresql://..." \
-  --from-literal=REDIS_URL="redis://..." \
-  --from-literal=AUTH_SECRET="..." \
-  --from-literal=SECRETS_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
-  --from-literal=RESEND_API_KEY="..." \
-  --from-literal=RESEND_EMAIL_SENDER="..." \
-  --from-literal=S3_ENDPOINT="..." \
-  --from-literal=S3_ACCESS_KEY_ID="..." \
-  --from-literal=S3_SECRET_ACCESS_KEY="..." \
-  --from-literal=S3_BUCKET="..." \
-  --from-literal=CDN_BASE_URL="..."
-
-# 2. 应用 ArgoCD Application
-kubectl apply -f deploy/argocd/application.yaml
-```
+架构说明详见 [k8s_gitops_redesign.zh-Hans.md](./k8s_gitops_redesign.zh-Hans.md)。
 
 ---
 
