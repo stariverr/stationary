@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "stationary.fullname" . }}-config
+  labels:
+    {{- include "stationary.labels" . | nindent 4 }}
+data:
+  {{- range $key, $val := .Values.config }}
+  {{ $key }}: {{ $val | quote }}
+  {{- end }}
+  NUXT_API_BASE_URL: {{ printf "http://%s-server:%d/api" (include "stationary.fullname" .) (int .Values.server.service.port) | quote }}

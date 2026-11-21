@@ -1,0 +1,44 @@
+{{- if .Values.migration.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "stationary.fullname" . }}-migrate
+  labels:
+    {{- include "stationary.componentLabels" (dict "root" . "component" "migrate") | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-1"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migration.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "stationary.componentLabels" (dict "root" . "component" "migrate") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: {{ printf "%s:%s" .Values.migration.image.repository (include "stationary.imageTag" (dict "root" . "image" .Values.migration.image)) | quote }}
+          imagePullPolicy: {{ .Values.migration.image.pullPolicy }}
+          command:
+            - bun
+            - run
+            - --bun
+            - /app/server/db/migrate.js
+          env:
+            - name: DB_POOL_MAX
+              value: {{ .Values.migration.dbPoolMax | quote }}
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecretName }}
+                  key: DB_URL
+          resources:
+            {{- toYaml .Values.migration.resources | nindent 12 }}
+{{- end }}

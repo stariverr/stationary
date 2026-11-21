@@ -33,6 +33,7 @@ export interface KVStore {
     consumeFixedWindow(key: string, limit: number, ttl: number): Promise<{ allowed: boolean; retryAfter: number }>;
     /** Runs a Lua script atomically; used by coordination primitives that need several keys at once. */
     evalScript(script: string, keys: string[], args: string[]): Promise<unknown>;
+    ping(): Promise<boolean>;
 }
 
 /* Redis connection pool */
@@ -424,6 +425,19 @@ class PooledRedisKVStore implements KVStore {
         await client.connect();
         await client.subscribe(channel, (message) => callback(message));
         // Note: This client won't be returned to the pool as it's used for subscription
+    }
+
+    async ping(): Promise<boolean> {
+        let client: RedisClient | null = null;
+        try {
+            client = await this.pool.getClient();
+            await client.ping();
+            return true;
+        } catch {
+            return false;
+        } finally {
+            if (client) this.pool.returnClient(client);
+        }
     }
 }
 

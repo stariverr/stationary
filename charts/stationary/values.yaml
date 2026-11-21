@@ -1,0 +1,96 @@
+global:
+  # Default tag used across web, server, worker, and migration workloads when component tag is omitted.
+  imageTag: ""
+
+imagePullSecrets: []
+
+# Existing Secret in the target namespace (created by SealedSecrets / ExternalSecrets).
+existingSecretName: stationary-secrets
+
+config:
+  SERVER_ENV: production
+  NODE_ENV: production
+  NUXT_PUBLIC_API_BASE_URL: /api
+  NUXT_PUBLIC_CDN_BASE_URL: /api
+  S3_REGION: auto
+  STORAGE_IS_PUBLIC: "false"
+  AI_BLOCKED_CIDRS: "169.254.0.0/16,fe80::/10"
+
+web:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/stariverr/stationary-web
+    tag: ""
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 3000
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+server:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/stariverr/stationary-server
+    tag: ""
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 9400
+  dbPoolMax: "5"
+  terminationGracePeriodSeconds: 30
+  tmpVolumeSizeLimit: 2Gi
+  resources:
+    requests:
+      cpu: 150m
+      memory: 256Mi
+    limits:
+      cpu: 1500m
+      memory: 1Gi
+
+worker:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/stariverr/stationary-server
+    tag: ""
+    pullPolicy: IfNotPresent
+  dbPoolMax: "5"
+  # QueueWorker.drain() waits up to 15s + settlement before exiting.
+  terminationGracePeriodSeconds: 45
+  tmpVolumeSizeLimit: 4Gi
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+migration:
+  enabled: true
+  image:
+    repository: ghcr.io/stariverr/stationary-server
+    tag: ""
+    pullPolicy: IfNotPresent
+  dbPoolMax: "2"
+  backoffLimit: 1
+  activeDeadlineSeconds: 300
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+route:
+  enabled: true
+  annotations: {}
+  parentRefs: []
+  hostnames: []

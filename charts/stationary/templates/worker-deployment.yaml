@@ -1,0 +1,49 @@
+{{- if .Values.worker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "stationary.fullname" . }}-worker
+  labels:
+    {{- include "stationary.componentLabels" (dict "root" . "component" "worker") | nindent 4 }}
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "stationary.selectorLabels" (dict "root" . "component" "worker") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "stationary.componentLabels" (dict "root" . "component" "worker") | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.worker.terminationGracePeriodSeconds }}
+      containers:
+        - name: worker
+          image: {{ printf "%s:%s" .Values.worker.image.repository (include "stationary.imageTag" (dict "root" . "image" .Values.worker.image)) | quote }}
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          command:
+            - bun
+            - run
+            - --bun
+            - /app/server/worker.js
+          env:
+            - name: DB_POOL_MAX
+              value: {{ .Values.worker.dbPoolMax | quote }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "stationary.fullname" . }}-config
+            - secretRef:
+                name: {{ .Values.existingSecretName }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.worker.tmpVolumeSizeLimit }}
+{{- end }}

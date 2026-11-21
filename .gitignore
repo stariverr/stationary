@@ -24,9 +24,6 @@ tsconfig.tsbuildinfo
 # Local databases/temp
 temp/
 
-# Server
-apps/server/drizzle
-
 # Apple / Swift / Xcode
 .derivedData/
 DerivedData/

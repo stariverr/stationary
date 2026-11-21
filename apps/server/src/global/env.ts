@@ -9,6 +9,8 @@ function isCidr(value: string): boolean {
 
 const envSchema = v.object({
     SERVER_ENV: v.optional(v.picklist(["development", "production", "test"]), "development"),
+    /** Controls whether the HTTP server process also runs the background queue worker (`all`) or HTTP only (`api`). */
+    SERVER_ROLE: v.optional(v.picklist(["all", "api"]), "all"),
 
     /** PostgreSQL URL */
     DB_URL: v.string(),

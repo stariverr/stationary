@@ -1,0 +1,18 @@
+Stationary has been deployed.
+
+Workloads:
+  - Web:    {{ include "stationary.fullname" . }}-web (ClusterIP :{{ .Values.web.service.port }})
+  - Server: {{ include "stationary.fullname" . }}-server (ClusterIP :{{ .Values.server.service.port }})
+{{- if .Values.worker.enabled }}
+  - Worker: {{ include "stationary.fullname" . }}-worker
+{{- end }}
+{{- if .Values.migration.enabled }}
+  - DB Migration Hook: {{ include "stationary.fullname" . }}-migrate (pre-install, pre-upgrade / ArgoCD PreSync)
+{{- end }}
+
+{{- if .Values.route.enabled }}
+HTTPRoute hosts:
+{{- range .Values.route.hostnames }}
+  - https://{{ . }}
+{{- end }}
+{{- end }}

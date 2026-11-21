@@ -1,0 +1,149 @@
+name: Release (Images & OCI Helm Chart)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to package and publish (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify Build & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Release Tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.5"
+
+      - name: Install Dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Lint
+        run: bunx oxlint
+
+      - name: Unit Tests
+        run: bun run --cwd apps/server test:unit
+
+  publish:
+    name: Publish Images & OCI Chart
+    needs: [verify]
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+      chart_version: ${{ steps.vars.outputs.chart_version }}
+    steps:
+      - name: Checkout Release Tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Resolve Release Version
+        id: vars
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="$REF_NAME"
+          fi
+          CHART_VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "chart_version=${CHART_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Web Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          target: web-release
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/stationary-web:${{ steps.vars.outputs.tag }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+      - name: Build and Push Server Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          target: server-release
+          platforms: linux/amd64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/stationary-server:${{ steps.vars.outputs.tag }}
+          cache-from: type=gha,scope=server
+          cache-to: type=gha,scope=server,mode=max
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint, Package and Push OCI Chart
+        env:
+          TAG: ${{ steps.vars.outputs.tag }}
+          CHART_VERSION: ${{ steps.vars.outputs.chart_version }}
+          OWNER: ${{ github.repository_owner }}
+          ACTOR: ${{ github.actor }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          helm lint charts/stationary
+          echo "$TOKEN" | helm registry login ghcr.io -u "$ACTOR" --password-stdin
+          helm package charts/stationary --version "$CHART_VERSION" --app-version "$TAG"
+          helm push "stationary-${CHART_VERSION}.tgz" "oci://ghcr.io/${OWNER}/charts"
+
+  notify-gitops:
+    name: Notify stationary-gitops
+    needs: [publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger repository_dispatch on stationary-gitops
+        env:
+          DISPATCH_TOKEN: ${{ secrets.GITOPS_DISPATCH_TOKEN }}
+          TAG: ${{ needs.publish.outputs.tag }}
+          CHART_VERSION: ${{ needs.publish.outputs.chart_version }}
+        run: |
+          if [ -z "$DISPATCH_TOKEN" ]; then
+            echo "::warning::GITOPS_DISPATCH_TOKEN is not set; skipping repository_dispatch to stariverr/stationary-gitops."
+            exit 0
+          fi
+
+          curl -fsSL -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${DISPATCH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/stariverr/stationary-gitops/dispatches \
+            -d "{\"event_type\":\"stationary-release\",\"client_payload\":{\"tag\":\"${TAG}\",\"chart_version\":\"${CHART_VERSION}\"}}"
